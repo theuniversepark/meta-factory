@@ -817,16 +817,3 @@ em.up { color: var(--good); } em.dn { color: var(--bad); }
 .dh-ver { font-size: 12px; color: var(--ink2); margin: 4px 0 6px; display: flex; align-items: center; gap: 6px; }
 .dh-ver select { background: rgba(255, 255, 255, 0.06); color: var(--ink); border: 1px solid var(--line); border-radius: 7px; padding: 2px 6px; }
 .rb-rec { display: block; font-size: 10.5px; color: var(--ink2); margin-top: 3px; line-height: 1.4; }
-
-/* 확장 Zone (유연생산 · 적응가공) — 셀 라벨 번호(C01 등), 공중 현황판, 왼쪽 패널 카드 */
-.st-label .nm .no.wide { width: auto; padding: 0 4px; border-radius: 8px; }
-.xz-board { background: rgba(8, 12, 18, 0.86); border: 1px solid var(--zc, #37e8ff); border-left: 4px solid var(--zc, #37e8ff); border-radius: 8px; padding: 5px 10px; font-size: 12px; color: var(--ink); white-space: nowrap; pointer-events: none; display: flex; flex-direction: column; gap: 2px; }
-.xz-board b { color: var(--zc, #37e8ff); font-size: 13px; }
-.xz-board i { font-style: normal; font-weight: 700; color: #fff; }
-.xz-card .xz-views { margin: 4px 0 6px; }
-.xz-card .xz-row { padding: 5px 0; border-top: 1px solid rgba(255, 255, 255, 0.08); }
-.xz-card .xz-h { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.xz-card .xz-go { padding: 2px 9px; font-size: 11px; border: 1px solid rgba(55, 232, 255, 0.4); background: rgba(55, 232, 255, 0.1); color: #7fe0f0; border-radius: 6px; }
-.xz-card .xz-go:hover { background: rgba(55, 232, 255, 0.22); }
-.xz-card .xz-s { color: var(--muted); margin-top: 2px; line-height: 1.5; }
-.xz-card .xz-s b { color: var(--ink); }

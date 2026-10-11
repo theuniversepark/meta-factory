@@ -10,7 +10,6 @@ import { FactoryAgent } from './agent.js';
 import { HybridAgent, compareArchitecturesAsync } from './multiagent.js';
 import { agentStructureHTML } from './agentinfo.js';
 import { FactoryView } from './factory.js';
-import { ExtraZones, ZONE_VIEWS } from './zones.js';
 import { UI } from './ui.js';
 import { LLMController } from './llm.js';
 import { LineDesigner } from './designer.js';
@@ -64,7 +63,7 @@ const target = new THREE.Vector3(-5.5, 0, 1);   // 건물 가운데 (생산동 +
 const persp = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.5, 400);
 persp.position.set(-10.5, 45, 58);
 const ctlP = new OrbitControls(persp, labelRenderer.domElement);
-ctlP.target.copy(target); ctlP.enableDamping = true; ctlP.maxPolarAngle = Math.PI * 0.47; ctlP.minDistance = 8; ctlP.maxDistance = 220;   // 확장 Zone(뒤 유연생산 · 앞 적응가공)까지 한 화면에
+ctlP.target.copy(target); ctlP.enableDamping = true; ctlP.maxPolarAngle = Math.PI * 0.47; ctlP.minDistance = 8; ctlP.maxDistance = 120;
 labelRenderer.domElement.style.pointerEvents = 'auto';
 let camera = persp, controls = ctlP;
 
@@ -75,8 +74,7 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.8);
 sun.position.set(-20, 40, 25);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.mapSize.set(4096, 4096);   // 건물이 앞뒤로 늘어난 만큼 그림자 해상도도 올린다
-Object.assign(sun.shadow.camera, { left: -75, right: 60, top: 60, bottom: -60, near: 1, far: 180 });
+Object.assign(sun.shadow.camera, { left: -58, right: 45, top: 30, bottom: -30, near: 1, far: 120 });
 sun.shadow.bias = -0.0005;
 scene.add(sun);
 const fill = new THREE.DirectionalLight(0x9ec9ff, 0.4);
@@ -99,7 +97,6 @@ makeComposer();
 
 // ── 시뮬레이션 ─────────────────────────────
 const view = new FactoryView(scene);
-const xzones = new ExtraZones(scene);   // 확장 Zone: 뒤쪽(화면 위) 유연생산Zone · 앞쪽(화면 아래) 적응가공Zone
 const hub = new DataHub();
 const camWall = new RobotCamWall(scene, renderer);   // 로봇 비전 관제 디스플레이 (피지컬AI 단계)
 const cctvView = new CCTVView(scene, () => camWall.renderer, scene);   // CCTV 전광판 · CCTV 영상 창
@@ -194,7 +191,6 @@ function setRender(style) {
   RENDER.style = style; document.body.dataset.render = style;
   if (!sim) return;
   view.setup(sim, labelsOn, changedIds); view.selected = null; view.selectRobot(null);
-  xzones.setup(sim, labelsOn);
   camWall.setup(sim, view); cctvView.setup(sim, view);
   applyLook(); RENDER.swapped = 0; blenderize(scene);
 }
@@ -207,7 +203,6 @@ function start(key) {
   agent = agentArch === 'hybrid' ? new HybridAgent(sim) : new FactoryAgent(sim);
   document.querySelectorAll('#archSeg button').forEach((b) => b.classList.toggle('on', b.dataset.arch === agentArch));
   view.setup(sim, labelsOn, changedIds);
-  xzones.setup(sim, labelsOn);
   view.selected = null;
   hub.reset(sim, view);
   camWall.setup(sim, view);
@@ -268,21 +263,6 @@ function renderZoneCard() {
   zoneCard.innerHTML = `<div class="zc-h"><b>${ZONE_NAME}</b><small>메타팩토리 테스트베드 · 6셀 혼류</small></div>
     <div class="seg small" id="slotSeg">${seg}</div>${body}`;
   updateZoneCard();
-}
-// 확장 Zone 카드: 세 Zone 바로가기(카메라) + 유연생산·적응가공 생산 현황
-const xzCard = document.getElementById('xzCard');
-function flyTo(key) {
-  const [p, t] = ZONE_VIEWS[key];
-  persp.position.set(...p); ctlP.target.set(...t); ctlP.update();
-}
-xzCard?.addEventListener('click', (e) => { const b = e.target.closest('button[data-view]'); if (b) flyTo(b.dataset.view); });
-function updateXzCard() {
-  if (!xzCard) return;
-  const rows = xzones.summary().map((z) => `<div class="xz-row"><div class="xz-h"><b>${z.code} ${z.name}</b><button type="button" class="xz-go" data-view="${z.key}">보기 ▸</button></div>`
-    + `<div class="xz-s">${Object.entries(z.products).map(([k, v]) => `${v.label} <b>${z.byProduct[k] ?? 0}</b>`).join(' · ')} · UPH <b>${z.uph}</b> · 가동 셀 <b>${z.busy}/${z.cells}</b>${z.key === 'flex' ? ` · NG <b>${z.ng}</b>` : ` · 리워크 <b>${z.rework}</b>`}</div></div>`).join('');
-  const html = `<div class="zc-h"><b>메타팩토리 Zone 배치</b><small>위 유연생산 · 가운데 정밀조립 · 아래 적응가공</small></div>`
-    + `<div class="seg small xz-views"><button type="button" data-view="all">전체</button><button type="button" data-view="flex">유연생산</button><button type="button" data-view="precision">정밀조립</button><button type="button" data-view="adapt">적응가공</button></div>${rows}`;
-  if (xzCard.dataset.h !== html) { xzCard.dataset.h = html; xzCard.innerHTML = html; }
 }
 function updateZoneCard() {
   if (!isZone(currentLine)) return;
@@ -379,7 +359,7 @@ document.getElementById('btnSupply').addEventListener('click', () => {
   sim.log('warn', '[시나리오] 자재 창고 출고 10분 중단', { obs: '협력사 납품 지연 상황 재현' });
 });
 document.getElementById('btnLabels').addEventListener('click', (e) => {
-  labelsOn = !labelsOn; e.currentTarget.classList.toggle('on', labelsOn); view.setLabels(labelsOn); xzones.setLabels(labelsOn);
+  labelsOn = !labelsOn; e.currentTarget.classList.toggle('on', labelsOn); view.setLabels(labelsOn);
 });
 // 에이전트 구조 전환 (운전 중에도): 의사결정 기록·쿨다운·고속 운전 상태를 넘겨받는다
 function setArch(arch) {
@@ -1029,7 +1009,7 @@ function keyPan(rdt, shift) {
   const sp = Math.max(6, cam.position.distanceTo(tg) * 0.35) * (shift ? 2.5 : 1) * rdt;   // 멀리서 볼수록 빠르게 (초당 시야 거리의 35%)
   panD.copy(panF).multiplyScalar(f).addScaledVector(panR, r).normalize().multiplyScalar(sp);
   // 공장·트럭 야드 밖으로 너무 멀리 가지 않게
-  panD.x = Math.max(-100, Math.min(70, tg.x + panD.x)) - tg.x; panD.z = Math.max(-80, Math.min(65, tg.z + panD.z)) - tg.z;
+  panD.x = Math.max(-100, Math.min(70, tg.x + panD.x)) - tg.x; panD.z = Math.max(-55, Math.min(35, tg.z + panD.z)) - tg.z;
   tg.add(panD); cam.position.add(panD);
 }
 let shiftHeld = false;
@@ -1115,7 +1095,7 @@ function frame() {
     let left = rdt * speed;
     while (left > 1e-6) {
       const h = Math.min(0.1, left);
-      sim.step(h); agent.update(h); xzones.step(h, sim);
+      sim.step(h); agent.update(h);
       left -= h;
     }
     llm.update();
@@ -1125,13 +1105,12 @@ function frame() {
   pcapVideoTick(rdt);
   odooSyncTick(rdt);
   view.update(rdt, running, speed);
-  xzones.update(rdt, running && !llm.holdSim, speed);
   keyPan(rdt, shiftHeld);
   netT += rdt; if (netT > 1 && !netCard.hidden) { netT = 0; renderNetCard(); }
   gnbT += rdt; if (gnbT > 1 && gnbSel) { gnbT = 0; renderGnb(); }
   controls.update();
   uiTimer += rdt; screenTimer += rdt;
-  if (uiTimer > 0.25) { uiTimer = 0; ui.update(); view.updateLabels(); xzones.updateLabels(); updateZoneCard(); updateXzCard(); orchView.tick(); gateView.tick(); updateAlarmButtons(); updateCmdUI(); clockEl.title = `기준 시계 (UTC) ${hub.iso()} · 모든 데이터·메시지가 이 시각을 씁니다`; }
+  if (uiTimer > 0.25) { uiTimer = 0; ui.update(); view.updateLabels(); updateZoneCard(); orchView.tick(); gateView.tick(); updateAlarmButtons(); updateCmdUI(); clockEl.title = `기준 시계 (UTC) ${hub.iso()} · 모든 데이터·메시지가 이 시각을 씁니다`; }
   robotTimer += rdt;
   if (view.telemetry && robotTimer > 0.12) { robotTimer = 0; ui.renderRobot(view.telemetry.snapshot(), hub.robotCounts(view.telemetry)); }
   pcapBoxT += rdt; if (pcapBoxT > 0.5 && ui.robotMode && !document.getElementById('detail').classList.contains('hidden') && !document.getElementById('pcapBox')?.contains(document.activeElement)) { pcapBoxT = 0; renderPcapBox(); }
@@ -1659,4 +1638,4 @@ fcBody.addEventListener('click', (e) => {
   const sf = e.target.closest('[data-sec-flow]'); if (sf) { secFlowSel = +sf.dataset.secFlow; renderFacosView(true); }
 });
 
-window.__twin = { xzones, flyTo, primKey, setRender, RENDER, openGnb: (id) => openGnb(id), cctvRec, robotRec, cctvView, epRec, get sim() { return sim; }, get agent() { return agent; }, view, ui, hub, camWall, orchView, persp, ctlP, llm };
+window.__twin = { primKey, setRender, RENDER, openGnb: (id) => openGnb(id), cctvRec, robotRec, cctvView, epRec, get sim() { return sim; }, get agent() { return agent; }, view, ui, hub, camWall, orchView, persp, ctlP, llm };
