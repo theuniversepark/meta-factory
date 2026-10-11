@@ -1460,6 +1460,8 @@ export class FactoryView {
     const floor = put(mesh(new THREE.PlaneGeometry(89, 40), floorMat, false), -6.5, 0, 0, r);
     floor.rotation.x = -Math.PI / 2;
     this.floorMat = floorMat;
+    // 확장 Zone 바닥 — 뒤쪽(화면 위) 유연생산Zone 동(x −51 ~ 12, z −56 ~ −20) · 앞쪽(화면 아래) 적응가공Zone 동(x −51 ~ 38, z 20 ~ 54)
+    for (const [w, d, x, z] of [[63, 36, -19.5, -38], [89, 34, -6.5, 37]]) put(mesh(new THREE.PlaneGeometry(w, d), floorMat, false), x, 0, z, r).rotation.x = -Math.PI / 2;
     // AGV 통로
     const laneGeo = (w, d) => new THREE.PlaneGeometry(w, d);
     // 앞쪽 통로는 확장동 물류존(AGV 원자재 상차·부품 피킹)까지 이어지고, 왼쪽 세로 통로는 동선 계산의 교차 통로(x −35.5)와 같은 자리
@@ -1496,6 +1498,14 @@ export class FactoryView {
       put(makeSignSprite('입고 도크', '#3ddc84', 3.2), W + 0.4, 5.6, INBOUND.dockZ, lw);
       lw.traverse((o) => (o.castShadow = false)); }
     put(box(0.3, 8, 40, MAT.wall), 38, 4, 0, r);
+    // 확장 Zone 동 벽체 — 유연생산Zone 동: 왼쪽(x −51)·오른쪽(x 12, 출하 트럭 야드 쪽)·뒷벽(z −56). 정밀조립Zone 뒷벽(관제 화면)이 두 동 사이 칸막이
+    // 적응가공Zone 동: 왼쪽(x −51)·오른쪽(x 38) 벽만 늘리고 앞쪽은 정밀조립Zone처럼 열어 둔다 (두 Zone 사이 벽 없음 — 바닥 경계선으로 구분)
+    { const xw = put(new THREE.Group(), 0, 0, 0, r);
+      put(box(0.3, 8, 36, MAT.wall), -51, 4, -38, xw); put(box(0.3, 8, 36, MAT.wall), 12, 4, -38, xw); put(box(63.3, 8, 0.3, MAT.wall), -19.5, 4, -56, xw);
+      for (let x = -45; x <= 9; x += 9) put(box(0.6, 8, 0.6, MAT.steel), x, 4, -55.6, xw);
+      put(box(63.3, 0.5, 0.35, MAT.accent), -19.5, 7.7, -55.8, xw);
+      put(box(0.3, 8, 34, MAT.wall), -51, 4, 37, xw); put(box(0.3, 8, 34, MAT.wall), 38, 4, 37, xw);
+      xw.traverse((o) => (o.castShadow = false)); }
     for (let x = -45; x <= 36; x += 9) put(box(0.6, 8, 0.6, MAT.steel), x, 4, -19.6, r);
     put(box(89, 0.5, 0.35, MAT.accent), -6.5, 7.7, -19.8, r);
     // 천장 형광등 기구는 두지 않는다 — 공장 밝기는 환경광·주광·보조광(main.js LOOK)으로 단계별로 유지
@@ -1801,18 +1811,18 @@ export class FactoryView {
   buildYard() {
     const r = this.root;
     const flat = (w, d, mat, x, z, y = 0.01) => { const m = put(new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat), x, y, z, r); m.rotation.x = -Math.PI / 2; m.receiveShadow = true; return m; };
-    flat(34, 28, std(0x2b3036, { roughness: 0.95 }), 31, -34.2, -0.01);
+    flat(34, 46, std(0x2b3036, { roughness: 0.95 }), 31, -43.2, -0.01);   // 도로(YARD.roadZ)까지 — 유연생산Zone 동 뒤로 옮긴 진출입 도로
     flat(110, 7, std(0x24282d, { roughness: 0.95 }), 62, YARD.roadZ, 0.0);
     const line = new THREE.MeshBasicMaterial({ color: 0xf2c230 }), white = new THREE.MeshBasicMaterial({ color: 0xd9dee4 });
     for (let x = 16; x < 116; x += 4) flat(2, 0.15, white, x, YARD.roadZ, 0.02);
     for (const bx of YARD.bays) for (const sd of [-1, 1]) flat(0.15, 12, line, bx + sd * 1.7, -26.4, 0.02);
     for (const sd of [-1, 1]) for (let z = -21; z > -33; z -= 1.6) flat(0.12, 0.8, white, YARD.waitX + sd * 1.6, z, 0.02);
     // 입고 트럭 야드 (왼쪽 벽 바깥): 바닥, 남북 도로(북행 입차·남행 출차), 서쪽 진입로, 도크 앞 정차선, 표시
-    flat(42, 42, std(0x2b3036, { roughness: 0.95 }), -72, -24, -0.01);   // 서쪽으로 돌아 도크 중심선에 서는 공간까지
-    flat(9, 36, std(0x24282d, { roughness: 0.95 }), INBOUND.roadX, -24, 0.0);
+    flat(42, 66, std(0x2b3036, { roughness: 0.95 }), -72, -36, -0.01);   // 서쪽으로 돌아 도크 중심선에 서는 공간까지
+    flat(9, INBOUND.roadZ * -1 - 6, std(0x24282d, { roughness: 0.95 }), INBOUND.roadX, (INBOUND.roadZ - 6) / 2, 0.0);
     flat(140, 7, std(0x24282d, { roughness: 0.95 }), -63, INBOUND.roadZ, 0.0);
     for (let x = -132; x < 7; x += 4) flat(2, 0.15, white, x, INBOUND.roadZ, 0.02);
-    for (let z = -38; z < -6; z += 4) flat(0.15, 2, white, INBOUND.roadX, z, 0.02);
+    for (let z = INBOUND.roadZ + 2; z < -6; z += 4) flat(0.15, 2, white, INBOUND.roadX, z, 0.02);
     for (const sd of [-1, 1]) flat(12, 0.15, line, INBOUND.wallX - 6.2, INBOUND.dockZ + sd * 1.7, 0.02);
     { const c2 = document.createElement('canvas'); c2.width = 1024; c2.height = 128;
       const g2 = c2.getContext('2d'); g2.fillStyle = 'rgba(61,220,132,0.95)'; g2.font = '700 64px "Apple SD Gothic Neo", "Noto Sans KR", sans-serif'; g2.textAlign = 'center'; g2.textBaseline = 'middle';
@@ -3198,3 +3208,10 @@ function lerpAngle(a, b, k) {
   if (d < -Math.PI) d += Math.PI * 2;
   return a + d * k;
 }
+
+// 확장 Zone(js/zones.js — 유연생산Zone · 적응가공Zone)이 정밀조립Zone과 같은 재질·로봇·설비 모델을 쓰도록 내보낸다
+export const KIT = {
+  std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, ZONE_COLOR,
+  makeRobot, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate,
+  buildWeld, buildSort, buildGate, buildVision, fillBins,
+};
