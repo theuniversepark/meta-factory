@@ -4,10 +4,10 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { RobotTelemetry } from './telemetry.js';
 import { BELT_Y, LOC, chgLoc, FG_CAP, RAW_CAP, ST_LABEL, TOOL_KITS, SINK_PICK } from './sim.js';
-import { YARD } from './shipping.js';
+import { YARD, SHIP, SHIP_FRAME, shipToWorld } from './shipping.js';
 import { INBOUND, WH, WH_RACK } from './receiving.js';
 import { DRONE_PAD, dronePad } from './drone.js';
-import { bk, fr, BUILDING, NOTCH_X } from './zonedefs.js';
+import { bk, fr, BUILDING } from './zonedefs.js';
 import { STAGES, INCIDENT_TYPES, prioOf } from './orchestrator.js';
 import { NR } from './net5g.js';
 import { blenderOn, cloneAsset, RENDER } from './blender.js';
@@ -1459,18 +1459,17 @@ export class FactoryView {
     const floorMat = new THREE.MeshStandardMaterial({ map: floorTexture(), roughness: 0.85, metalness: 0.05 });
     // 바닥: 생산동(x −38 ~ 38) + 왼쪽 물류 확장동(x −51 ~ −38) — 하나의 건물, 사이 벽 없음
     // 앞뒤(z −41 ~ 42): 서버실 · 유연생산Zone · 정밀조립Zone · 적응가공Zone · AMR 스테이션 (zonedefs.js)
-    // 뒷벽은 x NOTCH_X(19.5)에서 꺾인다: 왼쪽(서버실·관제 화면)은 z −41까지 뒤로, 오른쪽(출하 도크·트럭 야드)은 원래 z −20
-    const BD = BUILDING.z1 + 20, BC = (BUILDING.z1 - 20) / 2, NW = NOTCH_X - BUILDING.x0, NC = (NOTCH_X + BUILDING.x0) / 2, ND = -20 - BUILDING.z0, NZC = (BUILDING.z0 - 20) / 2;
+    // 직사각형 건물: x −51 ~ 38 · z −41(뒷벽 · 관제 화면) ~ 42(앞쪽 열린 면)
+    const BD = BUILDING.z1 - BUILDING.z0, BC = (BUILDING.z0 + BUILDING.z1) / 2;
     const floor = put(mesh(new THREE.PlaneGeometry(89, BD), floorMat, false), -6.5, 0, BC, r);
     floor.rotation.x = -Math.PI / 2;
-    put(mesh(new THREE.PlaneGeometry(NW, ND), floorMat, false), NC, 0, NZC, r).rotation.x = -Math.PI / 2;
     this.floorMat = floorMat;
     // AGV 통로
     const laneGeo = (w, d) => new THREE.PlaneGeometry(w, d);
     // 앞쪽 통로는 확장동 물류존(AGV 원자재 상차·부품 피킹)까지 이어지고, 왼쪽 세로 통로는 동선 계산의 교차 통로(x −35.5)와 같은 자리
     // 정밀조립Zone 앞뒤 통로(z ±9) · 확장 Zone 바깥 시설 통로(앞 FF · 뒤 BB) · 좌우 끝 세로 통로(시설 ↔ 정밀조립Zone 연결)
-// 뒤쪽 시설 통로(BB)는 꺾인 뒷벽 안쪽(x ≤ 18)까지만 · 왼쪽 세로 통로만 BB까지 내려간다
-    const lanes = [[-7, 9, 84, 2.6], [-1, -9, 72, 2.6], [-1, fr(9), 72, 2.6], [-9.5, bk(-9), 55, 2.6], [-35.5, (bk(-9) + fr(9)) / 2, 2.6, fr(9) - bk(-9) + 2.6], [35, (-9 + fr(9)) / 2, 2.6, fr(9) + 9 + 2.6]];   // 입고 지게차 운행 구간은 바닥 초록 전용 표시로만 구분
+const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
+    const lanes = [[-7, 9, 84, 2.6], [-1, -9, 72, 2.6], [-1, fr(9), 72, 2.6], [-1, bk(-9), 72, 2.6], [-35.5, VZ, 2.6, VL], [35, VZ, 2.6, VL]];   // 입고 지게차 운행 구간은 바닥 초록 전용 표시로만 구분
     for (const [x, z, w, d] of lanes) {
       const l = put(new THREE.Mesh(laneGeo(w, d), MAT.lane), x, 0.005, z, r); l.rotation.x = -Math.PI / 2; l.receiveShadow = true;
       for (const s of [-1, 1]) {
@@ -1481,13 +1480,8 @@ export class FactoryView {
     }
     // 벽체·기둥
     // 뒷벽: 출하 도크 문 2개(폭 4.6m · 높이 4.9m)만 트럭 상차용으로 열고 나머지는 외벽 (입고 도크와 같은 방식)
-    // 서버실 쪽 뒷벽(z −41, x −51 ~ 19.5) + 꺾이는 벽(x 19.5, z −41 ~ −20) · 출하 도크 쪽 뒷벽(z −20, x 19.5 ~ 38)
-    put(box(NW + 0.15, 8, 0.3, MAT.wall), NC, 4, BUILDING.z0, r);
-    put(box(0.3, 8, ND, MAT.wall), NOTCH_X, 4, NZC, r);
-    const doorW = 4.6, spans = [[NOTCH_X, YARD.bays[0] - doorW / 2], [YARD.bays[0] + doorW / 2, YARD.bays[1] - doorW / 2], [YARD.bays[1] + doorW / 2, 38]];
-    for (const [a, b] of spans) put(box(b - a, 8, 0.3, MAT.wall), (a + b) / 2, 4, -20, r);
-    for (const bx of YARD.bays) put(box(doorW, 8 - 4.9, 0.3, MAT.wall), bx, 4.9 + (8 - 4.9) / 2, -20, r);
-    put(box(19, 0.3, 0.32, MAT.steel), 28.5, 0.15, -20, r);
+    // 뒷벽(z −41): 건물 전체 폭으로 곧게 — 관제 화면·CCTV 전광판·로봇 디스플레이가 걸린다
+    put(box(89.3, 8, 0.3, MAT.wall), -6.5, 4, BUILDING.z0, r);
     // 왼쪽 벽(확장동 x −51): 입고 도크 문(z −16.8~−12.2, 높이 4.9m)만 트럭 하차용으로 열고 나머지는 외벽
     // 왼쪽 벽은 그림자를 드리우지 않는다 (해가 왼쪽에서 비쳐 물류 확장동 바닥을 크게 덮던 그림자 제거 — 바닥은 다른 그림자를 그대로 받음)
     { const dz0 = INBOUND.dockZ - 2.3, dz1 = INBOUND.dockZ + 2.3;
@@ -1504,9 +1498,14 @@ export class FactoryView {
       for (const sd of [-1, 1]) put(box(0.25, 0.5, 0.35, MAT.rubber), W - 0.3, 1.0, INBOUND.dockZ + sd * 1.15, lw);
       put(makeSignSprite('입고 도크', '#3ddc84', 3.2), W + 0.4, 5.6, INBOUND.dockZ, lw);
       lw.traverse((o) => (o.castShadow = false)); }
-    put(box(0.3, 8, BD, MAT.wall), 38, 4, BC, r);   // 오른쪽 벽 (z −20 ~ 42)
-    for (let x = -45; x <= 36; x += 9) put(box(0.6, 8, 0.6, MAT.steel), x, 4, x < NOTCH_X ? BUILDING.z0 + 0.4 : -19.6, r);
-    put(box(NW, 0.5, 0.35, MAT.accent), NC, 7.7, BUILDING.z0 + 0.2, r); put(box(38 - NOTCH_X, 0.5, 0.35, MAT.accent), (38 + NOTCH_X) / 2, 7.7, -19.8, r);
+    // 오른쪽 벽(x 38): 위쪽(뒤)에 출하 도크 문 2개(폭 4.6m · 높이 4.9m)만 트럭 상차용으로 연다 — 야드 로컬 좌표를 shipToWorld로 돌려 둔다
+    { const doorW = 4.6, dz = YARD.bays.map((bx) => shipToWorld(bx, YARD.wallZ).z).sort((a, b) => a - b), W = SHIP.wallX;
+      const cuts = [BUILDING.z0, ...dz.flatMap((z) => [z - doorW / 2, z + doorW / 2]), BUILDING.z1];
+      for (let i = 0; i < cuts.length; i += 2) put(box(0.3, 8, cuts[i + 1] - cuts[i], MAT.wall), W, 4, (cuts[i] + cuts[i + 1]) / 2, r);
+      for (const z of dz) put(box(0.3, 8 - 4.9, doorW, MAT.wall), W, 4.9 + (8 - 4.9) / 2, z, r);
+      put(box(0.32, 0.3, dz[dz.length - 1] - dz[0] + doorW + 4, MAT.steel), W, 0.15, (dz[0] + dz[dz.length - 1]) / 2, r); }
+    for (let x = -45; x <= 36; x += 9) put(box(0.6, 8, 0.6, MAT.steel), x, 4, BUILDING.z0 + 0.4, r);
+    put(box(89, 0.5, 0.35, MAT.accent), -6.5, 7.7, BUILDING.z0 + 0.2, r);
     // 천장 형광등 기구는 두지 않는다 — 공장 밝기는 환경광·주광·보조광(main.js LOOK)으로 단계별로 유지
     // 뒷벽 관제 화면 왼쪽(12×4m)에는 CCTV 전광판(js/cctvview.js)이 걸린다 — 과학기술정보통신부·정보통신산업진흥원 로고는 관제 서버 랙 양옆(아래 관제/서버)과 앞쪽 바닥 표시에 둔다
     // 바닥 표시(12×5.4m) — 앞쪽 AGV 충전소(오른쪽 끝 x −2.8)와 정비실(왼쪽 끝 x 10.3) 사이 가운데 (x 3.75), 앞쪽 통로(지게차 z ≤ 10.7)와 AMR 복귀 전용로(z ≥ 18.3) 사이 가운데 (z 14.5)
@@ -1515,14 +1514,15 @@ export class FactoryView {
     logoTex.colorSpace = THREE.SRGBColorSpace; logoTex.anisotropy = 8;
     const sign = put(new THREE.Mesh(new THREE.PlaneGeometry(12, 12 * 720 / 1600), new THREE.MeshBasicMaterial({ map: logoTex, transparent: true, depthWrite: false, toneMapped: false })), 3.75, 0.012, fr(14.5), r);   // 톤 매핑으로 글자가 옅어지지 않게
     sign.rotation.x = -Math.PI / 2;
-    // 출하 도크: 말아 올린 셔터·문틀·도크 레벨러·범퍼 (벽 기둥 사이 두 칸)
+    // 출하 도크: 말아 올린 셔터·문틀·도크 레벨러·범퍼 — 야드 로컬 좌표(도크 벽 z −20)로 만들고 그룹째 오른쪽 벽으로 돌린다
+    const dk = put(new THREE.Group(), SHIP_FRAME.x, 0, SHIP_FRAME.z, r); dk.rotation.y = SHIP_FRAME.rot; this.shipFrame = dk;
     for (const [i, bx] of YARD.bays.entries()) {
-      put(cyl(0.32, 0.32, 4.6, MAT.dark, 16), bx, 4.75, -19.85, r).rotation.z = Math.PI / 2;
-      put(box(4.8, 0.25, 0.14, MAT.yellow), bx, 4.6, -19.75, r);
-      for (const sd of [-1, 1]) put(box(0.18, 4.6, 0.2, MAT.yellow), bx + sd * 2.35, 2.3, -19.8, r);
-      put(box(2.6, 0.08, 1.4, MAT.steel), bx, 0.04, -19.2, r);
-      for (const sd of [-1, 1]) put(box(0.35, 0.5, 0.25, MAT.rubber), bx + sd * 1.15, 1.0, -20.3, r);
-      put(makeSignSprite(`출하 도크 ${i + 1}`, '#f2c230', 3.2), bx, 5.6, -19.6, r);
+      put(cyl(0.32, 0.32, 4.6, MAT.dark, 16), bx, 4.75, -19.85, dk).rotation.z = Math.PI / 2;
+      put(box(4.8, 0.25, 0.14, MAT.yellow), bx, 4.6, -19.75, dk);
+      for (const sd of [-1, 1]) put(box(0.18, 4.6, 0.2, MAT.yellow), bx + sd * 2.35, 2.3, -19.8, dk);
+      put(box(2.6, 0.08, 1.4, MAT.steel), bx, 0.04, -19.2, dk);
+      for (const sd of [-1, 1]) put(box(0.35, 0.5, 0.25, MAT.rubber), bx + sd * 1.15, 1.0, -20.3, dk);
+      put(makeSignSprite(`출하 도크 ${i + 1}`, '#f2c230', 3.2), bx, 5.6, -19.6, dk);
     }
     this.buildYard();
     this.buildFacadeSigns();
@@ -1810,12 +1810,15 @@ export class FactoryView {
   buildYard() {
     const r = this.root;
     const flat = (w, d, mat, x, z, y = 0.01) => { const m = put(new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat), x, y, z, r); m.rotation.x = -Math.PI / 2; m.receiveShadow = true; return m; };
-    flat(28, 28, std(0x2b3036, { roughness: 0.95 }), 34, -34.2, -0.01);   // x 20 ~ 48 (왼쪽은 뒤로 늘어난 서버실 쪽 건물)
-    flat(98, 7, std(0x24282d, { roughness: 0.95 }), 69, YARD.roadZ, 0.0);
     const line = new THREE.MeshBasicMaterial({ color: 0xf2c230 }), white = new THREE.MeshBasicMaterial({ color: 0xd9dee4 });
-    for (let x = 22; x < 116; x += 4) flat(2, 0.15, white, x, YARD.roadZ, 0.02);
-    for (const bx of YARD.bays) for (const sd of [-1, 1]) flat(0.15, 12, line, bx + sd * 1.7, -26.4, 0.02);
-    for (const sd of [-1, 1]) for (let z = -21; z > -33; z -= 1.6) flat(0.12, 0.8, white, YARD.waitX + sd * 1.6, z, 0.02);
+    // 출하 트럭 야드 (오른쪽 벽 바깥): 야드 로컬 좌표(도크 벽 z −20 · 바깥 −z)로 그리고 그룹째 90° 돌린다 (shipping.js SHIP_FRAME)
+    const sy = put(new THREE.Group(), SHIP_FRAME.x, 0, SHIP_FRAME.z, r); sy.rotation.y = SHIP_FRAME.rot;
+    const flatY = (w, d, mat, x, z, y = 0.01) => { const m = put(new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat), x, y, z, sy); m.rotation.x = -Math.PI / 2; m.receiveShadow = true; return m; };
+    flatY(38, 28, std(0x2b3036, { roughness: 0.95 }), 33, -34.2, -0.01);
+    flatY(100, 7, std(0x24282d, { roughness: 0.95 }), 60, YARD.roadZ, 0.0);
+    for (let x = 12; x < 110; x += 4) flatY(2, 0.15, white, x, YARD.roadZ, 0.02);
+    for (const bx of YARD.bays) for (const sd of [-1, 1]) flatY(0.15, 12, line, bx + sd * 1.7, -26.4, 0.02);
+    for (const sd of [-1, 1]) for (let z = -21; z > -33; z -= 1.6) flatY(0.12, 0.8, white, YARD.waitX + sd * 1.6, z, 0.02);
     // 입고 트럭 야드 (왼쪽 벽 바깥): 바닥, 남북 도로(북행 입차·남행 출차), 서쪽 진입로, 도크 앞 정차선, 표시
     flat(42, 42, std(0x2b3036, { roughness: 0.95 }), -72, -24, -0.01);   // 서쪽으로 돌아 도크 중심선에 서는 공간까지
     flat(9, 36, std(0x24282d, { roughness: 0.95 }), INBOUND.roadX, -24, 0.0);
@@ -1832,7 +1835,7 @@ export class FactoryView {
     const c = tx.getContext('2d'); c.fillStyle = 'rgba(242,194,48,0.95)'; c.font = '700 64px "Apple SD Gothic Neo", "Noto Sans KR", sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
     c.fillText('출하 트럭 야드 · 도크 1 · 대기 · 도크 2', 512, 64);
     const tex = new THREE.CanvasTexture(tx); tex.colorSpace = THREE.SRGBColorSpace;
-    flat(16, 2, new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }), YARD.waitX, -35.2, 0.03);
+    flatY(16, 2, new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }), YARD.waitX, -35.2, 0.03).rotation.z = Math.PI / 2;   // 글자는 화면 앞에서 바로 읽히게
   }
 
   // 물류 선반 칸 내용 (제품별 실물 모델 · 부품 토트) — Blender 모델은 앱 시작 후 불러오므로 화면을 만들 때마다(setup) 다시 채운다
@@ -3005,7 +3008,7 @@ export class FactoryView {
       }
     }
     // 물류 대기: 출하 지게차 — 두 출하 도크(트럭) 사이 벽 앞
-    { const fx = YARD.waitX, fz = YARD.wallZ + 2.4; area(fx - 1.3, fz - 2.1, fx + 1.3, fz + 1.3, GREEN, '출하 대기', sim.mode.key === 'dark' ? '자율 지게차' : '출하 지게차 (유인)', fx, fz + 1.95, 3.2); }
+    { const sh = sim.forklifts?.find((f) => !f.receiver)?.home ?? { x: 31.5, z: -25 }, fx = sh.x, fz = sh.z; area(fx - 1.3, fz - 2.1, fx + 1.3, fz + 1.3, GREEN, '출하 대기', sim.mode.key === 'dark' ? '자율 지게차' : '출하 지게차 (유인)', fx, fz + 1.95, 3.2); }
   }
 
   // 화물트럭: 시뮬레이션 트럭 목록과 모델을 맞추고, 위치·방향·뒷문·적재 팔레트·라벨을 갱신한다

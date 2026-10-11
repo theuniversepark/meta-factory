@@ -1,4 +1,5 @@
 import { bk, BUILDING, extraCellBoxes, inBuilding } from './zonedefs.js';
+import { shipToWorld, SHIP_FRAME } from './shipping.js';
 // CCTV — 사각지대 없는 배치. 바닥을 1m 간격 점으로 나누고, 카메라에서 각 점까지 시야가 큰 설비(셀·창고 랙·서버 랙)에
 // 가리지 않는지 따져 "보이는 점"을 구한 뒤, 아직 안 보이는 점을 가장 많이 덮는 후보 자리부터 차례로 골라(탐욕적 집합 덮개)
 // 모든 점이 최소 한 대에 보일 때까지 설치한다. 건물 안은 천장 돔 카메라(높이 7.5m, 반경 9m 어안),
@@ -81,10 +82,12 @@ export function planCCTV(sim) {
     ...grid(-92.5, -92.5, -44, -4, 4, O.y, O.R, 'pole'), ...grid(-91, -53, -45, -45, 4, O.y, O.R, 'pole'), ...grid(-91, -53, -2.5, -2.5, 4, O.y, O.R, 'pole'),
     ...grid(-87, -79, -38, -22, 8, O.y, O.R, 'pole')] }, []);   // 야드 서쪽 안쪽 기둥 (트럭 진출입 차로·회전 구역·대기 자리를 비켜)
   // 출하 트럭 야드: 뒷벽 바깥(z −20.4)과 야드 가장자리 기둥 후보
-  // 출하 트럭 야드: 뒷벽 바깥(z −20.4, x 19.5 오른쪽)과 야드 가장자리 기둥 후보 — 왼쪽 가장자리는 뒤로 늘어난 건물(서버실) 벽 바깥 x 20
-  const yardOut = coverRegion({ x0: 20, x1: 47, z0: -47, z1: -21, cands: [
-    ...grid(21, 37, -20.4, -20.4, 3, O.y, O.R, 'wall', { face: Math.PI }),
-    ...grid(48.5, 48.5, -47, -21, 4, O.y, O.R, 'pole'), ...grid(20, 20, -47, -24, 4, O.y, O.R, 'pole'), ...grid(21, 46, -48.5, -48.5, 4, O.y, O.R, 'pole')] }, []);
+  // 출하 트럭 야드 (오른쪽 벽 바깥): 야드 로컬 좌표(도크 벽 z −20, 바깥 −z)로 후보를 잡아 월드로 돌린다 (shipping.js shipToWorld) — 도크 벽 바깥 카메라 · 야드 가장자리 기둥
+  const toW = (c) => ({ ...c, ...shipToWorld(c.x, c.z), ...(c.face != null ? { face: c.face + SHIP_FRAME.rot } : {}) });
+  const a = shipToWorld(15, -47), b = shipToWorld(52, -21);
+  const yardOut = coverRegion({ x0: Math.min(a.x, b.x), x1: Math.max(a.x, b.x), z0: Math.min(a.z, b.z), z1: Math.max(a.z, b.z), cands: [
+    ...grid(16, 43, -20.4, -20.4, 3, O.y, O.R, 'wall', { face: Math.PI }),
+    ...grid(53.5, 53.5, -47, -21, 4, O.y, O.R, 'pole'), ...grid(14, 14, -47, -24, 4, O.y, O.R, 'pole'), ...grid(16, 52, -48.5, -48.5, 4, O.y, O.R, 'pole')].map(toW) }, []);
   const regions = { inside, yardIn, yardOut };
   const cams = [];
   for (const [rk, r] of Object.entries(regions)) for (const c of r.cams) cams.push({ ...c, region: rk, id: `CC-${String(cams.length + 1).padStart(2, '0')}` });

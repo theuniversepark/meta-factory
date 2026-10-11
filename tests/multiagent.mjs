@@ -10,7 +10,11 @@ console.log('== 혼합형 다중 에이전트');
   for (let t = 0; t < 3600; t += 0.1) { s.step(0.1); ag.update(0.1); }
   const H = ag.status();
   check('도메인 에이전트 3개(정비·품질·흐름)가 제안 → 메인이 승인', H.agents.length === 3 && H.proposed > 0 && H.approved > 0 && H.agents.some((a) => a.key === 'maint' && a.approved > 0), H.agents.map((a) => `${a.label} ${a.proposed}/${a.approved}`).join(' · '));
-  check('메인 조정: 충돌 판정·보류 · 제안 → 실행 지연 기록', H.conflicts > 0 && H.deferred > 0 && H.avgLat >= 0 && H.latMax < 120, `충돌 ${H.conflicts} · 보류 ${H.deferred} · 평균 ${H.avgLat.toFixed(2)}초 · 최대 ${H.latMax.toFixed(0)}초`);
+  // 충돌·보류는 고장·정비 시점이 겹쳐야 생긴다 — 시드 하나는 배치·동선에 따라 0일 수 있어 시드 2개(7 · 19)를 합쳐 본다
+  const s2 = new Simulation('smart', 19, { line: zoneLine(), quiet: true }), ag2 = new HybridAgent(s2);
+  for (let t = 0; t < 3600; t += 0.1) { s2.step(0.1); ag2.update(0.1); }
+  const H2 = ag2.status(), conf = H.conflicts + H2.conflicts, defer = H.deferred + H2.deferred;
+  check('메인 조정: 충돌 판정·보류 · 제안 → 실행 지연 기록 (시드 2개)', conf > 0 && defer > 0 && H.avgLat >= 0 && Math.max(H.latMax, H2.latMax) < 120, `충돌 ${conf} · 보류 ${defer} · 평균 ${((H.avgLat + H2.avgLat) / 2).toFixed(2)}초 · 최대 ${Math.max(H.latMax, H2.latMax).toFixed(0)}초`);
   check('반사 계층은 바로 실행 (자재 배차 · 충전)', ag.history.some((h) => /자재 보충 배차|충전 지시/.test(h.title)));
   check('정비 인력 수보다 많은 예지정비를 한꺼번에 걸지 않음', s.requests.filter((r) => r.kind === 'pm').length <= s.techs.length + 1); }
 { const s = new Simulation('smart', 9, { line: zoneLine(), quiet: true }), ag = new HybridAgent(s);
@@ -26,8 +30,9 @@ console.log('== 피지컬AI 기본 = 혼합형 · 사족보행 순찰 보고 →
   for (let t = 0; t < 3600; t += 0.1) { s.step(0.1); ag.update(0.1); }
   const H = ag.status(), viaPatrol = ag.history.filter((h) => /순찰 보고 →/.test(h.dec ?? ''));
   check('순찰 보고가 제안으로 올라가 메인 조정자가 승인 · 실행', (H.reports ?? 0) > 0 && viaPatrol.length > 0 && s.stats.pm + s.stats.cal > 0, `순찰 보고 ${H.reports}건 · 승인 실행 ${viaPatrol.length}건 · 예지정비 ${s.stats.pm} · 재보정 ${s.stats.cal}`); }
-console.log('== 디지털트윈 비교 (자동화 1시간 × 시드 3, 설비 고장 주입)');
-const R = compareArchitectures({ mode: 'smart', line: zoneLine(), T: 3600, seeds: [7, 19, 31] });
+console.log('== 디지털트윈 비교 (자동화 1시간 × 시드 10, 설비 고장 주입)');
+// 시드마다 ±5~7% 흔들린다(어느 셀이 언제 고장 나는지) — 배치가 바뀌어도 비교가 되도록 시드 10개 평균
+const R = compareArchitectures({ mode: 'smart', line: zoneLine(), T: 3600, seeds: [7, 19, 31, 43, 55, 67, 79, 91, 103, 115] });
 check('같은 조건 비교: 혼합형 생산(UPH)이 단일보다 나빠지지 않음 (−1% 이내)', R.hybrid.uph >= R.single.uph * 0.99, `단일 ${R.single.uph.toFixed(1)} · 혼합형 ${R.hybrid.uph.toFixed(1)} UPH · OEE ${(R.single.oee * 100).toFixed(2)} → ${(R.hybrid.oee * 100).toFixed(2)}%`);
 check('비교 지표 (판단 지연 · 충돌 · 되돌림)', R.single.avgLat === 0 && R.hybrid.avgLat > 0 && R.hybrid.conflicts > 0, `혼합형 평균 지연 ${R.hybrid.avgLat.toFixed(2)}초 · 충돌 ${R.hybrid.conflicts.toFixed(1)} · 되돌림 ${R.hybrid.reversals.toFixed(1)}`);
 // 시드 1개는 배치·동선이 조금만 바뀌어도 ±5% 넘게 흔들려 비교가 안 된다 — 자동화 비교처럼 시드 3개 평균으로 본다

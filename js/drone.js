@@ -42,7 +42,7 @@ export class PatrolDrone {
     for (const st of s.processing.filter((x) => !x.standby)) pts.push({ x: st.x, z: st.z, name: `${st.name} 상공`, scan: st });
     const sink = s.stations[s.stations.length - 1], src = s.stations[0];
     pts.push({ x: sink.x, z: sink.z, name: '구분 적재장 상공', scan: sink });
-    pts.push({ x: 26.5, z: -14.5, name: '출하 도크 상공' });
+    pts.push({ x: 40, z: -25, name: '출하 도크 상공' });   // 오른쪽 벽 출하 도크 바깥 상공
     pts.push({ x: -45, z: -1.6, name: '자재창고 상공' });
     pts.push({ x: src.x, z: src.z, name: '자재 투입 상공', scan: src });
     pts.push({ x: -48, z: -14.5, name: '입고 도크 상공' });

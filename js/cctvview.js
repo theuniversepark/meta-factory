@@ -62,7 +62,7 @@ export class CCTVView {
     if (c.region === 'yardIn') return '입고 트럭 야드'; if (c.region === 'yardOut') return '출하 트럭 야드';
     const st = [...this.sim.stations].sort((a, b) => Math.hypot(a.x - c.x, a.z - c.z) - Math.hypot(b.x - c.x, b.z - c.z))[0];
     if (c.x < -38 && c.z > 9) return '정비실';
-  if (c.x < -38) return c.z < -5 ? '입고 도크 · 입고 지게차' : '물류존 · 물류 선반'; if (c.x > 16 && c.z < -12 && c.z > -21) return '출하 도크';
+  if (c.x < -38) return c.z < -5 ? '입고 도크 · 입고 지게차' : '물류존 · 물류 선반'; if (c.x > 30 && c.z < -18 && c.z > bk(-20)) return '출하 도크';
   if (c.z < bk(-9)) return '관제실 · 뒤쪽 시설 통로';
   if (c.z < -11) return '유연생산Zone';
   if (c.z > 11 && c.z < fr(9)) return '적응가공Zone';
@@ -74,7 +74,7 @@ export class CCTVView {
   pose(c) {
     let tx, tz;
     if (c.region === 'inside') { const d = Math.hypot(c.x, c.z * 1.8) || 1; tx = c.x - (c.x / d) * 6; tz = c.z - ((c.z * 1.8) / d) * 6; if (d < 3) tz = c.z + 6; }
-    else { const cx = c.region === 'yardIn' ? -72 : 31, cz = c.region === 'yardIn' ? -24 : -34; const d = Math.hypot(cx - c.x, cz - c.z) || 1; tx = c.x + ((cx - c.x) / d) * 9; tz = c.z + ((cz - c.z) / d) * 9; }
+    else { const cx = c.region === 'yardIn' ? -72 : 52, cz = c.region === 'yardIn' ? -24 : -28; /* 출하 야드는 오른쪽 벽 바깥 */ const d = Math.hypot(cx - c.x, cz - c.z) || 1; tx = c.x + ((cx - c.x) / d) * 9; tz = c.z + ((cz - c.z) / d) * 9; }
     const yw = this.yaw.get(c.id) ?? 0, dx = tx - c.x, dz = tz - c.z, cs = Math.cos(yw), sn = Math.sin(yw);
     return { pos: new THREE.Vector3(c.x, c.y - 0.25, c.z), look: new THREE.Vector3(c.x + dx * cs - dz * sn, 0, c.z + dx * sn + dz * cs) };
   }

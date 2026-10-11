@@ -1,6 +1,6 @@
 // 지게차 포크 간섭 검증 — 포크(차체 중심 앞 0.75~1.9m, 폭 ±0.42m)가 다른 이동체(로봇·AMR·사람)·셀 바닥·충전 기둥·정비실 비품과 겹치지 않는지.
 // 3단계 공장(레거시·자동화·피지컬AI)을 각각 30분 돌리며 0.5초마다 포크 위 점들을 검사한다. 트럭 앞에서는 트럭 쪽을 본 채 들어가고 후진으로 나오는지도 본다. 실행: npm test
-import { YARD } from '../js/shipping.js';
+import { SHIP } from '../js/shipping.js';
 import { zoneLine } from '../js/line.js';
 import { Simulation, moverRadius, chgLoc, LOC, FORK } from '../js/sim.js';
 import { FactoryAgent } from '../js/agent.js';
@@ -21,9 +21,9 @@ for (const [mode, label] of [['traditional', '레거시'], ['smart', '자동화'
     if (Math.round(t * 10) % 5) continue;
     for (const f of forks) {
       const P = forkPts(f);
-      // 트럭에서 나올 때: 출하 도크 벽(YARD.wallZ)·입고 도크 벽(x −51) 2.2m 안(포크 끝이 적재함에 닿는 거리)에서 움직이는 지게차는 늘 트럭(벽) 쪽을 본다 — 포크를 넣은 채 후진, 돌지 않음
-      const nearShip = f.z < YARD.wallZ + 2.2 && f.shipper, nearIn = f.x < -51 + 2.3 && Math.abs(f.z + 14.5) < 1 && f.receiver;
-      if (f.moving && (nearShip || nearIn)) { const faceWall = nearShip ? Math.cos(f.heading) < -0.95 : Math.sin(f.heading) < -0.95; faceWall ? backOut++ : turnIn++; }
+      // 트럭에서 나올 때: 출하 도크 벽(오른쪽 벽 x 38)·입고 도크 벽(x −51) 2.2m 안(포크 끝이 적재함에 닿는 거리)에서 움직이는 지게차는 늘 트럭(벽) 쪽을 본다 — 포크를 넣은 채 후진, 돌지 않음
+      const nearShip = f.x > SHIP.wallX - 2.2 && f.z < -18 && f.shipper, nearIn = f.x < -51 + 2.3 && Math.abs(f.z + 14.5) < 1 && f.receiver;
+      if (f.moving && (nearShip || nearIn)) { const faceWall = nearShip ? Math.sin(f.heading) > 0.95 : Math.sin(f.heading) < -0.95; /* 출하 도크는 +x(오른쪽 벽), 입고 도크는 −x */ faceWall ? backOut++ : turnIn++; }
       for (const o of s.movers) if (o !== f && o.state !== 'line' && P.some((p) => Math.hypot(p.x - o.x, p.z - o.z) < moverRadius(o) * 0.8)) hit.mover.push(`${f.id}→${o.id}`);
       for (const st of s.stations) { const d = st.def; if (d.x == null) continue; const h = st.type === 'source' || st.type === 'sink' ? [1.8, 2.3] : [2.3, 2.3], c = Math.cos(d.rot ?? 0), sn = Math.sin(d.rot ?? 0);
         if (P.some((p) => { const rx = p.x - d.x, rz = p.z - (d.z ?? 0); return Math.abs(rx * c - rz * sn) < h[0] && Math.abs(rx * sn + rz * c) < h[1]; })) hit.cell.push(`${f.id}→${st.name}`); }

@@ -2,7 +2,9 @@
 import { fr, bk, inExtraZone, BUILDING, AMR_LEAD, TECH_DX } from './zonedefs.js';
 import { ImpactTracker } from './impact.js';
 import { CommandCenter } from './commands.js';
-import { TruckYard, planForklift, YARD } from './shipping.js';
+import { TruckYard, planForklift, YARD, SHIP } from './shipping.js';
+// 출하 지게차 대기 자리: 오른쪽 벽 두 출하 도크(z −31 · −19) 사이 안쪽 — 오른쪽 세로 통로(x 35)·뒤쪽 시설 통로(z −30)를 비켜 주차
+const SHIP_PARK = { x: SHIP.wallX - 6.5, z: -25 };
 import { InboundYard, planReceiver, WH, INBOUND } from './receiving.js';
 import { PatrolDrone, MISSION_PRIO } from './drone.js';
 import { planCCTV, CCTVAgent } from './cctv.js';
@@ -178,8 +180,7 @@ export function route(from, to, cur) {
   } else {
     const viaL = Math.abs(from.x - LEFT) + Math.abs(to.x - LEFT);
     const viaR = Math.abs(from.x - RIGHT) + Math.abs(to.x - RIGHT);
-    // 뒤쪽 시설 통로(BB)는 왼쪽 세로 통로로만 이어진다 — 오른쪽(x 35)은 뒷벽이 원래 자리(z −20, 출하 도크)
-    const sx = viaL <= viaR || from.aisle === 'BB' || to.aisle === 'BB' ? LEFT : RIGHT;
+    const sx = viaL <= viaR ? LEFT : RIGHT;
     const z1 = laneZ(fz, Math.sign(sx - from.x)), z2 = laneZ(tz, Math.sign(to.x - sx)), x = laneX(sx, Math.sign(tz - fz));
     pts.push({ x: from.x, z: z1 }, { x, z: z1 }, { x, z: z2 }, { x: to.x, z: z2 });
   }
@@ -422,7 +423,7 @@ export class Simulation {
       this.vehicles.push(v);
     }
     // 출하 지게차: 구분 적재장 → 뒷벽 출하 도크 → 트럭 야드 화물트럭 (레거시·자동화는 사람이 운전, 피지컬AI만 자율 지게차)
-    this.forklifts = [new Mover(m.key === 'dark' ? '자율 지게차' : '출하 지게차 (유인)', 'forklift', { x: YARD.waitX, z: YARD.wallZ + 2.4, aisle: 'B', name: '출하 지게차 대기 (출하 도크 사이)' }, m.key === 'traditional' ? 1.5 : m.key === 'smart' ? 1.9 : 2.1)];
+    this.forklifts = [new Mover(m.key === 'dark' ? '자율 지게차' : '출하 지게차 (유인)', 'forklift', { ...SHIP_PARK, aisle: 'B', name: '출하 지게차 대기 (두 출하 도크 사이)' }, m.key === 'traditional' ? 1.5 : m.key === 'smart' ? 1.9 : 2.1)];
     this.forklifts[0].shipper = true; this.forklifts[0].auto = m.key === 'dark';
     // 입고 지게차: 입고 도크(왼쪽 벽)에 접안한 공급사 트럭에서 팔레트를 내려 자재창고 랙에 넣는다 (피지컬AI만 자율)
     const rcv = new Mover(m.key === 'dark' ? '입고 자율 지게차' : '입고 지게차 (유인)', 'forklift', { ...INBOUND.park, aisle: 'B', name: '입고 지게차 대기 (뒷벽 쪽)' }, m.key === 'traditional' ? 1.5 : m.key === 'smart' ? 1.9 : 2.1);
@@ -745,7 +746,7 @@ export class Simulation {
         }
       }
       add('자재 담당', '작업자', -41.5, 3.4, -Math.PI / 2);
-      add('출하 담당', '작업자', 26.5, -12.5, 0);
+      add('출하 담당', '작업자', 35, -37, Math.PI / 2);   // 오른쪽 벽 출하 도크 1 뒤쪽 모서리 (지게차 동선 밖)
       // 순찰 반환점·보행로는 통로 바깥 보행로(z=±11.2, 가까운 차량 차로에서 1.5m) — 엇갈리는 차량을 막지 않는다
       add('작업반장', '반장', -20, 11.2, Math.PI / 2, [
         { x: -20, z: 11.2, aisle: 'F' }, { x: 24, z: 11.2, aisle: 'F' },

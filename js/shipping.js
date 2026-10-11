@@ -2,34 +2,45 @@
 // 건물 밖 트럭 야드의 화물트럭에 상차한다. 트럭이 가득 차면 출발하고, 대기하던 트럭이 빈 도크로 후진 접안하며,
 // 새 트럭이 대기 자리로 들어온다. 렌더링과 분리되어 헤드리스 시뮬레이션에서도 같은 흐름으로 동작한다.
 
-// 트럭 야드 배치 (뒷벽 z = -20 바깥, x 19.5 오른쪽 — 왼쪽은 서버실을 뒤로 옮긴 건물이 z −41까지): 도크 2개(벽 기둥 x 18·27·36 사이), 가운데 대기 자리,
-// z −44 진출입 도로 (트럭이 꺾어 도는 자리 x 15.5가 꺾인 건물 모서리(z −41)를 비키도록 원래 −40에서 4m 뒤로)
+// 트럭 야드 배치 — 야드 로컬 좌표: 도크 벽 z = -20, 도크 2개가 벽을 따라(x) 늘어서고 바깥 = −z, 가운데 대기 자리, z -40 진출입 도로.
+// 화면(월드)에는 직사각형 건물의 오른쪽 벽(x 38) 위쪽에 90° 시계 방향으로 돌려 놓는다 (shipToWorld): 도크 1 z −31 · 도크 2 z −19 · 진출입 도로 x 58
+// (도크 2는 오른쪽 벽 안쪽 설비 현황판(z −16.5 ~ 13.5) 바로 위, 출하 지게차는 정밀조립Zone 뒤 통로(z −9) → 오른쪽 세로 통로로 바로 닿는다)
+// 트럭 움직임은 로컬 좌표로 계산하고(Truck.lx·lz·lh), 바깥(화면·지게차·CCTV)에는 월드 좌표(x·z·heading)로 보인다
 export const YARD = {
-  wallZ: -20, bays: [22.5, 31.5], waitX: 27, roadZ: -44,
+  wallZ: -20, bays: [27.5, 39.5], waitX: 33.5, roadZ: -40,
   truckLen: 10.5, truckW: 2.5, cap: 32,      // 트럭 길이·폭(m), 적재 용량(개 = 팔레트 4개 × 8개)
   pallet: 8,                                   // 지게차 1회 운반량 (팔레트 1개)
 };
 const DOCK_Z = YARD.wallZ - YARD.truckLen / 2 - 0.15;   // 접안 트럭 중심 (뒤쪽 끝이 벽 바로 바깥)
 const WAIT_Z = DOCK_Z - 2;
 const FWD = 4.2, REV = 1.8;                    // 전진·후진 속도 (m/s)
+// 야드 로컬 → 월드: 오른쪽 벽 x 38, 로컬 x 27.5 → 월드 z −31 (회전 −90°: 월드 = (−z, x) + 평행이동)
+export const SHIP = { wallX: 38, zOff: -58.5 };
+export const SHIP_FRAME = { x: SHIP.wallX + YARD.wallZ, z: SHIP.zOff, rot: -Math.PI / 2 };   // three.js 그룹에 그대로 쓰는 변환 (위치 + y축 회전)
+export const shipToWorld = (x, z) => ({ x: SHIP_FRAME.x - z, z: x + SHIP_FRAME.z });
+const FRAME = { pos: shipToWorld, dh: SHIP_FRAME.rot };
 
 // 트럭: 위치(x,z)는 차체 중심, heading은 운전석이 향하는 방향 (이동체와 같은 규약: 0 = +z)
+// frame이 있으면(출하 야드) 위치·방향은 야드 로컬로 움직이고 x·z·heading은 월드로 돌려준다 (입고 트럭은 frame 없음 = 월드 그대로)
 export class Truck {
-  constructor(id, x, z, heading) { Object.assign(this, { id, x, z, heading, load: 0, by: {}, state: 'arrive', route: [], bay: null }); }
+  constructor(id, x, z, heading, frame = null) { Object.assign(this, { id, frame, lx: x, lz: z, lh: heading, load: 0, by: {}, state: 'arrive', route: [], bay: null }); }
+  get x() { return this.frame ? this.frame.pos(this.lx, this.lz).x : this.lx; } set x(v) { this.lx = v; }
+  get z() { return this.frame ? this.frame.pos(this.lx, this.lz).z : this.lz; } set z(v) { this.lz = v; }
+  get heading() { return this.lh + (this.frame?.dh ?? 0); } set heading(v) { this.lh = v; }
   // 경로점: { x, z, rev } — rev면 후진 (차체 방향은 진행 반대)
   go(points, state) { this.route = points.map((p) => ({ ...p })); this.state = state; }
   update(dt) {
     let rem = dt;
     while (rem > 0 && this.route.length) {
-      const p = this.route[0], dx = p.x - this.x, dz = p.z - this.z, d = Math.hypot(dx, dz);
+      const p = this.route[0], dx = p.x - this.lx, dz = p.z - this.lz, d = Math.hypot(dx, dz);
       const v = p.rev ? REV : FWD;
       if (d < 1e-3) { this.route.shift(); continue; }
       // 차체 방향은 진행 방향(후진이면 반대)으로 부드럽게 돈다
       const want = Math.atan2(dx, dz) + (p.rev ? Math.PI : 0);
-      let dh = ((want - this.heading + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
-      this.heading += Math.sign(dh) * Math.min(Math.abs(dh), rem * 0.9);
+      let dh = ((want - this.lh + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+      this.lh += Math.sign(dh) * Math.min(Math.abs(dh), rem * 0.9);
       const step = Math.min(d, v * rem);
-      this.x += (dx / d) * step; this.z += (dz / d) * step; rem -= step / v;
+      this.lx += (dx / d) * step; this.lz += (dz / d) * step; rem -= step / v;
       if (step >= d - 1e-6) this.route.shift();
     }
     this.moving = this.route.length > 0;
@@ -45,7 +56,7 @@ export class TruckYard {
     const w = this.spawn(YARD.waitX, WAIT_Z); w.state = 'wait';
     this.nextArrive = null;
   }
-  spawn(x, z) { const t = new Truck(`화물트럭-${++this.seq}`, x, z, Math.PI); this.trucks.push(t); return t; }
+  spawn(x, z) { const t = new Truck(`화물트럭-${++this.seq}`, x, z, Math.PI, FRAME); this.trucks.push(t); return t; }
   docked(bx) { return this.trucks.find((t) => t.bay === bx && t.state === 'dock'); }
   // 지게차가 실을 트럭: 접안해 있고 자리가 남은 트럭 중 많이 실린 쪽 (빨리 채워 출발시킨다)
   loadable() { return this.trucks.filter((t) => t.state === 'dock' && t.load + (t.reserved ?? 0) < YARD.cap).sort((a, b) => b.load - a.load)[0] ?? null; }
@@ -63,7 +74,7 @@ export class TruckYard {
     // 빈 도크(앞 트럭이 충분히 빠져나감)로 대기 트럭을 넣는다
     for (const bx of YARD.bays) {
       // 떠나는 트럭이 도로까지 빠져나가 옆으로 비킨 뒤에 들어간다 (대기 트럭 경로와 겹치지 않게)
-      const busy = this.trucks.some((t) => (t.bay === bx && (t.state === 'dock' || t.state === 'toDock')) || (t.state === 'depart' && t.bayLeft === bx && t.x < bx + 14));
+      const busy = this.trucks.some((t) => (t.bay === bx && (t.state === 'dock' || t.state === 'toDock')) || (t.state === 'depart' && t.bayLeft === bx && t.lx < bx + 14));
       const w = this.trucks.find((t) => t.state === 'wait');
       if (busy || !w) continue;
       const side = Math.sign(bx - YARD.waitX);
@@ -117,8 +128,8 @@ export function planForklift(sim, f) {
   t.reserved = (t.reserved ?? 0) + n;
   const pick = product === 'eaxle' ? sim.loc.PICK_EA : sim.loc.PICK_DT;
   // 도크 앞(벽에서 2.6m)에서 트럭 쪽을 보고 서서 포크를 적재함 높이로 올린 뒤 들어가고, 내려놓으면 포크를 넣은 채 반듯이 후진해 나온 뒤 돈다
-  const bx = t.bay, dock = { x: bx, z: YARD.wallZ + 2.6, aisle: 'B', name: `출하 도크 ${yard.bayNo(bx)}` };
-  const inside = { x: bx, z: YARD.wallZ + 0.7, aisle: 'B', name: `${t.id} 적재함` };   // 도크 레벨러 끝에서 포크를 적재함에 넣어 내려놓는다
+  const bx = t.bay, dock = { ...shipToWorld(bx, YARD.wallZ + 2.6), aisle: 'B', name: `출하 도크 ${yard.bayNo(bx)}` };
+  const inside = { ...shipToWorld(bx, YARD.wallZ + 0.7), aisle: 'B', name: `${t.id} 적재함` };   // 도크 레벨러 끝에서 포크를 적재함에 넣어 내려놓는다
   const pName = product === 'eaxle' ? 'e-axle' : product === 'doortrim' ? '도어트림' : '완제품';
   f.setTask(`${pName} 출하 → ${t.id}`, [
     { go: pick },
