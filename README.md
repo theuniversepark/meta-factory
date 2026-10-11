@@ -1,6 +1,6 @@
 # 피지컬AI 실증 메타팩토리 — 레거시 → 자동화 → 피지컬AI 자율공장 시뮬레이터
 
-**▶ 웹 버전 바로 실행: https://theuniversepark.github.io/jin-3d/** (설치 없이 브라우저에서 실행 · Claude 연동과 MQTT 발행은 맥 앱 또는 `npm start`에서)
+**▶ 웹 버전 바로 실행: https://theuniversepark.github.io/meta-factory/** (설치 없이 브라우저에서 실행 · Claude 연동과 MQTT 발행은 맥 앱 또는 `npm start`에서)
 
 웹 브라우저에서 실행되는 3D 공장 시뮬레이션 에이전트입니다. 사용한 오픈소스와 출처는 [OPEN_SOURCE.md](OPEN_SOURCE.md)를 보세요.
 
@@ -15,7 +15,7 @@ npm run app         # 패키징 없이 개발용으로 바로 실행
 - 개발자 서명이 없는 ad-hoc 서명 앱입니다. 이 Mac에서 직접 빌드한 앱은 바로 열립니다. 다른 Mac으로 옮기면 처음 한 번은 Finder에서 우클릭 → 열기가 필요합니다.
 
 ## 웹 버전 (GitHub Pages)
-설치 없이 브라우저에서 바로 실행: **https://theuniversepark.github.io/jin-3d/**
+설치 없이 브라우저에서 바로 실행: **https://theuniversepark.github.io/meta-factory/**
 - `main` 브랜치 루트를 그대로 서비스합니다(`.nojekyll`). 푸시하면 1~2분 뒤 반영됩니다.
 - 서버가 없으므로 Claude 연동(운영 에이전트·자연어 공정 설계)과 MQTT 발행은 쓸 수 없고, 추론 기반 에이전트로 운영합니다(`*.github.io`에서 열면 자동으로 이 모드).
 - 3D 운영, 단계 전환, 로봇 텔레메트리, 데이터 수집, 파일 저장(JSON·XML·RDF·CSV·AutomationML, 로봇별 AASX 등)은 모두 됩니다.
