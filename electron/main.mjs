@@ -7,10 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { startServer, setApiKey, hasApiKey } from '../server/app-server.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const APP_NAME = '피지컬AI 실증 메타팩토리';
+const APP_NAME = 'Meta-Factory';
 app.setName(APP_NAME);
-// 사용자 데이터 폴더는 이름을 바꾸기 전(Jin-3D) 그대로 둔다 — 저장된 API 키·녹화·에피소드를 이어서 쓴다
-app.setPath('userData', path.join(app.getPath('appData'), 'Jin-3D'));
+// 사용자 데이터 폴더는 jin-3d(Jin-3D)와 분리한다 — API 키·녹화·에피소드를 따로 보관한다
+app.setPath('userData', path.join(app.getPath('appData'), 'Meta-Factory'));
 
 const keyFile = () => path.join(app.getPath('userData'), 'anthropic-key.bin');
 let win = null, origin = null, keySource = null;

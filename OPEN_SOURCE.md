@@ -10,7 +10,7 @@
 | └ OrbitControls · CSS2DRenderer · EffectComposer · RenderPass · UnrealBloomPass · OutputPass | (three.js `examples/jsm`) | MIT | 같은 저장소 | 시점 조작, 라벨, 발광·후처리 |
 | └ WebGLRenderTarget · readRenderTargetPixels | (three.js 코어) | MIT | 같은 저장소 | 로봇 카메라 영상(관제 디스플레이 8분할, 로봇 정보 창 실시간 영상) |
 | └ GLTFLoader · RoomEnvironment (+ BufferGeometryUtils · SkeletonUtils) | (three.js `examples/jsm`) | MIT | 같은 저장소 | Blender 모델 렌더(기본) — glTF 모델 불러오기·실내 환경광 (`vendor/three/addons`) |
-| Electron | 44.5.1 | MIT | https://github.com/electron/electron | Mac 앱 셸 (피지컬AI 실증 메타팩토리.app) |
+| Electron | 44.5.1 | MIT | https://github.com/electron/electron | Mac 앱 셸 (Meta-Factory.app) |
 | @electron/packager | 20.3.0 | BSD-2-Clause | https://github.com/electron/packager | Mac 앱 패키징 (`npm run package`) |
 | @anthropic-ai/sdk | 0.131.0 | MIT | https://github.com/anthropics/anthropic-sdk-typescript | Agent(Claude API) 호출 서버 |
 | aedes | 1.2.0 | MIT | https://github.com/moscajs/aedes | 내장 MQTT 브로커 |
@@ -37,8 +37,8 @@
 
 | 사이트·서비스 | 용도 |
 |---|---|
-| GitHub — https://github.com/theuniversepark/jin-3d | 소스 저장소 |
-| GitHub Pages — https://theuniversepark.github.io/jin-3d/ | 웹 버전 배포 |
+| GitHub — https://github.com/theuniversepark/meta-factory | 소스 저장소 |
+| GitHub Pages — https://theuniversepark.github.io/meta-factory/ | 웹 버전 배포 |
 | jsDelivr CDN — https://cdn.jsdelivr.net/npm/three@0.186.1/ | 공유 페이지(Claude 아티팩트)에서 three.js 로드 |
 | Claude 아티팩트 (claude.ai) | 공유 페이지 호스팅 |
 | Anthropic Claude API (모델 `claude-opus-5-5`) | 대화 기반 Agent 해석, 자연어 공정 설계 (API 키가 있을 때만) |

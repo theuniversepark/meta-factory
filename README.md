@@ -4,13 +4,13 @@
 
 웹 브라우저에서 실행되는 3D 공장 시뮬레이션 에이전트입니다. 사용한 오픈소스와 출처는 [OPEN_SOURCE.md](OPEN_SOURCE.md)를 보세요.
 
-## 맥 앱 (피지컬AI 실증 메타팩토리.app)
+## 맥 앱 (Meta-Factory.app)
 ```bash
-npm run package     # → dist/피지컬AI 실증 메타팩토리-darwin-arm64/피지컬AI 실증 메타팩토리.app (Apple Silicon)
+npm run package     # → dist/Meta-Factory-darwin-arm64/Meta-Factory.app (Apple Silicon)
 npm run app         # 패키징 없이 개발용으로 바로 실행
 ```
-- `피지컬AI 실증 메타팩토리.app`을 응용 프로그램 폴더로 옮겨 쓰면 됩니다. 앱 안에 서버와 Three.js가 모두 들어 있어 따로 설치할 것이 없습니다.
-- Claude API 키는 **⚙ 버튼 또는 ⌘,** 에서 입력합니다. 키는 macOS 키체인(safeStorage)으로 암호화되어 `~/Library/Application Support/Jin-3D/`(이름 변경 전 폴더를 그대로 사용)에 저장되고, 화면(렌더러)으로는 전달되지 않습니다.
+- `Meta-Factory.app`을 응용 프로그램 폴더로 옮겨 쓰면 됩니다. 앱 안에 서버와 Three.js가 모두 들어 있어 따로 설치할 것이 없습니다.
+- Claude API 키는 **⚙ 버튼 또는 ⌘,** 에서 입력합니다. 키는 macOS 키체인(safeStorage)으로 암호화되어 `~/Library/Application Support/Meta-Factory/`에 저장되고, 화면(렌더러)으로는 전달되지 않습니다.
 - 내장 서버는 127.0.0.1의 임의 포트에서만 열립니다.
 - 개발자 서명이 없는 ad-hoc 서명 앱입니다. 이 Mac에서 직접 빌드한 앱은 바로 열립니다. 다른 Mac으로 옮기면 처음 한 번은 Finder에서 우클릭 → 열기가 필요합니다.
 
@@ -306,7 +306,7 @@ AMR이 구분 적재장 입구(경로 끝)에서 **가운데 정지 구간까지
 ### CCTV 영상 저장 — 전체 자동 녹화(NVR) · 개별 저장
 `js/cctvrec.js` — 영상은 시뮬레이션 장면을 각 CCTV 시점으로 렌더한 것을 브라우저 MediaRecorder로 WebM(VP9) 파일로 만듭니다.
 - **전체 자동 녹화 (NVR)**: 운전을 시작하면 설치된 CCTV **전체(정밀조립Zone 44대)**의 분할 화면을 그대로 계속 녹화합니다. 전광판과 같은 배치이고, AI 검출 상자·카메라 ID·위치·시각이 영상에 함께 들어가며, 머리 띠에 REC · 카메라 수 · 공장 단계 · UTC 시각 · 구간 번호를 표시합니다. 2fps · 가로 2592px(칸 288×162) · **5분 구간 파일**로 끊어 저장합니다(구간 약 40MB).
-  - 맥 앱·`node server.mjs`: 구간이 끝날 때마다 서버 `data/cctv/<실행ID>_cctv_<번호>.webm`에 저장합니다(맥 앱은 `~/Library/Application Support/Jin-3D/data/cctv/`, `JIN3D_DATA_DIR`로 변경). 보관 한도(원본 576구간 · MP4 144구간 · 전체 4GB — 아래 '녹화 영상 보관 한도')를 넘으면 오래된 것부터 지웁니다. `GET /api/cctv`로 구간 수·용량을 봅니다.
+  - 맥 앱·`node server.mjs`: 구간이 끝날 때마다 서버 `data/cctv/<실행ID>_cctv_<번호>.webm`에 저장합니다(맥 앱은 `~/Library/Application Support/Meta-Factory/data/cctv/`, `JIN3D_DATA_DIR`로 변경). 보관 한도(원본 576구간 · MP4 144구간 · 전체 4GB — 아래 '녹화 영상 보관 한도')를 넘으면 오래된 것부터 지웁니다. `GET /api/cctv`로 구간 수·용량을 봅니다.
   - 구간마다 **카메라 배치 색인** `<구간>.json`을 같이 남깁니다 — 카메라 ID · 위치 · 영상 속 칸 좌표(`rect` = x, y, 폭, 높이 px) · 시작·끝 시각 · fps. 칸을 잘라 카메라별 영상으로 나눌 수 있습니다(예: `ffmpeg -i 구간.webm -filter:v "crop=288:162:0:34" CC-01.mp4`).
   - 서버가 없는 웹 버전(GitHub Pages)은 브라우저에 최근 2구간을 보관하고 CCTV 정보 창에서 내려받습니다. 레거시 공장(전광판 없음)도 CCTV 녹화는 같이 합니다. 공유 페이지(Claude 아티팩트)는 파일 저장이 막혀 녹화하지 않습니다.
 - **개별 저장 (CCTV 정보 창)**: CCTV를 누르면 뜨는 창의 영상 아래에 저장 버튼이 있습니다.
