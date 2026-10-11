@@ -299,9 +299,12 @@ class ExtraZone {
     this.dyn = put(new THREE.Group(), 0, 0, 0, this.G);
     const acc = hex(Z.accent);
     // Zone 바닥 구역(셀 영역 테두리) · 바닥 Zone 이름 · 공중 표지
-    const F = Z.foot, W = F.x1 - F.x0, D = F.z1 - F.z0, cx = (F.x0 + F.x1) / 2, cz = (F.z0 + F.z1) / 2, frame = std(Z.accent, { emissive: Z.accent, emissiveIntensity: 0.25 });
-    put(box(W, 0.01, D, std(0x3d434b, { roughness: 0.9 }), false), cx, 0.004, cz, this.G).receiveShadow = true;
-    for (const sd of [-1, 1]) { put(box(W, 0.012, 0.14, frame, false), cx, 0.012, cz + sd * D / 2, this.G); put(box(0.14, 0.012, D, frame, false), cx + sd * W / 2, 0.012, cz, this.G); }
+    // 바닥은 정밀조립Zone(factory.js buildZoneDeco)과 같게: 건물 바닥 그대로 + 하늘색 점선 테두리 + 셀마다 반투명 색 바닥 (공동 청록 · 제품별 주황/보라 · NG 빨강)
+    const F = Z.foot, flat = (w, d, mat, x, z, y) => { const m = put(new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat), x, y, z, this.G); m.rotation.x = -PI / 2; m.receiveShadow = true; return m; };
+    const edge = new THREE.MeshBasicMaterial({ color: 0x37e8ff, transparent: true, opacity: 0.55 });
+    for (let x = F.x0; x < F.x1; x += 1.6) for (const z of [F.z0, F.z1]) flat(Math.min(1.0, F.x1 - x), 0.12, edge, x + 0.5, z, 0.012);
+    for (let z = F.z0; z < F.z1; z += 1.6) for (const x of [F.x0, F.x1]) flat(0.12, Math.min(1.0, F.z1 - z), edge, x, z + 0.5, 0.012);
+    for (const c of Object.values(Z.cells)) flat(5.0, 4.6, new THREE.MeshStandardMaterial({ color: PC[c.product] ?? PC.shared, transparent: true, opacity: 0.3, roughness: 0.9, depthWrite: false }), c.x, c.z, 0.01);
     // Zone 이름: 셀·AMR 길을 비킨 빈 바닥 (유연생산 = 투입 스테이션 뒤 · 적응가공 = 소재 식별셀 앞)
     this.titleAt = Z.key === 'flex' ? { x: -24.9, z: -5.4 } : { x: -20.5, z: 5.4 };
     put(textPlane([`${Z.code} ${Z.name}`, Z.sub], 7, 1.4, acc), this.titleAt.x, 0.02, this.titleAt.z, this.G);
