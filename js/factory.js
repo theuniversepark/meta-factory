@@ -1458,8 +1458,8 @@ export class FactoryView {
     const r = this.root;
     const floorMat = new THREE.MeshStandardMaterial({ map: floorTexture(), roughness: 0.85, metalness: 0.05 });
     // 바닥: 생산동(x −38 ~ 38) + 왼쪽 물류 확장동(x −51 ~ −38) — 하나의 건물, 사이 벽 없음
-    // 앞뒤(z −41 ~ 42): 서버실 · 유연생산Zone · 정밀조립Zone · 적응가공Zone · AMR 스테이션 (zonedefs.js)
-    // 직사각형 건물: x −51 ~ 38 · z −41(뒷벽 · 관제 화면) ~ 42(앞쪽 열린 면)
+    // 앞뒤(z −43 ~ 42): 서버실 · 유연생산Zone · 정밀조립Zone · 적응가공Zone · AMR 스테이션 (zonedefs.js)
+    // 직사각형 건물: x −51 ~ 48 · z −43(뒷벽 · 관제 화면) ~ 42(앞쪽 열린 면)
     const BD = BUILDING.z1 - BUILDING.z0, BC = (BUILDING.z0 + BUILDING.z1) / 2, BW = BUILDING.x1 - BUILDING.x0, BX = (BUILDING.x0 + BUILDING.x1) / 2;
     floorMat.map.repeat.set(BW / 4, BD / 4);   // 텍스처 한 장 = 4m (격자 4칸)
     const floor = put(mesh(new THREE.PlaneGeometry(BW, BD), floorMat, false), BX, 0, BC, r);
@@ -1483,7 +1483,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     }
     // 벽체·기둥
     // 뒷벽: 출하 도크 문 2개(폭 4.6m · 높이 4.9m)만 트럭 상차용으로 열고 나머지는 외벽 (입고 도크와 같은 방식)
-    // 뒷벽(z −41): 건물 전체 폭으로 곧게 — 관제 화면·CCTV 전광판·로봇 디스플레이가 걸린다
+    // 뒷벽(z −43): 건물 전체 폭으로 곧게 — 관제 화면·CCTV 전광판·로봇 디스플레이가 걸린다
     put(box(BW + 0.3, 8, 0.3, MAT.wall), BX, 4, BUILDING.z0, r);
     // 왼쪽 벽(확장동 x −51): 입고 도크 문(z −16.8~−12.2, 높이 4.9m)만 트럭 하차용으로 열고 나머지는 외벽
     // 왼쪽 벽은 그림자를 드리우지 않는다 (해가 왼쪽에서 비쳐 물류 확장동 바닥을 크게 덮던 그림자 제거 — 바닥은 다른 그림자를 그대로 받음)

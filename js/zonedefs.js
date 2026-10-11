@@ -1,6 +1,6 @@
 // 메타팩토리 3 Zone 배치 — 서버실(뒤)과 AMR 스테이션(앞) 사이에 앞뒤로 세 줄:
-//   뒤  ── 뒷벽 · 관제 화면 · 서버실 (z −41, 건물 전체 폭으로 곧게 — 직사각형 건물)
-//         뒤쪽 시설 통로 (z −30, 관제실 · 출하 도크) — 출하 도크는 오른쪽 벽(x 38) 위쪽, 야드는 건물 오른쪽 (shipping.js shipToWorld)
+//   뒤  ── 뒷벽 · 관제 화면 · 서버실 (z −43, 건물 전체 폭으로 곧게 — 직사각형 건물)
+//         뒤쪽 시설 통로 (z −32, 관제실) — 출하 도크는 오른쪽 벽(x 38) 위쪽, 야드는 건물 오른쪽 (shipping.js shipToWorld)
 //         A-1 유연생산Zone (가운데 z −20.5)
 //         정밀조립Zone 뒤 통로 (z −9) · 정밀조립Zone (z 0) · 앞 통로 (z 9)
 //         A-2 적응가공Zone (가운데 z 19.5)
@@ -11,12 +11,12 @@
 // 시설 ↔ 정밀조립Zone 이동은 좌우 끝 세로 통로(x −35.5 · 35)로 돌아간다 — 두 확장 Zone 사이를 가로지르지 않는다.
 // DOM 없이 시뮬레이션(sim.js)·CCTV·5G 배치와 3D 화면(zones.js)이 함께 쓴다.
 
-export const BACK_SHIFT = 21, FRONT_SHIFT = 22;
+export const BACK_SHIFT = 23, FRONT_SHIFT = 22;   // 뒤쪽: 21m + 바닥 격자 2칸(2m) 더 넓힘
 export const bk = (z) => z - BACK_SHIFT;    // 뒤쪽 시설 좌표 (원래 z → 옮긴 z)
 export const fr = (z) => z + FRONT_SHIFT;   // 앞쪽 시설 좌표
 // 오른쪽 벽은 원래 x 38에서 바닥 격자 10칸(10m) 오른쪽으로 옮겨 공간을 넓혔다 — 안쪽 통로(오른쪽 세로 통로 x 35)·설비는 그대로, 벽에 붙은 것(출하 도크·야드·설비 현황판)만 벽과 함께
 export const RIGHT_SHIFT = 10;
-export const BUILDING = { x0: -51, x1: 38 + RIGHT_SHIFT, z0: bk(-20), z1: fr(20) };   // 건물 안쪽 (오른쪽 벽 x 48 · 뒷벽 z −41 · 앞쪽 열린 면 z 42)
+export const BUILDING = { x0: -51, x1: 38 + RIGHT_SHIFT, z0: bk(-20), z1: fr(20) };   // 건물 안쪽 (오른쪽 벽 x 48 · 뒷벽 z −43 · 앞쪽 열린 면 z 42)
 export const inBuilding = (p, pad = 0) => p.x > BUILDING.x0 + pad && p.x < BUILDING.x1 - pad && p.z > BUILDING.z0 + pad && p.z < BUILDING.z1 - pad;
 // AMR 스테이션이 투입구에서 FRONT_SHIFT만큼 멀어져 빈 AMR이 편도 약 9~14초 더 달린다 — 투입 간격(7.5~9초) 기준 2대를 더 미리 부른다 (sim.js 선행 배차)
 export const AMR_LEAD = 2;
