@@ -6,6 +6,7 @@
 // 화면(월드)에는 직사각형 건물의 오른쪽 벽(x 38) 위쪽에 90° 시계 방향으로 돌려 놓는다 (shipToWorld): 도크 1 z −31 · 도크 2 z −19 · 진출입 도로 x 58
 // (도크 2는 오른쪽 벽 안쪽 설비 현황판(z −16.5 ~ 13.5) 바로 위, 출하 지게차는 정밀조립Zone 뒤 통로(z −9) → 오른쪽 세로 통로로 바로 닿는다)
 // 트럭 움직임은 로컬 좌표로 계산하고(Truck.lx·lz·lh), 바깥(화면·지게차·CCTV)에는 월드 좌표(x·z·heading)로 보인다
+import { BUILDING } from './zonedefs.js';
 export const YARD = {
   wallZ: -20, bays: [27.5, 39.5], waitX: 33.5, roadZ: -40,
   truckLen: 10.5, truckW: 2.5, cap: 32,      // 트럭 길이·폭(m), 적재 용량(개 = 팔레트 4개 × 8개)
@@ -15,7 +16,7 @@ const DOCK_Z = YARD.wallZ - YARD.truckLen / 2 - 0.15;   // 접안 트럭 중심 
 const WAIT_Z = DOCK_Z - 2;
 const FWD = 4.2, REV = 1.8;                    // 전진·후진 속도 (m/s)
 // 야드 로컬 → 월드: 오른쪽 벽 x 38, 로컬 x 27.5 → 월드 z −31 (회전 −90°: 월드 = (−z, x) + 평행이동)
-export const SHIP = { wallX: 38, zOff: -58.5 };
+export const SHIP = { wallX: BUILDING.x1, zOff: -58.5 };   // 오른쪽 벽(zonedefs.js BUILDING.x1)
 export const SHIP_FRAME = { x: SHIP.wallX + YARD.wallZ, z: SHIP.zOff, rot: -Math.PI / 2 };   // three.js 그룹에 그대로 쓰는 변환 (위치 + y축 회전)
 export const shipToWorld = (x, z) => ({ x: SHIP_FRAME.x - z, z: x + SHIP_FRAME.z });
 const FRAME = { pos: shipToWorld, dh: SHIP_FRAME.rot };

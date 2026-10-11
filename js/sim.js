@@ -746,7 +746,7 @@ export class Simulation {
         }
       }
       add('자재 담당', '작업자', -41.5, 3.4, -Math.PI / 2);
-      add('출하 담당', '작업자', 35, -37, Math.PI / 2);   // 오른쪽 벽 출하 도크 1 뒤쪽 모서리 (지게차 동선 밖)
+      add('출하 담당', '작업자', SHIP.wallX - 3, -37, Math.PI / 2);   // 오른쪽 벽 출하 도크 1 뒤쪽 모서리 (지게차 동선 밖)
       // 순찰 반환점·보행로는 통로 바깥 보행로(z=±11.2, 가까운 차량 차로에서 1.5m) — 엇갈리는 차량을 막지 않는다
       add('작업반장', '반장', -20, 11.2, Math.PI / 2, [
         { x: -20, z: 11.2, aisle: 'F' }, { x: 24, z: 11.2, aisle: 'F' },
@@ -819,7 +819,7 @@ export class Simulation {
       const base = dd > 0.05 ? Math.atan2(dz, dx) : 0;
       for (const da of [0, 0.5, -0.5, 1, -1, 1.6, -1.6, Math.PI]) {
         const r = R + 0.4, esc = { x: ev.x + Math.cos(base + da) * r, z: ev.z + Math.sin(base + da) * r };
-        if (!(esc.x > -50.2 && esc.x < 36.8 && esc.z > BUILDING.z0 + 1 && esc.z < BUILDING.z1 - 1) || inExtraZone(esc) || m.dockAt?.(esc, m)) continue;
+        if (!(esc.x > -50.2 && esc.x < BUILDING.x1 - 1.2 && esc.z > BUILDING.z0 + 1 && esc.z < BUILDING.z1 - 1) || inExtraZone(esc) || m.dockAt?.(esc, m)) continue;
         const aisle = m.loc?.aisle;
         m.steps.unshift({ go: { ...esc, aisle, name: '이벤트 반경 밖' }, via: [] }, { go: { x: m.x, z: m.z, aisle, name: m.loc?.name ?? '작업 자리' }, via: [] });
         this.reportHazard(m.id, ev, 'detour');
@@ -838,7 +838,7 @@ export class Simulation {
     // 이미 반경 안(이벤트가 바로 옆에서 발생)이면 그 자리에서 기다리지 않고 반경 밖으로 먼저 빠져나온다
     if (m.hzEsc && m.path?.[0] === m.hzEsc) return false;
     m.hzEsc = null;
-    const okPt = (p) => p.x > -50.2 && p.x < 36.8 && p.z > BUILDING.z0 + 1 && p.z < BUILDING.z1 - 1 && !inExtraZone(p) && !this.stations.some((s2) => Math.abs(p.x - s2.x) < 2.6 && Math.abs(p.z - (s2.z ?? 0)) < 2.6) && !m.dockAt?.(p, m);
+    const okPt = (p) => p.x > -50.2 && p.x < BUILDING.x1 - 1.2 && p.z > BUILDING.z0 + 1 && p.z < BUILDING.z1 - 1 && !inExtraZone(p) && !this.stations.some((s2) => Math.abs(p.x - s2.x) < 2.6 && Math.abs(p.z - (s2.z ?? 0)) < 2.6) && !m.dockAt?.(p, m);
     for (const ev of evs) {
       const dx = m.x - ev.x, dz = m.z - ev.z, dd = Math.hypot(dx, dz);
       if (goingTo(ev) || dd >= R(ev)) continue;

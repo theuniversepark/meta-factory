@@ -79,13 +79,13 @@ const cache = new Map();
 export function plan5G(sim) {
   const key = JSON.stringify(sim.stations.filter((s) => !s.standby).map((s) => [s.type, Math.round(s.x * 10), Math.round(s.z * 10)]));
   if (cache.has(key)) return cache.get(key);
-  const ob = sim.cctv.obstacles, B = { x0: -50.6, x1: 37.6, z0: BUILDING.z0 + 0.4, z1: BUILDING.z1 - 0.4 };   // 3 Zone으로 넓힌 건물 전체
+  const ob = sim.cctv.obstacles, B = { x0: -50.6, x1: BUILDING.x1 - 0.4, z0: BUILDING.z0 + 0.4, z1: BUILDING.z1 - 0.4 };   // 3 Zone으로 넓힌 건물 전체
   const pts = [];
   for (let x = B.x0; x <= B.x1 + 1e-9; x += STEP) for (let z = B.z0; z <= B.z1 + 1e-9; z += STEP) pts.push({ x, z });   // 격자 전체 (이웃 계산이 격자 순서를 쓴다)
   const cands = [];
   // 천장 후보: 설비 위는 피하고, 천장 CCTV 돔과는 CLEAR(2.5m) 이상 떨어뜨린다 (같은 자리에 겹쳐 달지 않음 · 카메라 시야를 가리지 않게)
   const domes = sim.cctv.cams.filter((c) => c.region === 'inside'), CLEAR = 2.5;
-  for (let x = -48; x <= 36; x += 4) for (let z = BUILDING.z0 + 3; z <= BUILDING.z1 - 3; z += 4) {
+  for (let x = -48; x <= BUILDING.x1 - 2; x += 4) for (let z = BUILDING.z0 + 3; z <= BUILDING.z1 - 3; z += 4) {
     if (!inBuilding({ x, z }, 1.5)) continue;
     if (ob.some((b) => x > b.x0 - 0.5 && x < b.x1 + 0.5 && z > b.z0 - 0.5 && z < b.z1 + 0.5)) continue;
     if (domes.some((c) => Math.hypot(c.x - x, c.z - z) < CLEAR)) continue;

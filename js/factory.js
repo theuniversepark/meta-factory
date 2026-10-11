@@ -100,7 +100,7 @@ function floorTexture() {
   g.strokeStyle = 'rgba(40,44,50,0.55)'; g.lineWidth = 2;
   for (let i = 0; i <= 512; i += 128) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 512); g.stroke(); g.beginPath(); g.moveTo(0, i); g.lineTo(512, i); g.stroke(); }
   const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(22.25, 10); t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1, 1);   // 바닥 크기에 맞춰 buildBuilding에서 정한다 (격자 한 칸 = 1m) t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 8;
   return t;
 }
@@ -1460,8 +1460,9 @@ export class FactoryView {
     // 바닥: 생산동(x −38 ~ 38) + 왼쪽 물류 확장동(x −51 ~ −38) — 하나의 건물, 사이 벽 없음
     // 앞뒤(z −41 ~ 42): 서버실 · 유연생산Zone · 정밀조립Zone · 적응가공Zone · AMR 스테이션 (zonedefs.js)
     // 직사각형 건물: x −51 ~ 38 · z −41(뒷벽 · 관제 화면) ~ 42(앞쪽 열린 면)
-    const BD = BUILDING.z1 - BUILDING.z0, BC = (BUILDING.z0 + BUILDING.z1) / 2;
-    const floor = put(mesh(new THREE.PlaneGeometry(89, BD), floorMat, false), -6.5, 0, BC, r);
+    const BD = BUILDING.z1 - BUILDING.z0, BC = (BUILDING.z0 + BUILDING.z1) / 2, BW = BUILDING.x1 - BUILDING.x0, BX = (BUILDING.x0 + BUILDING.x1) / 2;
+    floorMat.map.repeat.set(BW / 4, BD / 4);   // 텍스처 한 장 = 4m (격자 4칸)
+    const floor = put(mesh(new THREE.PlaneGeometry(BW, BD), floorMat, false), BX, 0, BC, r);
     floor.rotation.x = -Math.PI / 2;
     this.floorMat = floorMat;
     // AGV 통로
@@ -1469,7 +1470,9 @@ export class FactoryView {
     // 앞쪽 통로는 확장동 물류존(AGV 원자재 상차·부품 피킹)까지 이어지고, 왼쪽 세로 통로는 동선 계산의 교차 통로(x −35.5)와 같은 자리
     // 정밀조립Zone 앞뒤 통로(z ±9) · 확장 Zone 바깥 시설 통로(앞 FF · 뒤 BB) · 좌우 끝 세로 통로(시설 ↔ 정밀조립Zone 연결)
 const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
-    const lanes = [[-7, 9, 84, 2.6], [-1, -9, 72, 2.6], [-1, fr(9), 72, 2.6], [-1, bk(-9), 72, 2.6], [-35.5, VZ, 2.6, VL], [35, VZ, 2.6, VL]];   // 입고 지게차 운행 구간은 바닥 초록 전용 표시로만 구분
+    // 앞뒤 통로는 넓힌 오른쪽(x 48 벽 앞)까지 이어 그린다 — 출하 지게차가 오른쪽 세로 통로(x 35)에서 벽 쪽 도크로 간다
+    const LX1 = BUILDING.x1 - 1.3, lane = (x0, z) => [(x0 + LX1) / 2, z, LX1 - x0, 2.6];
+    const lanes = [lane(-49, 9), lane(-37, -9), lane(-37, fr(9)), lane(-37, bk(-9)), [-35.5, VZ, 2.6, VL], [35, VZ, 2.6, VL]];   // 입고 지게차 운행 구간은 바닥 초록 전용 표시로만 구분
     for (const [x, z, w, d] of lanes) {
       const l = put(new THREE.Mesh(laneGeo(w, d), MAT.lane), x, 0.005, z, r); l.rotation.x = -Math.PI / 2; l.receiveShadow = true;
       for (const s of [-1, 1]) {
@@ -1481,7 +1484,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     // 벽체·기둥
     // 뒷벽: 출하 도크 문 2개(폭 4.6m · 높이 4.9m)만 트럭 상차용으로 열고 나머지는 외벽 (입고 도크와 같은 방식)
     // 뒷벽(z −41): 건물 전체 폭으로 곧게 — 관제 화면·CCTV 전광판·로봇 디스플레이가 걸린다
-    put(box(89.3, 8, 0.3, MAT.wall), -6.5, 4, BUILDING.z0, r);
+    put(box(BW + 0.3, 8, 0.3, MAT.wall), BX, 4, BUILDING.z0, r);
     // 왼쪽 벽(확장동 x −51): 입고 도크 문(z −16.8~−12.2, 높이 4.9m)만 트럭 하차용으로 열고 나머지는 외벽
     // 왼쪽 벽은 그림자를 드리우지 않는다 (해가 왼쪽에서 비쳐 물류 확장동 바닥을 크게 덮던 그림자 제거 — 바닥은 다른 그림자를 그대로 받음)
     { const dz0 = INBOUND.dockZ - 2.3, dz1 = INBOUND.dockZ + 2.3;
@@ -1504,8 +1507,8 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       for (let i = 0; i < cuts.length; i += 2) put(box(0.3, 8, cuts[i + 1] - cuts[i], MAT.wall), W, 4, (cuts[i] + cuts[i + 1]) / 2, r);
       for (const z of dz) put(box(0.3, 8 - 4.9, doorW, MAT.wall), W, 4.9 + (8 - 4.9) / 2, z, r);
       put(box(0.32, 0.3, dz[dz.length - 1] - dz[0] + doorW + 4, MAT.steel), W, 0.15, (dz[0] + dz[dz.length - 1]) / 2, r); }
-    for (let x = -45; x <= 36; x += 9) put(box(0.6, 8, 0.6, MAT.steel), x, 4, BUILDING.z0 + 0.4, r);
-    put(box(89, 0.5, 0.35, MAT.accent), -6.5, 7.7, BUILDING.z0 + 0.2, r);
+    for (let x = -45; x <= BUILDING.x1 - 2; x += 9) put(box(0.6, 8, 0.6, MAT.steel), x, 4, BUILDING.z0 + 0.4, r);
+    put(box(BW, 0.5, 0.35, MAT.accent), BX, 7.7, BUILDING.z0 + 0.2, r);
     // 천장 형광등 기구는 두지 않는다 — 공장 밝기는 환경광·주광·보조광(main.js LOOK)으로 단계별로 유지
     // 뒷벽 관제 화면 왼쪽(12×4m)에는 CCTV 전광판(js/cctvview.js)이 걸린다 — 과학기술정보통신부·정보통신산업진흥원 로고는 관제 서버 랙 양옆(아래 관제/서버)과 앞쪽 바닥 표시에 둔다
     // 바닥 표시(12×5.4m) — 앞쪽 AGV 충전소(오른쪽 끝 x −2.8)와 정비실(왼쪽 끝 x 10.3) 사이 가운데 (x 3.75), 앞쪽 통로(지게차 z ≤ 10.7)와 AMR 복귀 전용로(z ≥ 18.3) 사이 가운데 (z 14.5)
@@ -1680,7 +1683,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     // 왼쪽 벽 바깥: 사인 대신 스타워즈 오프닝 크롤 전광판 (피지컬AI 제조데이터 아키텍처를 무한 스크롤업) — buildCrawl
     const left = this.buildCrawl();
     // 오른쪽 벽 바깥 — 바깥(+x)을 향함
-    const right = put(make(26, H), 38.2, Y, 0, this.root); right.rotation.y = Math.PI / 2;
+    const right = put(make(26, H), BUILDING.x1 + 0.2, Y, 0, this.root); right.rotation.y = Math.PI / 2;
     this.facadeSigns = [back, left, right];
   }
 
@@ -1759,7 +1762,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
   buildBoard() {
     const W = 30, H = 6.4, cv = document.createElement('canvas'); cv.width = 4096; cv.height = Math.round(4096 * H / W);
     this.boardCanvas = cv; this.boardTex = new THREE.CanvasTexture(cv); this.boardTex.colorSpace = THREE.SRGBColorSpace; this.boardTex.anisotropy = 8;
-    const g = put(new THREE.Group(), 37.72, 4.45, -1.5, this.root); g.rotation.y = -Math.PI / 2;
+    const g = put(new THREE.Group(), BUILDING.x1 - 0.28, 4.45, -1.5, this.root); g.rotation.y = -Math.PI / 2;   // 오른쪽 벽 안쪽
     put(box(W + 0.5, H + 0.5, 0.16, std(0x0b0d10, { roughness: 0.5, metalness: 0.4 })), 0, 0, -0.1, g);
     put(new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshBasicMaterial({ map: this.boardTex, toneMapped: false })), 0, 0, 0, g);
     this.boardT = -1;

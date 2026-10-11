@@ -75,7 +75,7 @@ export function planCCTV(sim) {
   const grid = (x0, x1, z0, z1, step, y, R, kind, extra = {}) => { const c = []; for (let x = x0; x <= x1 + 1e-9; x += step) for (let z = z0; z <= z1 + 1e-9; z += step) c.push({ x, y, z, R, kind, ...extra }); return c; };
   const D = CCTV_SPEC.dome, O = CCTV_SPEC.outdoor;
   // 건물 안: 천장 2m 격자 후보
-  const inside = coverRegion({ x0: -50.6, x1: 37.6, z0: BUILDING.z0 + 0.4, z1: BUILDING.z1 - 0.4, keep: (p) => inBuilding(p, 0.4), cands: grid(-50, 36, BUILDING.z0 + 2, BUILDING.z1 - 2, 2, D.y, D.R, 'dome').filter((c) => inBuilding(c, 1.5)) }, ob);   // 앞뒤로 넓힌 건물 전체 (3 Zone · 출하 도크 쪽 꺾인 뒷벽 반영)   // 왼쪽 확장동(물류존) 포함
+  const inside = coverRegion({ x0: -50.6, x1: BUILDING.x1 - 0.4, z0: BUILDING.z0 + 0.4, z1: BUILDING.z1 - 0.4, keep: (p) => inBuilding(p, 0.4), cands: grid(-50, BUILDING.x1 - 2, BUILDING.z0 + 2, BUILDING.z1 - 2, 2, D.y, D.R, 'dome').filter((c) => inBuilding(c, 1.5)) }, ob);   // 앞뒤로 넓힌 건물 전체 (3 Zone · 출하 도크 쪽 꺾인 뒷벽 반영)   // 왼쪽 확장동(물류존) 포함
   // 입고 트럭 야드: 왼쪽 확장동 외벽(x −51.4)과 야드 가장자리 기둥 후보
   const yardIn = coverRegion({ x0: -92, x1: -52, z0: -44, z1: -4, cands: [   // 입고 야드 (진입로는 z −61로 옮겼지만 감시 영역은 도크·회전 구역)
     ...grid(-51.4, -51.4, -18, 18, 3, O.y, O.R, 'wall', { face: -Math.PI / 2 }),

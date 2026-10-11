@@ -3,6 +3,7 @@
 // 영상: CCTV 카메라 시점으로 장면을 렌더 타깃에 그린다(전광판은 프레임마다 몇 칸씩 돌아가며 갱신, 이벤트 칸은 매 프레임).
 // AI 오버레이(피지컬AI): 객체 검출 상자·클래스·신뢰도·트랙 ID(YOLO11 + ByteTrack), 바닥 이상 분할 마스크(YOLO11-seg),
 // 연기 검출(D-Fire 학습 모델), 지오펜스 침입 경보 — 장면의 실제 위치·크기를 카메라로 투영해 모델 출력을 만든다.
+import { SHIP } from './shipping.js';
 import { bk, fr } from './zonedefs.js';
 import * as THREE from 'three';
 import { moverRadius } from './sim.js';
@@ -62,7 +63,7 @@ export class CCTVView {
     if (c.region === 'yardIn') return '입고 트럭 야드'; if (c.region === 'yardOut') return '출하 트럭 야드';
     const st = [...this.sim.stations].sort((a, b) => Math.hypot(a.x - c.x, a.z - c.z) - Math.hypot(b.x - c.x, b.z - c.z))[0];
     if (c.x < -38 && c.z > 9) return '정비실';
-  if (c.x < -38) return c.z < -5 ? '입고 도크 · 입고 지게차' : '물류존 · 물류 선반'; if (c.x > 30 && c.z < -18 && c.z > bk(-20)) return '출하 도크';
+  if (c.x < -38) return c.z < -5 ? '입고 도크 · 입고 지게차' : '물류존 · 물류 선반'; if (c.x > SHIP.wallX - 8 && c.z < -14 && c.z > bk(-20)) return '출하 도크';
   if (c.z < bk(-9)) return '관제실 · 뒤쪽 시설 통로';
   if (c.z < -11) return '유연생산Zone';
   if (c.z > 11 && c.z < fr(9)) return '적응가공Zone';
@@ -74,7 +75,7 @@ export class CCTVView {
   pose(c) {
     let tx, tz;
     if (c.region === 'inside') { const d = Math.hypot(c.x, c.z * 1.8) || 1; tx = c.x - (c.x / d) * 6; tz = c.z - ((c.z * 1.8) / d) * 6; if (d < 3) tz = c.z + 6; }
-    else { const cx = c.region === 'yardIn' ? -72 : 52, cz = c.region === 'yardIn' ? -24 : -28; /* 출하 야드는 오른쪽 벽 바깥 */ const d = Math.hypot(cx - c.x, cz - c.z) || 1; tx = c.x + ((cx - c.x) / d) * 9; tz = c.z + ((cz - c.z) / d) * 9; }
+    else { const cx = c.region === 'yardIn' ? -72 : SHIP.wallX + 14, cz = c.region === 'yardIn' ? -24 : -28; /* 출하 야드는 오른쪽 벽 바깥 */ const d = Math.hypot(cx - c.x, cz - c.z) || 1; tx = c.x + ((cx - c.x) / d) * 9; tz = c.z + ((cz - c.z) / d) * 9; }
     const yw = this.yaw.get(c.id) ?? 0, dx = tx - c.x, dz = tz - c.z, cs = Math.cos(yw), sn = Math.sin(yw);
     return { pos: new THREE.Vector3(c.x, c.y - 0.25, c.z), look: new THREE.Vector3(c.x + dx * cs - dz * sn, 0, c.z + dx * sn + dz * cs) };
   }

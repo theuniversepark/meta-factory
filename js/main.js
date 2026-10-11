@@ -60,9 +60,9 @@ host.appendChild(labelRenderer.domElement);
 const scene = new THREE.Scene();
 
 // ── 카메라: 3D 원근 ─────────────────
-const target = new THREE.Vector3(-6, 0, 0);   // 건물 가운데 (생산동 + 왼쪽 물류 확장동, 앞뒤로 유연생산 · 정밀조립 · 적응가공 3 Zone)
+const target = new THREE.Vector3(-1.5, 0, 0);   // 건물 가운데 (생산동 + 왼쪽 물류 확장동, 앞뒤로 유연생산 · 정밀조립 · 적응가공 3 Zone)
 const persp = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.5, 400);
-persp.position.set(-9, 78, 92);
+persp.position.set(-4.5, 80, 95);
 const ctlP = new OrbitControls(persp, labelRenderer.domElement);
 ctlP.target.copy(target); ctlP.enableDamping = true; ctlP.maxPolarAngle = Math.PI * 0.47; ctlP.minDistance = 8; ctlP.maxDistance = 200;
 labelRenderer.domElement.style.pointerEvents = 'auto';
@@ -76,7 +76,7 @@ sun.position.set(-20, 40, 25);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.mapSize.set(4096, 4096);   // 건물이 앞뒤로 늘어난 만큼 그림자 해상도도 올린다
-Object.assign(sun.shadow.camera, { left: -72, right: 58, top: 58, bottom: -58, near: 1, far: 180 });
+Object.assign(sun.shadow.camera, { left: -72, right: 68, top: 60, bottom: -60, near: 1, far: 190 });
 sun.shadow.bias = -0.0005;
 scene.add(sun);
 const fill = new THREE.DirectionalLight(0x9ec9ff, 0.4);
@@ -1029,7 +1029,7 @@ function keyPan(rdt, shift) {
   const sp = Math.max(6, cam.position.distanceTo(tg) * 0.35) * (shift ? 2.5 : 1) * rdt;   // 멀리서 볼수록 빠르게 (초당 시야 거리의 35%)
   panD.copy(panF).multiplyScalar(f).addScaledVector(panR, r).normalize().multiplyScalar(sp);
   // 공장·트럭 야드 밖으로 너무 멀리 가지 않게
-  panD.x = Math.max(-100, Math.min(70, tg.x + panD.x)) - tg.x; panD.z = Math.max(-75, Math.min(55, tg.z + panD.z)) - tg.z;
+  panD.x = Math.max(-100, Math.min(85, tg.x + panD.x)) - tg.x; panD.z = Math.max(-75, Math.min(55, tg.z + panD.z)) - tg.z;
   tg.add(panD); cam.position.add(panD);
 }
 let shiftHeld = false;

@@ -14,7 +14,9 @@
 export const BACK_SHIFT = 21, FRONT_SHIFT = 22;
 export const bk = (z) => z - BACK_SHIFT;    // 뒤쪽 시설 좌표 (원래 z → 옮긴 z)
 export const fr = (z) => z + FRONT_SHIFT;   // 앞쪽 시설 좌표
-export const BUILDING = { x0: -51, x1: 38, z0: bk(-20), z1: fr(20) };   // 건물 안쪽 (뒷벽 z −41 · 앞쪽 열린 면 z 42)
+// 오른쪽 벽은 원래 x 38에서 바닥 격자 10칸(10m) 오른쪽으로 옮겨 공간을 넓혔다 — 안쪽 통로(오른쪽 세로 통로 x 35)·설비는 그대로, 벽에 붙은 것(출하 도크·야드·설비 현황판)만 벽과 함께
+export const RIGHT_SHIFT = 10;
+export const BUILDING = { x0: -51, x1: 38 + RIGHT_SHIFT, z0: bk(-20), z1: fr(20) };   // 건물 안쪽 (오른쪽 벽 x 48 · 뒷벽 z −41 · 앞쪽 열린 면 z 42)
 export const inBuilding = (p, pad = 0) => p.x > BUILDING.x0 + pad && p.x < BUILDING.x1 - pad && p.z > BUILDING.z0 + pad && p.z < BUILDING.z1 - pad;
 // AMR 스테이션이 투입구에서 FRONT_SHIFT만큼 멀어져 빈 AMR이 편도 약 9~14초 더 달린다 — 투입 간격(7.5~9초) 기준 2대를 더 미리 부른다 (sim.js 선행 배차)
 export const AMR_LEAD = 2;

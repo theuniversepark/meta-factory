@@ -4,7 +4,7 @@
 
 // 이착륙·충전 패드: 오른쪽 AMR 복귀 전용로(세로 x 31.2) 왼쪽에 세로 한 줄 — 드론마다 앞쪽으로 1.7m씩 (H1 z 12.8 · H2 14.5 · H3 16.2)
 // 패드(반지름 0.7m, 드론 폭 0.8m)는 앞쪽 통로 이동체(지게차 포함)·복귀로 AMR과 충돌 반경 기준 0.5m 이상 떨어진다 (운용 3대 기준 — 4대째 H4 z 17.9는 가로 복귀로에 닿는다)
-import { fr } from './zonedefs.js';
+import { fr, BUILDING } from './zonedefs.js';
 export const DRONE_PAD = { x: 29.2, z: fr(12.8), pitch: 1.7, r: 0.7 };   // AMR 스테이션과 함께 앞쪽 시설 구역으로 (zonedefs.js)
 export const dronePad = (i) => ({ x: DRONE_PAD.x, z: DRONE_PAD.z + i * DRONE_PAD.pitch });
 export const MISSION_PRIO = { field: 4, equipment: 3, parts: 2, supply: 1 };   // 출동 우선순위 (현장 이벤트 > 설비 고장 > 부품 결품 > 공급 차질)
@@ -42,7 +42,7 @@ export class PatrolDrone {
     for (const st of s.processing.filter((x) => !x.standby)) pts.push({ x: st.x, z: st.z, name: `${st.name} 상공`, scan: st });
     const sink = s.stations[s.stations.length - 1], src = s.stations[0];
     pts.push({ x: sink.x, z: sink.z, name: '구분 적재장 상공', scan: sink });
-    pts.push({ x: 40, z: -25, name: '출하 도크 상공' });   // 오른쪽 벽 출하 도크 바깥 상공
+    pts.push({ x: BUILDING.x1 + 2, z: -25, name: '출하 도크 상공' });   // 오른쪽 벽 출하 도크 바깥 상공
     pts.push({ x: -45, z: -1.6, name: '자재창고 상공' });
     pts.push({ x: src.x, z: src.z, name: '자재 투입 상공', scan: src });
     pts.push({ x: -48, z: -14.5, name: '입고 도크 상공' });
