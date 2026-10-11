@@ -1,6 +1,6 @@
 // MQTT 게이트웨이 — 내장 MQTT 브로커(aedes)로 OPC UA PubSub(JSON) 메시지를 발행한다.
 // 브라우저(시뮬레이션)가 만든 NetworkMessage를 /api/mqtt/publish로 받아 브로커에 그대로 싣는다.
-//   MQTT_HOST (기본 127.0.0.1) · MQTT_PORT (기본 1883) — 외부 PC에서 받으려면 MQTT_HOST=0.0.0.0
+//   MQTT_HOST (기본 127.0.0.1) · MQTT_PORT (기본 1885 — 3d 원본의 1883과 겹치지 않게) — 외부 PC에서 받으려면 MQTT_HOST=0.0.0.0
 //   MQTT_BRIDGE_URL — 지정하면 같은 메시지를 외부 브로커(예: mqtt://broker.local:1883)에도 발행
 import net from 'node:net';
 import { Aedes } from 'aedes';
@@ -8,7 +8,7 @@ import { Aedes } from 'aedes';
 let broker = null, tcp = null, bridge = null;
 const state = { listening: false, host: null, port: null, error: null, clients: 0, published: 0, bytes: 0, bridgeUrl: null, bridgeConnected: false, bridgeError: null, startedAt: null };
 
-export async function startMqtt({ host = process.env.MQTT_HOST || '127.0.0.1', port = Number(process.env.MQTT_PORT) || 1883, bridgeUrl = process.env.MQTT_BRIDGE_URL } = {}) {
+export async function startMqtt({ host = process.env.MQTT_HOST || '127.0.0.1', port = Number(process.env.MQTT_PORT) || 1885, bridgeUrl = process.env.MQTT_BRIDGE_URL } = {}) {
   if (broker) return state;
   broker = await Aedes.createBroker();
   broker.on('client', () => { state.clients = broker.connectedClients; });
@@ -25,7 +25,7 @@ export async function startMqtt({ host = process.env.MQTT_HOST || '127.0.0.1', p
     state.bridgeUrl = bridgeUrl.replace(/\/\/[^@/]*@/, '//***@');   // 자격 증명은 상태에 노출하지 않는다
     try {
       const { connect } = await import('mqtt');
-      bridge = connect(bridgeUrl, { clientId: `jin3d-bridge-${process.pid}`, reconnectPeriod: 5000 });
+      bridge = connect(bridgeUrl, { clientId: `metafactory-bridge-${process.pid}`, reconnectPeriod: 5000 });
       bridge.on('connect', () => { state.bridgeConnected = true; state.bridgeError = null; });
       bridge.on('close', () => { state.bridgeConnected = false; });
       bridge.on('error', (e) => { state.bridgeError = e.message; });

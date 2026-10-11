@@ -259,7 +259,7 @@ export class RobotTelemetry {
     const net = this.view.sim.net, u = net?.ueOf(obj); if (!u) return null;
     const c = u.servCell, nb = net.plan.cells[u.nbr], h = u.hos[0], t = this.view.sim.time;
     const q = (v) => (v >= -75 ? 'ok' : v >= NR.design ? '' : v >= -95 ? 'warn' : 'bad');
-    const topic = `opcua/json/data/jin3d/…/${u.uid ?? u.id}`;
+    const topic = `opcua/json/data/metafactory/…/${u.uid ?? u.id}`;
     return { title: '5G 통신 (Private 5G)', rows: [
       ['서빙 셀', u.hoUntil >= 0 ? `핸드오버 중 → PCI ${net.plan.cells[u.hoTarget].pci}` : `${c.id} · PCI ${c.pci}`, u.hoUntil >= 0 ? 'warn' : 'ok'],
       ['RSRP / SINR', `${u.rsrp.toFixed(1)} dBm / ${u.sinr.toFixed(1)} dB`, q(u.rsrp)],

@@ -23,19 +23,19 @@
 
 식별자 규칙
 
-- AAS 셸 id: `https://camtic.or.kr/aas/jin3d/<자산 id>`
-- 서브모델 id: `https://camtic.or.kr/aas/jin3d/<자산 id>/sm/<서브모델 이름>`
-- 자산 id(globalAssetId): `https://camtic.or.kr/aas/jin3d/asset/<자산 id>`
+- AAS 셸 id: `https://camtic.or.kr/aas/metafactory/<자산 id>`
+- 서브모델 id: `https://camtic.or.kr/aas/metafactory/<자산 id>/sm/<서브모델 이름>`
+- 자산 id(globalAssetId): `https://camtic.or.kr/aas/metafactory/asset/<자산 id>`
 - 메타모델 네임스페이스: v3.1 `https://admin-shell.io/aas/3/1` (기본) · v3.0 `https://admin-shell.io/aas/3/0`
 
 ## 2. 자체 서브모델 — 표준 템플릿이 없는 운영 데이터
 
 | 서브모델 | semanticId | 담은 것 |
 |---|---|---|
-| `OperationalData` | `https://camtic.or.kr/sm/jin3d/OperationalData/1/0` | 지금 값 — 기준 시각 + 자산별 실시간 필드 |
+| `OperationalData` | `https://camtic.or.kr/sm/metafactory/OperationalData/1/0` | 지금 값 — 기준 시각 + 자산별 실시간 필드 |
 | `TelemetryTimeSeries` | IDTA 02008 구조 재사용 | 로봇을 선택한 뒤 1초 간격 정밀 기록 (관절 · 토크 · 온도 · TCP · 센서) |
-| `VideoRecordings` | `https://camtic.or.kr/sm/jin3d/VideoRecordings/1/0` | 카메라별 영상 링크(MP4 · 원본 WebM) · 시각 · 분할 영상 칸 좌표 · 로컬 경로 · AASX 링크 파일 |
-| 이벤트 | `https://camtic.or.kr/sm/jin3d/Events/1/0` | 인시던트 · 명령 기록 (데이터 허브 내보내기) |
+| `VideoRecordings` | `https://camtic.or.kr/sm/metafactory/VideoRecordings/1/0` | 카메라별 영상 링크(MP4 · 원본 WebM) · 시각 · 분할 영상 칸 좌표 · 로컬 경로 · AASX 링크 파일 |
+| 이벤트 | `https://camtic.or.kr/sm/metafactory/Events/1/0` | 인시던트 · 명령 기록 (데이터 허브 내보내기) |
 
 ### 속성을 고른 기준
 
@@ -55,7 +55,7 @@
 - **설명·단위**: 한글 설명과 단위를 description에 `설명 [단위]` 형식으로
 - **값 형식(valueType)**: AAS 규격 이름만 사용 — `xs:double` · `xs:int` · `xs:boolean` · `xs:string` · `xs:dateTime` (규격에 없는 형식은 `xs:string`으로)
 - **시각**: 모두 공장 기준 시계의 ISO 8601 UTC
-- **의미 식별자(semanticId)**: `https://camtic.or.kr/cd/jin3d/<이름>` — 같은 id의 개념 설명(ConceptDescription)을 함께 넣음
+- **의미 식별자(semanticId)**: `https://camtic.or.kr/cd/metafactory/<이름>` — 같은 id의 개념 설명(ConceptDescription)을 함께 넣음
 
 ## 3. 호환성 기준
 

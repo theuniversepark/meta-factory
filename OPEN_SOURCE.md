@@ -46,7 +46,7 @@
 | 과학기술정보통신부 — https://www.msit.go.kr (세로형·가로형 로고 SVG: https://commons.wikimedia.org/wiki/File:Ministry_of_Science_and_ICT_of_the_Republic_of_Korea_Logo_(vertical).svg · https://commons.wikimedia.org/wiki/File:Ministry_of_Science_and_ICT_of_the_Republic_of_Korea_Logo_(horizontal).svg) · 정보통신산업진흥원 — https://www.nipa.kr (CI 원본: https://www.nipa.kr/home/4-4-5) | 서버 랙 양옆 로고·앞쪽 바닥 표시 이미지 `assets/msit_logo.png` · `assets/nipa_logo.png` · `assets/msit_nipa_ci_v2.png` 출처 (바닥 표시는 공식 가로형 시그니처를 쓰고 로고타입만 진한 회색으로 굵게 처리) |
 | 사용자 제공 이미지 | 도어트림 실물 이미지 `assets/doortrim.png` · e-axle 실물 단면 이미지 `assets/eaxle.png` (부품분류셀 이후 AMR 위 제품 표시) |
 
-- AAS 데이터 안의 `https://admin-shell.io/...`, `https://camtic.or.kr/aas/jin3d/...` 등은 의미 식별자(semanticId·id)이며 실행 중 접속하지 않습니다.
+- AAS 데이터 안의 `https://admin-shell.io/...`, `https://camtic.or.kr/aas/metafactory/...` 등은 의미 식별자(semanticId·id)이며 실행 중 접속하지 않습니다.
 - 폰트는 외부에서 받지 않고 운영체제 기본 폰트(Apple SD Gothic Neo, 대체 Noto Sans KR·맑은 고딕)를 씁니다.
 
 ## 4. 참고·준수한 표준 (규격 문서 — 구현 코드는 직접 작성)

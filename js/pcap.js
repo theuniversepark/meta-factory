@@ -72,7 +72,7 @@ export class PacketCapture {
     else if (kind === '5g') { const k = ++this.n.g5; ip = [10, 45, (k >> 8) & 0xff, k & 0xff]; }
     else if (kind === 'cam') { const k = ++this.n.cam; ip = [10, 20, 2, k]; }
     else { const k = ++this.n.lan; ip = [10, 20, 1 + (k >> 8), k & 0xff]; }
-    c = { key, kind, ip, mac: kind === '5g' ? UPF_MAC : macOf(ip), port: 49152 + this.clients.size, cseq: 1000 + this.clients.size * 7919, sseq: 500000 + this.clients.size * 104729, pid: 0, spid: 0, last: tMs, subs, clientId: `jin3d-${key}` };
+    c = { key, kind, ip, mac: kind === '5g' ? UPF_MAC : macOf(ip), port: 49152 + this.clients.size, cseq: 1000 + this.clients.size * 7919, sseq: 500000 + this.clients.size * 104729, pid: 0, spid: 0, last: tMs, subs, clientId: `metafactory-${key}` };
     this.clients.set(key, c);
     const lat = this.lat(c);
     let t = tMs - 3 - lat * 3;   // 접속은 첫 메시지 직전에 끝나 있다

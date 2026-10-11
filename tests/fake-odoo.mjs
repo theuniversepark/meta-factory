@@ -3,7 +3,7 @@
 // 실제 Odoo의 모든 규칙을 재현하지는 않는다 — 호출 순서·인자·재고 흐름이 맞는지 확인하는 용도.
 import http from 'node:http';
 
-export function startFakeOdoo({ version = '17.0', db = 'jin3d', user = 'admin', key = 'test-key' } = {}) {
+export function startFakeOdoo({ version = '17.0', db = 'metafactory', user = 'admin', key = 'test-key' } = {}) {
   const T = {}, calls = [];
   let nid = 1;
   const tab = (m) => (T[m] ??= new Map());

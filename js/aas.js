@@ -9,15 +9,15 @@ export const AAS_VERSIONS = { '3.1': 'https://admin-shell.io/aas/3/1', '3.0': 'h
 export let AAS_VERSION = '3.1';
 export let AAS_NS = AAS_VERSIONS['3.1'];
 export function setAasVersion(v) { AAS_VERSION = AAS_VERSIONS[v] ? v : '3.1'; AAS_NS = AAS_VERSIONS[AAS_VERSION]; return AAS_VERSION; }
-const BASE = 'https://camtic.or.kr/aas/jin3d';
+const BASE = 'https://camtic.or.kr/aas/metafactory';
 export const SEM = {
   nameplate: 'https://admin-shell.io/zvei/nameplate/2/0/Nameplate',
   technical: 'https://admin-shell.io/ZVEI/TechnicalData/Submodel/1/2',
   timeseries: 'https://admin-shell.io/idta/TimeSeries/1/1',
-  operational: 'https://camtic.or.kr/sm/jin3d/OperationalData/1/0',
-  events: 'https://camtic.or.kr/sm/jin3d/Events/1/0',
-  videos: 'https://camtic.or.kr/sm/jin3d/VideoRecordings/1/0',
-  cd: (name) => `https://camtic.or.kr/cd/jin3d/${name}`,
+  operational: 'https://camtic.or.kr/sm/metafactory/OperationalData/1/0',
+  events: 'https://camtic.or.kr/sm/metafactory/Events/1/0',
+  videos: 'https://camtic.or.kr/sm/metafactory/VideoRecordings/1/0',
+  cd: (name) => `https://camtic.or.kr/cd/metafactory/${name}`,
 };
 export const aasId = (assetId) => `${BASE}/${assetId}`;
 export const smId = (assetId, sm) => `${BASE}/${assetId}/sm/${sm}`;
@@ -208,7 +208,7 @@ export function toAutomationML(assets, last, meta) {
       + `${pad}  <Attribute Name="OperationalData" AttributeDataType="xs:string">\n${pad}    <Value>${xesc(last?.t ?? '')}</Value>\n`
       + a.fields.map((f, i) => attr(f.idShort, cur ? fmt(cur[i], f.type) : '', f.unit, ind + 3, XSD[f.type])).join('')
       + `${pad}  </Attribute>\n`
-      + `${pad}  <RoleRequirements RefBaseRoleClassPath="Jin3DRoleClassLib/${role[a.kind] ?? 'Asset'}" />\n${children}${pad}</InternalElement>\n`;
+      + `${pad}  <RoleRequirements RefBaseRoleClassPath="MetaFactoryRoleClassLib/${role[a.kind] ?? 'Asset'}" />\n${children}${pad}</InternalElement>\n`;
   };
   const by = (k) => assets.filter((a) => a.kind === k);
   const factory = assets.find((a) => a.kind === 'Factory');
@@ -218,7 +218,7 @@ export function toAutomationML(assets, last, meta) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <CAEXFile xmlns="http://www.dke.de/CAEX" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" SchemaVersion="3.0" FileName="${xesc(meta.fileName)}">
   <SuperiorStandardVersion>AutomationML 2.10</SuperiorStandardVersion>
-  <SourceDocumentInformation OriginName="피지컬AI 실증 메타팩토리" OriginID="urn:camtic:jin3d" OriginVersion="1.0" LastWritingDateTime="${xesc(meta.writtenAt)}" OriginRelease="1.0" />
+  <SourceDocumentInformation OriginName="피지컬AI 실증 메타팩토리" OriginID="urn:camtic:metafactory" OriginVersion="1.0" LastWritingDateTime="${xesc(meta.writtenAt)}" OriginRelease="1.0" />
   <InstanceHierarchy Name="MetaFactoryTestbed">
     <InternalElement Name="${xesc(factory?.id ?? 'Factory')}" ID="${xesc(aasId(factory?.id ?? 'Factory'))}">
 ${factory ? attr('Description', factory.name, null, 3) + attr('AAS_Id', aasId(factory.id), null, 3) + attr('ReferenceClockUTC', last?.t ?? '', null, 3) + attr('RunId', meta.runId, null, 3) : ''}      <ExternalInterface Name="TimeSeriesData" ID="${xesc(`${BASE}/timeseries/${meta.runId}`)}" RefBaseClassPath="AutomationMLInterfaceClassLib/AutomationMLBaseInterface/ExternalDataConnector/ExternalDataReference">
@@ -229,10 +229,10 @@ ${factory ? attr('Description', factory.name, null, 3) + attr('AAS_Id', aasId(fa
 ${stations}      </InternalElement>
       <InternalElement Name="MobileRobots" ID="${xesc(`${BASE}/group/mobile`)}">
 ${mobiles}      </InternalElement>
-      <RoleRequirements RefBaseRoleClassPath="Jin3DRoleClassLib/ProductionLine" />
+      <RoleRequirements RefBaseRoleClassPath="MetaFactoryRoleClassLib/ProductionLine" />
     </InternalElement>
   </InstanceHierarchy>
-  <RoleClassLib Name="Jin3DRoleClassLib">
+  <RoleClassLib Name="MetaFactoryRoleClassLib">
 ${roles}  </RoleClassLib>
 </CAEXFile>
 `;

@@ -43,7 +43,7 @@ console.log('== 실시간 Odoo (게이트웨이 → JSON-RPC, 가짜 Odoo)');
 for (const version of ['17.0', '18.0']) {
   const fake = await startFakeOdoo({ version });
   const G = await import(`../server/odoo-gateway.mjs?v=${version}`);
-  G.odooConfig({ url: fake.url, db: 'jin3d', user: 'admin', key: 'test-key' });
+  G.odooConfig({ url: fake.url, db: 'metafactory', user: 'admin', key: 'test-key' });
   let res, err = null;
   try { res = await G.odooSync(E.pending()); } catch (e) { err = e.message; }
   const st2 = G.odooStatus();

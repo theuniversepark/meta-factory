@@ -21,7 +21,7 @@ s.cmd.issue('SAFE_SPEED', 'all'); step(5); s.cmd.issue('SAFE_SPEED_OFF', 'all');
 // 영상 프레임 (가짜 JPEG 12KB — CCTV 카메라가 OPC UA ua-data의 ByteString(base64)으로 발행)
 const jpeg = new Uint8Array(12000); jpeg[0] = 0xff; jpeg[1] = 0xd8;
 const b64 = Buffer.from(jpeg).toString('base64');
-hub.pcap.publish({ key: 'CCTV-CC-01', kind: 'cam', topic: 'opcua/json/data/jin3d/video/CCTV_CC-01', payload: JSON.stringify({ MessageType: 'ua-data', Messages: [{ Payload: { Image: { Value: b64 } } }] }), tMs: hub.epochMs + s.time * 1000, video: true });
+hub.pcap.publish({ key: 'CCTV-CC-01', kind: 'cam', topic: 'opcua/json/data/metafactory/video/CCTV_CC-01', payload: JSON.stringify({ MessageType: 'ua-data', Messages: [{ Payload: { Image: { Value: b64 } } }] }), tMs: hub.epochMs + s.time * 1000, video: true });
 step(130);   // keep-alive (60초 넘게 조용한 클라이언트)
 const P = hub.pcap, file = P.build();
 if (process.env.PCAP_OUT) (await import('node:fs')).writeFileSync(process.env.PCAP_OUT, file);   // 확인용 파일 저장 (Wireshark·tcpdump)

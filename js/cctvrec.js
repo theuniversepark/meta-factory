@@ -32,7 +32,7 @@ export class CCTVRecorder {
   attach(sim, runId, iso) {
     this.sim = sim; this.runId = runId; this.iso = iso;
     if (this.rec) this.stopSegment();
-    this.on = recSupported() && !globalThis.window?.JIN3D_SHARED;   // 공유 페이지(아티팩트)는 파일 저장이 막혀 있어 녹화하지 않는다
+    this.on = recSupported() && !globalThis.window?.METAFACTORY_SHARED;   // 공유 페이지(아티팩트)는 파일 저장이 막혀 있어 녹화하지 않는다
     this.cv.recording = this.on;
     this.acc = 1e9;
   }

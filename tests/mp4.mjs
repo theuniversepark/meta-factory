@@ -10,7 +10,7 @@ const ff = findFfmpeg();
 if (!ff) { console.log('  SKIP  ffmpeg 없음 — MP4 변환 시험 건너뜀'); console.log('\n결과: 0 PASS / 0 FAIL'); process.exit(0); }
 check('ffmpeg 찾기', !!ff, ff);
 check('카메라별 파일 이름 규칙 (서버 = 화면)', camFile({ robot: 'HM-M1', camera: 'handL' }) === clientCamFile({ robot: 'HM-M1', camera: 'handL' }) && camFile({ id: 'CC-01' }) === 'CC-01_view.mp4');
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jin3d-mp4-')); process.env.JIN3D_DATA_DIR = dir;
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'metafactory-mp4-')); process.env.METAFACTORY_DATA_DIR = dir;
 // 시험 영상: 2×1 칸 분할(칸 256×144 + 머리 띠 30) WebM 6초 2fps
 const src = path.join(dir, 'src.webm');
 spawnSync(ff, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=512x174:rate=2:duration=6', '-c:v', 'libvpx-vp9', '-b:v', '200k', src]);

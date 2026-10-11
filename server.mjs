@@ -1,4 +1,4 @@
-// 브라우저용 실행: npm start → http://localhost:8765
+// 브라우저용 실행: npm start → http://localhost:8780
 //   API 키: ANTHROPIC_API_KEY 환경변수 또는 .env 파일
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,7 +15,7 @@ if (fs.existsSync(envFile)) {
 
 const { startServer, hasApiKey } = await import('./server/app-server.mjs');
 const { MODEL } = await import('./server/llm-agent.mjs');
-const { port } = await startServer({ port: Number(process.env.PORT) || 8765 });
+const { port } = await startServer({ port: Number(process.env.PORT) || 8780 });
 console.log(`피지컬AI 실증 메타팩토리 → http://localhost:${port}`);
 const { mqttStatus } = await import('./server/mqtt-gateway.mjs');
 const mq = mqttStatus();

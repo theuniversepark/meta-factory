@@ -220,7 +220,7 @@ export async function buildEpisodesZip(uid, eps, runId) {
   const files = [];
   const e0 = eps[0];
   const info = {
-    dataset: `jin3d_${uid}`, format: e0?.videos ? '피지컬AI 실증 메타팩토리 VLA episode v2 (LeRobot 유사 구조: 메타 · 스텝 JSONL · 카메라 MP4 영상 + 타임스탬프)' : '피지컬AI 실증 메타팩토리 VLA episode v1 (LeRobot 유사 구조: 메타 · 스텝 JSONL · 카메라 JPEG)', generator: '피지컬AI 실증 메타팩토리 디지털트윈 (시뮬레이션 데이터)',
+    dataset: `metafactory_${uid}`, format: e0?.videos ? '피지컬AI 실증 메타팩토리 VLA episode v2 (LeRobot 유사 구조: 메타 · 스텝 JSONL · 카메라 MP4 영상 + 타임스탬프)' : '피지컬AI 실증 메타팩토리 VLA episode v1 (LeRobot 유사 구조: 메타 · 스텝 JSONL · 카메라 JPEG)', generator: '피지컬AI 실증 메타팩토리 디지털트윈 (시뮬레이션 데이터)',
     run_id: runId, robot: { id: uid, kind: e0?.robot_kind, cell: e0?.cell, cell_name: e0?.cell_name, joints: e0?.jointNames, units: e0?.jointUnits, cameras: e0?.cameras ?? ['wrist'],
       ...(e0?.robot_kind === 'humanoid' ? { dof_note: 'Atlas형 — 허리 360° 연속 회전 · 머리 좌우 ±90°' } : {}) },
     fps: EP_HZ, episodes: eps.length, total_steps: eps.reduce((a, e) => a + e.length, 0),

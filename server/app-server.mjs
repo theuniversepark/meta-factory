@@ -17,8 +17,8 @@ const PUBLIC = ['index.html', 'css/', 'js/', 'vendor/', 'assets/'];
 
 let client = null;
 
-// VLA 에피소드 저장소 — 맥 앱은 사용자 데이터 폴더(JIN3D_DATA_DIR), CLI는 프로젝트의 data/
-const DATA_DIR = () => process.env.JIN3D_DATA_DIR || path.join(ROOT, 'data');
+// VLA 에피소드 저장소 — 맥 앱은 사용자 데이터 폴더(METAFACTORY_DATA_DIR), CLI는 프로젝트의 data/
+const DATA_DIR = () => process.env.METAFACTORY_DATA_DIR || path.join(ROOT, 'data');
 const SAFE = /^[A-Za-z0-9_.-]{1,64}$/;
 function readRaw(req, limit) {
   return new Promise((resolve, reject) => {
@@ -41,10 +41,10 @@ async function saveEpisode(req, res, url) {
     return send(res, 200, { ok: true, bytes: buf.length, pruned });
   } catch (e) { return send(res, 400, { error: e.message }); }
 }
-// 에피소드 보관 한도: 로봇마다 최근 500개(JIN3D_EPISODE_KEEP), 전체 3GB(JIN3D_EPISODE_MAX_MB) — 넘으면 오래된 것부터 지운다
+// 에피소드 보관 한도: 로봇마다 최근 500개(METAFACTORY_EPISODE_KEEP), 전체 3GB(METAFACTORY_EPISODE_MAX_MB) — 넘으면 오래된 것부터 지운다
 // 로봇별 정리는 저장할 때마다, 전체 용량 정리는 50번 저장마다(파일이 많으면 목록 읽기가 무거워서) 한다
-export const EPISODE_KEEP = () => Number(process.env.JIN3D_EPISODE_KEEP) || 500;
-export const EPISODE_MAX_BYTES = () => (Number(process.env.JIN3D_EPISODE_MAX_MB) || 3072) * 1024 * 1024;
+export const EPISODE_KEEP = () => Number(process.env.METAFACTORY_EPISODE_KEEP) || 500;
+export const EPISODE_MAX_BYTES = () => (Number(process.env.METAFACTORY_EPISODE_MAX_MB) || 3072) * 1024 * 1024;
 let epSaves = 0;
 export function pruneEpisodes(robot = null, force = false) {
   const base = path.join(DATA_DIR(), 'episodes'); let n = 0;
@@ -78,13 +78,13 @@ function listEpisodes(res) {
 // CCTV 자동 녹화(NVR) 구간 저장소 — POST /api/cctv?id=run-..._cctv_0001&ext=webm|json → data/cctv/<id>.<ext>
 // 보관 기간: 구간 파일이 576개(5분 구간 약 48시간)를 넘으면 오래된 것부터 지운다
 // 녹화 영상 보관 한도 (종류별, 환경 변수로 변경):
-//   원본 WebM 구간 수 — CCTV JIN3D_CCTV_KEEP · 로봇 카메라 JIN3D_ROBOTCAM_KEEP (기본 576구간 ≈ 5분 구간 48시간)
-//   MP4(전체 + 카메라별) 구간 수 — JIN3D_MP4_KEEP (기본 144구간 ≈ 12시간)
-//   전체 용량(WebM + MP4 + 색인) — CCTV JIN3D_CCTV_MAX_MB (기본 4GB) · 로봇 카메라 JIN3D_ROBOTCAM_MAX_MB (기본 8GB)
+//   원본 WebM 구간 수 — CCTV METAFACTORY_CCTV_KEEP · 로봇 카메라 METAFACTORY_ROBOTCAM_KEEP (기본 576구간 ≈ 5분 구간 48시간)
+//   MP4(전체 + 카메라별) 구간 수 — METAFACTORY_MP4_KEEP (기본 144구간 ≈ 12시간)
+//   전체 용량(WebM + MP4 + 색인) — CCTV METAFACTORY_CCTV_MAX_MB (기본 4GB) · 로봇 카메라 METAFACTORY_ROBOTCAM_MAX_MB (기본 8GB)
 //   용량을 넘으면 오래된 구간의 MP4부터 지우고, 그래도 넘으면 오래된 구간을 통째로 지운다
 export const VIDEO_LIMITS = () => ({
-  cctv: { keep: Number(process.env.JIN3D_CCTV_KEEP) || 576, mp4Keep: Number(process.env.JIN3D_MP4_KEEP) || 144, maxBytes: (Number(process.env.JIN3D_CCTV_MAX_MB) || 4096) * 1048576 },
-  robotcam: { keep: Number(process.env.JIN3D_ROBOTCAM_KEEP) || 576, mp4Keep: Number(process.env.JIN3D_MP4_KEEP) || 144, maxBytes: (Number(process.env.JIN3D_ROBOTCAM_MAX_MB) || 8192) * 1048576 },
+  cctv: { keep: Number(process.env.METAFACTORY_CCTV_KEEP) || 576, mp4Keep: Number(process.env.METAFACTORY_MP4_KEEP) || 144, maxBytes: (Number(process.env.METAFACTORY_CCTV_MAX_MB) || 4096) * 1048576 },
+  robotcam: { keep: Number(process.env.METAFACTORY_ROBOTCAM_KEEP) || 576, mp4Keep: Number(process.env.METAFACTORY_MP4_KEEP) || 144, maxBytes: (Number(process.env.METAFACTORY_ROBOTCAM_MAX_MB) || 8192) * 1048576 },
 });
 const fsize = (f) => { try { return fs.statSync(f).size; } catch { return 0; } };
 const dsize = (d) => { let n = 0, c = 0; try { for (const f of fs.readdirSync(d)) { n += fsize(path.join(d, f)); c++; } } catch { /* 없음 */ } return { n, c }; };
@@ -206,9 +206,9 @@ async function saveAios(req, res, url) {
     return send(res, 200, { ok: true, bytes: buf.length, pruned: pruneAios() });
   } catch (e) { return send(res, 400, { error: e.message }); }
 }
-// AIOS 운영 데이터 보관 한도: 최근 1,008묶음(10분 묶음 7일 · JIN3D_AIOS_KEEP), 전체 1GB(JIN3D_AIOS_MAX_MB) — 넘으면 오래된 것부터 지운다
-export const AIOS_KEEP = () => Number(process.env.JIN3D_AIOS_KEEP) || 1008;
-export const AIOS_MAX_BYTES = () => (Number(process.env.JIN3D_AIOS_MAX_MB) || 1024) * 1024 * 1024;
+// AIOS 운영 데이터 보관 한도: 최근 1,008묶음(10분 묶음 7일 · METAFACTORY_AIOS_KEEP), 전체 1GB(METAFACTORY_AIOS_MAX_MB) — 넘으면 오래된 것부터 지운다
+export const AIOS_KEEP = () => Number(process.env.METAFACTORY_AIOS_KEEP) || 1008;
+export const AIOS_MAX_BYTES = () => (Number(process.env.METAFACTORY_AIOS_MAX_MB) || 1024) * 1024 * 1024;
 export function pruneAios() {
   const dir = path.join(DATA_DIR(), 'aios'); let n = 0, files = [];
   try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.zip')).map((f) => { const st = fs.statSync(path.join(dir, f)); return { f, t: st.mtimeMs, b: st.size }; }).sort((a, b) => a.t - b.t); } catch { return 0; }
@@ -289,7 +289,7 @@ function sendApiError(res, err) {
   send(res, status, { error: msg });
 }
 
-export async function startServer({ port = 8765, host = '127.0.0.1' } = {}) {
+export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
   if (!client) setApiKey(null);
   await startMqtt();
   const server = http.createServer(async (req, res) => {

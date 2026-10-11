@@ -11,7 +11,7 @@ export const RENDER = { style: 'blender', assets: {}, prims: new Map(), loaded: 
 let loading = null;
 
 // 공유 페이지(Claude 아티팩트)는 .glb를 내려주지 못해 같은 모델을 JSON glTF(버퍼 내장, .gltf.json)로 둔다
-export function loadBlenderAssets(base = 'assets/blender/', ext = globalThis.window?.JIN3D_SHARED ? '.gltf.json' : '.glb') {
+export function loadBlenderAssets(base = 'assets/blender/', ext = globalThis.window?.METAFACTORY_SHARED ? '.gltf.json' : '.glb') {
   if (RENDER.loaded) return Promise.resolve(RENDER.assets);
   if (loading) return loading;
   const loader = new GLTFLoader();

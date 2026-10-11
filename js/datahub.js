@@ -8,7 +8,7 @@ import { buildEnvironment, buildRobotEnvironment, detailCSV, toXML, toTurtle, to
 import { buildAASX } from './aasx.js';
 
 const DEG = 180 / Math.PI;
-export const PUBLISHER_ID = 'jin3d';
+export const PUBLISHER_ID = 'metafactory';
 export const WRITER_GROUP = 'MetaFactory';
 const BUILTIN = { double: 11, int: 6, string: 12, boolean: 1, dateTime: 13 };   // OPC UA Built-in Type Id
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`);
@@ -18,7 +18,7 @@ const f = (idShort, label, type, unit, get) => ({ idShort, label, type, unit, ge
 function buildAssets(sim, view) {
   const assets = [];
   const year = String(new Date().getFullYear());
-  const plate = (id, product) => ({ manufacturer: '피지컬AI 실증 메타팩토리 가상 자산 (시뮬레이션)', product, serial: `J3D-${id}`, year });
+  const plate = (id, product) => ({ manufacturer: '피지컬AI 실증 메타팩토리 가상 자산 (시뮬레이션)', product, serial: `MF-${id}`, year });
   const k = () => sim.kpi();
   assets.push({
     id: 'MetaFactory', kind: 'Factory', name: sim.line.name, nameplate: plate('MetaFactory', '메타팩토리 테스트베드 라인'),
@@ -136,8 +136,8 @@ export class DataHub {
     this.interval = 10;         // 수집 주기 (시뮬레이션 초)
     this.maxTicks = 6000;       // 보관 수집 회차 (기본 10초 × 6000 = 16시간 40분)
     this.publishOn = true;
-    this.shared = !!globalThis.window?.JIN3D_SHARED;   // 아티팩트 공유 페이지: 수집만 하고 발행·저장은 하지 않는다 (내려받기 차단)
-    this.noServer = this.shared || !!globalThis.window?.JIN3D_NO_SERVER;   // 정적 웹(GitHub Pages): 발행만 못 하고 저장은 된다
+    this.shared = !!globalThis.window?.METAFACTORY_SHARED;   // 아티팩트 공유 페이지: 수집만 하고 발행·저장은 하지 않는다 (내려받기 차단)
+    this.noServer = this.shared || !!globalThis.window?.METAFACTORY_NO_SERVER;   // 정적 웹(GitHub Pages): 발행만 못 하고 저장은 된다
     this.mqtt = { available: this.noServer ? false : null, status: null, sent: 0, failed: 0, lastError: null };
     this.queue = []; this.flushT = 0; this.lastMsg = null;
     this.pcap = null;   // 패킷 덤프 (js/pcap.js) — 켜져 있으면 발행하는 메시지를 MQTT/TCP/IP 패킷으로도 기록
@@ -254,7 +254,7 @@ export class DataHub {
       MessageId: uuid(), MessageType: 'ua-data', PublisherId: PUBLISHER_ID, WriterGroupName: WRITER_GROUP,
       Messages: [{
         DataSetWriterId: 0, DataSetWriterName: 'Events', SequenceNumber: ++this.seq, Timestamp: ev.t, MessageType: 'ua-event',
-        Payload: { EventId: uuid(), EventType: `ns=1;s=Jin3D.${ev.level}`, SourceName: ev.source, Time: ev.t, Severity: { alert: 800, warn: 600, plan: 400, act: 300, ok: 200, info: 100, llm: 300, chat: 100 }[ev.level] ?? 100, Message: { Text: `${ev.title}${ev.text ? ' — ' + ev.text : ''}`, Locale: 'ko-KR' } },
+        Payload: { EventId: uuid(), EventType: `ns=1;s=MetaFactory.${ev.level}`, SourceName: ev.source, Time: ev.t, Severity: { alert: 800, warn: 600, plan: 400, act: 300, ok: 200, info: 100, llm: 300, chat: 100 }[ev.level] ?? 100, Message: { Text: `${ev.title}${ev.text ? ' — ' + ev.text : ''}`, Locale: 'ko-KR' } },
       }],
     };
     const body = this.count(JSON.stringify(msg));
@@ -326,7 +326,7 @@ export class DataHub {
   }
 
   // ── 저장 ─────────────────
-  fileBase() { return `jin3d_${this.runId}`; }
+  fileBase() { return `metafactory_${this.runId}`; }
   // AAS 자산 → 영상 기록 키 (로봇 카메라 녹화 색인과 같은 키)
   videoKey(a) { return a.mover ? `m:${a.mover.id}` : a.kind === 'CellRobot' ? a.id : a.kind === 'Factory' ? 'cctv' : null; }
   // videosOf(asset) → 그 자산의 영상 파일 링크 목록 (main.js가 녹화기에서 넘겨준다)
@@ -361,7 +361,7 @@ export class DataHub {
     const a = ref.type === 'cell' ? this.assets.find((x) => x.id === tele.key()) : this.assets.find((x) => x.mover?.id === ref.id);
     if (a) return a;
     const id = tele.key().replace(/[^A-Za-z0-9_]/g, '') || 'Robot';
-    return { id, kind: 'Robot', name: tele.key(), nameplate: { manufacturer: '피지컬AI 실증 메타팩토리 가상 자산 (시뮬레이션)', product: '로봇', serial: `J3D-${id}`, year: String(new Date().getFullYear()) }, tech: {}, fields: [] };
+    return { id, kind: 'Robot', name: tele.key(), nameplate: { manufacturer: '피지컬AI 실증 메타팩토리 가상 자산 (시뮬레이션)', product: '로봇', serial: `MF-${id}`, year: String(new Date().getFullYear()) }, tech: {}, fields: [] };
   }
   robotCounts(tele) {
     if (!tele) return null;
@@ -372,7 +372,7 @@ export class DataHub {
   exportRobot(tele, format, videos = []) {
     const a = this.robotAsset(tele), L = tele.log();
     const detail = L.fields ? { fields: L.fields, rows: L.rows.map((r) => ({ t: this.iso(r.simT), simT: r.simT, v: r.v })) } : null;
-    const base = `jin3d_${a.id}_${this.runId}`;
+    const base = `metafactory_${a.id}_${this.runId}`;
     const csvPath = `/aasx/${a.id}/files/${a.id}_telemetry.csv`;
     const vids = videos.map((v) => ({ ...v })), links = format === 'aasx' ? videoLinkFiles(a.id, vids) : [];
     const env = buildRobotEnvironment({ asset: a, samples: this.samples, detail, last: this.last, opts: { fileRef: format === 'aasx' && detail ? csvPath : null, videos: vids } });

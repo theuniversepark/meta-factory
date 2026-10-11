@@ -8,20 +8,20 @@ let pass = 0, fail = 0;
 const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  — ' + info : ''}`); };
 console.log('== AAS 파일 호환 (BaSyx SDK)');
 // 셀 AMMR 로봇처럼 bool 필드(HoldingPart)가 있는 자산 + 영상 링크
-const plate = { manufacturer: 'Jin-3D', product: 'AMMR', serial: 'S-1', year: '2026' };
+const plate = { manufacturer: 'Meta-Factory', product: 'AMMR', serial: 'S-1', year: '2026' };
 const asset = { id: 'SORT_R1', kind: 'CellRobot', name: '부품분류셀 AMMR #1', nameplate: plate, tech: { Axes: 13, RobotType: 'AMMR' },
   fields: [{ idShort: 'HoldingPart', label: '부품 파지', type: 'bool' }, { idShort: 'Battery', label: '배터리', type: 'double', unit: '%' }, { idShort: 'RackTrips', label: '선반 왕복', type: 'int' }, { idShort: 'PlatformPhase', label: '상태', type: 'string' }] };
 const t = '2026-10-06T00:00:00.000Z', samples = [{ t, v: { SORT_R1: [true, 87.5, 3, 'pick'] } }, { t: '2026-10-06T00:00:10.000Z', v: { SORT_R1: [false, 87.2, 4, 'drive'] } }];
 const last = { t, SORT_R1: [true, 87.5, 3, 'pick'] };
 const detail = { fields: [{ idShort: 'J1', label: '관절1', type: 'double', unit: 'deg' }, { idShort: 'Grip', label: '파지', type: 'bool' }], rows: [{ t, simT: 0, v: [1.5, true] }] };
-const videos = ['head', 'handL'].map((c, i) => ({ segment: 'run-x_robotcam_0001', file: 'run-x_robotcam_0001.webm', camera: c, label: c, rect: [i * 256, 30, 256, 144], start: t, end: t, fps: 2, url: 'http://127.0.0.1:47615/videos/robotcam/run-x_robotcam_0001.webm', mp4Url: `http://127.0.0.1:47615/videos/robotcam/run-x_robotcam_0001/SORT_R1_${c}.mp4`, mp4Path: `/data/robotcam/x/${c}.mp4`, localPath: '/data/robotcam/x.webm', index: 'x.json' }));
+const videos = ['head', 'handL'].map((c, i) => ({ segment: 'run-x_robotcam_0001', file: 'run-x_robotcam_0001.webm', camera: c, label: c, rect: [i * 256, 30, 256, 144], start: t, end: t, fps: 2, url: 'http://127.0.0.1:47625/videos/robotcam/run-x_robotcam_0001.webm', mp4Url: `http://127.0.0.1:47625/videos/robotcam/run-x_robotcam_0001/SORT_R1_${c}.mp4`, mp4Path: `/data/robotcam/x/${c}.mp4`, localPath: '/data/robotcam/x.webm', index: 'x.json' }));
 const csvPath = '/aasx/SORT_R1/files/SORT_R1_telemetry.csv', links = videoLinkFiles('SORT_R1', videos);
 const env = buildRobotEnvironment({ asset, samples, detail, last, opts: { fileRef: csvPath, videos } });
 const vts = []; JSON.stringify(env, (k, v) => { if (k === 'valueType') vts.push(v); return v; });
 check('모든 valueType이 AAS 규격 이름 (bool → xs:boolean)', vts.length > 0 && vts.every((v) => /^xs:/.test(v)) && vts.includes('xs:boolean'), [...new Set(vts)].join(' · '));
 check('기본 메타모델 v3.1 네임스페이스', setAasVersion('3.1') === '3.1' && toXML(env).includes(`xmlns="${AAS_VERSIONS['3.1']}"`));
 check('옵션 v3.0 네임스페이스 (구버전 도구 호환)', setAasVersion('3.0') === '3.0' && toXML(env).includes(`xmlns="${AAS_VERSIONS['3.0']}"`) && setAasVersion('x') === '3.1');
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jin3d-basyx-'));
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'metafactory-basyx-'));
 setAasVersion('3.1');
 const aasx31 = path.join(dir, 'r31.aasx'), json = path.join(dir, 'r.aas.json'), xml = path.join(dir, 'r.aas.xml'), aasx30 = path.join(dir, 'r30.aasx');
 fs.writeFileSync(aasx31, buildAASX('SORT_R1', toXML(env), [{ path: csvPath, data: 'a,b\n', contentType: 'text/csv' }, ...links]));

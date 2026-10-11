@@ -1,8 +1,8 @@
-// 데이터 보관 한도 검증 — 녹화 영상(CCTV·로봇 카메라: 원본 구간 수 · MP4 구간 수 · 전체 용량), VLA 에피소드(로봇별 개수 JIN3D_EPISODE_KEEP · 전체 용량 JIN3D_EPISODE_MAX_MB), AIOS 운영 데이터(묶음 수 JIN3D_AIOS_KEEP · 용량 JIN3D_AIOS_MAX_MB)를 넘으면 오래된 것부터 지우는지. 실행: npm test
+// 데이터 보관 한도 검증 — 녹화 영상(CCTV·로봇 카메라: 원본 구간 수 · MP4 구간 수 · 전체 용량), VLA 에피소드(로봇별 개수 METAFACTORY_EPISODE_KEEP · 전체 용량 METAFACTORY_EPISODE_MAX_MB), AIOS 운영 데이터(묶음 수 METAFACTORY_AIOS_KEEP · 용량 METAFACTORY_AIOS_MAX_MB)를 넘으면 오래된 것부터 지우는지. 실행: npm test
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 let pass = 0, fail = 0;
 const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  — ' + info : ''}`); };
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jin3d-ep-')); process.env.JIN3D_DATA_DIR = dir; process.env.JIN3D_EPISODE_KEEP = '5'; process.env.JIN3D_EPISODE_MAX_MB = '1'; process.env.JIN3D_AIOS_KEEP = '4'; process.env.JIN3D_AIOS_MAX_MB = '1';
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'metafactory-ep-')); process.env.METAFACTORY_DATA_DIR = dir; process.env.METAFACTORY_EPISODE_KEEP = '5'; process.env.METAFACTORY_EPISODE_MAX_MB = '1'; process.env.METAFACTORY_AIOS_KEEP = '4'; process.env.METAFACTORY_AIOS_MAX_MB = '1';
 const { startServer, pruneEpisodes, pruneVideos } = await import('../server/app-server.mjs');
 const { port } = await startServer({ port: 0 }), base = `http://127.0.0.1:${port}`;
 console.log('== VLA 에피소드 보관 한도');
@@ -25,7 +25,7 @@ for (let i = 7; i < 10; i++) { await fetch(`${base}/api/aios?id=run_aios_${Strin
 const la = await (await fetch(`${base}/api/aios`)).json();
 check('AIOS 용량 한도 · 목록에 한도 표시', la.bytes <= 1024 * 1024 && la.keep === 4 && la.maxBytes === 1024 * 1024 && fs.existsSync(path.join(dir, 'aios', 'run_aios_0009.zip')), `${la.count}묶음 · ${(la.bytes / 1024).toFixed(0)}KB`);
 console.log('== 녹화 영상 보관 한도 (CCTV · 로봇 카메라)');
-process.env.JIN3D_CCTV_KEEP = '6'; process.env.JIN3D_MP4_KEEP = '3'; process.env.JIN3D_CCTV_MAX_MB = '2'; process.env.JIN3D_ROBOTCAM_KEEP = '9';
+process.env.METAFACTORY_CCTV_KEEP = '6'; process.env.METAFACTORY_MP4_KEEP = '3'; process.env.METAFACTORY_CCTV_MAX_MB = '2'; process.env.METAFACTORY_ROBOTCAM_KEEP = '9';
 const vdir = path.join(dir, 'cctv'); fs.mkdirSync(vdir, { recursive: true });
 const seg = (i, mp4kb) => { const id = `run_cctv_${String(i).padStart(4, '0')}`; fs.writeFileSync(path.join(vdir, `${id}.webm`), new Uint8Array(100 * 1024)); fs.writeFileSync(path.join(vdir, `${id}.json`), '{}');
   if (mp4kb) { fs.writeFileSync(path.join(vdir, `${id}.mp4`), new Uint8Array(mp4kb * 1024)); fs.writeFileSync(path.join(vdir, `${id}.mp4.json`), '{}'); fs.mkdirSync(path.join(vdir, id)); fs.writeFileSync(path.join(vdir, id, 'CC-01_view.mp4'), new Uint8Array(mp4kb * 1024)); }

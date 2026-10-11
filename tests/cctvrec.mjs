@@ -3,7 +3,7 @@
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 let pass = 0, fail = 0;
 const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  — ' + info : ''}`); };
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jin3d-cctv-')); process.env.JIN3D_DATA_DIR = dir;
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'metafactory-cctv-')); process.env.METAFACTORY_DATA_DIR = dir;
 const { startServer } = await import('../server/app-server.mjs');
 const { port, server } = await startServer({ port: 0 });
 const base = `http://127.0.0.1:${port}`;

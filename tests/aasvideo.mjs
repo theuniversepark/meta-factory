@@ -23,7 +23,7 @@ check('AAS XML에 영상 File 요소', /<idShort>Video<\/idShort>[\s\S]*?<conten
 const aasx = buildAASX(asset.id, xml, links), txt = new TextDecoder('latin1').decode(aasx);
 check('AASX 패키지에 링크 파일 · 목록 · 관계(aas-suppl)', links.every((l) => txt.includes(l.path.slice(1))) && /aas-suppl[^>]*videos\/[^"]+\.url/.test(txt) && /Extension="url"/.test(txt));
 // 서버: 로봇 카메라 영상 저장 · 링크 주소로 내려받기
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jin3d-rc-')); process.env.JIN3D_DATA_DIR = dir;
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'metafactory-rc-')); process.env.METAFACTORY_DATA_DIR = dir;
 const { startServer } = await import('../server/app-server.mjs');
 const { port } = await startServer({ port: 0 }), base = `http://127.0.0.1:${port}`;
 const webm = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 9, 8, 7]);

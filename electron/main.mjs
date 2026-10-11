@@ -9,7 +9,7 @@ import { startServer, setApiKey, hasApiKey } from '../server/app-server.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP_NAME = 'Meta-Factory';
 app.setName(APP_NAME);
-// 사용자 데이터 폴더는 jin-3d(Jin-3D)와 분리한다 — API 키·녹화·에피소드를 따로 보관한다
+// 사용자 데이터 폴더는 3d 원본(Jin-3D)과 분리한다 — API 키·녹화·에피소드를 따로 보관한다
 app.setPath('userData', path.join(app.getPath('appData'), 'Meta-Factory'));
 
 const keyFile = () => path.join(app.getPath('userData'), 'anthropic-key.bin');
@@ -123,9 +123,9 @@ app.whenReady().then(async () => {
     copyright: '제조공정 · 스마트팩토리 · 다크팩토리 시뮬레이션 에이전트',
   });
   try {
-    process.env.JIN3D_DATA_DIR ??= path.join(app.getPath('userData'), 'data');   // VLA 에피소드 저장 위치
-    // 고정 포트를 먼저 쓴다 — AAS에 넣은 영상 링크(http://127.0.0.1:47615/videos/…)가 앱을 다시 켜도 그대로 열리게. 이미 쓰이고 있으면 빈 포트
-    const { port } = await startServer({ port: 47615, host: '127.0.0.1' }).catch(() => startServer({ port: 0, host: '127.0.0.1' }));
+    process.env.METAFACTORY_DATA_DIR ??= path.join(app.getPath('userData'), 'data');   // VLA 에피소드 저장 위치
+    // 고정 포트를 먼저 쓴다 — AAS에 넣은 영상 링크(http://127.0.0.1:47625/videos/…)가 앱을 다시 켜도 그대로 열리게. 이미 쓰이고 있으면 빈 포트
+    const { port } = await startServer({ port: 47625, host: '127.0.0.1' }).catch(() => startServer({ port: 0, host: '127.0.0.1' }));
     origin = `http://127.0.0.1:${port}`;
   } catch (e) {
     dialog.showErrorBox(APP_NAME, `내장 서버를 시작하지 못했습니다.\n${e.message}`);

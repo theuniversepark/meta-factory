@@ -130,7 +130,7 @@ const fleetCfg = { amr: { scale: 1, paused: false, count: null }, agv: { scale: 
 // v4: 정밀조립Zone이 혼류(분기·합류) 구조로 바뀌어 이전 Zone 레시피는 버리고 사용자 라인만 옮긴다
 // v5: 부품분류셀 기본 로봇이 SCARA → AMMR(AMR 기반 양팔 로봇)로 바뀌어 이전 Zone 레시피는 버린다
 // v6: 포장셀 기본 로봇도 AMMR로 바뀌어 이전 Zone 레시피는 버린다
-const LINES_KEY = 'jin3d.lines.v6', OLD_KEYS = ['jin3d.lines.v5', 'jin3d.lines.v4', 'jin3d.lines.v3', 'jin3d.lines.v2'], OLD_LINE_KEY = 'jin3d.line.v1';
+const LINES_KEY = 'metafactory.lines.v6', OLD_KEYS = ['metafactory.lines.v5', 'metafactory.lines.v4', 'metafactory.lines.v3', 'metafactory.lines.v2'], OLD_LINE_KEY = 'metafactory.line.v1';
 const LINE_SLOTS = ['zone', 'custom'];
 const slotDefault = (k) => (k === 'custom' ? cloneLine(DEFAULT_LINE) : zoneLine());
 function loadLines() {
@@ -425,8 +425,8 @@ const dataModal = document.getElementById('datahub'), dataBody = document.getEle
 let dataTimer = null, dataNote = '';
 const kb = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 // AAS 메타모델 버전 선택 (로봇 정보 창 · 데이터 연동 창 공통, 브라우저에 기억) — 기본 3.1
-const aasVer = () => { try { return localStorage.getItem('jin3d.aasVersion') ?? '3.1'; } catch { return '3.1'; } };
-document.addEventListener('change', (e) => { if (e.target?.id === 'rbVer' || e.target?.id === 'dhVer') { try { localStorage.setItem('jin3d.aasVersion', e.target.value); } catch { /* 저장소 없음 */ } setAasVersion(e.target.value); } });
+const aasVer = () => { try { return localStorage.getItem('metafactory.aasVersion') ?? '3.1'; } catch { return '3.1'; } };
+document.addEventListener('change', (e) => { if (e.target?.id === 'rbVer' || e.target?.id === 'dhVer') { try { localStorage.setItem('metafactory.aasVersion', e.target.value); } catch { /* 저장소 없음 */ } setAasVersion(e.target.value); } });
 setAasVersion(aasVer());
 const FORMATS = [
   ['json', 'JSON', 'AAS JSON 직렬화 (셸·서브모델·개념 설명, 자산별 최근 60개 기록 + 전체는 CSV 참조)'],
@@ -953,7 +953,7 @@ function renderCctvPanel(force) {
   document.getElementById('cctvTitle').textContent = `📹 ${c.id} · ${res.place}`;
   document.getElementById('cctvSub').textContent = `${c.region === 'inside' ? '천장 돔 카메라 (어안 360° · 디워핑 뷰)' : '실외 PTZ 돔 카메라'} · 설치 높이 ${c.y}m · 감시 반경 ${c.R}m · 위치 x ${c.x.toFixed(1)}, z ${c.z.toFixed(1)}`;
   // 영상 저장 줄: 개별 녹화·스냅샷 + 자동 녹화(NVR) 상태
-  const R = cctvRec.stats(), shared = !!window.JIN3D_SHARED, mb = (b) => `${(b / 1048576).toFixed(1)}MB`;
+  const R = cctvRec.stats(), shared = !!window.METAFACTORY_SHARED, mb = (b) => `${(b / 1048576).toFixed(1)}MB`;
   setHTML(document.getElementById('cctvSave'), `<div class="cc-save">
     <button type="button" data-cctv="rec" class="${cctvClip.active ? 'rec' : ''}" ${shared ? 'disabled' : ''} title="이 카메라 영상을 녹화 — 다시 누르면 정지하고 로컬 파일로 저장 (서버에 ffmpeg가 있으면 MP4, 없으면 WebM)">${cctvClip.active ? `⏹ 녹화 정지·저장 (${Math.floor(cctvClip.secs)}초)` : '⏺ 이 카메라 녹화'}</button>
     <button type="button" data-cctv="snap" ${shared ? 'disabled' : ''} title="지금 화면(AI 오버레이 포함)을 JPEG 파일로 저장">📸 스냅샷</button>
@@ -968,7 +968,7 @@ function renderCctvPanel(force) {
   const st = ag?.stats(), hist = (ag?.history ?? []).filter((r) => !cctvOnlyThis || r.cam === c.id || r.cams?.includes(c.id)).slice(0, 40);
   setHTML(document.getElementById('cctvHist'), !ag?.on ? '<p class="vla-note">CCTV 에이전트는 피지컬AI 단계에서 동작합니다.</p>' : `
     <div class="cc-hh"><b>CCTV 에이전트 이벤트 이력</b><small>전체 ${st.total}건 · 감지·보고 ${st.reports} · 교차 확인 ${st.verify} · 영상 확보 ${st.records} · 진행 중 ${st.open} — 대응·관리는 메인 오케스트레이터</small>
-      <button type="button" data-cctv="only" class="${cctvOnlyThis ? 'on' : ''}">이 카메라만</button><button type="button" data-cctv="csv" ${window.JIN3D_SHARED ? 'disabled' : ''}>⬇ CSV</button></div>
+      <button type="button" data-cctv="only" class="${cctvOnlyThis ? 'on' : ''}">이 카메라만</button><button type="button" data-cctv="csv" ${window.METAFACTORY_SHARED ? 'disabled' : ''}>⬇ CSV</button></div>
     <div class="cc-hist"><table class="vla-t"><thead><tr><th>번호</th><th>시각</th><th>구분</th><th>카메라</th><th>클래스 · 모델</th><th>신뢰도</th><th>오케스트레이터 인시던트</th><th>상태 · 처리</th></tr></thead><tbody>
     ${hist.map((r) => `<tr><td>${r.no}</td><td>${fclock(r.t)}</td><td class="${r.kind === 'report' ? 'p-rejected' : ''}">${{ report: '감지·보고', verify: '교차 확인', record: '영상 확보' }[r.kind]}</td><td><button type="button" class="cc-cam" data-cctv="go" data-cam="${r.cam}">${r.cam}</button></td><td class="ins" title="${escV(r.note)}">${escV(r.cls)} · ${escV(AI_MODELS[r.model]?.name ?? '')}</td><td>${r.conf != null ? r.conf.toFixed(2) : '-'}</td><td class="ins" title="${escV(r.inc?.title ?? '')}">${r.inc ? `#${r.inc.id} ${escV(r.inc.title)}` : '-'}</td><td class="${r.status === 'open' ? 'p-train' : 'p-done'}" title="${escV(r.result ?? '')}">${r.status === 'open' ? '진행 중' : `종료 · ${fdur(r.dur)}`}</td></tr>`).join('') || '<tr><td colspan="8">아직 없음 — 하단 "⚠ 현장 이벤트"로 발생시킬 수 있습니다</td></tr>'}</tbody></table></div>`);
 }
@@ -980,10 +980,10 @@ function setSide(side, hide) {
   const b = sidePanels[side], name = side === 'left' ? '왼쪽 패널(정밀조립Zone)' : '오른쪽 패널(자율운영 에이전트)', key = side === 'left' ? '[' : ']';
   b.textContent = (side === 'left') === hide ? '▶' : '◀';
   b.title = `${name} ${hide ? '보이기' : '숨기기'} · 단축키 ${key}`;
-  try { localStorage.setItem(`jin3d.hide.${side}`, hide ? '1' : '0'); } catch { /* 저장소 없음 */ }
+  try { localStorage.setItem(`metafactory.hide.${side}`, hide ? '1' : '0'); } catch { /* 저장소 없음 */ }
 }
 for (const side of ['left', 'right']) {
-  let h = false; try { h = localStorage.getItem(`jin3d.hide.${side}`) === '1'; } catch { /* 무시 */ }
+  let h = false; try { h = localStorage.getItem(`metafactory.hide.${side}`) === '1'; } catch { /* 무시 */ }
   setSide(side, h);
   sidePanels[side].addEventListener('click', () => setSide(side, !document.body.classList.contains(`hide-${side}`)));
 }
@@ -1173,10 +1173,10 @@ designer = new LineDesigner({
 });
 llm.probe();
 // 에피소드 서버 저장이 가능한지 (맥 앱·npm start) — 정적 호스팅·공유 페이지는 브라우저 보관만
-if (!window.JIN3D_SHARED && !window.JIN3D_NO_SERVER) fetch('/api/status').then((r) => r.json()).then((j) => { epRec.server = !!j.episodes; cctvRec.server = !!j.cctv; robotRec.server = !!j.robotcam; robotRec.ffmpeg = cctvRec.ffmpeg = !!j.ffmpeg?.available; epRec.video = epRec.server && !!j.ffmpeg?.available; ffmpegVer = j.ffmpeg?.version ?? null; if (j.dataDir) { cctvRec.dir = `${j.dataDir}/cctv`; robotRec.dir = `${j.dataDir}/robotcam`; } }).catch(() => {});
+if (!window.METAFACTORY_SHARED && !window.METAFACTORY_NO_SERVER) fetch('/api/status').then((r) => r.json()).then((j) => { epRec.server = !!j.episodes; cctvRec.server = !!j.cctv; robotRec.server = !!j.robotcam; robotRec.ffmpeg = cctvRec.ffmpeg = !!j.ffmpeg?.available; epRec.video = epRec.server && !!j.ffmpeg?.available; ffmpegVer = j.ffmpeg?.version ?? null; if (j.dataDir) { cctvRec.dir = `${j.dataDir}/cctv`; robotRec.dir = `${j.dataDir}/robotcam`; } }).catch(() => {});
 
 // ── 맥 앱(피지컬AI 실증 메타팩토리) 전용: API 키 설정 ─────────────────
-const bridge = window.jin3d;
+const bridge = window.metafactory;
 if (bridge?.isApp) {
   document.body.classList.add('app');
   const modal = document.getElementById('settings');
@@ -1232,7 +1232,7 @@ function renderVla(force) {
   const okRate = P.allEps ? Math.round((P.okEps / P.allEps) * 100) : 0;
   const recNow = epRec.rec.size, frames = robots.reduce((a, R) => a + epRec.list(R.uid).reduce((b, e) => b + (e.frameCount ?? e.frames.length), 0), 0);
   const deployed = robots.filter((R) => P.versionOf(R.uid) === P.label(P.latest)).length;
-  const act = j?.phase ?? 'idle', shared = !!window.JIN3D_SHARED;
+  const act = j?.phase ?? 'idle', shared = !!window.METAFACTORY_SHARED;
   const stage = (ic, title, val, sub, on) => `<div class="vs ${on ? 'on' : ''}"><i>${ic}</i><b>${title}</b><span>${val}</span><small>${sub}</small></div>`;
   const kindKo = (k) => (k === 'ammr' ? 'AMMR' : k === 'humanoid' ? '휴머노이드' : k === 'cobot' ? '협동로봇' : '6축로봇');
   setHTML(vlaBody, `
@@ -1309,7 +1309,7 @@ function renderAios(force) {
   const tw = j?.phase === 'twin' && j.twin?.total ? Math.round((j.twin.steps / j.twin.total) * 100) : null;
   const stage = (ic, title, val, sub, on) => `<div class="vs aios ${on ? 'on' : ''}"><i>${ic}</i><b>${title}</b><span>${val}</span><small>${sub}</small></div>`;
   const ph = { train: (x) => `학습 ${x.epoch}/${x.epochs}`, twin: () => '트윈 검증', shadow: () => '섀도 모드', verify: () => '적용 · 효과 확인', done: () => '배포 완료', rejected: () => '배포 안 함', rollback: () => '롤백' };
-  const S = P.samples.slice(-8).reverse(), shared = !!window.JIN3D_SHARED;
+  const S = P.samples.slice(-8).reverse(), shared = !!window.METAFACTORY_SHARED;
   const dirTxt = `…/${(aiosDir?.dir ?? 'data/aios').split(/[\\/]/).slice(-2).join('/')}/*.zip · 보관 최근 ${(aiosDir?.keep ?? 1008).toLocaleString('ko-KR')}묶음 · 최대 ${((aiosDir?.maxBytes ?? 1073741824) / 1073741824).toFixed(0)}GB (오래된 것부터 정리)`;
   setHTML(aiosBody, `
     <div class="vla-flow">
@@ -1453,9 +1453,9 @@ document.getElementById('closeFleet').addEventListener('click', () => { fleetMod
 // ── FACOS 공장 운영 SW 통합 표시 (피지컬AI) ─────────────────
 // 운영자 지시 → AIOS → 오케스트레이터 → 자율 에이전트 → 명령 센터 → 셀·게이트 → VLA → 현장 감지 → DataHub 를 한 줄로, 계층마다 실시간 상태와 해당 창 바로가기
 const facosEl = document.getElementById('facos');
-try { if (localStorage.getItem('jin3d.facos.min') === '1') facosEl.classList.add('min'); } catch { /* 저장소 없음 */ }
+try { if (localStorage.getItem('metafactory.facos.min') === '1') facosEl.classList.add('min'); } catch { /* 저장소 없음 */ }
 facosEl.addEventListener('click', (e) => {
-  if (e.target.closest('.fc-brand')) { facosEl.classList.toggle('min'); try { localStorage.setItem('jin3d.facos.min', facosEl.classList.contains('min') ? '1' : '0'); } catch { /* 무시 */ } return; }
+  if (e.target.closest('.fc-brand')) { facosEl.classList.toggle('min'); try { localStorage.setItem('metafactory.facos.min', facosEl.classList.contains('min') ? '1' : '0'); } catch { /* 무시 */ } return; }
   const c = e.target.closest('[data-open]'); if (!c) return;
   if (c.dataset.open.startsWith('facos:')) openFacosView(c.dataset.open.slice(6)); else document.getElementById(c.dataset.open)?.click();
 });

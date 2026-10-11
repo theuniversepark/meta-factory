@@ -79,7 +79,7 @@ export function queueConvert(dir, id) {
 }
 // 개별 녹화(WebM 바이트) → MP4 바이트
 export async function convertClip(buf, fps = 8) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jin3d-clip-')), i = path.join(tmp, 'in.webm'), o = path.join(tmp, 'out.mp4');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'metafactory-clip-')), i = path.join(tmp, 'in.webm'), o = path.join(tmp, 'out.mp4');
   try { fs.writeFileSync(i, buf); await run(['-fflags', '+genpts', '-i', i, '-an', ...H264(fps, null, 23), o]); return fs.readFileSync(o); }
   finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 }
@@ -99,7 +99,7 @@ export function readStoredZip(buf) {
 export async function framesToMp4(frames, fps = 5) {
   if (!findFfmpeg()) throw new Error('ffmpeg 없음');
   if (!frames.length) throw new Error('프레임 없음');
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jin3d-ep-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'metafactory-ep-'));
   try {
     const list = [];
     frames.forEach((f, i) => { const n = `f${String(i).padStart(5, '0')}.jpg`; fs.writeFileSync(path.join(tmp, n), f.data); list.push(`file '${n}'`, `duration ${Math.max(1 / fps, f.dur).toFixed(4)}`); });

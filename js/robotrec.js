@@ -18,7 +18,7 @@ export class RobotVideoRecorder {
   attach(sim, runId, iso) {
     this.sim = sim; this.runId = runId; this.iso = iso;
     if (this.rec) this.stopSegment();
-    this.on = recSupported() && !globalThis.window?.JIN3D_SHARED;
+    this.on = recSupported() && !globalThis.window?.METAFACTORY_SHARED;
     this.acc = 1e9;
   }
   layout() {

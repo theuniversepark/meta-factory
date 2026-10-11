@@ -120,7 +120,7 @@ export class LineDesigner {
   needKeyNote() {
     return {
       errors: ['Agent가 연결되어 있지 않아 자연어 요청과 파일 분석을 할 수 없습니다. 아래 목록을 직접 편집하거나 API 키를 설정하세요.'],
-      needKey: !!window.jin3d,
+      needKey: !!window.metafactory,
       noLLM: true,
     };
   }
