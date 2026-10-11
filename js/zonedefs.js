@@ -29,7 +29,7 @@ const TOP = -4.6, BOT = 4.6, MID = 0, PI = Math.PI;
 // 좌표는 Zone 로컬 (origin = Zone 가운데). robot: [자동화 종류, 대수, 피지컬AI 종류, 대수] — 레거시는 작업자
 export const EXTRA_ZONES = [
   {
-    key: 'flex', code: 'A-1', name: '유연생산Zone', sub: '후드 · 도어 혼류 (삼진산업)', origin: { x: -3.5, z: -20.5 }, accent: 0x2f9bff,
+    key: 'flex', code: 'A-1', name: '유연생산Zone', sub: '후드 · 도어 혼류 (삼진산업)', origin: { x: -1.5, z: -20.5 }, accent: 0x2f9bff,   // 투입구 x −28 · 진입로 x −30.6 (정밀조립Zone과 같은 줄)
     products: { hood: { label: '후드', full: "LT2 후드 Ass'y" }, door: { label: '도어', full: '상용트럭 도어 Ass\'y' } },
     mix: { hood: 1, door: 1 },
     // 출하 도크(x 22.5) 왼쪽, 왼쪽 세로 통로(x −35.5) 오른쪽에 들어가도록 셀 간격을 9m → 8.5m로 좁혔다 (flexible-manufacturing과 셀 순서·흐름 동일)
@@ -63,22 +63,23 @@ export const EXTRA_ZONES = [
     key: 'adapt', code: 'A-2', name: '적응가공Zone', sub: '유압블록 · 리어커버 혼류', origin: { x: 0, z: 19.5 }, accent: 0xff7a45,
     products: { hblock: { label: '유압블록', full: '유압 매니폴드 블록' }, rcover: { label: '리어커버', full: '다이캐스팅 리어커버' } },
     mix: { hblock: 1, rcover: 1 },
-    // 정밀조립Zone AMR 출동로(x −30.6)·복귀로(x 31.2)가 옆으로 지나가도록 셀 간격을 정밀조립Zone보다 조금 좁혀 x −27.6 ~ 28 안에 둔다
+    // 왼쪽 정렬: 정밀조립Zone AMR 출동로(x −30.6)가 바로 왼쪽을 지나므로 그 다음 줄(진입로 x −27.6, 투입구 x −25)에 맞춘다
+    // 오른쪽 끝(자체 복귀로 x 23.5)은 정밀조립Zone AMR 복귀로(x 26.2)와 2.7m 띄운다 · 셀 중심 간격 8 ~ 10m
     cells: {
-      MATL: { no: '1', type: 'matid', label: '소재 식별·3D측정셀', product: 'shared', use: '소재 판별·가공여유 측정', x: -16, z: 0, cycle: 8, robot: ['cobot', 2, 'ammr', 2] },
-      HB_MILL: { no: '2', type: 'mill5', label: '유압블록 5축 가공셀', product: 'hblock', use: '6면 밀링·드릴·탭', x: -4.5, z: BOT, cycle: 16, robot: ['articulated', 1] },
-      HB_DEBR: { no: '3', type: 'deburr', label: '유압블록 사선·디버링셀', product: 'hblock', use: '사선홀·디버링·세척', x: 6.5, z: BOT, cycle: 14, robot: ['cobot', 2] },
-      RC_MILL: { no: '4', type: 'mill5', label: '리어커버 정밀절삭셀', product: 'rcover', use: '5축 정밀 절삭', x: -4.5, z: TOP, side: -1, cycle: 18, robot: ['articulated', 1] },
-      RC_TURN: { no: '5', type: 'turn', label: '리어커버 선삭·AI품질셀', product: 'rcover', use: '보어 선삭·품질예측', x: 6.5, z: TOP, side: -1, cycle: 14, robot: ['articulated', 1] },
-      CMM: { no: '6', type: 'cmm', label: '초정밀 측정·리워크셀', product: 'shared', use: 'CMM 판정·리워크', x: 16, z: 0, cycle: 10, robot: ['cobot', 2, 'ammr', 2] },
+      MATL: { no: '1', type: 'matid', label: '소재 식별·3D측정셀', product: 'shared', use: '소재 판별·가공여유 측정', x: -16.5, z: 0, cycle: 8, robot: ['cobot', 2, 'ammr', 2] },
+      HB_MILL: { no: '2', type: 'mill5', label: '유압블록 5축 가공셀', product: 'hblock', use: '6면 밀링·드릴·탭', x: -6.5, z: BOT, cycle: 16, robot: ['articulated', 1] },
+      HB_DEBR: { no: '3', type: 'deburr', label: '유압블록 사선·디버링셀', product: 'hblock', use: '사선홀·디버링·세척', x: 3.5, z: BOT, cycle: 14, robot: ['cobot', 2] },
+      RC_MILL: { no: '4', type: 'mill5', label: '리어커버 정밀절삭셀', product: 'rcover', use: '5축 정밀 절삭', x: -6.5, z: TOP, side: -1, cycle: 18, robot: ['articulated', 1] },
+      RC_TURN: { no: '5', type: 'turn', label: '리어커버 선삭·AI품질셀', product: 'rcover', use: '보어 선삭·품질예측', x: 3.5, z: TOP, side: -1, cycle: 14, robot: ['articulated', 1] },
+      CMM: { no: '6', type: 'cmm', label: '초정밀 측정·리워크셀', product: 'shared', use: 'CMM 판정·리워크', x: 12.5, z: 0, cycle: 10, robot: ['cobot', 2, 'ammr', 2] },
     },
     routes: { hblock: ['MATL', 'HB_MILL', 'HB_DEBR', 'CMM'], rcover: ['MATL', 'RC_MILL', 'RC_TURN', 'CMM'] },
-    src: { x: -25, z: 0 }, sink: { x: 25, z: 0 },
+    src: { x: -25, z: 0 }, sink: { x: 20.5, z: 0 },
     paths: {},
-    ret: [{ x: 28, z: 0 }, { x: 28, z: 9 }, { x: -27.6, z: 9 }, { x: -27.6, z: 0 }],   // 적재 → 동쪽 끝 → 앞쪽(시설 통로 쪽) 복귀로 → 투입 왼쪽 진입로
+    ret: [{ x: 23.5, z: 0 }, { x: 23.5, z: 9 }, { x: -27.6, z: 9 }, { x: -27.6, z: 0 }],   // 적재 → 동쪽 끝 → 앞쪽(시설 통로 쪽) 복귀로 → 투입 왼쪽 진입로
     rework: { at: 'CMM', rate: 0.06 },
     amr: { count: 9, speed: 1.6, ret: 2.6 }, load: 4, unload: 4,
-    foot: { x0: -28.6, x1: 28.6, z0: -7.2, z1: 9.6 },
+    foot: { x0: -28.6, x1: 24.1, z0: -7.2, z1: 9.6 },
   },
 ];
 

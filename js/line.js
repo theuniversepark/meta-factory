@@ -63,15 +63,17 @@ export const ZONE_PRODUCTS = {
   eaxle: { label: 'e-axle', customer: '쉐플러코리아' },
 };
 export const ZONE_CELLS = {
-  SORT:    { no: '1', type: 'sort',     label: '부품분류셀',      product: 'shared',   use: '공동 · 부품 종류 판별·분기', x: -18, z: 0 },
-  DT_ASSY: { no: '2', type: 'assembly', label: '도어트림 조립셀', product: 'doortrim', use: '도어트림 라인', x: -5, z: 4.6 },
-  DT_FAST: { no: '3', type: 'screw',    label: '도어트림 체결셀', product: 'doortrim', use: '도어트림 라인', x: 7, z: 4.6 },
-  EA_ASSY: { no: '4', type: 'assembly', label: 'e-axle 조립셀',  product: 'eaxle',    use: 'e-axle 라인', x: -5, z: -4.6, side: -1 },
-  EA_FAST: { no: '5', type: 'fasten',   label: 'e-axle 체결셀',  product: 'eaxle',    use: 'e-axle 라인', x: 7, z: -4.6, side: -1 },
-  PACK:    { no: '6', type: 'pack',     label: '포장셀',          product: 'shared',   use: '공동 · 제품별 포장', x: 18, z: 0 },
+  SORT:    { no: '1', type: 'sort',     label: '부품분류셀',      product: 'shared',   use: '공동 · 부품 종류 판별·분기', x: -19, z: 0 },
+  DT_ASSY: { no: '2', type: 'assembly', label: '도어트림 조립셀', product: 'doortrim', use: '도어트림 라인', x: -7.5, z: 4.6 },
+  DT_FAST: { no: '3', type: 'screw',    label: '도어트림 체결셀', product: 'doortrim', use: '도어트림 라인', x: 3.5, z: 4.6 },
+  EA_ASSY: { no: '4', type: 'assembly', label: 'e-axle 조립셀',  product: 'eaxle',    use: 'e-axle 라인', x: -7.5, z: -4.6, side: -1 },
+  EA_FAST: { no: '5', type: 'fasten',   label: 'e-axle 체결셀',  product: 'eaxle',    use: 'e-axle 라인', x: 3.5, z: -4.6, side: -1 },
+  PACK:    { no: '6', type: 'pack',     label: '포장셀',          product: 'shared',   use: '공동 · 제품별 포장', x: 14, z: 0 },
 };
-const ZONE_SRC = { x: -28, z: 0 };
-const ZONE_SINK = { x: 28, z: 0 };
+// 셀 배치 기준: 왼쪽 세로 통로(x −35.5) 바로 오른쪽 AMR 진입로(x −30.6)에 투입구를 맞추고, 셀 중심 간격은 9 ~ 11.5m
+// (셀 4.6m 사이 통로 4.4m 이상 · 대각 이동·합류 대기 차로가 들어가는 거리) — 원래 10 ~ 13m에서 줄여 AMR 운반·복귀 거리를 줄였다
+export const ZONE_SRC = { x: -28, z: 0 };
+export const ZONE_SINK = { x: 23, z: 0 };
 // 제품별 경로 (투입·적재 제외)
 export const ZONE_ROUTES = {
   doortrim: ['SORT', 'DT_ASSY', 'DT_FAST', 'PACK'],
@@ -93,7 +95,7 @@ export const ZONE_AMR = { count: 16, lineSpeed: 1.6, returnSpeed: 2.6, spacing: 
 //  · 대기열: 앞쪽 왼편 빈 바닥(z=17, 충전소보다 서쪽)에 한 줄
 //  · 출동: 대기열 남쪽 출동 차로(z=15.4) → 투입 스테이션 왼쪽 진입로(x=-30.6) → 투입 위치
 // AMR 스테이션(대기열·출동 차로·복귀로)은 적응가공Zone 앞쪽 시설 구역으로 옮겼다 (zonedefs.js FRONT_SHIFT) — 출동로 x −30.6 · 복귀로 x 31.2는 적응가공Zone 양옆을 지난다
-export const AMR_LANES = { ret: fr(18.8), park: fr(17.0), out: fr(15.4), retX: 31.2, dockX: -30.6 };
+export const AMR_LANES = { ret: fr(18.8), park: fr(17.0), out: fr(15.4), retX: ZONE_SINK.x + 3.2, dockX: ZONE_SRC.x - 2.6 };   // 복귀로는 구분 적재장 바로 오른쪽
 export const amrPark = (i) => ({ x: -36.4 + i * 1.4, z: AMR_LANES.park, aisle: 'F', name: `AMR 대기 ${i + 1}` });
 export const amrDockVia = (p) => [{ x: p.x, z: AMR_LANES.out }, { x: AMR_LANES.dockX, z: AMR_LANES.out }, { x: AMR_LANES.dockX, z: 0 }];
 export const amrReturnVia = (from, slot) => [{ x: AMR_LANES.retX, z: from.z }, { x: AMR_LANES.retX, z: AMR_LANES.ret }, { x: slot.x, z: AMR_LANES.ret }];

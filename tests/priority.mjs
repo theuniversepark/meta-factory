@@ -31,15 +31,17 @@ console.log('== 문제 해결 우선순위 (피지컬AI)');
   const iS = smokeEv.inc, iL = leakEv.inc;
   check('연기 의심 = P1 화재·인명 안전, 이물질 = P2 시설 안전, 설비 고장 = P3', prioOf(iS) === 1 && prioOf(iL) === 2 && prioOf(s.orch.find(`fail:${cells[0].id}`)) === 3);
   let tCmdS = null, tCmdL = null, fxId = null, deferredSeen = false;
-  const repairBefore = cells.map((st) => st.repairRemaining);
+  // 자리를 비운 순간의 수리 잔량 (P1 판단·명령이 오기 전까지는 수리를 이어 하므로 비운 뒤부터 본다)
+  const leftAt = new Map();
   run(s, ag, 2, () => {
     tCmdS ??= iS.steps.find((x) => x.kind === 'command')?.t ?? null; tCmdL ??= iL.steps.find((x) => x.kind === 'command')?.t ?? null;
+    for (const st of cells) if (!st.techOnSite && !leftAt.has(st)) leftAt.set(st, st.repairRemaining);
   });
   check('P1 판단·명령이 P2보다 먼저 (판단 지연 P1 25% · P2 50%)', tCmdS != null && tCmdL != null && tCmdS < tCmdL, `연기 ${(tCmdS - smokeEv.t0).toFixed(2)}초 · 이물질 ${(tCmdL - leakEv.t0).toFixed(2)}초`);
   const fx = s.movers.find((m) => m.job?.ev === smokeEv); fxId = fx?.id;
   check('수리 중이던 휴머노이드가 하던 일을 멈추고 소화기 대응 (선점)', !!fx && s.techs.includes(fx) && iS.steps.some((x) => /P1 우선 — .* 중단/.test(x.text)), fxId ?? '없음');
   const pausedCell = cells.find((st) => !st.techOnSite && st.state === 'DOWN');
-  check('수리 진행률은 유지 (자리를 비운 동안 수리 멈춤)', !pausedCell || pausedCell.repairRemaining >= repairBefore[cells.indexOf(pausedCell)] - 0.5);
+  check('수리 진행률은 유지 (자리를 비운 동안 수리 멈춤)', !pausedCell || pausedCell.repairRemaining >= leftAt.get(pausedCell) - 0.05, pausedCell ? `${pausedCell.name} 비운 순간 ${leftAt.get(pausedCell)?.toFixed(1)} → ${pausedCell.repairRemaining.toFixed(1)}` : '');
   // P1 진행 중에는 예지정비 요청을 보류
   const pmCell = s.processing.find((st) => !st.standby && !st.request && st.state !== 'DOWN');
   s.requestTech(pmCell, 'pm');

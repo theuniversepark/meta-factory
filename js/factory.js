@@ -12,6 +12,7 @@ import { STAGES, INCIDENT_TYPES, prioOf } from './orchestrator.js';
 import { NR } from './net5g.js';
 import { blenderOn, cloneAsset, RENDER } from './blender.js';
 import { equipmentList, STATUS_CLASS } from './assets.js';
+import { ZONE_SRC, ZONE_SINK } from './line.js';
 import { ROBOT_KINDS, toWorld, pointAt, pathLength, isZone, ZONE_CELLS, ZONE_PRODUCTS, ZONE_MIXES, ZONE_NAME, FG_ZONE_CAP, AMR_LANES, amrPark, ZONE_AMR, AMMR, AMMR_FETCH } from './line.js';
 
 // ── 헬퍼 ─────────────────────────────
@@ -100,7 +101,7 @@ function floorTexture() {
   g.strokeStyle = 'rgba(40,44,50,0.55)'; g.lineWidth = 2;
   for (let i = 0; i <= 512; i += 128) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 512); g.stroke(); g.beginPath(); g.moveTo(0, i); g.lineTo(512, i); g.stroke(); }
   const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1, 1);   // 바닥 크기에 맞춰 buildBuilding에서 정한다 (격자 한 칸 = 1m) t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1, 1); t.colorSpace = THREE.SRGBColorSpace;   // 반복 횟수는 바닥 크기에 맞춰 buildBuilding에서 정한다 (격자 한 칸 = 1m)
   t.anisotropy = 8;
   return t;
 }
@@ -2243,7 +2244,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     const g = (this.zoneDeco = new THREE.Group()); this.root.add(g);
     const flat = (w, d, mat, x, z, y = 0.008) => { const m = put(new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat), x, y, z, g); m.rotation.x = -Math.PI / 2; m.receiveShadow = true; return m; };
     const edge = new THREE.MeshBasicMaterial({ color: 0x37e8ff, transparent: true, opacity: 0.55 });
-    const X0 = -31, X1 = 31.5, Z0 = -7.3, Z1 = 7.3;
+    const X0 = ZONE_SRC.x - 3, X1 = ZONE_SINK.x + 3.5, Z0 = -7.3, Z1 = 7.3;   // 투입 스테이션 ~ 구분 적재장 (line.js 셀 배치)
     for (let x = X0; x < X1; x += 1.6) for (const z of [Z0, Z1]) flat(Math.min(1.0, X1 - x), 0.12, edge, x + 0.5, z, 0.012);
     for (let z = Z0; z < Z1; z += 1.6) for (const x of [X0, X1]) flat(0.12, Math.min(1.0, Z1 - z), edge, x, z + 0.5, 0.012);
     for (const [id, cell] of Object.entries(ZONE_CELLS)) {
