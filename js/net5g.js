@@ -7,6 +7,7 @@
 //    A3 이벤트(인접 셀 > 서빙 셀 + 3dB, TTT 160ms)가 나면 Xn 핸드오버를 한다. 실행 중(약 30~45ms) 올라온 패킷은 PDCP 버퍼에 담았다가
 //    타깃 셀로 포워딩해 순서대로 보낸다 → 유실 0. 데이터: AAS 모델 → OPC UA PubSub JSON 메시지 → MQTT(QoS 1) → 5G NR → UPF → 브로커.
 // 렌더링과 분리되어 헤드리스 시뮬레이션에서도 같은 흐름으로 동작한다 (모드: 자동화·피지컬AI).
+import { BUILDING, inBuilding } from './zonedefs.js';
 import { blocked } from './cctv.js';
 
 export const NR = {
@@ -78,13 +79,14 @@ const cache = new Map();
 export function plan5G(sim) {
   const key = JSON.stringify(sim.stations.filter((s) => !s.standby).map((s) => [s.type, Math.round(s.x * 10), Math.round(s.z * 10)]));
   if (cache.has(key)) return cache.get(key);
-  const ob = sim.cctv.obstacles, B = { x0: -50.6, x1: 37.6, z0: -19.6, z1: 19.6 };
+  const ob = sim.cctv.obstacles, B = { x0: -50.6, x1: 37.6, z0: BUILDING.z0 + 0.4, z1: BUILDING.z1 - 0.4 };   // 3 Zone으로 넓힌 건물 전체
   const pts = [];
-  for (let x = B.x0; x <= B.x1 + 1e-9; x += STEP) for (let z = B.z0; z <= B.z1 + 1e-9; z += STEP) pts.push({ x, z });
+  for (let x = B.x0; x <= B.x1 + 1e-9; x += STEP) for (let z = B.z0; z <= B.z1 + 1e-9; z += STEP) pts.push({ x, z });   // 격자 전체 (이웃 계산이 격자 순서를 쓴다)
   const cands = [];
   // 천장 후보: 설비 위는 피하고, 천장 CCTV 돔과는 CLEAR(2.5m) 이상 떨어뜨린다 (같은 자리에 겹쳐 달지 않음 · 카메라 시야를 가리지 않게)
   const domes = sim.cctv.cams.filter((c) => c.region === 'inside'), CLEAR = 2.5;
-  for (let x = -48; x <= 36; x += 4) for (let z = -18; z <= 18; z += 4) {
+  for (let x = -48; x <= 36; x += 4) for (let z = BUILDING.z0 + 3; z <= BUILDING.z1 - 3; z += 4) {
+    if (!inBuilding({ x, z }, 1.5)) continue;
     if (ob.some((b) => x > b.x0 - 0.5 && x < b.x1 + 0.5 && z > b.z0 - 0.5 && z < b.z1 + 0.5)) continue;
     if (domes.some((c) => Math.hypot(c.x - x, c.z - z) < CLEAR)) continue;
     cands.push({ x, y: NR.y, z });

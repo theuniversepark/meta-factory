@@ -1,13 +1,14 @@
 // 로봇 비전 관제 디스플레이 (피지컬AI 단계) — 로봇·드론에 달린 카메라 시점의 실시간 영상 8분할 + AI 추론 오버레이.
 // 영상: 각 로봇 카메라 시점으로 장면을 렌더 타깃의 한 칸에 그린다(프레임마다 한 칸씩 돌아가며 갱신).
 // 오버레이: 카메라로 투영한 객체 인식 박스·신뢰도, 추론 지연, 작업 상태, 현장 이벤트·알람 배너와 하단 알람 띠.
+import { bk, inExtraZone } from './zonedefs.js';
 import * as THREE from 'three';
 import { FIELD_EVENTS, ST_LABEL, moverRadius } from './sim.js';
 import { makeAlarmFx, blinkAlarmFx, ALARM_COLOR, ROBOT_CAMS } from './factory.js';
 
 export const COLS = 4, ROWS = 2;
 const TW = 384, TH = 256, W = COLS * TW, H = ROWS * TH;   // 4×2 분할 (오른쪽 열: 순찰 드론 짐벌·하방 카메라)
-const DISPLAY = { x: 2.325, y: 5.1, z: -19.15, w: 12, h: 4 };   // 뒷벽 왼쪽 두 번째 기둥(x −36) ~ 오른쪽 네 번째 기둥(x 9) 사이 CCTV 전광판·관제 화면·로봇 디스플레이를 같은 간격(0.525m)으로
+const DISPLAY = { x: 2.325, y: 5.1, z: bk(-19.15), w: 12, h: 4 };   // 뒷벽 왼쪽 두 번째 기둥(x −36) ~ 오른쪽 네 번째 기둥(x 9) 사이 CCTV 전광판·관제 화면·로봇 디스플레이를 같은 간격(0.525m)으로
 const FONT = '"Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif';
 const CLS_COLOR = { 설비: '#37a0ff', 협동로봇: '#2bd4c6', AMR: '#3ddc84', AGV: '#3ddc84', 휴머노이드: '#b89bff', 사족보행: '#f5d36b', 사람: '#ff5a5a', 누유: '#ff7a3d', 이물질: '#f5b82e', 연기: '#ff5a5a' };
 const hash = (s) => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0) / 4294967295; };
@@ -491,7 +492,7 @@ export class RobotCamWall {
       const fx = new THREE.Vector3(dir.x, 0, dir.z).normalize();
       const x = pos.x + fx.x * d - fx.z * lat, z = pos.z + fx.z * d + fx.x * lat;
       const inside = this.sim.stations.some((st) => Math.abs(x - st.x) < 3.2 && Math.abs(z - st.z) < 3.2);
-      if (inside || Math.abs(x) > 34 || Math.abs(z) > 17) continue;
+      if (inside || Math.abs(x) > 34 || Math.abs(z) > 17 || inExtraZone({ x, z }, 0.5)) continue;   // 확장 Zone 셀 위에는 만들지 않는다
       return this.sim.injectFieldEvent(type, x, z);
     }
     return null;

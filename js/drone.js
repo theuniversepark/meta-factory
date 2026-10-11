@@ -4,7 +4,8 @@
 
 // 이착륙·충전 패드: 오른쪽 AMR 복귀 전용로(세로 x 31.2) 왼쪽에 세로 한 줄 — 드론마다 앞쪽으로 1.7m씩 (H1 z 12.8 · H2 14.5 · H3 16.2)
 // 패드(반지름 0.7m, 드론 폭 0.8m)는 앞쪽 통로 이동체(지게차 포함)·복귀로 AMR과 충돌 반경 기준 0.5m 이상 떨어진다 (운용 3대 기준 — 4대째 H4 z 17.9는 가로 복귀로에 닿는다)
-export const DRONE_PAD = { x: 29.2, z: 12.8, pitch: 1.7, r: 0.7 };
+import { fr } from './zonedefs.js';
+export const DRONE_PAD = { x: 29.2, z: fr(12.8), pitch: 1.7, r: 0.7 };   // AMR 스테이션과 함께 앞쪽 시설 구역으로 (zonedefs.js)
 export const dronePad = (i) => ({ x: DRONE_PAD.x, z: DRONE_PAD.z + i * DRONE_PAD.pitch });
 export const MISSION_PRIO = { field: 4, equipment: 3, parts: 2, supply: 1 };   // 출동 우선순위 (현장 이벤트 > 설비 고장 > 부품 결품 > 공급 차질)
 // 현장 중계 유지 시간: 안전·설비 문제는 해소될 때까지, 오래 끄는 물류 문제(결품·공급 차질)는 관찰 보고 후 90초만 중계하고 순찰로 돌아간다

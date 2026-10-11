@@ -1,3 +1,4 @@
+import { bk, BUILDING, extraCellBoxes, inBuilding } from './zonedefs.js';
 // CCTV — 사각지대 없는 배치. 바닥을 1m 간격 점으로 나누고, 카메라에서 각 점까지 시야가 큰 설비(셀·창고 랙·서버 랙)에
 // 가리지 않는지 따져 "보이는 점"을 구한 뒤, 아직 안 보이는 점을 가장 많이 덮는 후보 자리부터 차례로 골라(탐욕적 집합 덮개)
 // 모든 점이 최소 한 대에 보일 때까지 설치한다. 건물 안은 천장 돔 카메라(높이 7.5m, 반경 9m 어안),
@@ -22,7 +23,8 @@ function obstacles(sim) {
     ob.push({ x0: st.x - 2.3, x1: st.x + 2.3, z0: st.z - 2.3, z1: st.z + (st.type === 'source' ? 3.1 : 2.3), h, name: st.name });
   }
   ob.push({ x0: -46.3, x1: -44.1, z0: -6.8, z1: 3.6, h: 5.0, name: '물류 선반' });   // 지게차 통로와 로봇 통로 사이 남북 방향 통과형 선반
-  ob.push({ x0: -15.7, x1: -11.3, z0: -15.6, z1: -13.2, h: 2.3, name: '관제 서버 랙' });   // 중앙 관제 디스플레이 가운데 아래
+  ob.push({ x0: -15.7, x1: -11.3, z0: bk(-15.6), z1: bk(-13.2), h: 2.3, name: '관제 서버 랙' });
+  ob.push(...extraCellBoxes());   // 유연생산·적응가공 Zone 셀   // 중앙 관제 디스플레이 가운데 아래
   return ob;
 }
 // 선분(카메라→점)이 상자(바닥 영역 × 0~h)를 지나는지 — 슬래브 방식
@@ -44,6 +46,7 @@ function coverRegion(region, ob) {
   const pts = [];
   for (let x = region.x0; x <= region.x1 + 1e-9; x += STEP) for (let z = region.z0; z <= region.z1 + 1e-9; z += STEP) {
     if (ob.some((b) => x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1)) continue;   // 설비가 서 있는 자리는 사람이 설 수 없다
+    if (region.keep && !region.keep({ x, z })) continue;   // 건물 밖 (꺾인 뒷벽 바깥)
     pts.push({ x, z });
   }
   const sees = region.cands.map((c) => {
@@ -71,16 +74,17 @@ export function planCCTV(sim) {
   const grid = (x0, x1, z0, z1, step, y, R, kind, extra = {}) => { const c = []; for (let x = x0; x <= x1 + 1e-9; x += step) for (let z = z0; z <= z1 + 1e-9; z += step) c.push({ x, y, z, R, kind, ...extra }); return c; };
   const D = CCTV_SPEC.dome, O = CCTV_SPEC.outdoor;
   // 건물 안: 천장 2m 격자 후보
-  const inside = coverRegion({ x0: -50.6, x1: 37.6, z0: -19.6, z1: 19.6, cands: grid(-50, 36, -18, 18, 2, D.y, D.R, 'dome') }, ob);   // 왼쪽 확장동(물류존) 포함
+  const inside = coverRegion({ x0: -50.6, x1: 37.6, z0: BUILDING.z0 + 0.4, z1: BUILDING.z1 - 0.4, keep: (p) => inBuilding(p, 0.4), cands: grid(-50, 36, BUILDING.z0 + 2, BUILDING.z1 - 2, 2, D.y, D.R, 'dome').filter((c) => inBuilding(c, 1.5)) }, ob);   // 앞뒤로 넓힌 건물 전체 (3 Zone · 출하 도크 쪽 꺾인 뒷벽 반영)   // 왼쪽 확장동(물류존) 포함
   // 입고 트럭 야드: 왼쪽 확장동 외벽(x −51.4)과 야드 가장자리 기둥 후보
-  const yardIn = coverRegion({ x0: -92, x1: -52, z0: -44, z1: -4, cands: [
+  const yardIn = coverRegion({ x0: -92, x1: -52, z0: -44, z1: -4, cands: [   // 입고 야드 (진입로는 z −61로 옮겼지만 감시 영역은 도크·회전 구역)
     ...grid(-51.4, -51.4, -18, 18, 3, O.y, O.R, 'wall', { face: -Math.PI / 2 }),
     ...grid(-92.5, -92.5, -44, -4, 4, O.y, O.R, 'pole'), ...grid(-91, -53, -45, -45, 4, O.y, O.R, 'pole'), ...grid(-91, -53, -2.5, -2.5, 4, O.y, O.R, 'pole'),
     ...grid(-87, -79, -38, -22, 8, O.y, O.R, 'pole')] }, []);   // 야드 서쪽 안쪽 기둥 (트럭 진출입 차로·회전 구역·대기 자리를 비켜)
   // 출하 트럭 야드: 뒷벽 바깥(z −20.4)과 야드 가장자리 기둥 후보
-  const yardOut = coverRegion({ x0: 15, x1: 47, z0: -47, z1: -21, cands: [
-    ...grid(16, 37, -20.4, -20.4, 3, O.y, O.R, 'wall', { face: Math.PI }),
-    ...grid(48.5, 48.5, -47, -21, 4, O.y, O.R, 'pole'), ...grid(14, 14, -47, -24, 4, O.y, O.R, 'pole'), ...grid(16, 46, -48.5, -48.5, 4, O.y, O.R, 'pole')] }, []);
+  // 출하 트럭 야드: 뒷벽 바깥(z −20.4, x 19.5 오른쪽)과 야드 가장자리 기둥 후보 — 왼쪽 가장자리는 뒤로 늘어난 건물(서버실) 벽 바깥 x 20
+  const yardOut = coverRegion({ x0: 20, x1: 47, z0: -47, z1: -21, cands: [
+    ...grid(21, 37, -20.4, -20.4, 3, O.y, O.R, 'wall', { face: Math.PI }),
+    ...grid(48.5, 48.5, -47, -21, 4, O.y, O.R, 'pole'), ...grid(20, 20, -47, -24, 4, O.y, O.R, 'pole'), ...grid(21, 46, -48.5, -48.5, 4, O.y, O.R, 'pole')] }, []);
   const regions = { inside, yardIn, yardOut };
   const cams = [];
   for (const [rk, r] of Object.entries(regions)) for (const c of r.cams) cams.push({ ...c, region: rk, id: `CC-${String(cams.length + 1).padStart(2, '0')}` });

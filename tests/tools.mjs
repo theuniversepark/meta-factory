@@ -1,5 +1,6 @@
 // 정비 도구 출동 검증 — 정비원·정비 휴머노이드가 상황에 맞는 도구를 정비실에서 챙겨 현장에 가고, 처리 후 정비실에 반납하는지
 // 설비 고장(수리 공구) · 바닥 누유(누유 처리 키트) · 이물질(수거 도구) · 연기 의심(소화기 대기). 실행: npm test
+import { TECH_DX } from '../js/zonedefs.js';
 import { zoneLine } from '../js/line.js';
 import { Simulation, TOOL_KITS, toolSpot, SINK_PICK } from '../js/sim.js';
 import { FactoryAgent } from '../js/agent.js';
@@ -7,7 +8,7 @@ let pass = 0, fail = 0;
 const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  — ' + info : ''}`); };
 const run = (s, ag, sec, each) => { for (let t = 0; t < sec; t += 0.1) { s.step(0.1); ag.update(0.1); each?.(); } };
 console.log('== 정비 도구 출동 (피지컬AI)');
-check('도구 세트 6종 (수리 · 예지정비 · 보정 · 누유 · 이물질 · 소화기) · 보관대는 정비실 안', ['repair', 'pm', 'cal', 'leak', 'debris', 'smoke'].every((k) => TOOL_KITS[k]?.items) && Object.keys(TOOL_KITS).every((k) => { const p = toolSpot(k); return p.x > 10 && p.x < 18 && p.z > 14 && p.z < 16.8; }));
+check('도구 세트 6종 (수리 · 예지정비 · 보정 · 누유 · 이물질 · 소화기) · 보관대는 정비실 안', ['repair', 'pm', 'cal', 'leak', 'debris', 'smoke'].every((k) => TOOL_KITS[k]?.items) && Object.keys(TOOL_KITS).every((k) => { const p = toolSpot(k); return p.x > 10 + TECH_DX && p.x < 18 + TECH_DX && p.z > 14 && p.z < 16.8; }));
 for (const [type, label] of [['leak', '바닥 누유'], ['debris', '바닥 이물질']]) {
   const s = new Simulation('dark', 2, { line: zoneLine(), quiet: true }), ag = new FactoryAgent(s);
   run(s, ag, 120);

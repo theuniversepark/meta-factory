@@ -1,5 +1,6 @@
 // 이동체 경로·막힘 검증 — 모든 이동 로봇(AMR·AGV·지게차·정비원/정비 휴머노이드·물류 휴머노이드·사족보행·작업자)이
 // 할 일이 있는데 오래 제자리에 갇히지 않는지. 3단계 공장 × 시드 2개 × 2시간, 설비 고장(6분마다)·현장 이벤트(피지컬AI 10분마다) 주입. 실행: npm test
+import { TECH_DX } from '../js/zonedefs.js';
 import { zoneLine } from '../js/line.js';
 import { Simulation, toolSpot, moverRadius } from '../js/sim.js';
 import { FactoryAgent } from '../js/agent.js';
@@ -30,7 +31,7 @@ for (const [mode, label] of [['traditional', '레거시'], ['smart', '자동화'
         if (!(m.steps[0]?.go && m.path?.length) || m.hzWait || !r || Math.hypot(m.x - r.x, m.z - r.z) > 0.05) { st.set(m, { x: m.x, z: m.z, t0: t }); continue; }   // 진로 이벤트로 정지 대기 중인 것은 의도된 대기 (tests/hazard.mjs)
         const d = t - r.t0; if (d > worst.d) worst = { d, who: `${m.id} [${m.task}] ← ${m.blockedOn?.id ?? '?'}` };
         // 정비실 안(대기 자리·도구 보관대)에서 정비원·정비 휴머노이드끼리 막힌 시간
-        if (s.techs.includes(m) && m.z > 12.5 && m.z < 16.4 && m.x > 10 && m.x < 18 && s.techs.includes(m.blockedOn) && d > 3) roomWait = Math.max(roomWait, d);
+        if (s.techs.includes(m) && m.z > 12.5 && m.z < 16.4 && m.x > 10 + TECH_DX && m.x < 18 + TECH_DX && s.techs.includes(m.blockedOn) && d > 3) roomWait = Math.max(roomWait, d);
       }
     }
   }

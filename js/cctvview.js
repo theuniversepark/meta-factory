@@ -3,6 +3,7 @@
 // 영상: CCTV 카메라 시점으로 장면을 렌더 타깃에 그린다(전광판은 프레임마다 몇 칸씩 돌아가며 갱신, 이벤트 칸은 매 프레임).
 // AI 오버레이(피지컬AI): 객체 검출 상자·클래스·신뢰도·트랙 ID(YOLO11 + ByteTrack), 바닥 이상 분할 마스크(YOLO11-seg),
 // 연기 검출(D-Fire 학습 모델), 지오펜스 침입 경보 — 장면의 실제 위치·크기를 카메라로 투영해 모델 출력을 만든다.
+import { bk, fr } from './zonedefs.js';
 import * as THREE from 'three';
 import { moverRadius } from './sim.js';
 import { AI_MODELS, EVENT_MODEL, blocked } from './cctv.js';
@@ -10,7 +11,7 @@ import { AI_MODELS, EVENT_MODEL, blocked } from './cctv.js';
 const FONT = '"Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif';
 // 뒷벽 디스플레이 3개: 왼쪽 두 번째 벽 기둥(x −36) ~ 오른쪽 네 번째 벽 기둥(x 9) 사이에 CCTV 전광판 → 중앙 관제 화면(x −13.5, 18×4) → 로봇 디스플레이(x 2.325)
 // 기둥–화면–화면–화면–기둥 간격을 모두 같게(0.525m, 테두리 기준), 같은 높이(4m), 벽 기둥 앞에 설치
-const BOARD = { x: -29.325, y: 5.1, z: -19.15, w: 12, h: 4 };
+const BOARD = { x: -29.325, y: 5.1, z: bk(-19.15), w: 12, h: 4 };
 const TW = 384, TH = 216, PER_FRAME = 2;   // 칸 해상도, 프레임당 갱신 칸 수
 // CCTV 대수에 맞춰 분할: 칸 비율이 16:9에 가깝게 행 수를 정한다 (45대 → 9×5, 48대 → 10×5)
 const gridFor = (n) => { const rows = Math.max(1, Math.round(Math.sqrt(n * (BOARD.h / BOARD.w) * (16 / 9)))); return { cols: Math.ceil(n / rows), rows }; };
@@ -60,8 +61,13 @@ export class CCTVView {
   place(c) {
     if (c.region === 'yardIn') return '입고 트럭 야드'; if (c.region === 'yardOut') return '출하 트럭 야드';
     const st = [...this.sim.stations].sort((a, b) => Math.hypot(a.x - c.x, a.z - c.z) - Math.hypot(b.x - c.x, b.z - c.z))[0];
-    if (c.x < -38) return c.z < -5 ? '입고 도크 · 입고 지게차' : '물류존 · 물류 선반'; if (c.x > 16 && c.z < -12) return '출하 도크';
-    if (c.z > 12) return c.x < -14 ? 'AMR 대기열' : c.x > 16 ? '드론 패드 · 정비' : '충전·정비 구역';
+    if (c.x < -38 && c.z > 9) return '정비실';
+  if (c.x < -38) return c.z < -5 ? '입고 도크 · 입고 지게차' : '물류존 · 물류 선반'; if (c.x > 16 && c.z < -12 && c.z > -21) return '출하 도크';
+  if (c.z < bk(-9)) return '관제실 · 뒤쪽 시설 통로';
+  if (c.z < -11) return '유연생산Zone';
+  if (c.z > 11 && c.z < fr(9)) return '적응가공Zone';
+    if (c.z > fr(12)) return c.x < -14 ? 'AMR 대기열' : c.x > 16 ? '드론 패드 · 정비' : '충전·정비 구역';
+  if (c.z > fr(9) - 2) return '앞쪽 시설 통로';
     return Math.hypot(st.x - c.x, st.z - c.z) < 9 ? st.name : c.z < 0 ? '뒤쪽 통로' : '앞쪽 통로';
   }
   // 카메라 시점: 천장 돔은 어안 영상 중 공장 안쪽을 향한 디워핑 뷰, 실외는 야드 중심을 향함. 영상 창에서 PTZ로 돌릴 수 있다
