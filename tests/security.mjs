@@ -3,12 +3,14 @@
 import { zoneLine } from '../js/line.js';
 import { Simulation } from '../js/sim.js';
 import { FactoryAgent } from '../js/agent.js';
+import { EXTRA_ZONES, zoneCellRobots } from '../js/zonedefs.js';
 let pass = 0, fail = 0;
 const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  — ' + info : ''}`); };
 console.log('== 신원 · 최소 권한');
 const s = new Simulation('dark', 3, { line: zoneLine(), quiet: true }), ag = new FactoryAgent(s), S = s.sec;
 const robots = s.processing.reduce((a, st) => a + (st.robotUids?.length ?? 0), 0) + (s.sinkRobotUids?.length ?? 0), mob = [...s.movers, ...s.drones].filter((m) => m.uid).length;
-check('모든 로봇·이동체·드론과 SW 에이전트에 DID 발행', S.identities === robots + mob + 5, `${S.identities}개 (셀 로봇 ${robots} · 이동·드론 ${mob} · SW·운영자 5)`);
+const zoneN = EXTRA_ZONES.reduce((a, Z) => a + Object.values(Z.cells).reduce((b, c) => b + zoneCellRobots(c, 'dark').count, 0) + Z.amr.count, 0);   // 확장 Zone 셀 로봇 · 운반 AMR
+check('모든 로봇·이동체·드론과 SW 에이전트에 DID 발행', S.identities === robots + mob + zoneN + 5, `${S.identities}개 (셀 로봇 ${robots} · 이동·드론 ${mob} · 확장 Zone ${zoneN} · SW·운영자 5)`);
 check('로봇 VC에는 명령 권한 없음 (최소 권한)', [...S.ids.values()].filter((x) => x.kind === 'robot').every((x) => !x.scopes.some((p) => p.startsWith('command:'))));
 check('자동화 단계에는 보안 계층 없음 (피지컬AI 전용)', !new Simulation('smart', 3, { line: zoneLine(), quiet: true }).sec.on);
 console.log('== 명령 · OT');

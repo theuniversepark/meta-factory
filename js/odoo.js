@@ -12,13 +12,19 @@
 // 두 가지 모드: ① 시뮬레이션 Odoo(내장 — 같은 모델·전표 번호·상태로 기록, 서버 없이 동작)
 //              ② 실시간 Odoo(서버 /api/odoo/sync → server/odoo-gateway.mjs가 JSON-RPC로 실제 Odoo에 생성·확정)
 // 렌더링과 분리되어 헤드리스 시뮬레이션에서도 같은 흐름으로 동작한다 (tests/odoo.mjs).
-import { WH } from './receiving.js';
+import { WH, WH_ITEMS } from './receiving.js';
+import { EXTRA_ZONES, zoneCellRobots, zoneRobotUid, zoneAmrUid } from './zonedefs.js';
 
 export const ODOO_PRODUCTS = {
   raw: { code: 'RM-BOX', name: '원자재 박스 (도어트림·e-axle 공용)', price: 12000 },
   parts: { code: 'PT-KIT', name: '조립 부품 (클립·볼트·스피커그릴 키트)', price: 800 },
   doortrim: { code: 'FG-DT', name: '도어트림 (완제품)', price: 185000 },
   eaxle: { code: 'FG-EA', name: 'e-axle (완제품)', price: 2400000 },
+  // 확장 Zone 자재 (확장 선반 보관 · 투입구에서 꺼냄)
+  'flex:raw': { code: 'A1-RM', name: 'A-1 유연생산 원재료 (후드·도어 패널)', price: 45000 },
+  'flex:parts': { code: 'A1-PT', name: 'A-1 유연생산 부품 키트 (힌지·볼트·실러)', price: 9000 },
+  'adapt:raw': { code: 'A2-RM', name: 'A-2 적응가공 원재료 (유압블록·리어커버 소재)', price: 28000 },
+  'adapt:parts': { code: 'A2-PT', name: 'A-2 적응가공 부품 키트 (플러그·실·볼트)', price: 3500 },
 };
 export const ODOO_LOCS = {
   vendor: { name: 'Partners/Vendors', usage: 'supplier' },
@@ -26,10 +32,16 @@ export const ODOO_LOCS = {
   production: { name: 'Virtual Locations/Production', usage: 'production' },
   rackRaw: { name: 'WH/Stock/물류선반-원자재', usage: 'internal' },
   rackParts: { name: 'WH/Stock/물류선반-부품', usage: 'internal' },
+  rackX: { name: 'WH/Stock/확장선반-A1·A2', usage: 'internal' },
+  feederA1: { name: 'WH/A-1/투입구', usage: 'internal' },
+  feederA2: { name: 'WH/A-2/투입구', usage: 'internal' },
   feeder: { name: 'WH/Line/투입구', usage: 'internal' },
   cells: { name: 'WH/Line/셀', usage: 'internal' },
   output: { name: 'WH/Output/구분적재장', usage: 'internal' },
 };
+// 품목별 선반 로케이션 · 꺼내 가는 곳
+const rackOf = (p) => (p === 'raw' ? 'rackRaw' : p === 'parts' ? 'rackParts' : 'rackX');
+const useOf = (p) => (p === 'raw' ? 'feeder' : p === 'parts' ? 'cells' : p.startsWith('flex:') ? 'feederA1' : 'feederA2');
 export const SUPPLIER = '공급사 (원자재·부품)', CUSTOMER = '완성차 고객사 (서연인테크 · 쉐플러코리아)';
 const WINDOW = 600;   // 내부 이동·생산 입고 묶음 (공장 시계 초)
 
@@ -40,7 +52,7 @@ export class OdooBridge {
     this.outbox = []; this.sent = 0;         // 실시간 Odoo로 보낼 이벤트
     this.seq = { po: 0, in: 0, int: 0, out: 0, mrp: 0, mr: 0 };
     this.db = { po: [], picking: [], mr: [], equipment: [] };
-    this.quant = Object.fromEntries(Object.keys(ODOO_LOCS).map((k) => [k, { raw: 0, parts: 0, doortrim: 0, eaxle: 0 }]));
+    this.quant = Object.fromEntries(Object.keys(ODOO_LOCS).map((k) => [k, Object.fromEntries(Object.keys(ODOO_PRODUCTS).map((p) => [p, 0]))]));
     this.byOrder = new Map(); this.byTruck = new Map(); this.byShip = new Map(); this.byStation = new Map();
     this.win = null; this.good = { doortrim: 0, eaxle: 0 }; this.log = [];
     if (!this.on) return;
@@ -48,15 +60,24 @@ export class OdooBridge {
     this.orderpoints = [
       { product: 'raw', location: 'rackRaw', min: WH.rawReorder, max: WH.rawTarget },
       { product: 'parts', location: 'rackParts', min: WH.partsReorder, max: WH.partsTarget },
+      ...WH_ITEMS.filter((I) => I.zone).map((I) => ({ product: I.key, location: 'rackX', min: I.reorder, max: I.target })),
     ];
     for (const st of sim.processing) this.equip(st.uid ?? st.id, st.name, '생산 셀', st.id);
+    for (const st of sim.zoneCells ?? []) this.equip(st.uid, st.name, '확장 Zone 셀', st.id);   // A-1 유연생산 · A-2 적응가공 셀 (고장·예지정비 요청)
     for (const st of sim.processing) (st.robotUids ?? []).forEach((u, i) => this.equip(u, `${st.name} 로봇 #${i + 1}`, '셀 로봇', `${st.id}-${i + 1}`));
+    // 확장 Zone 셀 로봇 · 운반 AMR (zones.js와 같은 고유 ID — zonedefs.js)
+    for (const Z of EXTRA_ZONES) {
+      for (const [id, c] of Object.entries(Z.cells)) for (let i = 0; i < zoneCellRobots(c, sim.mode.key).count; i++) this.equip(zoneRobotUid(Z, id, i), `${Z.code} ${c.label} 로봇 #${i + 1}`, '확장 Zone 셀 로봇', `${Z.code}-${id}-${i + 1}`);
+      for (let i = 0; i < Z.amr.count; i++) this.equip(zoneAmrUid(Z, i), `${Z.code}-AMR${String(i + 1).padStart(2, '0')}`, '확장 Zone 운반 AMR', `${Z.code}-AMR${i + 1}`);
+    }
     for (const m of [...sim.carriers, ...sim.vehicles, ...(sim.forklifts ?? []), ...sim.techs.filter((t) => t.kind !== 'human'), ...sim.helpers, ...sim.quads]) this.equip(m.uid ?? m.id, m.id, m.kind === 'carrier' ? '운반 AMR' : m.kind === 'agv' ? 'AGV' : m.kind === 'forklift' ? '지게차' : m.kind === 'humanoid' ? '휴머노이드' : m.kind === 'quadruped' ? '사족보행' : '이동 로봇', m.id);
     for (const d of sim.drones ?? []) this.equip(d.uid ?? d.id, d.id, '순찰 드론', d.id);
     // 기초 재고 (재고 조정): 시작 시 물류 선반 재고
     this.quant.rackRaw.raw = sim.whRaw ?? 0; this.quant.rackParts.parts = sim.partsTracked ? sim.whParts : 0;
+    for (const [z, w] of Object.entries(sim.whZone ?? {})) for (const k of ['raw', 'parts']) this.quant.rackX[`${z}:${k}`] = w[k];
     this.emit({ type: 'master', products: ODOO_PRODUCTS, locations: ODOO_LOCS, supplier: SUPPLIER, customer: CUSTOMER, orderpoints: this.orderpoints, equipment: this.db.equipment.map((e) => ({ ...e })), inventory: [
-      { product: 'raw', location: 'rackRaw', qty: this.quant.rackRaw.raw }, { product: 'parts', location: 'rackParts', qty: this.quant.rackParts.parts }] });
+      { product: 'raw', location: 'rackRaw', qty: this.quant.rackRaw.raw }, { product: 'parts', location: 'rackParts', qty: this.quant.rackParts.parts },
+      ...Object.entries(this.quant.rackX).filter(([, q]) => q > 0).map(([product, qty]) => ({ product, location: 'rackX', qty }))] });
   }
   now() { return this.sim.time; }
   // 이벤트 대기열 — 마스터 데이터는 따로 두고(대기열이 넘쳐도 잃지 않게) 처음 보낼 때 맨 앞에 붙인다
@@ -80,12 +101,9 @@ export class OdooBridge {
   // WMS 발주 (receiving.js) → 구매오더 확정 + 입고 예정 전표
   purchase(order) {
     if (!this.on) return;
-    const n = { raw: order.pallets.filter((p) => p === 'raw').length, parts: order.pallets.filter((p) => p === 'parts').length };
-    const lines = [];
-    if (n.raw) lines.push({ product: 'raw', qty: n.raw * WH.rawPallet, price: ODOO_PRODUCTS.raw.price });
-    if (n.parts) lines.push({ product: 'parts', qty: n.parts * WH.partsPallet, price: ODOO_PRODUCTS.parts.price });
+    const lines = WH_ITEMS.map((I) => ({ I, n: order.pallets.filter((p) => p === I.key).length })).filter((x) => x.n).map(({ I, n }) => ({ product: I.key, qty: n * I.pallet, price: ODOO_PRODUCTS[I.key].price }));
     const po = { id: this.db.po.length + 1, name: this.name('po'), partner: SUPPLIER, date_order: this.now(), date_planned: order.due, state: 'purchase', lines: lines.map((l) => ({ ...l, received: 0 })), amount: lines.reduce((a, l) => a + l.qty * l.price, 0), receipt: null, truck: null };
-    const pk = { id: this.db.picking.length + 1, name: this.name('in'), type: 'incoming', origin: po.name, partner: SUPPLIER, from: 'vendor', to: null, state: 'assigned', created: this.now(), done: null, lines: lines.map((l) => ({ product: l.product, qty: l.qty, done: 0, to: l.product === 'raw' ? 'rackRaw' : 'rackParts' })) };
+    const pk = { id: this.db.picking.length + 1, name: this.name('in'), type: 'incoming', origin: po.name, partner: SUPPLIER, from: 'vendor', to: null, state: 'assigned', created: this.now(), done: null, lines: lines.map((l) => ({ product: l.product, qty: l.qty, done: 0, to: rackOf(l.product) })) };
     po.receipt = pk.name; this.db.po.unshift(po); this.db.picking.unshift(pk); this.byOrder.set(order, { po, pk });
     // 자재 공급 차질 인시던트가 열려 있으면 타임라인에 발주 번호를 남긴다
     const sup = this.sim.orch?.find('supply'); if (sup) this.sim.orch.step(sup, 'exec', 'act', `ERP(Odoo) 구매오더 ${po.name} 확정 (${lines.map((l) => `${ODOO_PRODUCTS[l.product].code} ${l.qty}`).join(' · ')}) — 납품 재개 시 입고`);
@@ -117,9 +135,9 @@ export class OdooBridge {
     if (!this.win) this.win = { t0: this.now(), int: [], prod: { doortrim: 0, eaxle: 0 } };
     return this.win;
   }
-  consume(type, qty, toName) {   // 선반 → 투입구(원자재) / 셀(부품)
+  consume(type, qty, toName) {   // 선반 → 투입구(원자재) / 셀(부품) / 확장 Zone 투입구
     if (!this.on || qty <= 0) return;
-    this.window().int.push({ product: type, qty, from: type === 'raw' ? 'rackRaw' : 'rackParts', to: type === 'raw' ? 'feeder' : 'cells', ref: toName });
+    this.window().int.push({ product: type, qty, from: rackOf(type), to: useOf(type), ref: toName });
   }
   produced(product, n = 1) { if (this.on && product) this.window().prod[product] += n; }
   closeWindow() {

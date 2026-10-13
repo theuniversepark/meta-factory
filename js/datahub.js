@@ -15,7 +15,7 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toSt
 const f = (idShort, label, type, unit, get) => ({ idShort, label, type, unit, get });
 
 // ── 자산 정의 (AAS 단위) ─────────────────
-function buildAssets(sim, view) {
+function buildAssets(sim, view, xzones) {
   const assets = [];
   const year = String(new Date().getFullYear());
   const plate = (id, product) => ({ manufacturer: '피지컬AI 실증 메타팩토리 가상 자산 (시뮬레이션)', product, serial: `MF-${id}`, year });
@@ -128,7 +128,83 @@ function buildAssets(sim, view) {
     assets.push({ id: c.id.replace(/-/g, '_'), kind: 'Gnb5G', name: `5G 기지국 ${c.id} (PCI ${c.pci})`, nameplate: plate(c.id, '5G NR 소형 셀 (gNB)'), tech: { EquipmentId: c.id, PCI: c.pci, Band: 'n79 4.75GHz', Bandwidth: '100MHz', TxPower: '24dBm', PositionX: c.x, PositionZ: c.z },
       fields: [f('ConnectedUEs', '접속 단말', 'int', 'count', () => sim.net.ues.filter((u) => u.serv === i).length), f('UplinkMessages', '업링크 수신', 'int', 'count', () => cs().rx), f('UplinkBytes', '업링크 수신량', 'double', 'byte', () => cs().rxB), f('HandoverIn', '핸드오버 들어옴', 'int', 'count', () => cs().hoIn), f('HandoverOut', '핸드오버 나감', 'int', 'count', () => cs().hoOut)] });
   });
+  zoneAssets(assets, sim, xzones, plate);
   return assets;
+}
+
+// 확장 Zone(A-1 유연생산 · A-2 적응가공) 자산 — 정밀조립Zone과 같은 구조: Zone(라인) → 셀(설비) → 셀 로봇, Zone 운반 AMR
+// 셀 IoT 노드가 Zone 데이터 서버로 올리는 값을 같은 수집 주기·같은 OPC UA 토픽 체계로 발행하고 AAS·CSV로 저장한다.
+// 값은 매번 Zone 객체에서 찾아 읽는다 (화면을 다시 만들면 — setRender — 셀 로봇·AMR 객체가 새로 생기므로)
+const ZST = { BUSY: '가동', IDLE: '대기', BLOCKED: '출구 대기', DOWN: '고장', MAINT: '정비중' };
+function zoneAssets(assets, sim, xzones, plate) {
+  if (!xzones || sim.mode.key === 'traditional') return;   // 레거시: IoT 수집 없음 (정밀조립 셀 로봇과 같음)
+  for (const zone of xzones.zones) {
+    const Z = zone.Z, code = Z.code, pre = code.replace(/-/g, '_'), zid = `Zone_${pre}`;
+    const good = (k) => zone.stats.good[k] ?? 0, tot = () => Object.values(zone.stats.good).reduce((a, b) => a + b, 0);
+    assets.push({
+      id: zid, kind: 'Zone', name: `${code} ${Z.name}`, nameplate: plate(zid, `${Z.name} Zone 라인`),
+      tech: { ZoneCode: code, ZoneName: Z.name, Cells: zone.order.length, Products: Object.values(Z.products).map((v) => v.label).join(' · '), DataServer: `${code} 데이터 서버` },
+      fields: [
+        f('UnitsPerHour', '시간당 생산량', 'double', 'UPH', () => zone.summary().uph),
+        f('GoodParts', '양품 누적', 'int', 'pcs', tot),
+        ...Object.entries(Z.products).map(([k, v]) => f(`Good_${k}`, `양품 ${v.label}`, 'int', 'pcs', () => good(k))),
+        f('Released', '투입 누적', 'int', 'pcs', () => zone.stats.released),
+        f(Z.ng ? 'NgParts' : 'Rework', Z.ng ? 'NG 누적' : '리워크 누적', 'int', 'pcs', () => (Z.ng ? zone.stats.ng : zone.stats.rework)),
+        f('BusyCells', '가동 셀', 'int', 'count', () => zone.summary().busy),
+        f('MaterialStarved', '자재 대기', 'boolean', null, () => !!zone.starved),
+        f('RawMaterialStock', '확장 선반 원재료', 'int', 'pcs', () => sim.whZone?.[Z.key]?.raw ?? null),
+        f('PartsKitStock', '확장 선반 부품 키트', 'int', 'kits', () => sim.whZone?.[Z.key]?.parts ?? null),
+      ],
+    });
+    for (const cell of zone.order) {
+      const d = cell.def, zc = () => sim.zoneCell(Z.key, cell.id), id = `${pre}_${cell.id}`, R = d.robot;
+      assets.push({
+        id, kind: 'Station', parent: zid, name: `${code} ${d.label}`, nameplate: plate(id, `${d.label} 셀`),
+        tech: { EquipmentId: zc()?.uid ?? `${code}-${cell.id}`, Zone: code, StationType: d.type, Robot: R[1] ? `${ROBOT_KINDS[R[0]]?.label ?? R[0]} ${R[1]}대${R[2] ? ` (피지컬AI: ${ROBOT_KINDS[R[2]]?.label ?? R[2]} ${R[3]}대)` : ''}` : '없음', BaseCycleTime: d.cycle, Task: d.use, ProductLine: d.product },
+        fields: [
+          f('State', '상태', 'string', null, () => cell.fault ?? cell.state),
+          f('StateText', '상태(한글)', 'string', null, () => ZST[cell.fault ?? cell.state] ?? cell.state),
+          f('Health', '건강도', 'double', '%', () => zc()?.health ?? null),
+          f('ProcessCapability', '공정능력 Cpk', 'double', null, () => 1.67 / (1 + (zc()?.drift ?? 0) * 1.5)),
+          f('Utilization', '가동률', 'double', '%', () => (zone.time > 0 ? (cell.busy / zone.time) * 100 : 0)),
+          f('CycleTime', '사이클', 'double', 's', () => cell.cycle ?? d.cycle),
+          f('Progress', '작업 진행', 'double', '%', () => (cell.state === 'BUSY' ? cell.progress * 100 : 0)),
+          f('CurrentProduct', '작업 제품', 'string', null, () => (cell.item ? Z.products[cell.item.product]?.label ?? cell.item.product : '')),
+          f('Processed', '처리 누적', 'int', 'pcs', () => cell.done),
+          f('Failures', '고장 누적', 'int', 'count', () => zc()?.c.fails ?? 0),
+          f('MaintenanceRequest', '정비 요청', 'string', null, () => (zc()?.request ? (zc().request.kind === 'repair' ? '긴급수리' : '예지정비') : '')),
+        ],
+      });
+      // 셀 로봇: 관절·TCP (정밀조립 CellRobot과 같은 필드)
+      cell.robots.forEach((r0, i) => {
+        const rid = `${id}_R${i + 1}`, rb = () => cell.robots[i] ?? r0;
+        const fields = [f('State', '상태', 'string', null, () => (cell.fault ? 'Stopped' : cell.state === 'BUSY' ? 'Operating' : 'Idle'))];
+        r0.jointDefs.forEach((jd, j) => fields.push(f(`Joint${j + 1}`, jd.name, 'double', jd.unit === 'deg' ? 'deg' : 'mm', () => rb().joints()[j] * (jd.unit === 'deg' ? DEG : 1000))));
+        const tcp = () => { const r = rb(), w = r.tip.getWorldPosition(r.tip.position.clone()), b = r.root.getWorldPosition(r.root.position.clone()); return { x: (w.x - b.x) * 1000, y: -(w.z - b.z) * 1000, z: (w.y - b.y) * 1000 }; };
+        fields.push(f('TcpX', 'TCP X', 'double', 'mm', () => tcp().x), f('TcpY', 'TCP Y', 'double', 'mm', () => tcp().y), f('TcpZ', 'TCP Z', 'double', 'mm', () => tcp().z));
+        assets.push({ id: rid, kind: 'CellRobot', parent: id, name: `${code} ${d.label} ${ROBOT_KINDS[r0.kind]?.label ?? r0.kind} #${i + 1}`, nameplate: plate(rid, ROBOT_KINDS[r0.kind]?.label ?? r0.kind),
+          tech: { EquipmentId: cell.robotUids?.[i] ?? rid, RobotType: ROBOT_KINDS[r0.kind]?.label ?? r0.kind, Axes: r0.jointDefs.length, Payload: r0.payload, Cell: `${code}-${cell.id}`, Zone: code }, fields });
+      });
+    }
+    // Zone 운반 AMR (위치는 Zone 원점 기준 → 공장 좌표로)
+    zone.carriers.forEach((c0, i) => {
+      const am = () => zone.carriers[i] ?? c0, aid = `${pre}_AMR${String(i + 1).padStart(2, '0')}`, o = Z.origin;
+      let prev = null;
+      const ue = () => sim.net?.ueOf(am());
+      assets.push({
+        get mover() { return am(); },   // 5G 단말 업링크·패킷 캡처 (DataHub enqueueData · ipOf)
+        id: aid, kind: 'AMR', name: `${c0.id} (${code} 운반 AMR)`, nameplate: plate(aid, '운반 AMR (지그)'), tech: { EquipmentId: c0.uid ?? c0.id, RobotType: '운반 AMR', DisplayName: c0.id, Zone: code },
+        fields: [
+          f('PositionX', '위치 X', 'double', 'm', () => am().x + o.x), f('PositionZ', '위치 Z', 'double', 'm', () => am().z + o.z),
+          f('Heading', '방위', 'double', 'deg', () => ((am().heading * DEG) % 360 + 360) % 360),
+          f('Speed', '주행 속도', 'double', 'm/s', () => { const c = am(), t = sim.time, v = prev && t > prev.t ? Math.hypot(c.x - prev.x, c.z - prev.z) / (t - prev.t) : 0; prev = { x: c.x, z: c.z, t }; return v; }),
+          f('OperationState', '운행 상태', 'string', null, () => am().state),
+          f('Payload', '탑재물', 'string', null, () => { const it = am().item; return it ? `${it.product}#${it.id ?? ''}` : 'empty'; }),
+          ...(ue() ? [f('ServingPCI', '5G 서빙 셀 PCI', 'int', null, () => ue()?.servCell?.pci ?? null), f('RSRP', '5G RSRP', 'double', 'dBm', () => ue()?.rsrp ?? null), f('Handovers', '5G 핸드오버', 'int', 'count', () => ue()?.hoN ?? 0)] : []),
+        ],
+      });
+    });
+  }
 }
 
 export class DataHub {
@@ -145,12 +221,12 @@ export class DataHub {
   }
 
   // 시뮬레이션 시작·재시작 시: 기준 시계와 자산 목록을 새로 만든다
-  reset(sim, view) {
-    this.sim = sim; this.view = view;
+  reset(sim, view, xzones = this.xzones) {
+    this.sim = sim; this.view = view; this.xzones = xzones;
     const base = new Date(); base.setHours(8, 0, 0, 0);          // 화면 시계(08:00 시작)와 같은 기준
     this.epochMs = base.getTime();
     this.runId = `run-${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}`;
-    this.assets = buildAssets(sim, view);
+    this.assets = buildAssets(sim, view, xzones);
     this.writerIds = new Map(this.assets.map((a, i) => [a.id, i + 1]));
     this.samples = []; this.events = []; this.lastLogId = sim.logSeq; this.lastT = -Infinity; this.seq = 0;
     this.msgs = 0; this.bytes = 0;   // 생성한 OPC UA·AAS 메시지 누적 건수·바이트 (관제 화면 누적 데이터량)

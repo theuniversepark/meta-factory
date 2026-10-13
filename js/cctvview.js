@@ -1,18 +1,18 @@
-// CCTV 영상 (화면 쪽) — ① 뒷벽 CCTV 전광판(중앙 관제 화면 왼쪽, 로봇 디스플레이와 같은 12×4m, 설치된 CCTV 전체 분할)
+// CCTV 영상 (화면 쪽) — ① 왼쪽 벽 CCTV 전광판(관제 화면 앞쪽, 로봇 디스플레이와 같은 12×4m, 설치된 CCTV 전체 분할)
 // ② CCTV를 누르면 뜨는 실시간 영상 창.
 // 영상: CCTV 카메라 시점으로 장면을 렌더 타깃에 그린다(전광판은 프레임마다 몇 칸씩 돌아가며 갱신, 이벤트 칸은 매 프레임).
 // AI 오버레이(피지컬AI): 객체 검출 상자·클래스·신뢰도·트랙 ID(YOLO11 + ByteTrack), 바닥 이상 분할 마스크(YOLO11-seg),
 // 연기 검출(D-Fire 학습 모델), 지오펜스 침입 경보 — 장면의 실제 위치·크기를 카메라로 투영해 모델 출력을 만든다.
 import { SHIP } from './shipping.js';
-import { bk, fr } from './zonedefs.js';
+import { INBOUND } from './receiving.js';
+import { bk, fr, LEFT_WALL } from './zonedefs.js';
 import * as THREE from 'three';
 import { moverRadius } from './sim.js';
 import { AI_MODELS, EVENT_MODEL, blocked } from './cctv.js';
 
 const FONT = '"Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif';
-// 뒷벽 디스플레이 3개: 왼쪽 두 번째 벽 기둥(x −36) ~ 오른쪽 네 번째 벽 기둥(x 9) 사이에 CCTV 전광판 → 중앙 관제 화면(x −13.5, 18×4) → 로봇 디스플레이(x 2.325)
-// 기둥–화면–화면–화면–기둥 간격을 모두 같게(0.525m, 테두리 기준), 같은 높이(4m), 벽 기둥 앞에 설치
-const BOARD = { x: -29.325, y: 5.1, z: bk(-19.15), w: 12, h: 4 };
+// 정밀조립 화면은 왼쪽 벽 안쪽에 한 줄로 (zonedefs.js LEFT_WALL): 로봇 디스플레이 → 관제 화면 → CCTV 전광판 — 건물 안(+x)을 본다
+const BOARD = { x: LEFT_WALL.x, y: 5.1, z: LEFT_WALL.cctvZ, w: 12, h: 4 };
 const TW = 384, TH = 216, PER_FRAME = 2;   // 칸 해상도, 프레임당 갱신 칸 수
 // CCTV 대수에 맞춰 분할: 칸 비율이 16:9에 가깝게 행 수를 정한다 (45대 → 9×5, 48대 → 10×5)
 const gridFor = (n) => { const rows = Math.max(1, Math.round(Math.sqrt(n * (BOARD.h / BOARD.w) * (16 / 9)))); return { cols: Math.ceil(n / rows), rows }; };
@@ -30,7 +30,7 @@ export class CCTVView {
     this.scene = scene; this.getRenderer = getRenderer; this.tracks = new Map(); this.trackSeq = 0; this.yaw = new Map(); this.t = 0; this.tile = 0;
     this.cols = 1; this.rows = 1;
     this.rt = new THREE.WebGLRenderTarget(TW, TH); this.rt.texture.colorSpace = THREE.SRGBColorSpace;
-    this.group = new THREE.Group(); this.group.position.set(BOARD.x, BOARD.y, BOARD.z); parent.add(this.group);
+    this.group = new THREE.Group(); this.group.position.set(BOARD.x, BOARD.y, BOARD.z); this.group.rotation.y = Math.PI / 2; parent.add(this.group);
     const frame = new THREE.Mesh(new THREE.BoxGeometry(BOARD.w + 0.3, BOARD.h + 0.3, 0.12), new THREE.MeshStandardMaterial({ color: 0x14181e, roughness: 0.6, metalness: 0.3 }));
     frame.position.z = -0.08; this.group.add(frame);
     this.screen = new THREE.Mesh(new THREE.PlaneGeometry(BOARD.w, BOARD.h), new THREE.MeshBasicMaterial({ map: this.rt.texture, toneMapped: false }));
@@ -62,12 +62,11 @@ export class CCTVView {
   place(c) {
     if (c.region === 'yardIn') return '입고 트럭 야드'; if (c.region === 'yardOut') return '출하 트럭 야드';
     const st = [...this.sim.stations].sort((a, b) => Math.hypot(a.x - c.x, a.z - c.z) - Math.hypot(b.x - c.x, b.z - c.z))[0];
-    if (c.x < -38 && c.z > 9) return '정비실';
-  if (c.x < -38) return c.z < -5 ? '입고 도크 · 입고 지게차' : '물류존 · 물류 선반'; if (c.x > SHIP.wallX - 8 && c.z < -14 && c.z > bk(-20)) return '출하 도크';
+    if (c.x < -38) return c.z > INBOUND.dockZ - 4 ? '입고 도크 · 입고 지게차' : c.z > 17.5 ? '물류존 · 물류 선반' : c.z > 2.5 ? 'AGV 충전' : c.z < -19 ? (c.x > -44 ? '로봇 스테이션 (사족보행·드론)' : 'AMR 대기열') : c.z > -11 && c.x > -44 ? '정비실' : 'AMR 대기열 · 출동·복귀 차로'; if (c.x > SHIP.wallX - 8 && c.z < -14 && c.z > bk(-20)) return '출하 도크';
   if (c.z < bk(-9)) return '관제실 · 뒤쪽 시설 통로';
   if (c.z < -11) return '유연생산Zone';
   if (c.z > 11 && c.z < fr(9)) return '적응가공Zone';
-    if (c.z > fr(12)) return c.x < -14 ? 'AMR 대기열' : c.x > 16 ? '드론 패드 · 정비' : '충전·정비 구역';
+    if (c.z > fr(12)) return '앞쪽 시설 구역';
   if (c.z > fr(9) - 2) return '앞쪽 시설 통로';
     return Math.hypot(st.x - c.x, st.z - c.z) < 9 ? st.name : c.z < 0 ? '뒤쪽 통로' : '앞쪽 통로';
   }

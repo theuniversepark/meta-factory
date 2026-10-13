@@ -2,10 +2,11 @@
 // 현장 이벤트·설비 고장·결품·공급 차질이 생기면 순찰을 멈추고 그 현장으로 먼저 날아가 사고 현장을 중계·관찰 보고한다. 배터리가 떨어지면 이착륙장으로 돌아가 충전한다.
 // 지상 이동체 교통(차로·양보)과는 높이가 달라 서로 피하지 않는다. 렌더링과 분리되어 헤드리스에서도 같은 동작.
 
-// 이착륙·충전 패드: 오른쪽 AMR 복귀 전용로(세로 x 31.2) 왼쪽에 세로 한 줄 — 드론마다 앞쪽으로 1.7m씩 (H1 z 12.8 · H2 14.5 · H3 16.2)
-// 패드(반지름 0.7m, 드론 폭 0.8m)는 앞쪽 통로 이동체(지게차 포함)·복귀로 AMR과 충돌 반경 기준 0.5m 이상 떨어진다 (운용 3대 기준 — 4대째 H4 z 17.9는 가로 복귀로에 닿는다)
-import { fr, BUILDING } from './zonedefs.js';
-export const DRONE_PAD = { x: 29.2, z: fr(12.8), pitch: 1.7, r: 0.7 };   // AMR 스테이션과 함께 앞쪽 시설 구역으로 (zonedefs.js)
+// 이착륙·충전 패드: 왼쪽 확장동 위쪽, 사족보행 충전 스테이션(z −28) 바로 아래에 세로 한 줄 — 드론마다 앞쪽(남쪽)으로 1.7m씩 (H1 z −24.4 · H2 −22.7 · H3 −21.0)
+// 사족보행 도크(z −26.8)와 1.5m, 왼쪽 세로 로봇 통로(x −36.8~)와 1.5m 떨어진 빈 바닥 — 지나가는 지상 동선이 없다 (사족보행은 북쪽 뒤 통로로, AMR 복귀 차로는 x −45.2)
+import { BUILDING, ZONE_FAC, EXTRA_ZONES } from './zonedefs.js';
+import { INBOUND, WH_RACK } from './receiving.js';
+export const DRONE_PAD = { x: -39.0, z: -24.4, pitch: 1.7, r: 0.7 };   // 사족보행 스테이션 가운데(x −39) 아래 — 두 순찰 로봇 스테이션을 한 구역으로
 export const dronePad = (i) => ({ x: DRONE_PAD.x, z: DRONE_PAD.z + i * DRONE_PAD.pitch });
 export const MISSION_PRIO = { field: 4, equipment: 3, parts: 2, supply: 1 };   // 출동 우선순위 (현장 이벤트 > 설비 고장 > 부품 결품 > 공급 차질)
 // 현장 중계 유지 시간: 안전·설비 문제는 해소될 때까지, 오래 끄는 물류 문제(결품·공급 차질)는 관찰 보고 후 90초만 중계하고 순찰로 돌아간다
@@ -28,24 +29,35 @@ const ALT = 6.0, LOW = 5.4, SPEED = 3.4, CLIMB = 1.4, YAW_RATE = 1.6;
 const HOVER = 4, DRAIN = 100 / (24 * 60), CHARGE = 100 / (4 * 60);   // 비행 24분 · 충전 4분
 
 export class PatrolDrone {
-  constructor(sim, i = 0, n = 1) {
-    this.sim = sim; this.id = `순찰 드론-${i + 1}`; this.kind = 'drone'; this.idx = i; this.fleet = n;
-    const pad = dronePad(i);
+  // zone: 확장 Zone 드론이면 그 Zone 키 (zonedefs.js ZONE_FAC — 자기 Zone 이착륙장 · 자기 Zone 순찰 · 자기 Zone 인시던트 출동)
+  constructor(sim, i = 0, n = 1, zone = null) {
+    const Z = zone && EXTRA_ZONES.find((x) => x.key === zone);
+    this.sim = sim; this.id = Z ? `${Z.code} 순찰 드론-${i + 1}` : `순찰 드론-${i + 1}`; this.kind = 'drone'; this.idx = i; this.fleet = n; this.zone = zone;
+    const pad = Z ? ZONE_FAC[zone].pads[i] : dronePad(i);
     this.x = pad.x; this.z = pad.z; this.y = 0.25; this.heading = Math.PI; this.battery = 100 - i * (60 / Math.max(1, n));   // 충전이 겹치지 않게 배터리를 엇갈려 시작
-    this.home = { ...pad, aisle: 'F', name: `드론 이착륙장 ${i + 1}` };
+    this.home = { ...pad, aisle: 'F', name: Z ? `${Z.code} 드론 이착륙장 ${i + 1}` : `드론 이착륙장 ${i + 1}` };
     this.task = '이륙 준비'; this.mode = 'patrol'; this.wp = 0; this.hover = 0; this.moving = false; this.charging = false;
     this.target = null; this.mission = null; this.arrived = false; this.speedNow = 0; this.vy = 0;
   }
   // 순찰 경로: 셀 위를 라인 흐름 순서로, 끝나면 자재 투입·창고 쪽을 돌아 처음으로
   route() {
     const s = this.sim, pts = [];
+    if (this.zone) {   // 확장 Zone 드론: 자기 Zone 투입구 → 셀(정의 순서) → 구분 적재장 상공
+      const Z = EXTRA_ZONES.find((x) => x.key === this.zone), at = (p) => ({ x: Z.origin.x + p.x, z: Z.origin.z + p.z });
+      pts.push({ ...at(Z.src), name: `${Z.code} 자재 투입 상공` });
+      for (const c of s.zoneCells.filter((x) => x.zone === this.zone)) pts.push({ x: c.x, z: c.z, name: `${c.name} 상공` });
+      pts.push({ ...at(Z.sink), name: `${Z.code} 구분 적재장 상공` });
+      if (this.fleet <= 1) return pts;
+      const k = Math.ceil(pts.length / this.fleet);
+      return pts.slice(this.idx * k, this.idx * k + k);
+    }
     for (const st of s.processing.filter((x) => !x.standby)) pts.push({ x: st.x, z: st.z, name: `${st.name} 상공`, scan: st });
     const sink = s.stations[s.stations.length - 1], src = s.stations[0];
     pts.push({ x: sink.x, z: sink.z, name: '구분 적재장 상공', scan: sink });
     pts.push({ x: BUILDING.x1 + 2, z: -25, name: '출하 도크 상공' });   // 오른쪽 벽 출하 도크 바깥 상공
-    pts.push({ x: -45, z: -1.6, name: '자재창고 상공' });
+    pts.push({ x: WH_RACK.x, z: WH_RACK.z, name: '자재창고 상공' });
     pts.push({ x: src.x, z: src.z, name: '자재 투입 상공', scan: src });
-    pts.push({ x: -48, z: -14.5, name: '입고 도크 상공' });
+    pts.push({ x: -48, z: INBOUND.dockZ, name: '입고 도크 상공' });
     // 여러 대면 순찰 경로를 이어진 구간으로 나눠 맡는다 (드론 i → i번째 구간)
     if (this.fleet <= 1) return pts;
     const k = Math.ceil(pts.length / this.fleet);

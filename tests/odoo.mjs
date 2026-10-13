@@ -51,7 +51,7 @@ for (const version of ['17.0', '18.0']) {
   const raw = fake.stockAt('물류선반-원자재', 'RM-BOX'), parts = fake.stockAt('물류선반-부품', 'PT-KIT'), dt = fake.stockAt('구분적재장', 'FG-DT'), ea = fake.stockAt('구분적재장', 'FG-EA');
   check(`Odoo ${version}: Odoo 재고 = 시뮬레이션 Odoo 재고 (선반 원자재·부품, 구분 적재장)`, raw === Q.rackRaw.raw && parts === Q.rackParts.parts && dt === Q.output.doortrim && ea === Q.output.eaxle, `원자재 ${raw} · 부품 ${parts} · 도어트림 ${dt} · e-axle ${ea}`);
   const pos = [...fake.T['purchase.order'].values()], mrs = [...(fake.T['maintenance.request']?.values() ?? [])];
-  check(`Odoo ${version}: 구매오더 확정 · 정비요청 단계(완료) · 재주문 규칙 · 설비`, pos.length === S.po && pos.every((p) => p.state === 'purchase') && mrs.length === E.db.mr.length && mrs.filter((m) => m.stage_id?.[0] && fake.T['maintenance.stage'].get(m.stage_id[0]).done).length === E.db.mr.filter((m) => m.stage === 'done').length && fake.T['stock.warehouse.orderpoint'].size === 2 && fake.T['maintenance.equipment'].size === S.equipment);
+  check(`Odoo ${version}: 구매오더 확정 · 정비요청 단계(완료) · 재주문 규칙 · 설비`, pos.length === S.po && pos.every((p) => p.state === 'purchase') && mrs.length === E.db.mr.length && mrs.filter((m) => m.stage_id?.[0] && fake.T['maintenance.stage'].get(m.stage_id[0]).done).length === E.db.mr.filter((m) => m.stage === 'done').length && fake.T['stock.warehouse.orderpoint'].size === E.orderpoints.length && E.orderpoints.length === 6 && fake.T['maintenance.equipment'].size === S.equipment);
   fake.close();
 }
 void ODOO_LOCS;

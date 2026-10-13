@@ -97,6 +97,7 @@ export class RobotTelemetry {
       put('Payload', '탑재물', null, it ? (it.scrap ? 'empty(reject)' : `${it.product ?? 'part'}#${it.id}`) : 'empty', 'string');
       put('Battery', '배터리', '%', m.battery);
     }
+    if (m.kind === 'zoneamr') { put('OperationState', '운행 상태', null, m.state, 'string'); put('Payload', '탑재물', null, m.payload, 'string'); }
     if (m.kind === 'humanoid') { put('CarryingBin', '부품 빈 운반', null, !!m.carry, 'boolean'); put('Battery', '배터리', '%', m.battery); }
     if (m.kind === 'drone') { put('Altitude', '비행 고도', 'm', m.y); put('Battery', '배터리', '%', m.battery); put('FlightMode', '비행 모드', null, m.mode, 'string'); }
     if (m.kind === 'quadruped') put('Battery', '배터리', '%', m.battery);
@@ -114,13 +115,12 @@ export class RobotTelemetry {
   resolve() {
     const { view, ref } = this;
     if (ref.type === 'cell') {
-      const sv = view.stationViews.find((s) => s.st.id === ref.stationId);
-      const r = sv?.parts.robots?.[ref.idx];
-      return r ? { kind: 'arm', robot: r, st: sv.st, obj: r.root } : null;
+      const f = view.cellRobot(ref.stationId, ref.idx);   // 정밀조립 셀 · 확장 Zone 셀
+      return f ? { kind: 'arm', robot: f.robot, st: f.st, obj: f.robot.root } : null;
     }
     const all = [...view.vehicleViews, ...view.carrierViews, ...view.techViews, ...view.helperViews, ...view.quadViews, ...(view.droneViews ?? [])];
     const mv = all.find((x) => x.v.id === ref.id);
-    if (!mv) return null;
+    if (!mv) { const zc = view.xzones?.carrier(ref.id); return zc ? { kind: 'zoneamr', mover: zc.mover, obj: zc.obj } : null; }   // 확장 Zone 운반 AMR (zones.js)
     // 라인 위 운반 AMR은 대상물 메시(아래쪽 AMR)로 그려진다
     let obj = mv.g;
     if (mv.v.kind === 'carrier' && mv.v.state === 'line') {
@@ -318,7 +318,7 @@ export class RobotTelemetry {
       ] });
     } else {
       const m = R.mover;
-      const kindLabel = { agv: 'AGV', forklift: '지게차', carrier: '운반 AMR', humanoid: '휴머노이드', quadruped: '사족보행 로봇', robot: '정비로봇', drone: '순찰 드론' }[m.kind] ?? m.kind;
+      const kindLabel = { agv: 'AGV', forklift: '지게차', carrier: '운반 AMR', zoneamr: `${m.zone === 'flex' ? 'A-1 유연생산' : 'A-2 적응가공'} 운반 AMR`, humanoid: '휴머노이드', quadruped: '사족보행 로봇', robot: '정비로봇', drone: '순찰 드론' }[m.kind] ?? m.kind;
       out.title = `${m.uid ? `[${m.uid}] ` : ''}${m.id} · ${kindLabel}`;
       const lidar = this.lidar(m);
       const field = m.blockedOn ? [`정지 — 전방 ${m.blockedOn.id}`, 'warn'] : !m.moving ? ['정지 (대기)', ''] : lidar < 0.5 ? ['보호 필드 침범', 'bad'] : lidar < 1.5 ? ['경고 필드 — 감속', 'warn'] : ['정상', 'ok'];

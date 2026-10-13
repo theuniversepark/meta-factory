@@ -23,8 +23,8 @@ console.log('== CCTV AI 감지 (피지컬AI)');
   check('자동화 단계는 녹화·관제만 (AI 자동 감지 없음)', !ev.detected); }
 console.log('== CCTV 에이전트 이력 · 오케스트레이터 연동');
 { const s = new Simulation('dark', 3, { line: zoneLine(), quiet: true }); for (let t = 0; t < 60; t += 0.1) s.step(0.1);
-  // CCTV 경로만 본다: 카메라가 보고 6m 안에 순찰 로봇·이동체가 없는 앞 통로 자리 (로봇이 먼저 발견하면 CCTV 보고가 생기지 않는다)
-  const spot = [[-5, 8], [0, 9], [-12, 9], [8, 9], [-18, 8.6], [16, 8.6]].map(([x, z]) => ({ x, z })).find((p) => camerasSeeing(s.cctv, p.x, p.z).length && !s.movers.some((m) => m.state !== 'line' && Math.hypot(m.x - p.x, m.z - p.z) < 6)) ?? { x: -5, z: 8 };
+  // CCTV 경로만 본다: 카메라가 보고 14m(로봇 카메라 감지 거리) 안에 순찰 로봇·이동체가 없는 앞 통로 자리 (로봇이 먼저 발견하면 CCTV 보고가 생기지 않는다)
+  const spot = [[-5, 8], [0, 9], [-12, 9], [8, 9], [-18, 8.6], [16, 8.6]].map(([x, z]) => ({ x, z })).find((p) => camerasSeeing(s.cctv, p.x, p.z).length && !s.movers.some((m) => m.state !== 'line' && Math.hypot(m.x - p.x, m.z - p.z) < 14)) ?? { x: -5, z: 8 };
   const A = s.cctvAgent, ev = s.injectFieldEvent('leak', spot.x, spot.z); for (let t = 0; t < 4; t += 0.1) s.step(0.1);
   const rep = A.history.find((h) => h.kind === 'report' && h.label === '바닥 누유');
   check('감지 → 이력 등록(보고) · 오케스트레이터 인시던트 연결', !!rep && !!rep.inc && ev.detected && /CCTV 에이전트/.test(ev.detectedBy), rep ? `${rep.no} ${rep.cam} ${rep.model} ${rep.conf} → #${rep.inc?.id}` : '');

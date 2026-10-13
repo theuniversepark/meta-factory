@@ -2,14 +2,15 @@
 // 3단계 공장(레거시·자동화·피지컬AI)을 각각 30분 돌리며 0.5초마다 포크 위 점들을 검사한다. 트럭 앞에서는 트럭 쪽을 본 채 들어가고 후진으로 나오는지도 본다. 실행: npm test
 import { SHIP } from '../js/shipping.js';
 import { zoneLine } from '../js/line.js';
-import { Simulation, moverRadius, chgLoc, LOC, FORK } from '../js/sim.js';
+import { Simulation, moverRadius, chgLoc, FORK } from '../js/sim.js';
 import { FactoryAgent } from '../js/agent.js';
+import { techLocal } from '../js/zonedefs.js';
 let pass = 0, fail = 0;
 const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  — ' + info : ''}`); };
 const forkPts = (f) => { const d = { x: Math.sin(f.heading), z: Math.cos(f.heading) }, n = { x: d.z, z: -d.x }, out = [];
   for (let a = 0.75; a <= 1.9 + 1e-6; a += 0.23) for (const l of [-0.42, 0, 0.42]) out.push({ x: f.x + d.x * a + n.x * l, z: f.z + d.z * a + n.z * l }); return out; };
-const fixed = [...[0, 1, 2, 3, 4, 5].map((i) => { const c = chgLoc(i); return { name: '충전 기둥', x0: c.x - 0.25, x1: c.x + 0.25, z0: c.z + 1.3, z1: c.z + 1.7 }; }),
-  { name: '정비실 비품', x0: LOC.TECH.x - 1.7, x1: LOC.TECH.x + 5.9, z0: 15.9, z1: 16.8 }];
+const fixed = [...[0, 1, 2, 3, 4, 5].map((i) => { const c = chgLoc(i); return { name: '충전 기둥', x0: c.x - 0.25, x1: c.x + 0.25, z0: c.post - 0.2, z1: c.post + 0.2 }; }),
+  { name: '정비실 비품', local: true, x0: -2.5, x1: 5.1, z0: -0.1, z1: 0.8 }];   // 정비실 비품 줄: 정비실 로컬 좌표 (zonedefs.js techLocal)
 console.log('== 지게차 포크 간섭');
 check('포크 크기 설정: 포크 끝 1.9m · 차체·포크 선분 앞 1.45m + 반폭 0.55m ≥ 1.9m', FORK.reach >= 1.9 && FORK.front + FORK.half >= 1.9);
 for (const [mode, label] of [['traditional', '레거시'], ['smart', '자동화'], ['dark', '피지컬AI']]) {
@@ -27,7 +28,7 @@ for (const [mode, label] of [['traditional', '레거시'], ['smart', '자동화'
       for (const o of s.movers) if (o !== f && o.state !== 'line' && P.some((p) => Math.hypot(p.x - o.x, p.z - o.z) < moverRadius(o) * 0.8)) hit.mover.push(`${f.id}→${o.id}`);
       for (const st of s.stations) { const d = st.def; if (d.x == null) continue; const h = st.type === 'source' || st.type === 'sink' ? [1.8, 2.3] : [2.3, 2.3], c = Math.cos(d.rot ?? 0), sn = Math.sin(d.rot ?? 0);
         if (P.some((p) => { const rx = p.x - d.x, rz = p.z - (d.z ?? 0); return Math.abs(rx * c - rz * sn) < h[0] && Math.abs(rx * sn + rz * c) < h[1]; })) hit.cell.push(`${f.id}→${st.name}`); }
-      for (const o of fixed) if (P.some((p) => p.x > o.x0 && p.x < o.x1 && p.z > o.z0 && p.z < o.z1)) hit.fixed.push(`${f.id}→${o.name}`);
+      for (const o of fixed) if (P.map((p) => (o.local ? ((l) => ({ x: l.lx, z: l.lz }))(techLocal(p)) : p)).some((p) => p.x > o.x0 && p.x < o.x1 && p.z > o.z0 && p.z < o.z1)) hit.fixed.push(`${f.id}→${o.name}`);
     }
   }
   const moved = forks.reduce((a, f) => a + f.dist, 0);

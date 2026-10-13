@@ -1,6 +1,6 @@
 // 이동체 경로·막힘 검증 — 모든 이동 로봇(AMR·AGV·지게차·정비원/정비 휴머노이드·물류 휴머노이드·사족보행·작업자)이
 // 할 일이 있는데 오래 제자리에 갇히지 않는지. 3단계 공장 × 시드 2개 × 2시간, 설비 고장(6분마다)·현장 이벤트(피지컬AI 10분마다) 주입. 실행: npm test
-import { TECH_DX } from '../js/zonedefs.js';
+import { techLocal } from '../js/zonedefs.js';
 import { zoneLine } from '../js/line.js';
 import { Simulation, toolSpot, moverRadius } from '../js/sim.js';
 import { FactoryAgent } from '../js/agent.js';
@@ -31,7 +31,7 @@ for (const [mode, label] of [['traditional', '레거시'], ['smart', '자동화'
         if (!(m.steps[0]?.go && m.path?.length) || m.hzWait || !r || Math.hypot(m.x - r.x, m.z - r.z) > 0.05) { st.set(m, { x: m.x, z: m.z, t0: t }); continue; }   // 진로 이벤트로 정지 대기 중인 것은 의도된 대기 (tests/hazard.mjs)
         const d = t - r.t0; if (d > worst.d) worst = { d, who: `${m.id} [${m.task}] ← ${m.blockedOn?.id ?? '?'}` };
         // 정비실 안(대기 자리·도구 보관대)에서 정비원·정비 휴머노이드끼리 막힌 시간
-        if (s.techs.includes(m) && m.z > 12.5 && m.z < 16.4 && m.x > 10 + TECH_DX && m.x < 18 + TECH_DX && s.techs.includes(m.blockedOn) && d > 3) roomWait = Math.max(roomWait, d);
+        if (s.techs.includes(m) && ((l) => l.lz > -3.5 && l.lz < 0.4 && l.lx > -2.8 && l.lx < 5.2)(techLocal(m)) && s.techs.includes(m.blockedOn) && d > 3) roomWait = Math.max(roomWait, d);
       }
     }
   }
@@ -40,6 +40,6 @@ for (const [mode, label] of [['traditional', '레거시'], ['smart', '자동화'
   check(`${label}: 이동 로봇이 휴머노이드 충전 도크(바닥 판·충전 기둥)와 겹치지 않음`, !dockHits.length, dockHits.slice(0, 3).join(', '));
   check(`${label}: 휴머노이드가 충전 도크 근처에서 맴돌지 않고 곧게 복귀 (도크 3.5m 안 8초 이하)`, circle <= 8, `최장 ${circle.toFixed(1)}초`);
 }
-check('정비 휴머노이드 충전 스테이션: 정비실 양쪽 끝에 하나씩 서로 마주 봄', (() => { const s = new Simulation('dark', 2, { line: zoneLine(), quiet: true }); const [a, b] = s.techs.map((t) => t.home); return a && b && Math.abs(a.x - b.x) > 5.5 && Math.abs(Math.sin(a.heading) + Math.sin(b.heading)) < 1e-6 && Math.sin(a.heading) * (b.x - a.x) > 0; })());
+check('정비 휴머노이드 충전 스테이션: 정비실 양쪽 끝에 하나씩 서로 마주 봄', (() => { const s = new Simulation('dark', 2, { line: zoneLine(), quiet: true }); const [a, b] = s.techs.map((t) => t.home); const da = [Math.sin(a.heading), Math.cos(a.heading)], db = [Math.sin(b.heading), Math.cos(b.heading)]; return a && b && Math.hypot(a.x - b.x, a.z - b.z) > 5.5 && Math.hypot(da[0] + db[0], da[1] + db[1]) < 1e-6 && da[0] * (b.x - a.x) + da[1] * (b.z - a.z) > 0; })());
 console.log(`\n결과: ${pass} PASS / ${fail} FAIL`);
 process.exitCode = fail ? 1 : 0;

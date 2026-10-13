@@ -5,6 +5,7 @@
 //  ② 데이터·IP 보안: 동형암호 연합학습 · ZKML 무결성 검증 · eVDI 격리 워크스페이스 · 반출 통제(DLP)
 //  ③ AI 모델 보안: 메타모픽(MR) · 차등 테스팅 → Safety Score · DRS
 //  ④ OT 보안: OTAC 단방향 다이나믹 인증 · 구간 암호화 · DPI 명령 선별 제어 · AI 이상 탐지
+import { EXTRA_ZONES, zoneCellRobots, zoneRobotUid, zoneAmrUid } from './zonedefs.js';
 
 export const SEC_LAYERS = {
   agent: { icon: '🪪', label: '피지컬AI 에이전트 보안', sub: 'DID/VC 신원 · 최소 권한', by: '라온시큐어 (ONE Access · TrustCore)' },
@@ -126,6 +127,11 @@ export class SecurityLayer {
     for (const st of s.processing) for (const u of st.robotUids ?? []) add(u, `${st.name} 로봇 ${u}`, 'robot', ['task:execute', 'telemetry:publish']);
     for (const u of s.sinkRobotUids ?? []) add(u, `적재 로봇 ${u}`, 'robot', ['task:execute', 'telemetry:publish']);
     for (const m of [...s.movers, ...s.drones]) if (m.uid) add(m.uid, m.id, m.kind === 'drone' ? 'drone' : 'mobile', ['move', 'task:execute', 'telemetry:publish']);
+    // 확장 Zone 셀 로봇 · 운반 AMR (zones.js와 같은 고유 ID — zonedefs.js)
+    for (const Z of EXTRA_ZONES) {
+      for (const [id, c] of Object.entries(Z.cells)) for (let i = 0; i < zoneCellRobots(c, s.mode.key).count; i++) { const u = zoneRobotUid(Z, id, i); add(u, `${Z.code} ${c.label} 로봇 ${u}`, 'robot', ['task:execute', 'telemetry:publish']); }
+      for (let i = 0; i < Z.amr.count; i++) { const u = zoneAmrUid(Z, i); add(u, `${Z.code}-AMR${String(i + 1).padStart(2, '0')}`, 'mobile', ['move', 'task:execute', 'telemetry:publish']); }
+    }
     add('ORCH', '공장 오케스트레이터', 'agent', ['command:control', 'command:emergency', 'task:assign']);
     add('AGENT', '자율 에이전트', 'agent', ['command:control', 'task:assign']);
     add('OPERATOR', '운영자(관제)', 'human', ['command:control', 'command:emergency']);

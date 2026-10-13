@@ -3,15 +3,14 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { RobotTelemetry } from './telemetry.js';
-import { BELT_Y, LOC, chgLoc, FG_CAP, RAW_CAP, ST_LABEL, TOOL_KITS, SINK_PICK } from './sim.js';
+import { BELT_Y, AISLE, chgLoc, FG_CAP, RAW_CAP, ST_LABEL, TOOL_KITS, SINK_PICK } from './sim.js';
 import { YARD, SHIP, SHIP_FRAME, shipToWorld } from './shipping.js';
-import { INBOUND, WH, WH_RACK } from './receiving.js';
+import { INBOUND, WH, WH_RACK, LOGI_DZ, XRACK, XWH, WH_ITEMS, xrackZ, stockOf } from './receiving.js';
 import { DRONE_PAD, dronePad } from './drone.js';
-import { bk, fr, BUILDING } from './zonedefs.js';
+import { bk, fr, BUILDING, TECH_ROOM, TECH_ROOMS, ZONE_FAC, EXTRA_ZONES, LEFT_WALL, SRV } from './zonedefs.js';
 import { STAGES, INCIDENT_TYPES, prioOf } from './orchestrator.js';
 import { NR } from './net5g.js';
 import { blenderOn, cloneAsset, RENDER } from './blender.js';
-import { equipmentList, STATUS_CLASS } from './assets.js';
 import { ZONE_SRC, ZONE_SINK } from './line.js';
 import { ROBOT_KINDS, toWorld, pointAt, pathLength, isZone, ZONE_CELLS, ZONE_PRODUCTS, ZONE_MIXES, ZONE_NAME, FG_ZONE_CAP, AMR_LANES, amrPark, ZONE_AMR, AMMR, AMMR_FETCH } from './line.js';
 
@@ -1460,7 +1459,7 @@ export class FactoryView {
     const floorMat = new THREE.MeshStandardMaterial({ map: floorTexture(), roughness: 0.85, metalness: 0.05 });
     // 바닥: 생산동(x −38 ~ 38) + 왼쪽 물류 확장동(x −51 ~ −38) — 하나의 건물, 사이 벽 없음
     // 앞뒤(z −43 ~ 42): 서버실 · 유연생산Zone · 정밀조립Zone · 적응가공Zone · AMR 스테이션 (zonedefs.js)
-    // 직사각형 건물: x −51 ~ 48 · z −43(뒷벽 · 관제 화면) ~ 42(앞쪽 열린 면)
+    // 직사각형 건물: x −51(왼쪽 벽 · 정밀조립 화면) ~ 48 · z −43(뒷벽) ~ 42(앞쪽 열린 면)
     const BD = BUILDING.z1 - BUILDING.z0, BC = (BUILDING.z0 + BUILDING.z1) / 2, BW = BUILDING.x1 - BUILDING.x0, BX = (BUILDING.x0 + BUILDING.x1) / 2;
     floorMat.map.repeat.set(BW / 4, BD / 4);   // 텍스처 한 장 = 4m (격자 4칸)
     const floor = put(mesh(new THREE.PlaneGeometry(BW, BD), floorMat, false), BX, 0, BC, r);
@@ -1468,12 +1467,12 @@ export class FactoryView {
     this.floorMat = floorMat;
     // AGV 통로
     const laneGeo = (w, d) => new THREE.PlaneGeometry(w, d);
-    // 앞쪽 통로는 확장동 물류존(AGV 원자재 상차·부품 피킹)까지 이어지고, 왼쪽 세로 통로는 동선 계산의 교차 통로(x −35.5)와 같은 자리
+    // 앞쪽 통로(z 9)는 확장동 AGV 충전 패드 앞까지, 앞쪽 시설 통로(z 31)는 확장동 물류존(AGV 원자재 상차·부품 피킹) 앞까지 이어지고, 왼쪽 세로 통로는 동선 계산의 교차 통로(x −35.5)와 같은 자리
     // 정밀조립Zone 앞뒤 통로(z ±9) · 확장 Zone 바깥 시설 통로(앞 FF · 뒤 BB) · 좌우 끝 세로 통로(시설 ↔ 정밀조립Zone 연결)
 const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     // 앞뒤 통로는 넓힌 오른쪽(x 48 벽 앞)까지 이어 그린다 — 출하 지게차가 오른쪽 세로 통로(x 35)에서 벽 쪽 도크로 간다
     const LX1 = BUILDING.x1 - 1.3, lane = (x0, z) => [(x0 + LX1) / 2, z, LX1 - x0, 2.6];
-    const lanes = [lane(-49, 9), lane(-37, -9), lane(-37, fr(9)), lane(-37, bk(-9)), [-35.5, VZ, 2.6, VL], [35, VZ, 2.6, VL]];   // 입고 지게차 운행 구간은 바닥 초록 전용 표시로만 구분
+    const lanes = [lane(-49, 9), lane(-37, -9), lane(-45.2, fr(9)), lane(-42, bk(-9)), [-35.5, VZ, 2.6, VL], [35, VZ, 2.6, VL], [(-39.6 - 36.8) / 2, AISLE.T, 2.8, 2.6]];   // 마지막: 정비실 앞 짧은 통로 (정비실 출입구 → 왼쪽 세로 통로)   // 입고 지게차 운행 구간은 바닥 초록 전용 표시로만 구분
     for (const [x, z, w, d] of lanes) {
       const l = put(new THREE.Mesh(laneGeo(w, d), MAT.lane), x, 0.005, z, r); l.rotation.x = -Math.PI / 2; l.receiveShadow = true;
       for (const s of [-1, 1]) {
@@ -1484,9 +1483,9 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     }
     // 벽체·기둥
     // 뒷벽: 출하 도크 문 2개(폭 4.6m · 높이 4.9m)만 트럭 상차용으로 열고 나머지는 외벽 (입고 도크와 같은 방식)
-    // 뒷벽(z −43): 건물 전체 폭으로 곧게 — 관제 화면·CCTV 전광판·로봇 디스플레이가 걸린다
+    // 뒷벽(z −43): 건물 전체 폭으로 곧게 (정밀조립 관제 화면·CCTV 전광판·로봇 디스플레이는 왼쪽 벽 안쪽 — zonedefs.js LEFT_WALL)
     put(box(BW + 0.3, 8, 0.3, MAT.wall), BX, 4, BUILDING.z0, r);
-    // 왼쪽 벽(확장동 x −51): 입고 도크 문(z −16.8~−12.2, 높이 4.9m)만 트럭 하차용으로 열고 나머지는 외벽
+    // 왼쪽 벽(확장동 x −51): 맨 아래 입고 도크 문(z 33.5~38.1, 높이 4.9m)만 트럭 하차용으로 열고 나머지는 외벽
     // 왼쪽 벽은 그림자를 드리우지 않는다 (해가 왼쪽에서 비쳐 물류 확장동 바닥을 크게 덮던 그림자 제거 — 바닥은 다른 그림자를 그대로 받음)
     { const dz0 = INBOUND.dockZ - 2.3, dz1 = INBOUND.dockZ + 2.3;
       const W = INBOUND.wallX, lw = put(new THREE.Group(), 0, 0, 0, r);
@@ -1511,7 +1510,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     for (let x = -45; x <= BUILDING.x1 - 2; x += 9) put(box(0.6, 8, 0.6, MAT.steel), x, 4, BUILDING.z0 + 0.4, r);
     put(box(BW, 0.5, 0.35, MAT.accent), BX, 7.7, BUILDING.z0 + 0.2, r);
     // 천장 형광등 기구는 두지 않는다 — 공장 밝기는 환경광·주광·보조광(main.js LOOK)으로 단계별로 유지
-    // 뒷벽 관제 화면 왼쪽(12×4m)에는 CCTV 전광판(js/cctvview.js)이 걸린다 — 과학기술정보통신부·정보통신산업진흥원 로고는 관제 서버 랙 양옆(아래 관제/서버)과 앞쪽 바닥 표시에 둔다
+    // 과학기술정보통신부·정보통신산업진흥원 로고는 정밀조립 데이터 서버 랙 양옆(아래 관제/서버, 왼쪽 벽 앞)과 앞쪽 바닥 표시에 둔다
     // 바닥 표시(12×5.4m) — 앞쪽 AGV 충전소(오른쪽 끝 x −2.8)와 정비실(왼쪽 끝 x 10.3) 사이 가운데 (x 3.75), 앞쪽 통로(지게차 z ≤ 10.7)와 AMR 복귀 전용로(z ≥ 18.3) 사이 가운데 (z 14.5)
     // 두 줄로 각 기관 CI 가로형 시그니처(상징 + 로고타입, 상징은 공식 색) — 멀리서도 선명하게 로고타입은 진한 회색(#3a3a3a)으로 굵게. 바탕 판 없이 바닥색 위에 그린다 (투명 배경 이미지)
     const logoTex = new THREE.TextureLoader().load('assets/msit_nipa_ci_v2.png');
@@ -1530,7 +1529,6 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     }
     this.buildYard();
     this.buildFacadeSigns();
-    this.buildBoard();
   }
 
   // 물류 선반 재고 현황판 — 원자재·부품 재고 막대(재주문점 표시), 입고 순환 상태, 입고·출고 누적
@@ -1759,57 +1757,6 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     C.tex.needsUpdate = true;
   }
 
-  // 오른쪽 벽 설비 현황 전광판 — 모든 설비·로봇의 고유 ID·이름·현재 상태 (1초마다 갱신)
-  buildBoard() {
-    const W = 30, H = 6.4, cv = document.createElement('canvas'); cv.width = 4096; cv.height = Math.round(4096 * H / W);
-    this.boardCanvas = cv; this.boardTex = new THREE.CanvasTexture(cv); this.boardTex.colorSpace = THREE.SRGBColorSpace; this.boardTex.anisotropy = 8;
-    const g = put(new THREE.Group(), BUILDING.x1 - 0.28, 4.45, -1.5, this.root); g.rotation.y = -Math.PI / 2;   // 오른쪽 벽 안쪽
-    put(box(W + 0.5, H + 0.5, 0.16, std(0x0b0d10, { roughness: 0.5, metalness: 0.4 })), 0, 0, -0.1, g);
-    put(new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshBasicMaterial({ map: this.boardTex, toneMapped: false })), 0, 0, 0, g);
-    this.boardT = -1;
-  }
-  drawBoard() {
-    const sim = this.sim, cv = this.boardCanvas, x = cv.getContext('2d'), W = cv.width, H = cv.height;
-    const F = '"Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif', MONO = 'Menlo, "SF Mono", Consolas, monospace';
-    const list = equipmentList(sim, this);
-    const COL = { run: '#3dff8a', idle: '#8fb3c9', charge: '#37e8ff', maint: '#ffc21f', fault: '#ff4d4d', stop: '#ff7a3d', off: '#5c6670' };
-    x.fillStyle = '#020405'; x.fillRect(0, 0, W, H);
-    // 머리줄: 제목 · 시각 · 상태별 대수
-    const HH = 112;
-    x.fillStyle = '#0d1a12'; x.fillRect(0, 0, W, HH);
-    x.font = `900 58px ${F}`; x.fillStyle = '#ffb020'; x.textBaseline = 'middle'; x.textAlign = 'left';
-    x.fillText('설비 현황판', 34, HH / 2); x.font = `700 30px ${MONO}`; x.fillStyle = '#c99a3a'; x.fillText('EQUIPMENT STATUS BOARD', 400, HH / 2 + 4);
-    const s0 = Math.floor(sim.time) + 8 * 3600, clock = `${String(Math.floor(s0 / 3600) % 24).padStart(2, '0')}:${String(Math.floor(s0 / 60) % 60).padStart(2, '0')}:${String(s0 % 60).padStart(2, '0')}`;
-    const cnt = {}; for (const e of list) cnt[e.cls] = (cnt[e.cls] ?? 0) + 1;
-    let cx = W - 34; x.textAlign = 'right';
-    x.font = `700 44px ${MONO}`; x.fillStyle = '#3dff8a'; x.fillText(clock, cx, HH / 2); cx -= x.measureText(clock).width + 46;
-    for (const k of ['off', 'stop', 'fault', 'maint', 'charge', 'idle', 'run']) {
-      if (!cnt[k]) continue;
-      const t = `${STATUS_CLASS[k]} ${cnt[k]}`; x.font = `800 38px ${F}`; x.fillStyle = COL[k]; x.fillText(t, cx, HH / 2); cx -= x.measureText(t).width + 18;
-      x.beginPath(); x.arc(cx, HH / 2, 11, 0, Math.PI * 2); x.fill(); cx -= 40;
-    }
-    x.textAlign = 'right'; x.font = `700 30px ${F}`; x.fillStyle = '#7d8a95'; x.fillText(`전체 ${list.length}대 · ${sim.mode.label}`, cx, HH / 2);
-    // 목록: 4열
-    const cols = 4, rows = Math.ceil(list.length / cols), top = HH + 18, rh = Math.min(58, (H - top - 10) / Math.max(1, rows)), cw = W / cols;
-    const fs = Math.max(22, Math.min(32, rh * 0.6));
-    list.forEach((e, i) => {
-      const c = Math.floor(i / rows), r = i % rows, x0 = c * cw + 24, y = top + r * rh + rh / 2;
-      if (r % 2 === 0) { x.fillStyle = 'rgba(255,255,255,0.025)'; x.fillRect(c * cw + 8, top + r * rh, cw - 16, rh); }
-      x.textAlign = 'left'; x.font = `800 ${fs}px ${MONO}`; x.fillStyle = '#ffb020'; x.fillText(e.uid, x0, y);
-      x.font = `600 ${fs}px ${F}`; x.fillStyle = '#d7dde3'; let nm = e.name; while (x.measureText(nm).width > cw * 0.42 && nm.length > 3) nm = nm.slice(0, -2) + '…'; x.fillText(nm, x0 + fs * 5.4, y);
-      const col = COL[e.cls] ?? '#8fb3c9', blink = (e.cls === 'fault' || e.cls === 'stop') && Math.floor(performance.now() / 500) % 2;
-      x.fillStyle = blink ? 'rgba(255,255,255,0.15)' : col;
-      x.textAlign = 'right'; x.font = `800 ${fs}px ${F}`; x.fillStyle = blink ? '#5a1a1a' : col; x.fillText(e.text, c * cw + cw - 30, y);
-      x.beginPath(); x.arc(c * cw + cw - 30 - x.measureText(e.text).width - 18, y, fs * 0.22, 0, Math.PI * 2); x.fill();
-      if (c) { x.fillStyle = 'rgba(255,176,32,0.18)'; x.fillRect(c * cw, top, 2, rows * rh); }
-    });
-    // LED 점 질감
-    x.fillStyle = 'rgba(0,0,0,0.22)';
-    for (let yy = 0; yy < H; yy += 4) x.fillRect(0, yy, W, 1);
-    for (let xx = 0; xx < W; xx += 4) x.fillRect(xx, 0, 1, H);
-    this.boardTex.needsUpdate = true;
-  }
-
   // 건물 밖 트럭 야드 (뒷벽 바깥, 검은 외부): 아스팔트·도크 접안선·대기 자리·진출입 도로
   buildYard() {
     const r = this.root;
@@ -1823,18 +1770,19 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     for (let x = 12; x < 110; x += 4) flatY(2, 0.15, white, x, YARD.roadZ, 0.02);
     for (const bx of YARD.bays) for (const sd of [-1, 1]) flatY(0.15, 12, line, bx + sd * 1.7, -26.4, 0.02);
     for (const sd of [-1, 1]) for (let z = -21; z > -33; z -= 1.6) flatY(0.12, 0.8, white, YARD.waitX + sd * 1.6, z, 0.02);
-    // 입고 트럭 야드 (왼쪽 벽 바깥): 바닥, 남북 도로(북행 입차·남행 출차), 서쪽 진입로, 도크 앞 정차선, 표시
-    flat(42, 42, std(0x2b3036, { roughness: 0.95 }), -72, -24, -0.01);   // 서쪽으로 돌아 도크 중심선에 서는 공간까지
-    flat(9, 36, std(0x24282d, { roughness: 0.95 }), INBOUND.roadX, -24, 0.0);
-    flat(81, 7, std(0x24282d, { roughness: 0.95 }), -92.5, INBOUND.roadZ, 0.0);   // 건물(서버실 쪽 뒤로 늘어난 부분) 왼쪽까지
-    for (let x = -132; x < -53; x += 4) flat(2, 0.15, white, x, INBOUND.roadZ, 0.02);
-    for (let z = -38; z < -6; z += 4) flat(0.15, 2, white, INBOUND.roadX, z, 0.02);
-    for (const sd of [-1, 1]) flat(12, 0.15, line, INBOUND.wallX - 6.2, INBOUND.dockZ + sd * 1.7, 0.02);
+    // 입고 트럭 야드 (왼쪽 벽 바깥 · 건물 앞쪽): 바닥, 남북 도로(북행 입차·남행 출차), 건물 앞쪽 진입로, 도크 앞 정차선, 표시
+    const DZ = INBOUND.dockZ, RZ = INBOUND.roadZ;
+    flat(42, RZ + 4 - (DZ - 21), std(0x2b3036, { roughness: 0.95 }), -72, (DZ - 21 + RZ + 4) / 2, -0.01);   // 서쪽으로 돌아 도크 중심선에 서는 공간까지
+    flat(9, RZ + 2 - (DZ - 8.5), std(0x24282d, { roughness: 0.95 }), INBOUND.roadX, (DZ - 8.5 + RZ + 2) / 2, 0.0);
+    flat(81, 7, std(0x24282d, { roughness: 0.95 }), -92.5, RZ, 0.0);
+    for (let x = -132; x < -53; x += 4) flat(2, 0.15, white, x, RZ, 0.02);
+    for (let z = DZ - 7; z < RZ - 2; z += 4) flat(0.15, 2, white, INBOUND.roadX, z, 0.02);
+    for (const sd of [-1, 1]) flat(12, 0.15, line, INBOUND.wallX - 6.2, DZ + sd * 1.7, 0.02);
     { const c2 = document.createElement('canvas'); c2.width = 1024; c2.height = 128;
       const g2 = c2.getContext('2d'); g2.fillStyle = 'rgba(61,220,132,0.95)'; g2.font = '700 64px "Apple SD Gothic Neo", "Noto Sans KR", sans-serif'; g2.textAlign = 'center'; g2.textBaseline = 'middle';
       g2.fillText('입고 트럭 야드 · 입고 도크', 512, 64);
       const t2 = new THREE.CanvasTexture(c2); t2.colorSpace = THREE.SRGBColorSpace;
-      const m2 = flat(14, 1.75, new THREE.MeshBasicMaterial({ map: t2, transparent: true, depthWrite: false }), -60, -21.5, 0.03); m2.rotation.z = 0; }
+      const m2 = flat(14, 1.75, new THREE.MeshBasicMaterial({ map: t2, transparent: true, depthWrite: false }), -60, DZ - 7, 0.03); m2.rotation.z = 0; }
     const tx = document.createElement('canvas'); tx.width = 1024; tx.height = 128;
     const c = tx.getContext('2d'); c.fillStyle = 'rgba(242,194,48,0.95)'; c.font = '700 64px "Apple SD Gothic Neo", "Noto Sans KR", sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
     c.fillText('출하 트럭 야드 · 도크 1 · 대기 · 도크 2', 512, 64);
@@ -1878,15 +1826,83 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
   // 정비실 비품: 뒤쪽(+z, 앞면이 실내를 봄) 캐비닛 · 공구 카트 · 작업대(공구 타공판) · 소모품 선반 · 에어 컴프레서, 오른쪽 확장 구역에 청소도구,
   // 왼쪽에 소화기 — 양쪽 끝은 정비 휴머노이드 충전 스테이션, 가운데는 비워 통로·바닥 표시가 보이게 한다
   buildTechFurniture() {
-    const G = this.techFurn; G.clear();
-    const M = RENDER.assets.maint;
-    if (!blenderOn() || !M) {   // Blender 모델이 없으면 기본 상자: 공구함(빨강) · 작업대(회색)
-      put(box(0.6, 1.8, 1.6, std(0xc0392b)), -2.15, 0.9, -1.4, G); put(box(0.7, 0.9, 1.6, MAT.steel), 2.15, 0.45, -1.4, G); return;
+    for (const { furn: G } of this.techRooms ?? []) {   // 정비실마다 같은 비품 (정밀조립 · A-1 · A-2)
+      G.clear();
+      const M = RENDER.assets.maint;
+      if (!blenderOn() || !M) {   // Blender 모델이 없으면 기본 상자: 공구함(빨강) · 작업대(회색)
+        put(box(0.6, 1.8, 1.6, std(0xc0392b)), -2.15, 0.9, -1.4, G); put(box(0.7, 0.9, 1.6, MAT.steel), 2.15, 0.45, -1.4, G); continue;
+      }
+      const place = (name, x, z, ry = Math.PI) => { const o = M.getObjectByName(name).clone(); o.position.set(x, 0, z); o.rotation.set(0, ry, 0); G.add(o); return o; };
+      place('M_Locker', -2.0, -0.05); place('M_ToolChest', -1.15, 0.0); place('M_Workbench', 0.35, -0.2);
+      place('M_Shelf', 1.95, -0.05); place('M_Compressor', 3.1, -0.15); place('M_Cleaning', 4.35, -0.55);
+      place('M_Extinguisher', -2.25, -1.0, Math.PI / 2);   // (A형 사다리는 쓰는 작업이 없어 두지 않는다)
     }
-    const place = (name, x, z, ry = Math.PI) => { const o = M.getObjectByName(name).clone(); o.position.set(x, 0, z); o.rotation.set(0, ry, 0); G.add(o); return o; };
-    place('M_Locker', -2.0, -0.05); place('M_ToolChest', -1.15, 0.0); place('M_Workbench', 0.35, -0.2);
-    place('M_Shelf', 1.95, -0.05); place('M_Compressor', 3.1, -0.15); place('M_Cleaning', 4.35, -0.55);
-    place('M_Extinguisher', -2.25, -1.0, Math.PI / 2);   // (A형 사다리는 쓰는 작업이 없어 두지 않는다)
+  }
+
+  // 확장 선반 (A-1 유연생산 · A-2 적응가공 자재): 물류 선반 바로 북쪽에 같은 줄로 이어 선 4열 × 3단 팔레트 선반 — 서쪽 면 입고(지게차) · 동쪽 면 출고
+  // 열(북 → 남): A-1 원재료 · A-1 부품 · A-2 원재료 · A-2 부품, 한 칸 = 입고 팔레트 1개 (receiving.js XRACK · XWH) — 재고만큼 차고 투입할수록 줄어든다
+  buildXRack() {
+    const r = this.root, LV = [0.3, 1.9, 3.5], H = XRACK.len / 2;
+    const rack = put(new THREE.Group(), XRACK.x, 0, XRACK.z, r); rack.rotation.y = Math.PI / 2;   // 로컬 +x = 북쪽 (물류 선반과 같은 방향)
+    for (let k = 0; k <= 4; k++) for (const z of [-1, 1]) put(box(0.12, 5.2, 0.12, MAT.accent), -H + k * XRACK.pitch, 2.6, z, rack);   // 칸마다 기둥
+    for (const x of [-H, H]) for (const [y0, sg] of [[0.3, 1], [2.7, -1]]) for (const sd of [-1, 1]) { const br = put(box(0.04, 2.6, 0.04, MAT.steel), x, y0 + 1.2, 0, rack); br.rotation.x = sd * sg * 0.72; }   // 끝면 X 브레이싱
+    for (const z of [-1, 1]) put(box(XRACK.len, 0.14, 0.12, MAT.accent), 0, 5.15, z, rack);   // 크라운 프레임
+    for (const y of LV) for (const z of [-0.95, 0.95]) put(box(XRACK.len, 0.12, 0.08, MAT.orange), 0, y, z, rack);   // 앞뒤 로드 빔
+    this.xSlots = {};
+    for (const I of WH_ITEMS.filter((x) => x.zone)) {
+      const lx = -(xrackZ(I.key) - XRACK.z), Z = XWH[I.zone], tint = std(Z.col), slots = [];
+      for (const y of LV) {
+        put(box(1.5, 0.12, 1.6, MAT.pallet), lx, y + 0.11, 0, rack);
+        if (I.kind === 'raw') {   // 원재료: 아래·위 두 묶음 (A-1 패널 블랭크 묶음 · A-2 주조 소재 상자)
+          const mat = I.zone === 'flex' ? MAT.steel : MAT.crate;
+          const lo = put(box(1.35, 0.42, 1.4, mat), lx, y + 0.38, 0, rack), hi = put(box(1.35, 0.42, 1.4, mat), lx, y + 0.82, 0, rack);
+          put(box(1.36, 0.06, 0.06, tint), lx, y + 0.6, 0.71, rack);   // Zone 색 띠 (동쪽 면)
+          slots.push({ y, lo, hi });
+        } else {                  // 부품: Zone 색 토트 4개
+          const bins = [0, 1, 2, 3].map((k) => put(box(0.62, 0.36, 0.66, tint), lx - 0.34 + (k % 2) * 0.68, y + 0.37, -0.36 + Math.floor(k / 2) * 0.72, rack));
+          slots.push({ y, bins });
+        }
+      }
+      this.xSlots[I.key] = { I, slots, shown: undefined };
+      put(makeSignSprite(I.label, I.zone === 'flex' ? '#6ab8ff' : '#ff9a6a', 1.5), XRACK.x + 1.25, 4.75, xrackZ(I.key), r);   // 열 표지 (동쪽 면)
+    }
+    // 확장 선반 재고 현황판: 선반 꼭대기 위(동쪽을 향함) — 현황판 제목이 선반 이름을 겸한다
+    const sc = document.createElement('canvas'); sc.width = 1100; sc.height = 420;
+    this.xBoard = { cv: sc, tex: new THREE.CanvasTexture(sc), key: '' }; this.xBoard.tex.colorSpace = THREE.SRGBColorSpace; this.xBoard.tex.anisotropy = 8;
+    const bd = put(new THREE.Group(), XRACK.x, 6.5, XRACK.z, r); bd.rotation.y = Math.PI / 2; bd.scale.setScalar(0.8);
+    put(box(XRACK.len + 0.2, 2.85, 0.12, std(0x0b0d10, { roughness: 0.5, metalness: 0.4 })), 0, 0, -0.07, bd);
+    put(new THREE.Mesh(new THREE.PlaneGeometry(XRACK.len, (XRACK.len * 420) / 1100), new THREE.MeshBasicMaterial({ map: this.xBoard.tex, toneMapped: false })), 0, 0, 0, bd);
+    bd.traverse((o) => (o.castShadow = false));
+  }
+  // 확장 선반 칸 채움: 원재료 칸은 팔레트 반마다 한 묶음씩, 부품 칸은 4분의 1마다 토트 하나씩
+  updateXRack() {
+    for (const X of Object.values(this.xSlots ?? {})) {
+      const v = stockOf(this.sim, X.I.key); if (v === X.shown) continue; X.shown = v;
+      X.slots.forEach((sl, i) => {
+        const n = Math.max(0, Math.min(X.I.pallet, v - i * X.I.pallet));
+        if (sl.lo) { sl.lo.visible = n > 0; sl.hi.visible = n > X.I.pallet / 2; } else sl.bins.forEach((b, k) => (b.visible = k < Math.ceil((n / X.I.pallet) * 4)));
+      });
+    }
+    const B = this.xBoard; if (!B) return;
+    const sim = this.sim, vals = WH_ITEMS.filter((x) => x.zone).map((I) => [I, stockOf(sim, I.key)]), st = sim.zoneStarved ?? {};
+    const key = vals.map(([, v]) => v).join('|') + Object.values(st).join('|');
+    if (key === B.key) return; B.key = key;
+    const c = B.cv.getContext('2d'), W = B.cv.width, F = '"Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+    c.fillStyle = '#04121f'; c.fillRect(0, 0, W, B.cv.height);
+    c.fillStyle = '#e8eef4'; c.font = `800 42px ${F}`; c.textBaseline = 'middle'; c.fillText('📦 확장 선반 · A-1 유연생산 · A-2 적응가공', 30, 44);
+    vals.forEach(([I, v], k) => {
+      const y = 112 + k * 64, x0 = 250, w = 540, h = 36, f = Math.max(0, Math.min(1, v / I.cap));
+      c.font = `700 32px ${F}`; c.fillStyle = I.zone === 'flex' ? '#6ab8ff' : '#ff9a6a'; c.fillText(I.label, 30, y);
+      c.fillStyle = '#16232f'; c.fillRect(x0, y - h / 2, w, h);
+      c.fillStyle = v <= I.reorder ? '#ff8a1f' : I.kind === 'raw' ? '#9aa4ae' : '#3d8bff'; c.fillRect(x0, y - h / 2, w * f, h);
+      for (let s = 1; s < 3; s++) { c.fillStyle = '#04121f'; c.fillRect(x0 + (w * s) / 3 - 2, y - h / 2, 4, h); }   // 선반 칸(3단) 구분
+      c.fillStyle = '#ffffff'; c.fillRect(x0 + w * (I.reorder / I.cap) - 2, y - h / 2 - 7, 4, h + 14);   // 재주문점
+      c.font = `700 30px ${F}`; c.fillStyle = '#e8eef4'; c.fillText(`${v} / ${I.cap}${I.unit}`, x0 + w + 20, y);
+    });
+    const starved = Object.entries(st).filter(([, on]) => on).map(([z]) => XWH[z].code);
+    c.font = `700 30px ${F}`; c.fillStyle = starved.length ? '#ff8a1f' : '#8fb3c9';
+    c.fillText(starved.length ? `⛔ ${starved.join(' · ')} 투입구 자재 대기 — 입고 트럭 도착 시 재개` : '투입구가 대상물 1개마다 원재료 1 · 부품 키트 1을 꺼냄 · 흰 선 = 재주문점', 30, 382);
+    B.tex.needsUpdate = true;
   }
 
   buildAreas() {
@@ -1945,10 +1961,13 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     put(box(10.4, 2.95, 0.12, std(0x0b0d10, { roughness: 0.5, metalness: 0.4 })), 0, 0, -0.07, bd);
     put(new THREE.Mesh(new THREE.PlaneGeometry(10, 2.73), new THREE.MeshBasicMaterial({ map: this.whBoard.tex, toneMapped: false })), 0, 0, 0, bd);
     bd.traverse((o) => (o.castShadow = false));   // 왼쪽 벽에 붙은 재고 현황판도 그림자 없음
+    this.buildXRack();
     // 드론 이착륙·충전 패드 (피지컬AI 단계에서만 보임)
-    // 드론마다 이착륙·충전 패드 (H1·H2·H3…, AMR 복귀 전용로 왼쪽에 세로 한 줄) — 운용 대수만큼 보인다. 무선 충전기는 복귀로 반대쪽(왼쪽)
-    this.dronePads = [0, 1, 2, 3].map((i) => {
-      const p = dronePad(i), g = put(new THREE.Group(), p.x, 0, p.z, r);
+    // 드론마다 이착륙·충전 패드 (H1·H2·H3…, 사족보행 충전 스테이션 바로 아래 세로 한 줄) — 운용 대수만큼 보인다. 무선 충전기는 서쪽
+    // 확장 Zone 드론 이착륙장도 같은 모양 (A-1 위쪽 · A-2 아래쪽 로봇 스테이션 — zonedefs.js ZONE_FAC.pads) · 그 Zone 드론이 운용 중일 때만 보인다
+    const padList = [...[0, 1, 2, 3].map((i) => ({ i, zone: null, p: dronePad(i) })), ...Object.entries(ZONE_FAC).flatMap(([zone, F]) => F.pads.map((p, i) => ({ i, zone, p })))];
+    this.dronePads = padList.map(({ i, zone, p }) => {
+      const g = put(new THREE.Group(), p.x, 0, p.z, r); g.userData.pad = { i, zone };
       const padC = document.createElement('canvas'); padC.width = padC.height = 256;
       const pc = padC.getContext('2d'); pc.fillStyle = '#1d2a3a'; pc.beginPath(); pc.arc(128, 128, 124, 0, Math.PI * 2); pc.fill();
       pc.strokeStyle = '#37e8ff'; pc.lineWidth = 10; pc.beginPath(); pc.arc(128, 128, 110, 0, Math.PI * 2); pc.stroke();
@@ -1963,16 +1982,20 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     for (let i = 0; i < 4; i++) {
       const L = chgLoc(i);
       const pad = put(new THREE.Mesh(new THREE.PlaneGeometry(2.0, 2.4), std(0x2b4a3a)), L.x, 0.012, L.z, r); pad.rotation.x = -Math.PI / 2;
-      const post = put(box(0.4, 1.3, 0.3, MAT.white), L.x, 0.65, L.z + 1.5, r);
+      const post = put(box(0.4, 1.3, 0.3, MAT.white), L.x, 0.65, L.post, r);   // 충전 기둥: 통로 반대쪽
       const m = emis(0x3dff8a, 1.5);
       put(box(0.25, 0.25, 0.02, m, false), 0, 0.3, -0.16, post);
       this.chargers.push({ group: pad, post, m });
     }
     // 정비실
-    // 정비실: 오른쪽으로 확장 — 로컬 x −2.5 ~ +5.1 (x 19.4에서 1.5m 앞까지)
-    const tech = (this.tech = put(new THREE.Group(), LOC.TECH.x + 0.8, 0, 16.0, r));   // 정비실 기준점 (sim.js TECH_ROOM과 같은 자리)
-    put(box(7.6, 0.02, 3.5, std(0x6b4a2a)), 1.3, 0.01, -1.5, tech);
-    this.techFurn = put(new THREE.Group(), 0, 0, 0, tech);   // 비품 (Blender 모델은 앱 시작 후 불러오므로 setup마다 다시 채움)
+    // 정비실: 왼쪽 확장동 AMR 스테이션 옆, 출입구가 왼쪽 세로 통로(동쪽)를 보게 돌려 둔다 — 로컬 x −2.5 ~ +5.1 (zonedefs.js TECH_ROOM · sim.js techAt과 같은 자리·회전)
+    // Zone마다 하나씩: 정밀조립 · A-1 유연생산(위쪽 뒷벽 앞) · A-2 적응가공(아래쪽 건물 앞면 앞) — zonedefs.js TECH_ROOMS
+    this.techRooms = Object.values(TECH_ROOMS).map((R) => {
+      const g = put(new THREE.Group(), R.x, 0, R.z, r); g.rotation.y = R.rot;
+      put(box(7.6, 0.02, 3.5, std(0x6b4a2a)), 1.3, 0.01, -1.5, g);
+      return { R, g, furn: put(new THREE.Group(), 0, 0, 0, g) };   // 비품 (Blender 모델은 앱 시작 후 불러오므로 setup마다 다시 채움)
+    });
+    this.tech = this.techRooms[0].g;
     this.buildTechFurniture();
     // 정비실 바닥 표시 (단계별 문구: 레거시·자동화 — 정비원, 피지컬AI — 정비 휴머노이드) + 뒤쪽 표지판
     const textTex = (lines, w, h, { bg, fg, sub, border }) => {
@@ -1985,13 +2008,14 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       if (lines[1]) { let fs = c.height * 0.2; x.font = `700 ${fs}px ${F}`; while (x.measureText(lines[1]).width > c.width * 0.88) { fs *= 0.94; x.font = `700 ${fs}px ${F}`; } x.fillStyle = sub; x.fillText(lines[1], c.width / 2, c.height * 0.76); }
       const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t;
     };
-    this.techMarks = {};
-    for (const [k, sub] of [['human', '정비원 대기 · 고장 수리 · 예지정비'], ['humanoid', '정비 휴머노이드 대기 · 고장 수리 · 예지정비']]) {
-      const m = put(new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.0), new THREE.MeshBasicMaterial({ map: textTex(['🔧 정비실', sub], 3.4, 1.0, { fg: 'rgba(255,255,255,0.92)', sub: 'rgba(255,214,140,0.95)', border: 'rgba(242,194,48,0.9)' }), transparent: true, depthWrite: false })), 1.3, 0.03, -1.5, tech);   // 정비실 구역 정중앙
-      m.rotation.x = -Math.PI / 2; m.visible = false; this.techMarks[k] = m;
+    this.techMarks = { human: [], humanoid: [] };
+    for (const { R, g } of this.techRooms) for (const [k, sub] of [['human', '정비원 대기 · 고장 수리 · 예지정비'], ['humanoid', '정비 휴머노이드 대기 · 고장 수리 · 예지정비']]) {
+      const m = put(new THREE.Mesh(new THREE.PlaneGeometry(3.4, 1.0), new THREE.MeshBasicMaterial({ map: textTex([`🔧 ${R.label}`, sub], 3.4, 1.0, { fg: 'rgba(255,255,255,0.92)', sub: 'rgba(255,214,140,0.95)', border: 'rgba(242,194,48,0.9)' }), transparent: true, depthWrite: false })), 1.3, 0.03, -1.5, g);   // 정비실 구역 정중앙
+      m.rotation.x = -Math.PI / 2; m.rotation.z = -R.rot; m.visible = false; this.techMarks[k].push(m);   // 바닥 글씨는 정비실을 돌려도 건물 앞쪽에서 바로 읽히게
     }
     // 관제/서버
-    const srv = (this.server = put(new THREE.Group(), LOC.CTRL.x, 0, bk(-17.5), r));   // 관제 서버 랙: 중앙 관제 디스플레이 가운데 아래
+    // 정밀조립 데이터 서버 랙: 왼쪽 벽(x −51) 앞, 로봇 디스플레이 아래(z −29) — 벽을 등지고 건물 안(+x)을 본다. AMR 대기열·출동 차로(z −23 ~ 0)보다 뒤쪽
+    const srv = (this.server = put(new THREE.Group(), SRV.x, 0, SRV.z, r)); srv.rotation.y = Math.PI / 2;
     this.serverLeds = [];
     for (const x of [-1.6, -0.5, 0.6, 1.7]) {
       const rk = put(box(0.9, 2.3, 1.0, MAT.dark), x, 1.15, 0, srv);
@@ -2001,10 +2025,10 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
         put(box(0.6, 0.04, 0.02, m, false), 0, -0.8 + k * 0.32, 0.51, rk);
       }
     }
-    this.serverPos = new THREE.Vector3(LOC.CTRL.x, 2.6, bk(-17));
+    this.serverPos = new THREE.Vector3(SRV.x + 0.5, 2.6, SRV.z);
     // 로고 표시는 서버 랙 묶음과 따로 둔다 — 레거시 단계는 관제 서버를 숨기지만 로고는 모든 단계에 보인다
-    const brand = put(new THREE.Group(), LOC.CTRL.x, 0, bk(-17.5), r);
-    // 서버 랙 양옆 로고 스탠드(랙과 같은 줄, 관제 화면 아래) — 왼쪽 과학기술정보통신부 · 오른쪽 정보통신산업진흥원
+    const brand = put(new THREE.Group(), SRV.x, 0, SRV.z, r); brand.rotation.y = Math.PI / 2;
+    // 서버 랙 양옆 로고 스탠드(랙과 같은 줄, 관제 화면 아래) — 건물 안에서 벽을 보았을 때 왼쪽(앞 +z) 과학기술정보통신부 · 오른쪽(뒤 −z) 정보통신산업진흥원
     // 흰 바탕이 블룸으로 번지지 않도록 회백색으로 낮춰 표시한다
     for (const [x, file] of [[-3.25, 'assets/msit_logo.png'], [3.25, 'assets/nipa_logo.png']]) {
       const tex = new THREE.TextureLoader().load(file); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
@@ -2019,12 +2043,10 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     this.screenCanvas = c;
     this.screenTex = new THREE.CanvasTexture(c); this.screenTex.colorSpace = THREE.SRGBColorSpace;
     const scrMat = new THREE.MeshBasicMaterial({ map: this.screenTex, toneMapped: false });
-    // 벽 기둥 앞(z -19.15)에 설치 — 18×4m: 높이는 양옆 CCTV 전광판·로봇 디스플레이(12×4m)와 같고 폭만 1.5배
-    // 뒷벽 왼쪽 두 번째 기둥(x −36) ~ 오른쪽 네 번째 기둥(x 9) 사이: CCTV 전광판(x −29.325) → 관제 화면 → 로봇 디스플레이(x 2.325), 기둥·화면 사이 간격 모두 0.525m
-    this.screen = put(new THREE.Mesh(new THREE.PlaneGeometry(18, 4), scrMat), LOC.CTRL.x, 5.1, bk(-19.15), r);
+    // 18×4m: 높이는 양옆 CCTV 전광판·로봇 디스플레이(12×4m)와 같고 폭만 1.5배
+    // 정밀조립 화면은 왼쪽 벽(x −51) 안쪽에 건물 안(+x)을 보고 한 줄로 (zonedefs.js LEFT_WALL): 로봇 디스플레이 → 관제 화면 → CCTV 전광판, 간격 0.5m
+    this.screen = put(new THREE.Mesh(new THREE.PlaneGeometry(18, 4), scrMat), LEFT_WALL.x, 5.1, LEFT_WALL.ctrlZ, r); this.screen.rotation.y = Math.PI / 2;
     put(new THREE.Mesh(new THREE.BoxGeometry(18.3, 4.3, 0.12), std(0x14181e, { roughness: 0.6, metalness: 0.3 })), 0, 0, -0.08, this.screen);
-    // 관제 데스크
-    put(box(3.5, 0.8, 1.0, MAT.white), LOC.CTRL.x, 0.4, LOC.CTRL.z - 1.4, srv.parent);
   }
 
   // 모드별 설비/인원/조명 구성
@@ -2101,7 +2123,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     this.buildCCTV(sim);
     this.build5G(sim);
     this.cctvG.traverse((o) => (o.castShadow = false));   // 천장 CCTV(카메라·지지대)는 바닥에 그림자를 드리우지 않는다
-    this.techMarks.human.visible = sim.mode.techKind !== 'humanoid'; this.techMarks.humanoid.visible = sim.mode.techKind === 'humanoid';
+    for (const m of this.techMarks.human) m.visible = sim.mode.techKind !== 'humanoid'; for (const m of this.techMarks.humanoid) m.visible = sim.mode.techKind === 'humanoid';
 
     // 컨베이어 (경로를 따라 직선 구간별로 생성, 코너는 겹쳐서 이음). 미사용 분기는 멈춘 채 어둡게
     const idle = sim.idleLinks.map((l) => ({ from: l.from, to: l.to, path: l.path, idle: true }));
@@ -2170,7 +2192,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     });
     this.quadViews = sim.quads.map((q) => robotView(q, makeQuadruped(), 1.5, 'quad'));
     this.droneViews = (sim.drones ?? []).map((d) => robotView(d, makeDrone(), 0.7, 'drone'));
-    this.dronePads.forEach((g, i) => (g.visible = i < (sim.drones ?? []).length));
+    this.dronePads.forEach((g) => { const P = g.userData.pad; g.visible = (sim.drones ?? []).some((d) => (d.zone ?? null) === P.zone && d.idx === P.i); });
     this.workerViews = sim.workers.map((w) => {
       const hat = { 반장: 0xffffff, 모니터링: 0x2aa8ff, 관제: 0x2aa8ff, 검사원: 0x9b59b6 }[w.role] ?? 0xf2c230;
       const g = makeWorker(hat, w.role === '모니터링' || w.role === '관제' ? std(0x2a6fdb) : MAT.hiVis);
@@ -2213,7 +2235,13 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     return null;
   }
   pickTargets() {
-    return [...this.stationViews.map((s) => s.group), this.dyn, ...(this.cctvG ? [this.cctvG] : []), ...(this.netG?.visible ? [this.netG] : [])];
+    return [...this.stationViews.map((s) => s.group), this.dyn, ...(this.xzones ? [this.xzones.root] : []), ...(this.cctvG ? [this.cctvG] : []), ...(this.netG?.visible ? [this.netG] : [])];
+  }
+  // 셀 로봇 찾기: 정밀조립 셀(stationViews) → 확장 Zone 셀(zones.js) — { robot, st }
+  cellRobot(stationId, idx) {
+    const sv = this.stationViews.find((s) => s.st.id === stationId);
+    if (sv) return sv.parts.robots?.[idx] ? { robot: sv.parts.robots[idx], st: sv.st } : null;
+    return this.xzones?.cellRobot(stationId, idx) ?? null;
   }
   selectRobot(ref) {
     this.telemetry = ref ? new RobotTelemetry(this, ref) : null;
@@ -2264,10 +2292,11 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     decal(`▶ 도어트림 라인 (${ZONE_PRODUCTS.doortrim.customer})`, 'rgba(245,189,92,0.95)', 12, 1, 1.6, 56);
     decal(`▶ e-axle 라인 (${ZONE_PRODUCTS.eaxle.customer})`, 'rgba(184,155,255,0.95)', 12, 1, -1.6, 56);
     if (!sim.useAMR) return;
-    // AMR 전용 동선: 대기열, 복귀 전용로(적재장 → 앞쪽 → 대기열), 출동 차로(대기열 → 투입 스테이션)
+    // AMR 전용 동선 (왼쪽 확장동 위쪽 AMR 스테이션): 대기열(남북 한 줄), 복귀 전용로(적재장 → 뒤 통로 뒤 → 대기열 동쪽 복귀 차로), 출동 차로(대기열 서쪽 → 남쪽 끝 → 동쪽 투입 스테이션)
     const p0 = amrPark(0), pN = amrPark(ZONE_AMR.count - 1);
-    flat(pN.x - p0.x + 1.4, 1.9, new THREE.MeshStandardMaterial({ color: 0x2bb3a6, transparent: true, opacity: 0.22, depthWrite: false }), (p0.x + pN.x) / 2, AMR_LANES.park, 0.01);
-    decal('AMR 대기열', 'rgba(127,224,214,0.95)', 8, p0.x + 3.5, AMR_LANES.park + 1.3, 64);
+    const { ret, retX, dockX, parkX, retLaneX, outX } = AMR_LANES;
+    flat(1.9, p0.z - pN.z + 1.4, new THREE.MeshStandardMaterial({ color: 0x2bb3a6, transparent: true, opacity: 0.22, depthWrite: false }), parkX, (p0.z + pN.z) / 2, 0.01);
+    decal('AMR 대기열', 'rgba(127,224,214,0.95)', 5, parkX, pN.z - 1.6, 64);
     const tape = new THREE.MeshBasicMaterial({ color: 0x7fe0d6, transparent: true, opacity: 0.7 });
     const dash = (ax, az, bx, bz) => {
       const L = Math.hypot(bx - ax, bz - az), n = Math.floor(L / 1.2);
@@ -2276,11 +2305,10 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
         m.rotation.z = Math.atan2(bz - az, bx - ax) * -1;
       }
     };
-    const { ret, out, retX, dockX } = AMR_LANES;
-    dash(retX, 2.4, retX, ret); dash(retX, ret, p0.x, ret);
-    dash(pN.x, out, dockX, out); dash(dockX, out, dockX, 0.6);
-    decal('◀ AMR 복귀 전용로', 'rgba(127,224,214,0.9)', 10, 8, ret + 0.9, 56);
-    decal('◀ AMR 출동 차로', 'rgba(127,224,214,0.9)', 8, -24, out - 0.9, 56);
+    dash(retX, -2.4, retX, ret); dash(retX, ret, retLaneX, ret); dash(retLaneX, pN.z, retLaneX, p0.z);
+    dash(outX, pN.z, outX, 0); dash(outX, 0, dockX - 0.6, 0);
+    decal('◀ AMR 복귀 전용로', 'rgba(127,224,214,0.9)', 8, 8, ret, 56);
+    decal('AMR 출동 차로 ▶', 'rgba(127,224,214,0.9)', 7, -40.6, 1.1, 56);
   }
 
   setLabels(on) {
@@ -2449,7 +2477,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       this.whPartsShown = parts;
       this.whPartSlots.forEach((sl, i) => { const n = Math.max(0, Math.min(WH.partsPallet, parts - i * WH.partsPallet)); const b = Math.ceil(n / (WH.partsPallet / 6)); sl.bins.forEach((x, k) => (x.visible = k < b)); });
     }
-    this.drawWhBoard();
+    this.drawWhBoard(); this.updateXRack();
     if (this.asrs && !REDUCED_MOTION) {   // AS/RS: 셔틀이 단마다 칸 ↔ 리프트를 오가고 리프트가 오르내린다
       this.asrs.shuttles.forEach((sh, i) => { sh.position.x = sh.userData.x0 + Math.sin(t * 0.55 + i * 1.3) * 1.7; });
       this.asrs.lift.position.y = 0.3 + (1 - Math.cos(t * 0.45)) * 1.6;
@@ -2504,7 +2532,6 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       vv.el.innerHTML = `${v.uid ? `<i class="uid">${v.uid}</i>` : ''}${v.id}${v.kind === 'agv' ? ` · ${v.battery.toFixed(0)}%` : ''}<em>${v.task ?? '대기'}</em>`;
     }
     this.updateTrucks(t, rdt);
-    if (this.boardCanvas && this.sim && t - (this.boardT ?? -1) > 1) { this.boardT = t; this.drawBoard(); }
     for (const cv of this.carrierViews) {
       const c = cv.v;
       cv.g.visible = c.state !== 'line';
@@ -2986,24 +3013,47 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     const AMBER = '245,166,35', GREEN = '61,220,132';
     const legacy = sim.mode.key === 'traditional', agv = sim.mode.vehicleKind === 'agv';
     // 물류존: 자재창고 랙 · AGV 상차 · 부품 랙 피킹
-    area(-46.3, -6.9, -40.6, 4.3, AMBER, '📦 물류존', agv ? '자재창고 · AGV 자재 상차 · 부품 랙 피킹' : '자재창고 · 지게차 자재 상차 · 부품 랙', -42.4, 3.7, 3.4);
+    // 북쪽으로 확장 선반(A-1 유연생산 · A-2 적응가공 자재)까지 — 앞쪽 통로(z 9) 바로 앞
+    area(-46.3, XRACK.z - XRACK.len / 2 - 0.2, -40.6, 4.3 + LOGI_DZ, AMBER, '📦 물류존', `${agv ? '자재창고 · AGV 자재 상차 · 부품 랙 피킹' : '자재창고 · 지게차 자재 상차 · 부품 랙'} · 확장 선반(A-1·A-2 자재)`, -42.4, 3.7 + LOGI_DZ, 3.4);
     // 입고 지게차 전용 영역: 입고 도크 ↔ 창고 랙 왼쪽 입고 칸 ↔ 대기 — 뒤쪽 통로·세로 통로와 떨어져 있어 로봇 이동 경로와 겹치지 않는다
     { const Z = INBOUND.zone; area(Z.x0, Z.z0, Z.x1, Z.z1, GREEN, `🚚 입고 ${sim.mode.key === 'dark' ? '자율 ' : ''}지게차 전용`, '로봇 통행 금지 · 도크 ↔ 선반 입고 면', (Z.x0 + Z.x1) / 2, Z.z1 - 0.6, 4.0); }
     // 입고 지게차 주차 칸 (대기 자리, 도크 쪽을 향해 반듯이 주차)
     { const rc = sim.forklifts?.find((f) => f.receiver); if (rc) { const hx = rc.home.x, hz = rc.home.z, pl = new THREE.MeshBasicMaterial({ color: 0xf2f5f8 });
-      for (const sd of [-1, 1]) flat(0.1, 2.9, pl, hx + sd * 0.9, hz + 0.15, 0.02);   // 북쪽(뒷벽 쪽) 끝선, 남쪽에서 들어온다
-      flat(1.9, 0.1, pl, hx, hz - 1.3, 0.02); } }
+      const s = Math.sign(hz - INBOUND.dockZ);   // 도크 반대쪽(건물 맨 아래) 끝선, 도크 쪽에서 들어온다
+      for (const sd of [-1, 1]) flat(0.1, 2.9, pl, hx + sd * 0.9, hz - s * 0.15, 0.02);
+      flat(1.9, 0.1, pl, hx, hz + s * 1.3, 0.02); } }
     // 물류 대기: 부품 보충 휴머노이드 (피지컬AI)
-    if (sim.helpers?.length) area(-40.4, -6.9, -37.0, 4.3, GREEN, '물류 대기', '부품 보충 휴머노이드', -38.7, 3.7, 3.0);   // 물류존(x −46.3 ~ −40.6)과 오른쪽 로봇 통로(x −36.8~) 사이, 위·아래를 물류존과 맞춤
+    // 물류존(x −46.3 ~ −40.6)과 오른쪽 로봇 통로(x −36.8~) 사이 물류 대기 줄 — 도크 2칸씩 세 묶음 (북쪽부터 A-1 · A-2 · 정밀조립), 묶음마다 바닥 구역·이름
+    for (const [zone, title, sub] of [['flex', 'A-1 물류 대기', '부품 키트 → A-1 투입구'], ['adapt', 'A-2 물류 대기', '부품 키트 → A-2 투입구'], [null, '정밀조립 물류 대기', '부품 보충 → 셀 부품 선반']]) {
+      const hs = (sim.helpers ?? []).filter((h) => (h.zone ?? null) === zone); if (!hs.length) continue;
+      const z = hs[0].home.z; area(-40.4, z - 1.3, -37.0, z + 1.5, GREEN, title, sub, -38.7, z + 1.05, 3.0);
+    }
     // 물류 대기: AGV(레거시는 지게차) 대기·충전 — 충전 패드 4칸과 충전 기둥
-    area(-15.6, fr(12.0), -2.8, fr(15.5), GREEN, agv ? '🔋 물류 대기 · AGV 충전' : '물류 대기 · 지게차', agv ? '자재 공급 AGV 대기·자동 충전' : '자재 운반 지게차 대기 (유인)', -9.2, fr(16.25), 6.5);
-    // 사족보행 충전 스테이션 (피지컬AI): 도킹 충전기 + 상태등 (충전 중 초록 점멸, 대기 파랑)
+    { const a = chgLoc(0), b = chgLoc(3);   // 왼쪽 확장동 위쪽, 앞 통로(z 9) 바로 북쪽 · 이름은 북쪽(AMR 출동 차로 쪽) 빈 바닥에
+      area(a.x - 1.3, a.post - 0.5, b.x + 1.3, a.z + 1.5, GREEN, agv ? '🔋 물류 대기 · AGV 충전' : '물류 대기 · 지게차', agv ? '자재 공급 AGV 대기·자동 충전' : '자재 운반 지게차 대기 (유인)', (a.x + b.x) / 2, a.post - 1.4, 6.5); }
+    // 로봇 스테이션 (피지컬AI): 사족보행 충전 스테이션(도킹 충전기 + 상태등 — 충전 중 초록 점멸, 대기 파랑)과 바로 아래 드론 이착륙·충전 패드를 한 구역으로 표시
     this.quadDocks = [];
+    const mq = (sim.quads ?? []).filter((q) => !q.zone);
+    if (mq.length) {
+      const xs = mq.map((q) => q.home.x), zc = mq[0].home.z, nd = (sim.drones ?? []).filter((d) => !d.zone).length;
+      const z1 = nd ? dronePad(nd - 1).z + DRONE_PAD.r + 0.5 : zc + 1.9, x0 = Math.min(...xs) - 1.2, x1 = Math.max(...xs) + 1.2;
+      area(x0, zc - 1.2, x1, z1, '90,169,255', nd ? '🔋 로봇 스테이션' : '🔋 사족보행 충전 스테이션', nd ? `사족보행 ${mq.length}대 도킹 충전 · 드론 ${nd}대 이착륙·무선 충전` : `순찰 로봇 ${mq.length}대 · 30% 이하 자동 복귀 도킹 충전`, (x0 + x1) / 2, z1 + 0.65, 4.6);
+    }
+    // 확장 Zone 로봇 스테이션 (A-1 위쪽 · A-2 아래쪽): 그 Zone 사족보행 2대 + 드론 2대
+    for (const [zone, F] of Object.entries(ZONE_FAC)) {
+      const qs = (sim.quads ?? []).filter((q) => q.zone === zone), nd = (sim.drones ?? []).filter((d) => d.zone === zone).length, A = F.robotArea, code = EXTRA_ZONES.find((Z) => Z.key === zone).code;
+      if (!qs.length && !nd) continue;
+      const tz = zone === 'flex' ? A.z1 + 0.65 : A.z0 - 0.65;   // 이름은 통로 쪽
+      area(A.x0, A.z0, A.x1, A.z1, '90,169,255', `🔋 ${code} 로봇 스테이션`, `사족보행 ${qs.length}대 도킹 충전 · 드론 ${nd}대 이착륙·무선 충전`, (A.x0 + A.x1) / 2, tz, 4.6);
+    }
+    // 확장 Zone AMR 스테이션 (모든 단계 — 레거시는 대차): 복귀로 위 일방통행 고리의 대기 줄 · 무선 충전 (zones.js)
+    for (const [zone, F] of Object.entries(ZONE_FAC)) {
+      const A = F.station.area, Z = EXTRA_ZONES.find((x) => x.key === zone), legacy = sim.mode.key === 'traditional';
+      area(A.x0, A.z0, A.x1, A.z1, '43,179,166', `${Z.code} ${legacy ? '대차 대기' : 'AMR 스테이션'}`, `${legacy ? '대차' : 'AMR'} ${Z.amr.count}대 · 투입 대기열이 차면 여기서 대기${legacy ? '' : ' · 무선 충전'}`, (A.x0 + A.x1) / 2, zone === 'flex' ? A.z0 - 0.65 : A.z1 + 0.65, 5.2);
+    }
     if (sim.quads?.length) {
-      const xs = sim.quads.map((q) => q.home.x), zc = sim.quads[0].home.z;
-      area(Math.min(...xs) - 1.2, zc - 1.2, Math.max(...xs) + 1.2, zc + 1.9, '90,169,255', '🔋 사족보행 충전 스테이션', `순찰 로봇 ${sim.quads.length}대 · 30% 이하 자동 복귀 도킹 충전`, (Math.min(...xs) + Math.max(...xs)) / 2, zc + 2.55, 4.6);
       for (const q of sim.quads) {
-        const d = put(new THREE.Group(), q.home.x, 0, q.home.z, g);
+        const d = put(new THREE.Group(), q.home.x, 0, q.home.z, g); d.rotation.y = (q.zone ? ZONE_FAC[q.zone].quadHeading : Math.PI) - Math.PI;   // 도크는 로봇 뒤쪽 (통로 반대쪽)
         put(new THREE.Mesh(new THREE.CircleGeometry(0.7, 28), new THREE.MeshStandardMaterial({ color: 0x1d2a3a, roughness: 0.7 })), 0, 0.012, 0, d).rotation.x = -Math.PI / 2;
         put(box(0.7, 0.55, 0.28, MAT.white), 0, 0.28, 1.05, d);                 // 충전 도크 (로봇 뒤쪽)
         put(box(0.5, 0.06, 0.4, MAT.dark), 0, 0.03, 0.75, d);                    // 충전 접점 판

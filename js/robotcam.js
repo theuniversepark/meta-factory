@@ -1,14 +1,14 @@
 // 로봇 비전 관제 디스플레이 (피지컬AI 단계) — 로봇·드론에 달린 카메라 시점의 실시간 영상 8분할 + AI 추론 오버레이.
 // 영상: 각 로봇 카메라 시점으로 장면을 렌더 타깃의 한 칸에 그린다(프레임마다 한 칸씩 돌아가며 갱신).
 // 오버레이: 카메라로 투영한 객체 인식 박스·신뢰도, 추론 지연, 작업 상태, 현장 이벤트·알람 배너와 하단 알람 띠.
-import { bk, inExtraZone } from './zonedefs.js';
+import { bk, inExtraZone, LEFT_WALL } from './zonedefs.js';
 import * as THREE from 'three';
 import { FIELD_EVENTS, ST_LABEL, moverRadius } from './sim.js';
 import { makeAlarmFx, blinkAlarmFx, ALARM_COLOR, ROBOT_CAMS } from './factory.js';
 
 export const COLS = 4, ROWS = 2;
 const TW = 384, TH = 256, W = COLS * TW, H = ROWS * TH;   // 4×2 분할 (오른쪽 열: 순찰 드론 짐벌·하방 카메라)
-const DISPLAY = { x: 2.325, y: 5.1, z: bk(-19.15), w: 12, h: 4 };   // 뒷벽 왼쪽 두 번째 기둥(x −36) ~ 오른쪽 네 번째 기둥(x 9) 사이 CCTV 전광판·관제 화면·로봇 디스플레이를 같은 간격(0.525m)으로
+const DISPLAY = { x: LEFT_WALL.x, y: 5.1, z: LEFT_WALL.robotZ, w: 12, h: 4 };   // 왼쪽 벽 안쪽 맨 뒤(관제 화면 뒤쪽) — 건물 안(+x)을 본다 (zonedefs.js LEFT_WALL)
 const FONT = '"Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif';
 const CLS_COLOR = { 설비: '#37a0ff', 협동로봇: '#2bd4c6', AMR: '#3ddc84', AGV: '#3ddc84', 휴머노이드: '#b89bff', 사족보행: '#f5d36b', 사람: '#ff5a5a', 누유: '#ff7a3d', 이물질: '#f5b82e', 연기: '#ff5a5a' };
 const hash = (s) => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0) / 4294967295; };
@@ -18,7 +18,7 @@ export class RobotCamWall {
     this.scene = scene; this.renderer = renderer;
     this.rt = new THREE.WebGLRenderTarget(W, H, { samples: 0 });
     this.group = new THREE.Group(); scene.add(this.group);
-    this.group.position.set(DISPLAY.x, DISPLAY.y, DISPLAY.z);
+    this.group.position.set(DISPLAY.x, DISPLAY.y, DISPLAY.z); this.group.rotation.y = Math.PI / 2;
     const frame = new THREE.Mesh(new THREE.BoxGeometry(DISPLAY.w + 0.3, DISPLAY.h + 0.3, 0.12), new THREE.MeshStandardMaterial({ color: 0x14181e, roughness: 0.6, metalness: 0.3 }));
     frame.position.z = -0.08; this.group.add(frame);
     this.screen = new THREE.Mesh(new THREE.PlaneGeometry(DISPLAY.w, DISPLAY.h), new THREE.MeshBasicMaterial({ map: this.rt.texture }));
@@ -104,14 +104,16 @@ export class RobotCamWall {
     const busy = (m) => m.moving || (!m.idle && !m.chgNow && !m.charging);
     for (const m of [...sim.techs, ...sim.helpers]) if (m.kind === 'humanoid' && busy(m)) add('humanoid', feed({ type: 'mover', id: m.id }, m.id, m.kind, { mover: m }));
     for (const m of sim.quads) if (busy(m)) add('quadruped', feed({ type: 'mover', id: m.id }, m.id, m.kind, { mover: m }));
-    { const cs = sim.carriers.filter((m) => m.state === 'line' || m.moving), off = Math.floor(this.t / 5) * 4;   // 운반 AMR은 한 번에 4대까지 — 순환마다 다른 AMR
-      for (let k = 0; k < Math.min(4, cs.length); k++) { const m = cs[(off + k) % cs.length]; add('carrier', feed({ type: 'mover', id: m.id }, m.id, m.kind, { mover: m })); } }
+    { const zc = sim.mode.key === 'traditional' ? [] : (view?.xzones?.carriersAll() ?? []).filter((z) => z.mover.moving).map((z) => z.mover);   // 확장 Zone 운반 AMR도 같은 순환에
+      const cs = [...sim.carriers.filter((m) => m.state === 'line' || m.moving), ...zc], off = Math.floor(this.t / 5) * 4;   // 운반 AMR은 한 번에 4대까지 — 순환마다 다른 AMR
+      for (let k = 0; k < Math.min(4, cs.length); k++) { const m = cs[(off + k) % cs.length]; add('carrier', feed({ type: 'mover', id: m.id }, m.id, m.kind === 'zoneamr' ? 'carrier' : m.kind, { mover: m })); } }
     for (const m of [...sim.vehicles, ...(sim.forklifts ?? [])]) if (busy(m)) add('vehicle', feed({ type: 'mover', id: m.id }, m.id, m.kind, { mover: m }));
     for (const d of sim.drones ?? []) if (d.y > 0.5) add('drone', feed({ type: 'mover', id: d.id }, d.id, 'drone', { mover: d }));
     for (const sv of view?.stationViews ?? []) {
       const st = sv.st, rs = sv.parts.robots; if (!rs?.length || st.state !== 'BUSY') continue;
       rs.forEach((r, idx) => add('cell', feed({ type: 'cell', stationId: st.id, idx }, st.robotUids?.[idx] ?? `${st.name} 로봇 #${idx + 1}`, r.kind, { station: st })));
     }
+    for (const { ref, robot, st, r } of view?.xzones?.cellRobots() ?? []) if (st.state === 'BUSY') add('cell', feed(ref, robot, r.kind, { station: st }));   // 확장 Zone 가동 셀 로봇
     const cats = ['cell', 'humanoid', 'carrier', 'quadruped', 'drone', 'vehicle'].filter((c) => groups.get(c)?.length), out = [];
     for (let k = 0; out.length < [...groups.values()].reduce((a, g) => a + g.length, 0); k++) for (const c of cats) { const g = groups.get(c); if (k < g.length) out.push(g[k]); }
     return out;
@@ -176,14 +178,14 @@ export class RobotCamWall {
     const sim = this.sim, view = this.view; if (!sim || !ref) return null;
     const front = (m, label, h, fwd, ahead, down) => ({ label, pose: () => { const fx = Math.sin(m.heading), fz = Math.cos(m.heading); return { pos: new THREE.Vector3(m.x + fx * fwd, h, m.z + fz * fwd), dir: new THREE.Vector3(fx, -down, fz).normalize(), ahead }; } });
     if (ref.type === 'cell') {
-      const sv = view?.stationViews.find((x) => x.st.id === ref.stationId), r = sv?.parts.robots?.[ref.idx];
+      const cr = view?.cellRobot(ref.stationId, ref.idx), r = cr?.robot, st = cr?.st;   // 정밀조립 셀 · 확장 Zone 셀
       if (!r) return null;
-      if (r.vla) { const up = new THREE.Vector3(); return { label: '손목 카메라 · VLA', pose: () => { const p = r.tip.getWorldPosition(new THREE.Vector3()); up.set(0, 1, 0).transformDirection(r.tip.parent.matrixWorld); return { pos: p.addScaledVector(up, -0.06), dir: up.clone(), ahead: 1.2 }; } }; }
+      if (r.vla || r.wristCam) { const up = new THREE.Vector3(); return { label: r.vla ? '손목 카메라 · VLA' : '손목 카메라', pose: () => { const p = r.tip.getWorldPosition(new THREE.Vector3()); up.set(0, 1, 0).transformDirection(r.tip.parent.matrixWorld); return { pos: p.addScaledVector(up, -0.06), dir: up.clone(), ahead: 1.2 }; } }; }
       if ((r.kind === 'ammr' || r.kind === 'humanoid') && r.cams) return this.anchorCam(r.cams, ref.cam, r.kind === 'ammr' ? 'AMMR' : '휴머노이드');
-      return { label: '셀 상부 카메라', pose: () => { const p = r.root.getWorldPosition(new THREE.Vector3()); const c = new THREE.Vector3(sv.st.x, 1.2, sv.st.z); return { pos: p.add(new THREE.Vector3(0, 2.6, 0)), dir: c.sub(p).normalize(), ahead: 3 }; } };
+      return { label: '셀 상부 카메라', pose: () => { const p = r.root.getWorldPosition(new THREE.Vector3()); const c = new THREE.Vector3(st.x, 1.2, st.z); return { pos: p.add(new THREE.Vector3(0, 2.6, 0)), dir: c.sub(p).normalize(), ahead: 3 }; } };
     }
     const m = [...sim.movers, ...(sim.drones ?? [])].find((x) => x.id === ref.id);
-    if (!m) return null;
+    if (!m) { const zc = view?.xzones?.carrier(ref.id); return zc ? front(zc.mover, '전방 카메라', 0.42, 0.82, 5, 0.12) : null; }   // 확장 Zone 운반 AMR (정밀조립 운반 AMR과 같은 장착 위치)
     if (m.kind === 'drone') return { label: '드론 짐벌 카메라', pose: () => { const fx = Math.sin(m.heading), fz = Math.cos(m.heading), look = m.mode === 'mission' || m.hover > 0; return { pos: new THREE.Vector3(m.x + fx * 0.3, m.y - 0.15, m.z + fz * 0.3), dir: new THREE.Vector3(fx, look ? -2.2 : -0.55, fz).normalize(), ahead: 8 }; } };
     if (m.kind === 'humanoid') {   // 3D 모델의 카메라 앵커(머리 · 양손 · 등) — 허리·머리 회전과 팔 동작을 따라간다
       const mv = [...(this.view?.techViews ?? []), ...(this.view?.helperViews ?? [])].find((x) => x.v === m);
@@ -207,11 +209,18 @@ export class RobotCamWall {
       const keys = r.cams ? ROBOT_CAMS.map(([k]) => k) : [null];
       for (const k of keys) { const c = this.cameraFor(k ? { ...ref, cam: k } : ref); if (c && (r.vla || r.cams || r.kind === 'ammr')) out.push({ ref: k ? { ...ref, cam: k } : ref, robot: uid, cam: k ?? 'wrist', label: c.label, assetKey: `${sv.st.id}_R${idx + 1}`, kind: r.kind }); }
     });
+    // 확장 Zone 셀 로봇 (같은 규칙: 손목 카메라 · AMMR·휴머노이드 4대) — assetKey는 DataHub 자산 id (A_1_C03_R1)
+    for (const { ref, robot, r } of view.xzones?.cellRobots() ?? []) {
+      const keys = r.cams ? ROBOT_CAMS.map(([k]) => k) : [null];
+      for (const k of keys) { const c = this.cameraFor(k ? { ...ref, cam: k } : ref); if (c && (r.wristCam || r.cams)) out.push({ ref: k ? { ...ref, cam: k } : ref, robot, cam: k ?? 'wrist', label: c.label, assetKey: `${ref.stationId}_R${ref.idx + 1}`, kind: r.kind }); }
+    }
     for (const m of [...sim.movers, ...(sim.drones ?? [])]) {
       const ref = { type: 'mover', id: m.id };
       const hum = m.kind === 'humanoid' && this.camsOf(ref).length;
       for (const k of hum ? ROBOT_CAMS.map(([x]) => x) : [null]) { const c = this.cameraFor(k ? { ...ref, cam: k } : ref); if (c) out.push({ ref: k ? { ...ref, cam: k } : ref, robot: m.uid ?? m.id, name: m.id, cam: k ?? 'front', label: c.label, assetKey: `m:${m.id}`, kind: m.kind }); }
     }
+    // 확장 Zone 운반 AMR 전방 카메라 (레거시 대차는 카메라 없음)
+    if (sim.mode.key !== 'traditional') for (const { id, mover } of view.xzones?.carriersAll() ?? []) { const ref = { type: 'mover', id }, c = this.cameraFor(ref); if (c) out.push({ ref, robot: mover.uid ?? id, name: id, cam: 'front', label: c.label, assetKey: `m:${id}`, kind: 'carrier' }); }
     return out;
   }
   // 카메라 앵커(+z = 보는 방향) → 시점. cam: head · handL · handR · back (없으면 머리)
@@ -223,7 +232,7 @@ export class RobotCamWall {
   // 로봇에 달린 카메라 목록 (휴머노이드·AMMR = 머리 · 왼손 · 오른손 · 등)
   camsOf(ref) {
     if (!ref || !this.view) return [];
-    if (ref.type === 'cell') { const r = this.view.stationViews.find((x) => x.st.id === ref.stationId)?.parts.robots?.[ref.idx]; return r?.cams ? ROBOT_CAMS.filter(([k]) => r.cams[k]) : []; }
+    if (ref.type === 'cell') { const r = this.view.cellRobot(ref.stationId, ref.idx)?.robot; return r?.cams ? ROBOT_CAMS.filter(([k]) => r.cams[k]) : []; }
     const mv = [...(this.view.techViews ?? []), ...(this.view.helperViews ?? [])].find((x) => x.v.id === ref.id);
     return mv?.g.userData.cams ? ROBOT_CAMS : [];
   }
@@ -424,6 +433,7 @@ export class RobotCamWall {
       const au = f.station?.ammr?.[f.ref.idx];
       const task = f.mover ? f.mover.task ?? '대기' : !f.station ? ''
         : f.kind === 'ammr' ? `${f.station.name} ${ST_LABEL[f.station.state] ?? ''} · ${au && au.phase !== 'work' ? '선반에서 부품 가져오기' : '양팔 작업'} · 선반 ${f.station.parts ?? '-'}개`
+        : f.station.zone ? `${f.station.name} ${ST_LABEL[f.station.state] ?? ''} · ${f.station.use}`
         : `${ST_LABEL[f.station.state] ?? ''} · VLA 선반 부품 인식→집기→조립 · 선반 ${f.station.parts ?? '-'}개`;
       const fy = y0 + TH - 20 - (row === ROWS - 1 ? 30 : 0);   // 아래 줄은 하단 알람 띠 위로
       g.fillStyle = 'rgba(5,8,12,0.6)'; g.fillRect(x0, fy, TW, 20);

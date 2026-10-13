@@ -66,7 +66,7 @@ export class FactoryAgent {
   // ── 물류: 자재 공급 / 완제품 출하 ─────────────────
   logistics() {
     const s = this.sim, m = this.m;
-    const free = s.vehicles.filter((v) => v.idle && !v.outOfService && !(m.batteryDrain && v.battery < (m.chargeAt ?? 0) * 0.6));   // 운행 제외 AGV(관제)는 배차 안 함
+    const free = s.vehicles.filter((v) => !v.zone && v.idle && !v.outOfService && !(m.batteryDrain && v.battery < (m.chargeAt ?? 0) * 0.6));   // 운행 제외 AGV(관제)는 배차 안 함
     const projected = s.rawStock + s.inboundRaw;
 
     if (projected <= m.reorderPoint) {
@@ -74,8 +74,10 @@ export class FactoryAgent {
       // 공급 차질 중에도 배차한다 — AGV는 자재창고에서 출고 재개를 기다린다 (안전재고 긴급 운송은 flowControl)
       if (this.supplyWait >= m.dispatchDelay) {
         const pool = free.length ? free : [];
+        // 투입구에서 막 내리고 서 있는 AGV를 먼저 보낸다 — 충전 패드의 AGV를 보내면 투입구에 도착해 서 있던 AGV를 패드로 비켜 보내야 한다 (헛걸음)
+        const atSrc = (v) => Math.hypot(v.x - s.loc.SRC.x, v.z - s.loc.SRC.z) < 2;
         const v = m.agentActive
-          ? pool.sort((a, b) => (Math.abs(a.x - LOC.WH.x) - a.battery * 0.3) - (Math.abs(b.x - LOC.WH.x) - b.battery * 0.3))[0]
+          ? pool.sort((a, b) => (atSrc(b) - atSrc(a)) || (Math.abs(a.x - LOC.WH.x) - a.battery * 0.3) - (Math.abs(b.x - LOC.WH.x) - b.battery * 0.3))[0]
           : pool[0];
         if (v) {
           s.dispatchSupply(v);
@@ -226,7 +228,7 @@ export class FactoryAgent {
   expedite() {
     const s = this.sim;
     if (!s.supplyDisrupted || this.disruptHandled >= s.supplyDisruptedUntil) return null;
-    const v = s.vehicles.filter((x) => x.idle && !x.outOfService && x.battery > 25).sort((a, b) => Math.abs(a.x - LOC.WH.x) - Math.abs(b.x - LOC.WH.x))[0];
+    const v = s.vehicles.filter((x) => !x.zone && x.idle && !x.outOfService && x.battery > 25).sort((a, b) => Math.abs(a.x - LOC.WH.x) - Math.abs(b.x - LOC.WH.x))[0];
     if (!v) return null;
     const remain = s.supplyDisruptedUntil - s.time;
     const add = Math.max(0, Math.min(s.safetyStock, RAW_CAP - s.rawStock - s.inboundRaw));

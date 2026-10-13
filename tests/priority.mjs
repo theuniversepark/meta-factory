@@ -18,8 +18,8 @@ console.log('== 문제 해결 우선순위 (피지컬AI)');
   for (const st of cells) s.fail(st);
   let onSite = false;
   for (let t = 0; t < 200 && !onSite; t += 0.1) { s.step(0.1); ag.update(0.1); onSite = cells.every((st) => st.techOnSite); }
-  const busy = s.techs.filter((t) => t.job?.prio === 3).length;
-  check('정비 휴머노이드가 모두 긴급수리(P3) 중', busy === s.techs.length, `${busy}/${s.techs.length}대 · 현장 도착 ${onSite}`);
+  const mt = s.techs.filter((t) => !t.zone), busy = mt.filter((t) => t.job?.prio === 3).length;   // 정밀조립Zone 정비 휴머노이드 (확장 Zone 인력은 자기 Zone만 맡는다)
+  check('정비 휴머노이드가 모두 긴급수리(P3) 중', busy === mt.length, `${busy}/${mt.length}대 · 현장 도착 ${onSite}`);
   // 대응 로봇 선택: 덜 급한 일(부품 보충 P4·대기)을 하던 휴머노이드를 먼저 — 생산 정지 수리(P3)는 되도록 끊지 않는다
   const probe = { x: -6, z: -8.2 }, pick = s.pickResponder(probe, 1);
   check('대응 로봇 선택: 덜 급한 일을 하던 휴머노이드 먼저', !!pick && s.jobPrio(pick) > 3, `${pick?.id} (현재 일 P${s.jobPrio(pick) === 99 ? '대기' : s.jobPrio(pick)})`);

@@ -184,10 +184,18 @@ export class Private5G {
   ueOf(obj) { return this.byMover?.get(obj) ?? null; }
   // 단말 추가 (시험·증설 검토용: 로봇을 더 들였을 때) — pos()는 { x, y, z, m }
   addUE(id, uid, kind, pos) { const u = new UE(this, id, uid, kind, pos); this.ues.push(u); this.measure(u, true); u.mbps = this.demand(u); this.admit(u); return u; }
+  // 시뮬레이션 밖에서 만드는 이동 로봇(확장 Zone 운반 AMR — zones.js)을 단말로 붙인다: 같은 uid가 있으면 새 객체(m)로 다시 묶는다 (화면을 다시 만들 때)
+  bindUE(id, uid, kind, pos, m) {
+    if (!this.on) return null;
+    let u = this.ues.find((x) => x.uid === uid);
+    if (u) { for (const [k, v] of this.byMover) if (v === u) this.byMover.delete(k); u.pos = pos; }
+    else u = this.addUE(id, uid, kind, pos);
+    this.byMover.set(m, u); return u;
+  }
   // 단말 업링크 수요(Mbps): 움직이거나 일하는 중이면 카메라 영상 전부, 쉬는 중이면 10%
   demand(u) {
     const p = u.pos(), m = p.m, L = UE_LOAD[u.kind] ?? { mbps: 1 };
-    const active = m ? (m.moving || (m.task && !m.chgNow && !m.charging) || m.state === 'line' || m.mode === 'mission' || m.mode === 'patrol') : true;
+    const active = m ? (m.moving || (m.task && !m.chgNow && !m.charging) || m.state === 'line' || m.zoneMoving?.() || m.mode === 'mission' || m.mode === 'patrol') : true;
     return TELE_MBPS + (active ? L.mbps : 0);   // 쉬는 중(주차·충전·대기)은 영상을 끄고 텔레메트리만
   }
   cellOf(u) { return u.hoUntil >= 0 ? u.hoTarget : u.serv; }   // 핸드오버 중인 단말은 옮겨 갈 셀 부하로 센다 (DAPS라 패킷은 끊기지 않음)

@@ -1,9 +1,14 @@
 // AMR·AGV 관제 — 운반 AMR(대상물 운반·복귀)과 자재 공급 AGV의 공통 설정·상태, 상황별 속도 변화, 전체 속도 배율(50~150%)·
 // 전체 정지/시작(AGV는 1초 간격 순차 재출발), 운행 대수(설치 대수 안에서 운행 제외 지정), 설정 변경 효과의 디지털트윈 예측(현재 설정 vs 기준 설정 · 대수별 비교). 렌더링과 분리되어 헤드리스에서도 같은 동작.
 import { ZONE_AMR } from './line.js';
+import { EXTRA_ZONES } from './zonedefs.js';
 
 export const FLEET_RANGE = { min: 0.5, max: 1.5, step: 0.1 };
-export const FLEET_NAMES = { amr: '운반 AMR', agv: '자재 공급 AGV' };
+export const FLEET_NAMES = { amr: '운반 AMR', agv: '자재 공급 AGV', zflex: 'A-1 유연생산 AMR', zadapt: 'A-2 적응가공 AMR' };
+// 확장 Zone AMR 관제 (A-1 · A-2): 정밀조립Zone 운반 AMR과 같은 속도 배율 · 정지/시작 · 운행 대수 — AMR은 화면 Zone 시뮬레이션(zones.js)이 sim.zoneAmr에 올려 둔다
+export const ZONE_FLEETS = ['zflex', 'zadapt'];
+export const isAmrFleet = (f) => f === 'amr' || ZONE_FLEETS.includes(f);
+const zoneKey = (f) => f.slice(1), zoneDef = (f) => EXTRA_ZONES.find((Z) => Z.key === zoneKey(f));
 // 사람·휴머노이드와 같은 공간을 다니는 무인 운반차의 권장 상한 (참고: ISO 3691-4 — 사람 감지 구역은 감속, 일반 운용 1.5~2.0 m/s)
 export const SHARED_SPACE_LIMIT = 2.0;
 
@@ -12,6 +17,7 @@ export class FleetControl {
     this.sim = sim;
     this.amr = { scale: 1, paused: false };
     this.agv = { scale: 1, paused: false };
+    for (const f of ZONE_FLEETS) this[f] = { scale: 1, paused: false };
     this.events = [];   // 관제 조작 이력
     this.spd = new Map();   // 이동체 → 실제 속도(m/s, 지수 평활)
     this.last = new Map();
@@ -19,8 +25,10 @@ export class FleetControl {
   }
   get hasAMR() { return !!this.sim.useAMR && this.sim.carriers.length > 0; }
   get hasAGV() { return this.sim.mode.vehicleKind === 'agv' && this.sim.vehicles.length > 0; }
-  list(f) { return f === 'amr' ? this.sim.carriers : f === 'agv' && this.hasAGV ? this.sim.vehicles : []; }
-  base(f) { return f === 'amr' ? { line: ZONE_AMR.lineSpeed, drive: ZONE_AMR.returnSpeed } : { drive: this.sim.mode.vehicleSpeed }; }
+  hasZone(f) { return this.sim.mode.key !== 'traditional' && (this.sim.zoneAmr?.[zoneKey(f)]?.length ?? 0) > 0; }   // 레거시 단계 확장 Zone은 대차(유인)
+  get fleets() { return ['amr', 'agv', ...ZONE_FLEETS].filter((f) => (f === 'amr' ? this.hasAMR : f === 'agv' ? this.hasAGV : this.hasZone(f))); }
+  list(f) { return f === 'amr' ? this.sim.carriers : f === 'agv' ? (this.hasAGV ? this.sim.vehicles : []) : this.sim.zoneAmr?.[zoneKey(f)] ?? []; }
+  base(f) { if (ZONE_FLEETS.includes(f)) { const A = zoneDef(f).amr; return { line: A.speed, drive: A.ret }; } return f === 'amr' ? { line: ZONE_AMR.lineSpeed, drive: ZONE_AMR.returnSpeed } : { drive: this.sim.mode.vehicleSpeed }; }
   speeds(f) { const b = this.base(f), k = this[f].scale; return { line: b.line != null ? b.line * k : null, drive: b.drive * k }; }
   // 배율을 이동체·라인(셀 사이 운반 경로)에 반영
   // 운행 대수: 설치 대수 안에서 N대만 배차한다. 나머지는 '운행 제외' — 하던 일은 마치고 대기·충전 자리에 머문다
@@ -28,8 +36,8 @@ export class FleetControl {
   active(f) { return this.list(f).filter((m) => !m.outOfService).length; }
   setActive(f, n, by) {
     const L = this.list(f), N = L.length; if (!N) return;
-    n = Math.max(f === 'amr' ? 1 : 0, Math.min(N, Math.round(n)));
-    const idle = (m) => (f === 'amr' ? m.state === 'park' : m.idle);
+    n = Math.max(isAmrFleet(f) ? 1 : 0, Math.min(N, Math.round(n)));
+    const idle = (m) => (isAmrFleet(f) ? m.state === 'park' : m.idle);
     // 제외할 차량: 이미 제외된 차 → 지금 쉬는 차(뒤 번호부터) → 일하는 차(뒤 번호부터, 현재 작업 후 제외)
     const order = [...L].sort((a, b) => (b.outOfService ? 1 : 0) - (a.outOfService ? 1 : 0) || (idle(b) ? 1 : 0) - (idle(a) ? 1 : 0) || L.indexOf(b) - L.indexOf(a));
     const off = new Set(order.slice(0, N - n));
@@ -49,20 +57,20 @@ export class FleetControl {
   }
   note(text, by) { this.events.unshift({ t: this.sim.time, text, by }); if (this.events.length > 30) this.events.pop(); this.sim.log('act', `🚚 AMR·AGV · ${text}`, { dec: by ?? '관제 운영자', act: text }); }
   setScale(f, k, by) {
-    const fl = f === 'all' ? ['amr', 'agv'] : [f];
+    const fl = f === 'all' ? this.fleets : [f];
     k = Math.round(Math.max(FLEET_RANGE.min, Math.min(FLEET_RANGE.max, k)) * 10) / 10;
     for (const x of fl) this[x].scale = k;
     this.apply();
     this.note(`${f === 'all' ? 'AMR·AGV 전체' : FLEET_NAMES[f]} 속도 ${Math.round(k * 100)}% (${fl.map((x) => `${FLEET_NAMES[x]} ${this.speeds(x).drive.toFixed(2)} m/s`).join(' · ')})`, by);
   }
   pause(f, by) {
-    for (const x of f === 'all' ? ['amr', 'agv'] : [f]) this[x].paused = true;
+    for (const x of f === 'all' ? ['amr', 'agv', ...ZONE_FLEETS] : [f]) this[x].paused = true;
     this.note(`${f === 'all' ? 'AMR·AGV 전체' : FLEET_NAMES[f]} 정지`, by);
   }
   // 시작: AGV는 1초 간격으로 차례로 출발시켜 충전소·통로 동시 출발 혼잡을 줄인다 (AMR은 라인 간격 2m를 지키며 함께 재개)
   resume(f, by) {
     const s = this.sim;
-    for (const x of f === 'all' ? ['amr', 'agv'] : [f]) {
+    for (const x of f === 'all' ? ['amr', 'agv', ...ZONE_FLEETS] : [f]) {
       if (!this[x].paused) continue;
       this[x].paused = false;
       if (x === 'agv') s.vehicles.forEach((v, i) => { v.holdUntil = s.time + i * 1.0; });
@@ -73,7 +81,7 @@ export class FleetControl {
   // 실제 속도 측정 (누적 주행 거리 변화 / 시간)
   sample(dt) {
     if (dt <= 0) return;
-    for (const m of [...this.sim.carriers, ...(this.hasAGV ? this.sim.vehicles : [])]) {
+    for (const m of [...this.sim.carriers, ...(this.hasAGV ? this.sim.vehicles : []), ...ZONE_FLEETS.flatMap((f) => this.list(f))]) {
       const p = this.last.get(m) ?? m.dist, v = (m.dist - p) / dt;
       this.spd.set(m, (this.spd.get(m) ?? 0) * 0.7 + v * 0.3); this.last.set(m, m.dist);
     }
@@ -83,6 +91,12 @@ export class FleetControl {
   stateOf(m, f) {
     const s = this.sim, K = s.cmd;
     if (K.estopAll || K.pstopAll) return ['명령 정지', 'bad'];
+    if (ZONE_FLEETS.includes(f)) {   // 확장 Zone AMR (zones.js 상태)
+      if (this[f].paused) return ['관제 정지', 'warn'];
+      if (m.outOfService) return [m.state === 'park' ? '운행 제외' : '운행 제외 예정 (현재 작업 후)', 'idle'];
+      const Z = { park: [`스테이션 ${m.slot + 1}번 자리 대기${m.chgNow ? '·충전' : ''}`, 'act'], toQ: ['투입 대기열로 출동', 'ok'], queue: ['투입 대기', 'idle'], toSrc: ['투입 진입', 'ok'], load: ['적재 중', 'act'], ready: ['출발 대기 (다음 셀 차 있음)', 'warn'], move: ['셀 사이 운반', 'ok'], work: ['셀 안 정차·작업', 'act'], unload: ['하역 중', 'act'], return: [m.wait > 0 ? '앞차 간격 대기' : '빈 차 복귀', m.wait > 0 ? 'warn' : 'ok'] };
+      return Z[m.state] ?? [m.state, 'idle'];
+    }
     if (f === 'amr' ? this.amr.paused : this.agvHeld(m)) return [this[f].paused ? '관제 정지' : '순차 출발 대기', 'warn'];
     if (m.outOfService) { const busy = f === 'amr' ? m.state !== 'park' : !m.idle; return [busy ? '운행 제외 예정 (현재 작업 후)' : '운행 제외', 'idle']; }
     if (m.charging) return ['충전', 'act'];
@@ -120,12 +134,12 @@ export class FleetControl {
 // 설정 변경의 예상 문제점·기대효과 (규칙 기반) — 배율·정지 상태에 따라
 export function fleetAdvice(F) {
   const out = [], sp = (f) => F.speeds(f);
-  for (const f of ['amr', 'agv']) {
-    if (f === 'amr' ? !F.hasAMR : !F.hasAGV) continue;
+  for (const f of ['amr', 'agv', ...ZONE_FLEETS]) {
+    if (f === 'amr' ? !F.hasAMR : f === 'agv' ? !F.hasAGV : !F.hasZone(f)) continue;
     const k = F[f].scale, v = sp(f), nm = FLEET_NAMES[f];
     if (F[f].paused) {
-      out.push({ f, kind: 'risk', text: f === 'amr' ? `${nm} 정지 — 셀 사이 운반이 멈춰 다음 셀이 자재대기, 앞 셀은 배출대기로 막혀 UPH가 바로 떨어지고 재공(WIP)이 셀 안에 쌓입니다. 길게 세울 때는 투입 정지를 함께 거는 것이 좋습니다.` : `${nm} 정지 — 창고 → 투입구 자재 공급과 부품 보충이 멈춰, 투입 버퍼가 비는 시점부터 라인 전체가 결품 정지합니다.` });
-      out.push({ f, kind: 'tip', text: `다시 시작할 때 ${f === 'agv' ? 'AGV는 1초 간격으로 순차 출발해' : 'AMR은 라인 간격 2m를 지키며'} 통로·진입로 동시 혼잡을 줄입니다.` });
+      out.push({ f, kind: 'risk', text: isAmrFleet(f) ? `${nm} 정지 — 셀 사이 운반이 멈춰 다음 셀이 자재대기, 앞 셀은 배출대기로 막혀 UPH가 바로 떨어지고 재공(WIP)이 셀 안에 쌓입니다. 길게 세울 때는 투입 정지를 함께 거는 것이 좋습니다.` : `${nm} 정지 — 창고 → 투입구 자재 공급과 부품 보충이 멈춰, 투입 버퍼가 비는 시점부터 라인 전체가 결품 정지합니다.` });
+      out.push({ f, kind: 'tip', text: `다시 시작할 때 ${!isAmrFleet(f) ? 'AGV는 1초 간격으로 순차 출발해' : 'AMR은 라인 간격 2m를 지키며'} 통로·진입로 동시 혼잡을 줄입니다.` });
       continue;
     }
     if (k > 1.001) {
@@ -134,14 +148,14 @@ export function fleetAdvice(F) {
       if (v.drive > SHARED_SPACE_LIMIT) out.push({ f, kind: 'risk', text: `주행 ${v.drive.toFixed(2)} m/s는 사람·휴머노이드와 같은 공간의 권장 상한(약 ${SHARED_SPACE_LIMIT} m/s, ISO 3691-4 감속 구역 기준 참고)을 넘습니다 — 사람 감지 구역 자동 감속을 함께 두어야 합니다.` });
     } else if (k < 0.999) {
       out.push({ f, kind: 'gain', text: `${nm} ${Math.round(k * 100)}% — 근접·양보 정지와 제동 거리가 줄어 안전 여유가 커지고 배터리·에너지 소모가 줄어듭니다.` });
-      out.push({ f, kind: 'risk', text: `이동 시간이 약 ${Math.round((1 / k - 1) * 100)}% 늘어 ${f === 'amr' ? '셀 사이 운반이 병목이 되면 자재대기·배출대기가 늘고' : '투입구 원자재 공급이 늦어지면 결품 정지가 생기고'} UPH가 떨어질 수 있습니다.` });
+      out.push({ f, kind: 'risk', text: `이동 시간이 약 ${Math.round((1 / k - 1) * 100)}% 늘어 ${isAmrFleet(f) ? '셀 사이 운반이 병목이 되면 자재대기·배출대기가 늘고' : '투입구 원자재 공급이 늦어지면 결품 정지가 생기고'} UPH가 떨어질 수 있습니다.` });
     }
   }
-  for (const f of ['amr', 'agv']) {
+  for (const f of ['amr', 'agv', ...ZONE_FLEETS]) {
     const N = F.installed(f), n = F.active(f); if (!N || n >= N || F[f].paused) continue;
     const nm = FLEET_NAMES[f];
     out.push({ f, kind: 'gain', text: `${nm} ${n}/${N}대 운행 — 쉬는 ${N - n}대만큼 대기 전력·통로 혼잡·정비 부담이 줄고, 남은 차량의 이용률이 올라갑니다.` });
-    out.push({ f, kind: 'risk', text: f === 'amr' ? `셀 사이 운반 능력이 약 ${Math.round((1 - n / N) * 100)}% 줄어 — 현재 라인은 AMR 운반이 병목이라 UPH가 거의 비례해 떨어질 수 있습니다. '운행 대수별 비교'로 적정 대수를 확인하세요.` : `자재 공급 AGV가 ${n}대로 줄어 — 입고·공급 차질이 겹치면 투입구 결품 위험이 커집니다${n === 0 ? ' (0대: 자재 공급이 멈춥니다)' : ''}.` });
+    out.push({ f, kind: 'risk', text: isAmrFleet(f) ? `셀 사이 운반 능력이 약 ${Math.round((1 - n / N) * 100)}% 줄어 — 현재 라인은 AMR 운반이 병목이라 UPH가 거의 비례해 떨어질 수 있습니다. '운행 대수별 비교'로 적정 대수를 확인하세요.` : `자재 공급 AGV가 ${n}대로 줄어 — 입고·공급 차질이 겹치면 투입구 결품 위험이 커집니다${n === 0 ? ' (0대: 자재 공급이 멈춥니다)' : ''}.` });
   }
   if (!out.length) out.push({ f: null, kind: 'tip', text: '기준 설정(100%)으로 운용 중입니다. 배율을 바꾸면 예상 문제점·기대효과와 디지털트윈 예측을 볼 수 있습니다.' });
   return out;

@@ -10,7 +10,7 @@ import { FactoryAgent } from './agent.js';
 import { HybridAgent, compareArchitecturesAsync } from './multiagent.js';
 import { agentStructureHTML } from './agentinfo.js';
 import { FactoryView } from './factory.js';
-import { ExtraZones, ZONE_VIEWS } from './zones.js';
+import { ExtraZones, ZONE_VIEWS, EXTRA_ZONES } from './zones.js';
 import { UI } from './ui.js';
 import { LLMController } from './llm.js';
 import { LineDesigner } from './designer.js';
@@ -33,7 +33,7 @@ import { AI_MODELS } from './cctv.js';
 import { NR, STACK, LAT, UE_LOAD, maxRobots } from './net5g.js';
 import { setAasVersion, AAS_VERSIONS } from './aas.js';
 import { OrchView } from './orchview.js';
-import { FLEET_RANGE, FLEET_NAMES, SHARED_SPACE_LIMIT, fleetAdvice, predictFleet, predictFleetCounts } from './fleet.js';
+import { FLEET_RANGE, FLEET_NAMES, SHARED_SPACE_LIMIT, fleetAdvice, predictFleet, predictFleetCounts, ZONE_FLEETS, isAmrFleet } from './fleet.js';
 import { SEC_LAYERS, SEC_KPI, SEC_THREATS, SEC_LANES, SEC_STAGES, SEC_ACTORS } from './security.js';
 import { DEFAULT_LINE, normalizeLine, cloneLine, zoneLine, isZone, ZONE_CELLS, ZONE_PRODUCTS, ZONE_MIXES, ZONE_NAME } from './line.js';
 
@@ -100,6 +100,7 @@ makeComposer();
 // ── 시뮬레이션 ─────────────────────────────
 const view = new FactoryView(scene);
 const xzones = new ExtraZones(scene);   // 정밀조립Zone 뒤 유연생산Zone · 앞 적응가공Zone (zonedefs.js)
+view.xzones = xzones;   // 확장 Zone 셀 로봇·운반 AMR 클릭 · 텔레메트리 (factory.js cellRobot · pickTargets)
 const hub = new DataHub();
 const camWall = new RobotCamWall(scene, renderer);   // 로봇 비전 관제 디스플레이 (피지컬AI 단계)
 const cctvView = new CCTVView(scene, () => camWall.renderer, scene);   // CCTV 전광판 · CCTV 영상 창
@@ -127,7 +128,7 @@ let sim, agent, agentArch = 'single';   // 에이전트 구조: single · hybrid
 const archPref = {};   // 단계별 운영자 선택 (없으면 MODES[단계].agentArch — 피지컬AI 기본 혼합형)
 let modeKey = 'smart', speed = 3, running = true, labelsOn = true;
 const SEED = 20261001;
-const fleetCfg = { amr: { scale: 1, paused: false, count: null }, agv: { scale: 1, paused: false, count: null } };   // count: 운행 대수 (null = 설치 대수 전부)   // AMR·AGV 관제 설정 (단계·라인을 바꿔도 유지)
+const fleetCfg = { amr: { scale: 1, paused: false, count: null }, agv: { scale: 1, paused: false, count: null }, zflex: { scale: 1, paused: false, count: null }, zadapt: { scale: 1, paused: false, count: null } };   // count: 운행 대수 (null = 설치 대수 전부)   // AMR·AGV 관제 설정 (단계·라인을 바꿔도 유지)
 
 // 공정 라인 구성 — 정밀조립Zone 두 시나리오(도어트림·e-axle)와 사용자 라인을 각각 저장해 다음 실행 때도 유지
 // v4: 정밀조립Zone이 혼류(분기·합류) 구조로 바뀌어 이전 Zone 레시피는 버리고 사용자 라인만 옮긴다
@@ -209,7 +210,7 @@ function start(key) {
   view.setup(sim, labelsOn, changedIds);
   xzones.setup(sim, labelsOn);
   view.selected = null;
-  hub.reset(sim, view);
+  hub.reset(sim, view, xzones);
   camWall.setup(sim, view);
   cctvView.setup(sim, view);
   epRec.attach(sim);
@@ -249,7 +250,30 @@ function setHTML(el, html) {
   el.scrollTop = selfTop; el.scrollLeft = selfLeft;
 }
 const cellBadge = (id) => `${ZONE_CELLS[id].no}.${ZONE_CELLS[id].label.replace('셀', '')}`;
+// 왼쪽 패널 위 Zone 카드: 제목 드롭다운으로 정밀조립Zone(혼류·사용자 라인) · A-1 유연생산Zone · A-2 적응가공Zone을 고른다
+// 확장 Zone은 js/zones.js 시뮬레이션(셀 상태·혼류 비율·실적)을 보여 준다 — 고른 Zone과 확장 Zone 혼류 비율은 다음 실행 때도 유지
+const ZONE_PICK_KEY = 'metafactory.zonePick.v1';
+const ZONE_PICKS = [{ key: 'precision', code: '', name: ZONE_NAME, sub: '도어트림 · e-axle 혼류 · 6셀' }, ...EXTRA_ZONES.map((Z) => ({ key: Z.key, code: Z.code, name: Z.name, sub: `${Z.sub} · ${Object.keys(Z.cells).length}셀` }))];
+const XZ_CLS = { hood: 'doortrim', hblock: 'doortrim', door: 'eaxle', rcover: 'eaxle', ng: 'ng' };   // 셀 색 (주황·보라·빨강)
+const XZ_LAB = { BUSY: '가동', IDLE: '대기', BLOCKED: '출구 대기', ESTOP: '정지' };
+const zonePick = (() => {
+  const d = { view: 'precision', mix: Object.fromEntries(EXTRA_ZONES.map((Z) => [Z.key, '1:1'])) };
+  try {
+    const v = JSON.parse(localStorage.getItem(ZONE_PICK_KEY) ?? 'null');
+    if (ZONE_PICKS.some((z) => z.key === v?.view)) d.view = v.view;
+    for (const Z of EXTRA_ZONES) if (Z.mixes[v?.mix?.[Z.key]]) d.mix[Z.key] = v.mix[Z.key];
+  } catch { /* 저장소 사용 불가 시 기본값 */ }
+  return d;
+})();
+for (const Z of EXTRA_ZONES) xzones.byKey(Z.key).setMix(Z.mixes[zonePick.mix[Z.key]].w);
+function saveZonePick() { try { localStorage.setItem(ZONE_PICK_KEY, JSON.stringify(zonePick)); } catch { /* 이번 실행에만 적용 */ } }
+function zoneDropdown() {
+  const cur = ZONE_PICKS.find((z) => z.key === zonePick.view);
+  const items = ZONE_PICKS.map((z) => `<button type="button" class="zc-dd-it${z.key === cur.key ? ' on' : ''}" data-pick="${z.key}"><b>${escH(z.code ? `${z.code} ${z.name}` : z.name)}</b><small>${escH(z.sub)}</small></button>`).join('');
+  return `<div class="zc-dd"><button type="button" class="zc-dd-btn" data-dd aria-haspopup="listbox" title="Zone 선택">${escH(cur.code ? `${cur.code} ${cur.name}` : cur.name)} <i>▾</i></button><div class="zc-dd-menu" role="listbox">${items}</div></div>`;
+}
 function renderZoneCard() {
+  if (zonePick.view !== 'precision') return renderXzZoneCard();
   const zone = isZone(currentLine);
   const seg = `<button data-slot="zone" class="${lineSlot === 'zone' ? 'on' : ''}">정밀조립Zone (혼류)</button><button data-slot="custom" class="${lineSlot === 'custom' ? 'on' : ''}">사용자 라인</button>`;
   let body;
@@ -265,9 +289,37 @@ function renderZoneCard() {
       <div class="zc-amr" id="zcAmr"></div>
       <div class="zc-flow">투입 → 1.분류 → <span class="t-dt">도어트림 2.조립 → 3.체결</span> / <span class="t-ea">e-axle 4.조립 → 5.체결</span> → 6.포장 → 구분 적재</div>`;
   } else body = `<div class="zc-sub">${escH(currentLine.name)} · 공정 ${currentLine.stations.length}개 (공정 설계에서 편집)</div>`;
-  zoneCard.innerHTML = `<div class="zc-h"><b>${ZONE_NAME}</b><small>메타팩토리 테스트베드 · 6셀 혼류</small></div>
+  zoneCard.innerHTML = `<div class="zc-h">${zoneDropdown()}<small>메타팩토리 테스트베드 · 6셀 혼류</small></div>
     <div class="seg small" id="slotSeg">${seg}</div>${body}`;
   updateZoneCard();
+}
+// 확장 Zone 카드: 혼류 비율 · 셀 목록(분기 포함, 상태 칩) · 실적 · 흐름 (flexible-manufacturing · adaptive-machining 카드와 같은 구성)
+function renderXzZoneCard() {
+  const Z = EXTRA_ZONES.find((z) => z.key === zonePick.view), ps = Object.values(Z.products);
+  const mixSeg = Object.entries(Z.mixes).map(([k, m]) => `<button data-xmix="${k}" class="${k === zonePick.mix[Z.key] ? 'on' : ''}">${escH(m.label)}</button>`).join('');
+  const cellRow = (id) => { const c = Z.cells[id], no = c.no ?? id; return `<div class="zc-cell p-${XZ_CLS[c.product] ?? c.product}" data-xcell="${id}"><b class="${no.length > 1 ? 'wide' : ''}">${escH(no)}</b><span>${escH(c.label)}</span><em>${escH(c.use)}</em><i class="chip" data-xchip="${id}"></i></div>`; };
+  const cells = Z.card.map((it) => typeof it === 'string' ? cellRow(it)
+    : `<div class="zc-branch">${it.map((br) => `<div class="zc-line p-${XZ_CLS[br.product] ?? br.product}"><small>▶ ${escH(br.title)}</small>${br.cells.map(cellRow).join('')}</div>`).join('')}</div>`).join('');
+  zoneCard.innerHTML = `<div class="zc-h">${zoneDropdown()}<small>메타팩토리 테스트베드 ${Z.code} · ${Object.keys(Z.cells).length}셀 혼류</small></div>
+    <div class="zc-sub">혼류 비율 (${ps.map((p) => p.label).join(' : ')})</div>
+    <div class="seg small zc-mix">${mixSeg}</div>
+    <div class="zc-cells">${cells}</div>
+    <div class="zc-amr" id="zcAmr"></div>
+    <div class="zc-flow">${Z.flow}</div>`;
+  updateZoneCard();
+}
+function updateXzZoneCard() {
+  const z = xzones.byKey(zonePick.view), Z = z.Z, halted = !!xzones.halted;
+  for (const el of zoneCard.querySelectorAll('[data-xchip]')) {
+    const c = z.cells[el.dataset.xchip], s = halted ? 'ESTOP' : c.state;
+    el.className = 'chip s-' + s;
+    el.textContent = XZ_LAB[s] + (c.state === 'BUSY' && c.item ? ` · ${Z.products[c.item.product].label}` : '');
+  }
+  const sm = z.summary(), g = z.stats.good, n = (...k) => z.carriers.filter((c) => k.includes(c.state)).length;
+  const amr = document.getElementById('zcAmr');
+  if (amr) amr.innerHTML = `양품 ${Object.entries(Z.products).map(([k, v]) => `${escH(v.label)} <b>${g[k] ?? 0}</b>`).join(' · ')} · UPH <b>${sm.uph}</b> · 가동 셀 <b>${sm.busy}/${z.order.length}</b>`
+    + (Z.ng ? ` · NG <b>${z.stats.ng}</b>` : '') + (Z.rework ? ` · 리워크 <b>${z.stats.rework}</b>` : '')
+    + `<br>🛻 ${z.mode === 'traditional' ? '대차' : 'AMR'} ${z.carriers.length}대 · 적재 운반 <b>${n('move', 'work', 'ready')}</b> · 빈차 복귀 <b>${n('return')}</b> · 대기 <b>${n('queue', 'toSrc', 'load', 'unload')}</b> · 투입 <b>${z.stats.released}</b>`;
 }
 // 3 Zone 카드: 카메라 바로가기 + 유연생산·적응가공 Zone 생산 현황
 const xzCard = document.getElementById('xzCard');
@@ -275,6 +327,7 @@ function flyTo(key) {
   const [p, t] = ZONE_VIEWS[key];
   persp.position.set(...p); ctlP.target.set(...t); ctlP.update();
 }
+document.addEventListener('click', (e) => { if (!e.target.closest('.zc-dd')) zoneCard.querySelector('.zc-dd.open')?.classList.remove('open'); });
 xzCard?.addEventListener('click', (e) => { const b = e.target.closest('button[data-view]'); if (b) flyTo(b.dataset.view); });
 function updateXzCard() {
   if (!xzCard) return;
@@ -285,6 +338,7 @@ function updateXzCard() {
   if (xzCard.dataset.h !== html) { xzCard.dataset.h = html; xzCard.innerHTML = html; }
 }
 function updateZoneCard() {
+  if (zonePick.view !== 'precision') return updateXzZoneCard();
   if (!isZone(currentLine)) return;
   for (const el of zoneCard.querySelectorAll('[data-chip]')) {
     const st = sim.stations.find((s) => s.id === el.dataset.chip);
@@ -300,6 +354,35 @@ function updateZoneCard() {
     + `<br>🚚 입고 · 창고 원자재 <b>${sim.whRaw}</b>${sim.partsTracked ? ` · 부품 <b>${sim.whParts}</b>` : ''} · 입고 트럭 <b>${sim.inbound.stats.trucks}</b>대${sim.inbound.docked ? ' · 하차 중' : sim.inbound.trucks.length ? ' · 입차 중' : sim.inbound.orders.length ? ' · 발주됨' : ''}`;
 }
 zoneCard.addEventListener('click', (e) => {
+  const dd = e.target.closest('[data-dd]');
+  if (dd) { dd.parentElement.classList.toggle('open'); return; }
+  const pk = e.target.closest('button[data-pick]');
+  if (pk) {
+    if (pk.dataset.pick !== zonePick.view) { zonePick.view = pk.dataset.pick; saveZonePick(); renderZoneCard(); }
+    else zoneCard.querySelector('.zc-dd')?.classList.remove('open');
+    flyTo(zonePick.view);
+    return;
+  }
+  const xm = e.target.closest('button[data-xmix]');
+  if (xm) {
+    const Z = EXTRA_ZONES.find((z) => z.key === zonePick.view), m = Z.mixes[xm.dataset.xmix];
+    if (xm.dataset.xmix === zonePick.mix[Z.key]) return;
+    zonePick.mix[Z.key] = xm.dataset.xmix; saveZonePick();
+    xzones.byKey(Z.key).setMix(m.w);
+    renderZoneCard();
+    sim.log('act', `${Z.code} ${Z.name} 혼류 비율 변경 · ${Object.values(Z.products).map((p) => p.label).join(' : ')} = ${m.label}`, {
+      obs: `투입 순서를 비율에 맞춰 평준화 (${Object.entries(m.w).map(([k, w]) => `${Z.products[k].label} ${w}`).join(' : ')})`,
+      act: '다음 투입부터 적용 · 라인 안 재공은 그대로',
+    });
+    return;
+  }
+  const xc = e.target.closest('[data-xcell]');
+  if (xc) {   // 확장 Zone 셀: 카메라를 그 셀로
+    const Z = EXTRA_ZONES.find((z) => z.key === zonePick.view), c = Z.cells[xc.dataset.xcell];
+    const x = Z.origin.x + c.x, z = Z.origin.z + c.z;
+    persp.position.set(x, 16, z + 14); ctlP.target.set(x, 0, z); ctlP.update();
+    return;
+  }
   const b = e.target.closest('button[data-slot]');
   if (b && b.dataset.slot !== lineSlot) {
     lineSlot = b.dataset.slot; currentLine = lines[lineSlot];
@@ -1363,19 +1446,19 @@ function renderAios(force) {
 // 운반 AMR·자재 공급 AGV의 공통 설정·상태, 상황별 속도 변화, 전체 속도 배율(50~150%)·정지·시작, 설정 변경의 예상 문제점·기대효과와 디지털트윈 예측
 function applyFleetCfg() {
   const F = sim?.fleet; if (!F) return;
-  for (const f of ['amr', 'agv']) { F[f].scale = fleetCfg[f].scale; F[f].paused = fleetCfg[f].paused; }
+  for (const f of ['amr', 'agv', ...ZONE_FLEETS]) { F[f].scale = fleetCfg[f].scale; F[f].paused = fleetCfg[f].paused; }
   F.apply();
-  for (const f of ['amr', 'agv']) if (fleetCfg[f].count != null && fleetCfg[f].count < F.installed(f)) F.setActive(f, fleetCfg[f].count, '관제 설정 유지');   // 단계마다 설치 대수가 다르면(AGV 3·4대) 그 안으로 맞춘다
+  for (const f of ['amr', 'agv', ...ZONE_FLEETS]) if (fleetCfg[f].count != null && fleetCfg[f].count < F.installed(f)) F.setActive(f, fleetCfg[f].count, '관제 설정 유지');   // 단계마다 설치 대수가 다르면(AGV 3·4대) 그 안으로 맞춘다
 }
 const fleetModal = document.getElementById('fleetModal'), fleetBody = document.getElementById('fleetBody');
 let fleetTimer = null, fleetPred = null, fleetBusy = false, fleetCnt = null, fleetCntBusy = null;
 const ms = (v) => (v == null ? '-' : `${v.toFixed(2)} m/s`);
 function renderFleet() {
-  const F = sim.fleet, has = { amr: F.hasAMR, agv: F.hasAGV };
-  if (!has.amr && !has.agv) { setHTML(fleetBody, `<p class="vla-note">레거시 단계에는 운반 AMR·AGV가 없습니다 (고정 컨베이어 · 유인 지게차). 자동화·피지컬AI 단계에서 관제할 수 있습니다.</p>`); return; }
-  const fl = ['amr', 'agv'].filter((f) => has[f]);
+  const F = sim.fleet, has = { amr: F.hasAMR, agv: F.hasAGV, zflex: F.hasZone('zflex'), zadapt: F.hasZone('zadapt') };
+  if (!has.amr && !has.agv && !has.zflex && !has.zadapt) { setHTML(fleetBody, `<p class="vla-note">레거시 단계에는 운반 AMR·AGV가 없습니다 (고정 컨베이어 · 유인 지게차). 자동화·피지컬AI 단계에서 관제할 수 있습니다.</p>`); return; }
+  const fl = ['amr', 'agv', ...ZONE_FLEETS].filter((f) => has[f]);
   const ctrl = (f) => { const C = F[f], v = F.speeds(f), b = F.base(f), S = F.summary(f);
-    return `<div class="fc-card"><h4>${f === 'amr' ? '📦' : '🚛'} ${FLEET_NAMES[f]} <small>${S.n}대 · 주행 ${S.moving}대 · 대기·정지 ${S.blocked}대 · 평균 배터리 ${Math.round(S.battery)}%</small></h4>
+    return `<div class="fc-card"><h4>${isAmrFleet(f) ? '📦' : '🚛'} ${FLEET_NAMES[f]} <small>${S.n}대 · 주행 ${S.moving}대 · 대기·정지 ${S.blocked}대 · 평균 배터리 ${Math.round(S.battery)}%</small></h4>
       <div class="ai-bar"><b style="font-size:20px;min-width:70px">${Math.round(C.scale * 100)}%</b>
         <button type="button" class="ai-btn" data-fl-step="${f}:-1" ${C.scale <= FLEET_RANGE.min + 1e-6 ? 'disabled' : ''}>－10%</button>
         <input type="range" min="${FLEET_RANGE.min * 100}" max="${FLEET_RANGE.max * 100}" step="10" value="${Math.round(C.scale * 100)}" data-fl-range="${f}" style="flex:1;min-width:140px">
@@ -1383,12 +1466,12 @@ function renderFleet() {
         <button type="button" class="ai-btn" data-fl-set="${f}:1">기준 100%</button>
         <button type="button" class="ai-btn ${C.paused ? 'on' : ''}" data-fl-${C.paused ? 'resume' : 'pause'}="${f}">${C.paused ? '▶ 시작' : '⏸ 정지'}</button></div>
       <div class="ai-bar"><small style="min-width:70px">운행 대수</small><b style="font-size:17px;min-width:70px">${S.active} / ${S.n}대</b>
-        <button type="button" class="ai-btn" data-fl-count="${f}:-1" ${S.active <= (f === 'amr' ? 1 : 0) ? 'disabled' : ''}>－1대</button>
-        <input type="range" min="${f === 'amr' ? 1 : 0}" max="${S.n}" step="1" value="${S.active}" data-fl-crange="${f}" style="flex:1;min-width:120px">
+        <button type="button" class="ai-btn" data-fl-count="${f}:-1" ${S.active <= (isAmrFleet(f) ? 1 : 0) ? 'disabled' : ''}>－1대</button>
+        <input type="range" min="${isAmrFleet(f) ? 1 : 0}" max="${S.n}" step="1" value="${S.active}" data-fl-crange="${f}" style="flex:1;min-width:120px">
         <button type="button" class="ai-btn" data-fl-count="${f}:1" ${S.active >= S.n ? 'disabled' : ''}>＋1대</button>
         <button type="button" class="ai-btn" data-fl-count="${f}:all" ${S.active >= S.n ? 'disabled' : ''}>전체 운행</button>
         <small>${S.n - S.active ? `운행 제외 ${S.n - S.active}대 — 하던 작업은 마치고 대기·충전 자리에서 대기` : '설치 대수 전부 운행'}</small></div>
-      <div class="fc-sub">설정 속도: ${b.line != null ? `셀 사이 운반 ${ms(v.line)} (기준 ${ms(b.line)}) · ` : ''}${f === 'amr' ? '빈 차 복귀' : '주행'} ${ms(v.drive)} (기준 ${ms(b.drive)})${v.drive > SHARED_SPACE_LIMIT ? ` · <b style="color:#ffc65a">공존 구역 권장 상한 ${SHARED_SPACE_LIMIT} m/s 초과</b>` : ''} · 실제 평균 ${ms(S.avg)} · 최고 ${ms(S.max)}${C.paused ? ' · <b style="color:#ff9a9a">관제 정지 중</b>' : ''}</div></div>`; };
+      <div class="fc-sub">설정 속도: ${b.line != null ? `셀 사이 운반 ${ms(v.line)} (기준 ${ms(b.line)}) · ` : ''}${isAmrFleet(f) ? '빈 차 복귀' : '주행'} ${ms(v.drive)} (기준 ${ms(b.drive)})${v.drive > SHARED_SPACE_LIMIT ? ` · <b style="color:#ffc65a">공존 구역 권장 상한 ${SHARED_SPACE_LIMIT} m/s 초과</b>` : ''} · 실제 평균 ${ms(S.avg)} · 최고 ${ms(S.max)}${C.paused ? ' · <b style="color:#ff9a9a">관제 정지 중</b>' : ''}</div></div>`; };
   const K = sim.cmd, nmode = sim.mode;
   const common = [
     ['설치 · 운행 대수', `설치 ${F.installed('amr')}대 · 운행 ${F.active('amr')}대`, has.agv ? `설치 ${F.installed('agv')}대 · 운행 ${F.active('agv')}대` : '-'],
@@ -1416,15 +1499,16 @@ function renderFleet() {
       ${R.map((r) => `<tr${r.on ? ' style="background:rgba(245,184,46,.10)"' : ''}><td><b>${escV(r.k)}</b></td><td class="ins" title="${escV(r.eff)}">${escV(r.eff)}</td><td>${r.on ? (r.n != null ? `${r.n}대` : '적용 중') : '-'}</td><td class="ins" title="${escV(r.src)}">${escV(r.src)}</td></tr>`).join('')}</tbody></table></div></div>
     <h4>설정 변경 — 예상 문제점 · 기대효과 <small>현재 관제 설정 기준</small></h4>
     <table class="vla-t"><tbody>${adv.map((a) => `<tr><td style="white-space:nowrap" class="${ADV[a.kind][1]}">${ADV[a.kind][0]}</td><td>${a.f ? `<b>${FLEET_NAMES[a.f]}</b> · ` : ''}${escV(a.text)}</td></tr>`).join('')}</tbody></table>
+    ${has.zflex || has.zadapt ? '<p class="vla-note">확장 Zone(A-1 유연생산 · A-2 적응가공) AMR은 화면의 Zone 시뮬레이션에서 운행합니다 — 속도·정지·운행 대수·배터리는 바로 반영되고, 아래 디지털트윈 예측·운행 대수별 비교는 정밀조립Zone 운반 AMR·자재 공급 AGV 기준입니다.</p>' : ''}
     <div class="ai-bar" style="margin-top:8px"><button type="button" class="ai-btn" data-fl-predict ${fleetBusy ? 'disabled' : ''}>🔬 디지털트윈 예측 (15분 · 기준 100% 운행 vs 현재 설정)</button><small>${fleetBusy ? '예측 중…' : P ? `예측 완료 ${fclock(P.at)} — 설정: AMR ${P.cfg.amr} · AGV ${P.cfg.agv}` : '같은 라인·단계로 헤드리스 시뮬레이션 두 번(약 2초)'}</small></div>
     ${P ? `<table class="vla-t"><thead><tr><th>지표 (15분)</th><th>기준 100% · 전체 운행</th><th>현재 설정</th><th>변화</th></tr></thead><tbody>${predRows}</tbody></table>` : ''}
     <div class="ai-bar" style="margin-top:8px"><button type="button" class="ai-btn" data-fl-counts ${fleetCntBusy ? 'disabled' : ''}>📊 운행 대수별 비교 (15분씩 · 현재 속도 설정)</button><small>${fleetCntBusy ? `계산 중… ${fleetCntBusy}` : fleetCnt ? `완료 ${fclock(fleetCnt.at)} — AMR ${fleetCnt.amrScale} · AGV ${fleetCnt.agvScale}` : 'AMR 운행 대수(설치 대수 안에서 4단계)와 AGV 운행 대수별 UPH·재공·대기·자재대기를 비교해 적정 대수를 찾습니다'}</small></div>
     ${fleetCnt ? fleetCountTables(fleetCnt) : ''}
     <h4>차량별 상태 <small>실제 속도는 주행 거리 변화로 측정</small></h4><div style="max-height:260px;overflow:auto"><table class="vla-t"><thead><tr><th>ID</th><th>종류</th><th>상태</th><th>실제 속도</th><th>설정 속도</th><th>배터리</th><th>작업</th></tr></thead><tbody>
-      ${fl.flatMap((f) => F.list(f).map((m) => { const [st, c] = F.stateOf(m, f), v = F.speeds(f); return `<tr><td><b class="uidc">${escV(m.uid ?? m.id)}</b></td><td>${f === 'amr' ? 'AMR' : 'AGV'}</td><td class="${c === 'ok' ? 'p-done' : c === 'bad' ? 'p-rejected' : c === 'warn' ? 'p-train' : ''}">${escV(st)}</td><td>${ms(F.speedOf(m))}</td><td>${ms(m.state === 'line' ? v.line : v.drive)}</td><td>${Math.round(m.battery ?? 100)}%</td><td class="ins" title="${escV(m.lineInfo?.phase ?? m.task ?? '')}">${escV(m.state === 'line' ? m.lineInfo?.phase ?? '' : m.task ?? '대기')}</td></tr>`; })).join('')}</tbody></table></div>
+      ${fl.flatMap((f) => F.list(f).map((m) => { const [st, c] = F.stateOf(m, f), v = F.speeds(f); return `<tr><td><b class="uidc">${escV(m.uid ?? m.id)}</b></td><td>${f === 'amr' ? 'AMR' : f === 'agv' ? 'AGV' : FLEET_NAMES[f].replace(' AMR', '')}</td><td class="${c === 'ok' ? 'p-done' : c === 'bad' ? 'p-rejected' : c === 'warn' ? 'p-train' : ''}">${escV(st)}</td><td>${ms(F.speedOf(m))}</td><td>${ms(m.state === 'line' ? v.line : v.drive)}</td><td>${Math.round(m.battery ?? 100)}%</td><td class="ins" title="${escV(m.lineInfo?.phase ?? m.task ?? '')}">${escV(m.state === 'line' ? m.lineInfo?.phase ?? '' : m.task ?? '대기')}</td></tr>`; })).join('')}</tbody></table></div>
     <h4>관제 이력</h4><table class="vla-t"><tbody>${F.events.slice(0, 8).map((e) => `<tr><td>${fclock(e.t)}</td><td>${escV(e.text)}</td><td>${escV(e.by ?? '관제 운영자')}</td></tr>`).join('') || '<tr><td>아직 없음</td></tr>'}</tbody></table>`);
 }
-function fleetDo(fn) { fn(sim.fleet); const F = sim.fleet; for (const f of ['amr', 'agv']) fleetCfg[f] = { scale: F[f].scale, paused: F[f].paused, count: F.installed(f) && F.active(f) < F.installed(f) ? F.active(f) : null }; renderFleet(); }
+function fleetDo(fn) { fn(sim.fleet); const F = sim.fleet; for (const f of ['amr', 'agv', ...ZONE_FLEETS]) fleetCfg[f] = { scale: F[f].scale, paused: F[f].paused, count: F.installed(f) && F.active(f) < F.installed(f) ? F.active(f) : null }; renderFleet(); }
 // 운행 대수별 비교 표 — 대수마다 UPH·재공·대기·자재대기, 가장 좋은 UPH와 '대수당 UPH 증가'가 줄어드는 지점(적정 대수)을 표시
 function fleetCountTables(C) {
   const tbl = (f, rows) => {

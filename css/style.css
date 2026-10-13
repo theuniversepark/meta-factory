@@ -50,7 +50,7 @@ body[data-mode="dark"] #modeSeg button.on { background: #6d4aff; }
 .zone-card { padding: 9px 10px; border-radius: 10px; background: rgba(55, 232, 255, 0.06); border: 1px solid rgba(55, 232, 255, 0.25); margin-bottom: 10px; font-size: 12px; }
 .zc-h { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; margin-bottom: 6px; }
 .zc-h b { font-size: 13px; color: #7ff3ff; }
-.zc-h small { color: var(--muted); font-size: 10.5px; }
+.zc-h small { color: var(--muted); font-size: 10.5px; text-align: right; }
 .zone-card .seg { margin-bottom: 6px; }
 .zone-card .seg button { flex: 1; }
 .zc-sub { color: var(--ink2); margin-bottom: 5px; }
@@ -72,6 +72,24 @@ body[data-mode="dark"] #modeSeg button.on { background: #6d4aff; }
 .zc-cell em { grid-column: 2; font-style: normal; font-size: 10.5px; color: var(--muted); }
 .zc-cell .chip { grid-column: 3; grid-row: 1 / span 2; align-self: center; font-style: normal; }
 .zc-flow { margin-top: 6px; font-size: 11px; color: var(--ink2); line-height: 1.45; }
+/* Zone 카드 제목 드롭다운 (정밀조립 · 유연생산 · 적응가공) */
+.zc-dd { position: relative; }
+.zc-dd-btn { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 7px; border: 1px solid rgba(55, 232, 255, 0.4); background: rgba(55, 232, 255, 0.1); color: #7ff3ff; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.zc-dd-btn:hover { background: rgba(55, 232, 255, 0.2); }
+.zc-dd-btn i { font-style: normal; font-size: 10px; transition: transform 0.15s; }
+.zc-dd.open .zc-dd-btn i { transform: rotate(180deg); }
+.zc-dd-menu { display: none; position: absolute; left: 0; top: calc(100% + 4px); z-index: 20; min-width: 240px; padding: 4px; border-radius: 9px; border: 1px solid rgba(55, 232, 255, 0.35); background: rgba(12, 18, 26, 0.97); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+.zc-dd.open .zc-dd-menu { display: grid; gap: 2px; }
+.zc-dd-it { display: grid; text-align: left; gap: 1px; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); cursor: pointer; }
+.zc-dd-it:hover { background: rgba(255, 255, 255, 0.07); }
+.zc-dd-it.on { background: rgba(55, 232, 255, 0.14); }
+.zc-dd-it.on b { color: #7ff3ff; }
+.zc-dd-it b { font-size: 12.5px; }
+.zc-dd-it small { color: var(--muted); font-size: 10.5px; }
+.zc-cell.p-ng { border-left-color: #d23b3b; }
+.zc-line.p-ng small, .zc-flow .t-ng { color: #ff8a8a; }
+.zc-cell b.wide { width: auto; padding: 0 4px; border-radius: 8px; }
+.zc-cell:has(b.wide) { grid-template-columns: auto 1fr auto; }
 .kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .kpi { background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line); border-radius: 10px; padding: 7px 9px; }
 .kpi .k { font-size: 11px; color: var(--muted); }
@@ -174,7 +192,7 @@ body.llm-on .agent-avatar { background: linear-gradient(135deg, #d97757, #f0c27b
 .v-label.tech { color: #ffc58a; }
 .v-label.helper { color: #9fd0ff; }
 .v-label.quad { color: #f5d36b; }
-.chip.s-NOPARTS, .chip.s-NOAMR { background: rgba(245, 184, 46, 0.2); color: var(--warn); }
+.chip.s-NOPARTS, .chip.s-NOAMR, .chip.s-NOSTOCK { background: rgba(245, 184, 46, 0.2); color: var(--warn); }
 
 /* 비교 모달 */
 .modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 20; display: grid; place-items: center; }
@@ -297,6 +315,7 @@ body.app .topbar button, body.app .topbar .seg { -webkit-app-region: no-drag; }
 .st-label .nm .no, .zc-cell b, .st-card .no.cell { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: #2bb3a6; color: #04121f; font-size: 10px; font-weight: 800; margin-right: 4px; vertical-align: 1px; }
 .zc-cell.p-doortrim b { background: #f0a030; }
 .zc-cell.p-eaxle b { background: #9a6bff; }
+.zc-cell.p-ng b { background: #d23b3b; color: #fff; }
 .zc-amr { margin-top: 6px; font-size: 11px; color: var(--ink2); padding: 4px 6px; border-radius: 7px; background: rgba(255, 255, 255, 0.04); }
 .zc-amr b { color: var(--ink); font-variant-numeric: tabular-nums; }
 

@@ -88,17 +88,22 @@ export const ZONE_MIXES = {
   ea: { label: 'e-axle만', w: { doortrim: 0, eaxle: 1 } },
 };
 // 셀 사이 물류: 조립 대상물을 실은 AMR이 셀 중앙(양쪽 협동로봇 사이)으로 들어와 정차한다
-// count: 대기열은 충전소 서쪽 빈 바닥에 16칸까지 — 더 늘리면 충전소와 겹치므로 대기열을 두 줄로 바꿔야 한다
+// count: 대기열은 왼쪽 확장동 위쪽에 16칸까지 — 더 늘리면 사족보행·드론 스테이션과 겹치므로 대기열을 두 줄로 바꿔야 한다
 export const ZONE_AMR = { count: 16, lineSpeed: 1.6, returnSpeed: 2.6, spacing: 2.0 };
-// AMR 전용 동선 — AGV·정비 인력이 다니는 주 통로를 따라 달리지 않고, 두 곳에서 가로지르기만 한다.
-//  · 복귀: 구분 적재장 → 오른쪽 끝(x=31.2)에서 북쪽으로 → 건물 앞쪽 AMR 전용 복귀로(z=18.8)를 서쪽으로 → 대기열
-//  · 대기열: 앞쪽 왼편 빈 바닥(z=17, 충전소보다 서쪽)에 한 줄
-//  · 출동: 대기열 남쪽 출동 차로(z=15.4) → 투입 스테이션 왼쪽 진입로(x=-30.6) → 투입 위치
-// AMR 스테이션(대기열·출동 차로·복귀로)은 적응가공Zone 앞쪽 시설 구역으로 옮겼다 (zonedefs.js FRONT_SHIFT) — 출동로 x −30.6 · 복귀로 x 31.2는 적응가공Zone 양옆을 지난다
-export const AMR_LANES = { ret: fr(18.8), park: fr(17.0), out: fr(15.4), retX: ZONE_SINK.x + 3.2, dockX: ZONE_SRC.x - 2.6 };   // 복귀로는 구분 적재장 바로 오른쪽
-export const amrPark = (i) => ({ x: -36.4 + i * 1.4, z: AMR_LANES.park, aisle: 'F', name: `AMR 대기 ${i + 1}` });
-export const amrDockVia = (p) => [{ x: p.x, z: AMR_LANES.out }, { x: AMR_LANES.dockX, z: AMR_LANES.out }, { x: AMR_LANES.dockX, z: 0 }];
-export const amrReturnVia = (from, slot) => [{ x: AMR_LANES.retX, z: from.z }, { x: AMR_LANES.retX, z: AMR_LANES.ret }, { x: slot.x, z: AMR_LANES.ret }];
+// AMR 전용 동선 — AGV·정비 인력이 다니는 주 통로를 따라 달리지 않고, 가로지르기만 한다.
+// AMR 스테이션은 왼쪽 확장동 위쪽 왼쪽 벽 쪽(x −51 ~ −44.5, z −24 ~ 1)에 둔다 — 복귀 차로와 왼쪽 세로 통로 사이에는 정비실 (zonedefs.js TECH_ROOM) — 투입 스테이션(x −28, z 0) 바로 서쪽이라 출동 거리가 가장 짧다
+//  · 대기열: 남북으로 한 줄(x −47.6, z −2 ~ −23, 1.4m 간격), 서쪽을 보고 선다 — 0번 자리(z −2)가 출구에 가장 가깝다
+//  · 출동: 대기 자리 → 서쪽 출동 차로(x −49.2)로 나와 남쪽 끝(z 0) → 동쪽으로 곧게 투입 진입로(x −30.6) → 투입 위치 (왼쪽 세로 통로만 가로지름)
+//  · 복귀: 구분 적재장 → 오른쪽(x 26.2)에서 북쪽으로 → 뒤 통로·보행로(z −11.2) 너머 AMR 전용 복귀로(z −12.8)를 서쪽으로 → 동쪽 복귀 차로(x −45.2) → 대기 자리
+//    (뒤 통로·보행로·왼쪽 세로 통로를 한 번씩 가로지름 · 복귀로는 유연생산Zone 셀 영역(z ≤ −13.8) 바로 앞)
+//    복귀 차로는 대기열에서 2.4m — 복귀로 모퉁이에서 서쪽으로 들어설 때 옆 칸에 선 AMR이 진로 감지(앞 2.1m) 안에 들지 않게
+export const AMR_LANES = { ret: -12.8, retX: ZONE_SINK.x + 3.2, dockX: ZONE_SRC.x - 2.6, parkX: -47.6, retLaneX: -45.2, outX: -49.2, park0: -2.0, pitch: 1.4 };
+export const amrPark = (i) => ({ x: AMR_LANES.parkX, z: AMR_LANES.park0 - i * AMR_LANES.pitch, aisle: 'F', name: `AMR 대기 ${i + 1}` });
+export const amrDockVia = (p) => [{ x: AMR_LANES.outX, z: p.z }, { x: AMR_LANES.outX, z: ZONE_SRC.z }, { x: AMR_LANES.dockX, z: ZONE_SRC.z }];
+// 투입 진입 대기 자리: 게이트(x −30.6) 서쪽으로 한 줄 — 왼쪽 세로 통로(x −36.8 ~ −34.2)는 비워 두고 그 너머에 이어 선다
+const AMR_ENTRY_Q = [2.6, 7.6, 9.6, 11.6, 13.6];
+export const amrEntrySlot = (gate, k) => ({ x: gate.x - AMR_ENTRY_Q[Math.min(k, AMR_ENTRY_Q.length - 1)], z: gate.z, aisle: 'F', name: `투입 진입 대기 ${k + 1}` });
+export const amrReturnVia = (from, slot) => [{ x: AMR_LANES.retX, z: from.z }, { x: AMR_LANES.retX, z: AMR_LANES.ret }, { x: AMR_LANES.retLaneX, z: AMR_LANES.ret }, { x: AMR_LANES.retLaneX, z: slot.z }];
 export const AMR_DOCK = { ...ZONE_SRC, aisle: 'F', name: 'AMR 적재 위치' };
 export const FG_ZONE_CAP = 24;
 // AMMR 부품 보충: 셀 양쪽의 부품 선반(셀 중심에서 3.75m, AMMR 작업 위치에서 약 1m)을 오가며 로봇 부품 빈을 채운다

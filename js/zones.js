@@ -8,7 +8,8 @@ import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { KIT } from './factory.js';
 import { blenderOn, cloneAsset, RENDER } from './blender.js';
 import { pointAt, pathLength } from './line.js';
-import { EXTRA_ZONES } from './zonedefs.js';
+import { EXTRA_ZONES, ZONE_FAC, zoneRobotUid, zoneAmrUid } from './zonedefs.js';
+import { BATTERY, moverRadius, moverWidth } from './sim.js';
 export { EXTRA_ZONES };
 
 const { std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, makeRobot, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, buildWeld, buildGate, buildVision } = KIT;
@@ -17,6 +18,7 @@ const PC = { shared: 0x2bb3a6, hood: 0xf0a030, door: 0x9a6bff, hblock: 0xf0a030,
 const USE_CLS = { hood: 'doortrim', hblock: 'doortrim', door: 'eaxle', rcover: 'eaxle' };   // 셀 라벨 색 (주황·보라)
 const hex = (c) => '#' + c.toString(16).padStart(6, '0');
 
+const STATION_LEAD = 2;   // Zone AMR 투입 대기열 칸 (나머지는 Zone AMR 스테이션에서 대기)
 const MODE_MUL = { traditional: 1.3, smart: 1.0, dark: 0.9 };   // 단계별 사이클 배율 (정밀조립Zone 단계와 같은 방향)
 const ROBOT_SHORT = { articulated: '6축', cobot: '협동', ammr: 'AMMR', humanoid: '휴머노이드' };
 
@@ -225,15 +227,34 @@ function buildCMM(g) {
 const BUILD = { kit: buildKit, locate: buildLocate, spot: buildSpot, seal: buildSeal, hem: buildHem, mount: buildMount, vision: (g) => buildVision(g), rework: buildRework, mill5: buildMill5, turn: buildTurn, deburr: buildDeburr, matid: buildMatId, cmm: buildCMM };
 
 // 투입 스테이션(AS/RS 출고 포트) · 구분 적재장 — 두 Zone 공통 간이 형상
+// 자재 투입존 (정밀조립Zone 투입 스테이션과 같은 구성): 혼류 제품별로 양쪽에 따로 보관 (첫 제품 +z · 둘째 제품 −z) — 판넬(후드·도어)은 빗살 거치대에 세워 2열 × 10장,
+// 주조·단조 소재(유압블록·리어커버)는 팔레트에 4 × 3 × 2단 · 가운데는 AMR 지그 투입 위치 · 직교 3축 갠트리가 다음 투입 제품 쪽에서 집어 지그에 내려놓는다
+const SRC_SIDE = 20;   // 제품별 보관 칸 (sim.js ZONE_SRC.cap = 양쪽 합)
 function buildPort(g, Z, kind) {
-  put(box(3.6, 0.06, 3.6, MAT.dark), 0, 0.03, 0, g);
-  put(box(3.6, 0.01, 1.5, MAT.lane), 0, 0.065, 0, g);
   if (kind === 'src') {
-    for (const z of [-1.3, 1.3]) put(box(0.14, 3.0, 0.14, MAT.accent), 0, 1.5, z, g);
-    put(box(0.2, 0.2, 2.8, MAT.accent), 0, 3.0, 0, g);
-    put(box(0.4, 0.3, 0.4, MAT.orange), 0, 2.75, 0, g);
-    const keys = Object.keys(Z.products);
-    keys.forEach((k, i) => { const z = i ? -1.25 : 1.25; for (let j = 0; j < 3; j++) put(box(1.1, 0.3, 0.9, std(PC[k], { roughness: 0.7 })), -1.0 + (j % 2) * 0.05, 0.2 + j * 0.32, z, g); });
+    put(box(4.2, 0.06, 6.8, MAT.dark), 0, 0.03, 0, g);
+    put(box(4.2, 0.01, 1.5, MAT.lane), 0, 0.065, 0, g);
+    const auto = put(new THREE.Group(), 0, 0, 0, g);
+    for (const x of [-1.95, 1.95]) for (const z of [-3.15, 3.15]) put(box(0.12, 3.0, 0.12, MAT.yellow ?? MAT.accent), x, 1.5, z, auto);
+    for (const z of [-3.15, 3.15]) { put(box(4.1, 0.14, 0.14, MAT.yellow ?? MAT.accent), 0, 3.0, z, auto); put(box(3.9, 0.03, 0.05, MAT.steel), 0, 3.09, z, auto); }
+    const bridge = put(new THREE.Group(), 0, 3.0, 0, auto);
+    put(box(0.18, 0.18, 6.5, MAT.dark), 0, 0.12, 0, bridge);
+    for (const z of [-3.15, 3.15]) put(box(0.3, 0.14, 0.26, MAT.orange), 0, 0.14, z, bridge);
+    const car = put(new THREE.Group(), 0, 0, 0, bridge);
+    put(box(0.4, 0.3, 0.4, MAT.orange), 0, -0.05, 0, car); put(box(0.18, 0.7, 0.18, MAT.dark), 0, 0.3, 0, car);
+    const lift = put(new THREE.Group(), 0, 0, 0, car);
+    put(box(0.08, 2.7, 0.08, MAT.steel), 0, -0.25, 0, lift); put(box(0.5, 0.08, 0.4, MAT.dark), 0, -1.6, 0, lift);
+    // 제품별 보관 구역 바닥색 · 거치대 · 바닥 이름 (혼류 구분)
+    Object.keys(Z.products).forEach((k, i) => {
+      const z = i ? -2.15 : 2.15, panel = k === 'hood' || k === 'door';
+      const tint = put(new THREE.Mesh(new THREE.PlaneGeometry(3.9, 1.9), new THREE.MeshBasicMaterial({ color: PC[k], transparent: true, opacity: 0.32, depthWrite: false })), 0, 0.07, z, g); tint.rotation.x = -PI / 2;
+      if (panel) {   // 빗살 거치대
+        put(box(3.7, 0.08, 1.6, MAT.steel), 0, 0.04, z, g);
+        for (const cx of [-0.95, 0.95]) for (let j = 0; j <= 10; j++) for (const x of [-0.5, 0.5]) put(box(0.02, 0.5, 0.02, MAT.accent), cx + x, 0.33, z - 0.725 + j * 0.145, g);
+      } else put(box(3.6, 0.12, 1.6, MAT.pallet), 0, 0.06, z, g);
+      put(textPlane([Z.products[k].label], 2.4, 0.6, hex(PC[k])), 0, 0.08, i ? -3.65 : 3.65, g);
+    });
+    return { auto, bridge, car, lift };
   } else {
     Object.keys(Z.products).forEach((k, i) => {
       const z = i ? -1.35 : 1.35;
@@ -294,7 +315,7 @@ function textPlane(lines, w, h, color) {
 // ── Zone 하나: 정적 형상 + 흐름 시뮬레이션 + 화면 동기화 ─────────────────
 class ExtraZone {
   constructor(Z, root) {
-    this.Z = Z;
+    this.Z = Z; this.mix = { ...Z.mix };
     this.G = put(new THREE.Group(), Z.origin.x, 0, Z.origin.z, root);
     this.dyn = put(new THREE.Group(), 0, 0, 0, this.G);
     const acc = hex(Z.accent);
@@ -314,17 +335,22 @@ class ExtraZone {
       cellBase(g, 4.6);
       const parts = BUILD[c.type](g, c);
       const light = put(makeStackLight(), -1.9, 0.15, -1.6, g);
+      // IoT 노드 (정밀조립Zone 셀과 같은 자리·모양 — factory.js setup): 셀 데이터를 Zone 데이터 서버로 올린다
+      const sensorMat = emis(0x37e8ff, 2.5), ringM = new THREE.MeshBasicMaterial({ color: 0x37e8ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false });
+      const iot = put(new THREE.Group(), 1.7, 3.2, -1.4, g), sensor = put(mesh(new THREE.SphereGeometry(0.12, 12, 10), sensorMat, false), 0, 0, 0, iot);
+      const pulse = put(new THREE.Mesh(new THREE.RingGeometry(0.2, 0.26, 24), ringM), 0, 0, 0, iot); pulse.rotation.x = -PI / 2;
       const robotsG = put(new THREE.Group(), 0, 0, 0, g), workersG = put(new THREE.Group(), 0, 0, 0, g);
       const el = document.createElement('div'); el.className = 'st-label xz';
       const no = c.no ?? id;
       el.innerHTML = `<div class="nm"><b class="no${no.length > 1 ? ' wide' : ''}">${no}</b><span>${c.label}</span></div><div class="use u-${USE_CLS[c.product] ?? 'shared'}">${c.use}</div><div class="row"><span class="chip s-IDLE">대기</span></div><div class="rb"></div>`;
       const label = new CSS2DObject(el); label.position.set(0, 4.3, 0); g.add(label);
-      const cell = { id, def: c, g, parts, light, robotsG, workersG, robots: [], el, chip: el.querySelector('.chip'), rb: el.querySelector('.rb'), label, occ: null, state: 'IDLE', progress: 0, item: null, busy: 0, done: 0 };
+      const cell = { id, def: c, g, parts, light, robotsG, workersG, robots: [], robotUids: [], iot, sensor, pulse, ringM, sensorMat, phase: Math.random() * 6, el, chip: el.querySelector('.chip'), rb: el.querySelector('.rb'), label, occ: null, state: 'IDLE', progress: 0, item: null, busy: 0, done: 0 };
       this.cells[id] = cell; this.order.push(cell);
     }
     this.src = { id: 'SRC', def: Z.src, occ: null }; this.sink = { id: 'SINK', def: Z.sink, occ: null };
     for (const [n, kind] of [[this.src, 'src'], [this.sink, 'sink']]) {
-      const g = put(new THREE.Group(), n.def.x, 0, n.def.z, this.G); g.rotation.y = n.def.rot ?? 0; buildPort(g, Z, kind);
+      const g = put(new THREE.Group(), n.def.x, 0, n.def.z, this.G); g.rotation.y = n.def.rot ?? 0; n.port = buildPort(g, Z, kind);
+      if (kind === 'src') { n.stockG = put(new THREE.Group(), 0, 0, 0, g); n.heldG = put(new THREE.Group(), 0, 0, 0, n.port.lift); }
       const el = document.createElement('div'); el.className = 'st-label xz';
       el.innerHTML = `<div class="nm"><span>${kind === 'src' ? '자재 투입 (AS/RS)' : '양품 구분 적재'}</span></div><div class="row"><span class="chip s-IDLE"></span></div>`;
       const label = new CSS2DObject(el); label.position.set(0, 4.0, 0); g.add(label);
@@ -333,26 +359,108 @@ class ExtraZone {
     // Zone 현황판 (Zone 위 공중, 라벨과 함께 켜고 끔)
     const bel = document.createElement('div'); bel.className = 'xz-board'; bel.style.setProperty('--zc', acc);
     this.board = new CSS2DObject(bel); this.board.position.set(this.titleAt.x, 3.4, this.titleAt.z); this.G.add(this.board); this.boardEl = bel;   // 바닥 Zone 이름 바로 위
-    // 복귀 경로와 투입 대기열 자리 (복귀로 끝에서 거꾸로 2m 간격)
-    this.retPath = [{ x: Z.sink.x, z: Z.sink.z }, ...Z.ret, { x: Z.src.x, z: Z.src.z }];
-    const rev = [...this.retPath].reverse(), L = pathLength(rev);
-    this.qSlots = []; for (let s = 2.2; s < L - 3 && this.qSlots.length < Z.amr.count; s += 2.0) this.qSlots.push(pointAt(rev, s));
+    // Zone AMR 스테이션 (정밀조립Zone AMR 스테이션과 같은 구조 — zonedefs.js ZONE_FAC.station): AMR마다 자기 대기 자리(AMR i ↔ 자리 i)
+    //  · 복귀: 적재 → Zone 복귀로 → 복귀 차로 → 자기 자리로 들어가 출동 차로 쪽을 보고 선다 (무선 충전)
+    //  · 출동: 투입 대기열(투입구 앞 STATION_LEAD칸)이 비면 출구에 가까운 자리의 AMR부터 → 출동 차로 → 투입 진입로 → 대기열 → 투입구
+    const ST = ZONE_FAC[Z.key]?.station, o = Z.origin;
+    const keep = Z.ret.slice(0, -2), zr = keep[keep.length - 1].z;
+    const loc = (p) => ({ x: p.x - o.x, z: p.z === 'ret' ? zr : p.z === 'src' ? Z.src.z : p.z - o.z });
+    this.st = ST ? {
+      keep, retZ: ST.retZ - o.z, outZ: ST.outZ - o.z, ret: ST.ret.map(loc), out: ST.out.map(loc), face: ST.outZ > ST.rowZ ? 0 : PI,
+      slots: Array.from({ length: Z.amr.count }, (_, k) => ({ x: ST.x0 + ST.pitch * k - o.x, z: ST.rowZ - o.z })),
+    } : null;
+    this.retPath = [{ x: Z.sink.x, z: Z.sink.z }, ...Z.ret, { x: Z.src.x, z: Z.src.z }];   // 스테이션이 없을 때 (복귀로 끝 = 투입 대기열)
+    const tail = this.st ? [...this.st.out, { x: Z.src.x, z: Z.src.z }] : this.retPath, rev = [...tail].reverse(), L = pathLength(rev);
+    this.qSlots = []; for (let s = 2.2; s < L - 1 && this.qSlots.length < (this.st ? STATION_LEAD : Z.amr.count); s += 2.0) this.qSlots.push(pointAt(rev, s));
+    this.buildWall(root);
     this.reset();
+  }
+
+  // Zone 전광판 · 데이터 서버 (자동화·피지컬AI — 레거시 단계는 정밀조립Zone 관제 서버처럼 숨긴다): 위치는 zonedefs.js ZONE_FAC.wall
+  // 전광판: Zone 실적·UPH · 셀별 상태와 건강도 · AMR · 정비 · 사족보행 · 드론 · 확장 선반 재고 (0.5초마다 다시 그림)
+  buildWall(root) {
+    const W = ZONE_FAC[this.Z.key]?.wall; if (!W) return;
+    const B = W.board, cv = document.createElement('canvas'); cv.width = 1800; cv.height = 400;
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+    const g = put(new THREE.Group(), B.x, B.y, B.z, root); g.rotation.y = B.rot;
+    put(box(B.w + 0.3, B.h + 0.3, 0.12, std(0x0b0d10, { roughness: 0.5, metalness: 0.4 })), 0, 0, -0.08, g);   // 테두리 판
+    put(new THREE.Mesh(new THREE.PlaneGeometry(B.w, B.h), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false })), 0, 0, 0, g);
+    g.traverse((o) => (o.castShadow = false));
+    this.board2 = { g, cv, tex, t: 0 };
+    const S = W.server, srv = put(new THREE.Group(), S.x, 0, S.z, root); srv.rotation.y = S.rot;   // 서버 랙 4대 (앞면 = 건물 안쪽)
+    this.srvLeds = [];
+    for (const x of [-1.65, -0.55, 0.55, 1.65]) {
+      const rk = put(box(0.9, 2.3, 1.0, MAT.dark), x, 1.15, 0, srv);
+      for (let k = 0; k < 6; k++) { const m = emis(k % 2 ? 0x3dff8a : 0x2aa8ff, 2); this.srvLeds.push(m); put(box(0.6, 0.04, 0.02, m, false), 0, -0.8 + k * 0.32, 0.51, rk); }
+    }
+    // 셀 IoT 노드 → 이 서버로 날아가는 데이터 패킷 목적지 (서버 랙 앞면 가운데, 정밀조립 factory.js serverPos와 같은 높이)
+    this.serverPos = new THREE.Vector3(S.x + Math.sin(S.rot) * 0.5, 2.6, S.z + Math.cos(S.rot) * 0.5);
+    this.pkG = put(new THREE.Group(), 0, 0, 0, root); this.packets = [];
+    put(textPlane([`${this.Z.code} 데이터 서버`, `${this.Z.name} · MES · 셀 PLC · 영상`], 3.0, 0.6, hex(this.Z.accent)), 0, 2.72, 0.45, srv).rotation.x = 0;
+    this.srv = srv;
+  }
+  drawWall() {
+    const B = this.board2, s = this.sim; if (!B || !s) return;
+    const c = B.cv.getContext('2d'), W = B.cv.width, H = B.cv.height, F = '"Apple SD Gothic Neo", "Noto Sans KR", sans-serif', Z = this.Z, acc = hex(Z.accent);
+    const ST = { BUSY: ['가동', '#3ddc84'], IDLE: ['대기', '#8fb3c9'], BLOCKED: ['출구 대기', '#f5b82e'], DOWN: ['고장', '#ff5a5a'], MAINT: ['정비중', '#f5b82e'], ESTOP: ['정지', '#ff5a5a'] };
+    c.fillStyle = '#04121f'; c.fillRect(0, 0, W, H);
+    c.fillStyle = acc; c.fillRect(0, 0, 14, H);
+    const good = this.stats.good, tot = Object.values(good).reduce((a, b) => a + b, 0), uph = this.time > 120 ? Math.round((tot / this.time) * 3600) : 0;
+    c.textBaseline = 'middle'; c.fillStyle = '#e8eef4'; c.font = `800 44px ${F}`; c.fillText(`${Z.code} ${Z.name} 운영 현황`, 36, 40);
+    c.font = `700 32px ${F}`; c.fillStyle = '#c9d2dc';
+    c.fillText(`${Object.entries(Z.products).map(([k, v]) => `${v.label} ${good[k] ?? 0}`).join(' · ')} · UPH ${uph} · 투입 ${this.stats.released} · ${Z.ng ? `NG ${this.stats.ng}` : `리워크 ${this.stats.rework}`} · 셀 고장 누적 ${s.zoneCells.filter((x) => x.zone === Z.key).reduce((a, x) => a + x.c.fails, 0)}건`, 640, 40);
+    // 셀 타일: 이름 · 상태 · 건강도 막대
+    const n = this.order.length, tw = (W - 60) / n;
+    this.order.forEach((cell, i) => {
+      const x = 36 + i * tw, zc = s.zoneCell(Z.key, cell.id), st = (s.cmd?.estopAll || s.cmd?.pstopAll) ? 'ESTOP' : cell.fault ?? cell.state, [lab, col] = ST[st] ?? [st, '#8fb3c9'];
+      c.fillStyle = '#0c2133'; c.fillRect(x, 78, tw - 12, 150);
+      c.fillStyle = col; c.fillRect(x, 78, tw - 12, 8);
+      c.font = `700 26px ${F}`; c.fillStyle = '#e8eef4'; let label = `${cell.def.no ?? cell.id} ${cell.def.label}`; while (c.measureText(label).width > tw - 28 && label.length > 4) label = label.slice(0, -1);
+      c.fillText(label, x + 8, 112);
+      c.font = `800 30px ${F}`; c.fillStyle = col; c.fillText(lab, x + 8, 152);
+      const h = zc?.health ?? 100; c.fillStyle = '#16232f'; c.fillRect(x + 8, 186, tw - 28, 18);
+      c.fillStyle = h < 40 ? '#ff5a5a' : h < 60 ? '#f5b82e' : '#3ddc84'; c.fillRect(x + 8, 186, (tw - 28) * h / 100, 18);
+      c.font = `600 20px ${F}`; c.fillStyle = '#8fb3c9'; c.fillText(`건강도 ${Math.round(h)}%${zc?.request ? ` · ${zc.request.kind === 'repair' ? '긴급수리' : '예지정비'}` : ''}`, x + 8, 218);
+    });
+    // 아래: AMR · 정비 · 순찰 로봇 · 물류
+    const cs = this.carriers.reduce((a, k) => ((a[k.state] = (a[k.state] ?? 0) + 1), a), {}), legacy = this.mode === 'traditional';
+    const techs = s.techs.filter((t) => t.zone === Z.key), quads = s.quads.filter((q) => q.zone === Z.key), drones = (s.drones ?? []).filter((d) => d.zone === Z.key);
+    const w = s.whZone?.[Z.key], kits = s.zoneKits?.[Z.key];
+    const short = (m) => (m.task ? m.task.replace(/\s*\(.*\)$/, '').slice(0, 14) : '대기');
+    const rows = [
+      [`${legacy ? '대차' : 'AMR'} ${this.carriers.length}대`, `스테이션 ${cs.park ?? 0} · 투입 대기 ${cs.queue ?? 0} · 운행 ${this.carriers.length - (cs.park ?? 0) - (cs.queue ?? 0)}`],
+      [`정비 ${techs.length}명`, techs.map((t) => `${t.id.split(' ').pop()} ${short(t)}`).join(' · ')],
+      [`순찰 로봇`, quads.length || drones.length ? [...quads.map((q) => `${q.id.split(' ').pop()} ${Math.round(q.battery)}%`), ...drones.map((d) => `드론-${d.idx + 1} ${Math.round(d.battery)}% ${d.mode === 'mission' ? '출동' : d.mode === 'patrol' ? '순찰' : '충전'}`)].join(' · ') : '피지컬AI 단계에서 운용'],
+      [`물류`, w ? `투입구 원재료 ${s.zoneRaw?.[Z.key] ?? '-'}/40${kits != null ? ` · 키트 ${kits}/12` : ''} · 확장 선반 원재료 ${w.raw} · 부품 ${w.parts} · 전용 ${legacy ? '지게차' : 'AGV'} ${(() => { const v = s.vehicles.find((x) => x.zone === Z.key); return v ? (v.task ? v.task.replace(/\s*\(.*\)$/, '') : '대기') : '-'; })()}${this.starved ? ' · ⛔ 자재 대기' : ''}` : '-'],
+    ];
+    rows.forEach(([k, v], i) => {
+      const y = 262 + i * 34;
+      c.font = `800 26px ${F}`; c.fillStyle = acc; c.fillText(k, 36, y);
+      c.font = `600 26px ${F}`; c.fillStyle = '#c9d2dc'; let t = v; while (c.measureText(t).width > W - 260 && t.length > 4) t = t.slice(0, -1); c.fillText(t, 220, y);
+    });
+    B.tex.needsUpdate = true;
   }
 
   // 새 실행(단계·라인 변경)마다 처음부터
   reset(modeKey = 'smart', seed = 1) {
     this.mode = modeKey; this.rng = mulberry(seed + (this.Z.key === 'flex' ? 11 : 23));
-    this.time = 0; this.seq = 0; this.mixAcc = {};
+    this.time = 0; this.seq = 0; this.mixAcc = {}; this.starved = false;
+    if (this.board2) { this.board2.g.visible = this.srv.visible = this.pkG.visible = modeKey !== 'traditional'; }
+    for (const c of this.order) c.iot.visible = modeKey !== 'traditional';   // 레거시: IoT 노드·데이터 수집 없음 (정밀조립Zone과 같음)
+    for (const p of this.packets ?? []) { p.alive = false; p.m.visible = false; }
+    this.buildSrcStock();
     this.stats = { good: {}, ng: 0, rework: 0, released: 0 };
     for (const c of this.order) Object.assign(c, { occ: null, state: 'IDLE', progress: 0, item: null, busy: 0, done: 0 });
     this.src.occ = null; this.sink.occ = null;
     this.dyn.clear();
     const legacy = modeKey === 'traditional';
+    // 처음: 투입 대기열 칸만큼 대기열에, 나머지는 스테이션 대기 줄에
     this.carriers = Array.from({ length: this.Z.amr.count }, (_, i) => {
-      const q = this.qSlots[Math.min(i, this.qSlots.length - 1)];
+      const inQ = !this.st, q = inQ ? this.qSlots[Math.min(i, this.qSlots.length - 1)] : this.st.slots[i];   // 처음: 모두 자기 대기 자리에서 (스테이션이 없으면 투입 대기열)
       const g = legacy ? makeCart() : makeCarrierAMR(); this.dyn.add(g);
-      return { id: `${this.Z.code}-AMR${String(i + 1).padStart(2, '0')}`, i, x: q.x, z: q.z, heading: 0, state: 'queue', qAt: i, wait: 0, path: null, s: 0, item: null, at: null, g, pm: null, timer: 0 };
+      if (!legacy) g.traverse((o) => { o.userData.moverId = `${this.Z.code}-AMR${String(i + 1).padStart(2, '0')}`; });
+      return { id: `${this.Z.code}-AMR${String(i + 1).padStart(2, '0')}`, uid: zoneAmrUid(this.Z, i), i, x: q.x, z: q.z, heading: this.st?.face ?? 0, state: inQ ? 'queue' : 'park', qAt: i, parkAt: i, wait: 0, path: null, s: 0, item: null, at: null, g, pm: null, timer: 0,
+        slot: i, battery: 100 - ((i * 7) % 28), dist: 0, moving: false, chgNow: true, outOfService: false, task: null };
     });
     this.buildCrew(modeKey);
   }
@@ -361,7 +469,7 @@ class ExtraZone {
   buildCrew(modeKey) {
     const legacy = modeKey === 'traditional', dark = modeKey === 'dark';
     for (const c of this.order) {
-      c.robotsG.clear(); c.workersG.clear(); c.robots = [];
+      c.robotsG.clear(); c.workersG.clear(); c.robots = []; c.robotUids = [];
       const R = c.def.robot, kind = dark && R[2] ? R[2] : R[0], count = dark && R[2] ? R[3] : R[1];
       c.cycle = c.def.cycle * (MODE_MUL[modeKey] ?? 1);
       if (c.parts.manualProps) c.parts.manualProps.forEach((p) => (p.visible = legacy));
@@ -381,14 +489,84 @@ class ExtraZone {
         const r = makeRobot(kind, MAT.orange);
         const [x, z, yaw] = slots[i];
         put(r.root, x, kind === 'ammr' ? 0.06 : 0.15, kind === 'ammr' ? Math.sign(z) * AMMR.slotZ : z, c.robotsG); r.root.rotation.y = yaw;
-        r.phase = i * 1.3; c.robots.push(r);
+        // 피지컬AI: 6축·협동로봇 손목 카메라 (정밀조립 VLA 셀 로봇과 같은 자리·모양 — factory.js placeRobots) · AMMR·휴머노이드는 모델에 카메라 4대(r.cams)
+        if (dark && (kind === 'articulated' || kind === 'cobot')) {
+          const cam = put(box(0.07, 0.05, 0.06, MAT.dark), 0.07, 0.02, 0, r.tip.parent);
+          put(cyl(0.018, 0.018, 0.02, emis(0x37e8ff, 1.5), 10), 0, 0.035, 0, cam); r.wristCam = true;
+        }
+        r.root.traverse((o) => { o.userData.stationId = this.sid(c); o.userData.robotIdx = i; });   // 클릭 → 셀 로봇 텔레메트리 (factory.js pick · DataHub 자산 id와 같은 셀 키)
+        r.phase = i * 1.3; c.robots.push(r); c.robotUids.push(zoneRobotUid(this.Z, c.id, i));   // 셀 로봇 고유 ID (zonedefs.js)
       }
       c.rb.textContent = `🤖 ${ROBOT_SHORT[kind] ?? kind}×${count}`;
     }
   }
 
+  // 자재 투입존 보관 재고 (제품별 양쪽): Blender 모델이 늦게 들어오므로 실행마다 다시 채운다 · 칸 위치는 안쪽(지그 쪽)·아래 단부터
+  buildSrcStock() {
+    const n = this.src; if (!n?.stockG) return;
+    n.stockG.clear(); n.heldG.clear(); n.side = {};
+    Object.keys(this.Z.products).forEach((k, i) => {
+      const z0 = i ? -2.15 : 2.15, sg = Math.sign(z0), panel = k === 'hood' || k === 'door', D = PRODUCT_DIM[k][1], slots = [];
+      if (panel) { for (let j = 0; j < 10; j++) for (const cx of [-0.95, 0.95]) slots.push({ x: cx, y: 0.14 + D / 2, z: z0 - sg * 0.65 + sg * j * 0.145 }); }
+      else for (let L = 0; L < 2; L++) for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) slots.push({ x: -1.2 + c * 0.8, y: 0.12 + L * 0.32, z: z0 - sg * 0.5 + sg * r * 0.5 });
+      const place = (m, p) => { if (panel) m.rotation.x = -PI / 2; m.position.set(p.x, p.y, p.z); return m; };
+      const objs = slots.slice(0, SRC_SIDE).map((p) => { const m = place(makeProduct(k), p); n.stockG.add(m); return m; });
+      const held = makeProduct(k); if (panel) held.rotation.x = -PI / 2; held.position.y = -1.85 - (panel ? 0 : 0.1); held.visible = false; n.heldG.add(held);
+      n.side[k] = { objs, slots: slots.slice(0, SRC_SIDE), held, h: panel ? D : 0.25, panel };
+    });
+    n.shown = null;
+  }
+  // 다음 투입 제품 (평준화 누적값을 바꾸지 않고 미리 봄) — 갠트리가 그 제품 쪽 보관 구역에서 집는다
+  peekNext() {
+    const w = this.mix, keys = Object.keys(w).filter((k) => w[k] > 0), tot = keys.reduce((a, k) => a + w[k], 0) || 1;
+    return keys.reduce((a, b) => ((this.mixAcc[b] ?? 0) + w[b] / tot > (this.mixAcc[a] ?? 0) + w[a] / tot ? b : a), keys[0]);
+  }
+  // 자재 투입존 화면: 투입구 원재료(sim.zoneRaw)를 혼류 비율로 양쪽에 나눠 보이고, 적재(load) 중이면 갠트리가 다음 제품 쪽 맨 위 칸에서 집어 가운데 지그로
+  animSrc() {
+    const n = this.src, P = n?.port, s = this.sim; if (!n?.side || !P) return;
+    const keys = Object.keys(this.Z.products), w = this.mix, tot = keys.reduce((a, k) => a + (w[k] || 0), 0) || 1;
+    const buf = s?.zoneRaw?.[this.Z.key] ?? SRC_SIDE * 2;
+    const cnt = {}; cnt[keys[0]] = Math.min(SRC_SIDE, Math.round(buf * (w[keys[0]] || 0) / tot)); cnt[keys[1]] = Math.min(SRC_SIDE, buf - cnt[keys[0]]);
+    const c = n.occ && n.occ.state === 'load' ? n.occ : null, k = c ? Math.min(1, Math.max(0, 1 - c.timer / this.Z.load)) : 0;
+    let next = this.peekNext(); if (!cnt[next]) next = keys.find((x) => cnt[x] > 0) ?? next;
+    const S = n.side[next], picked = c && k >= 0.36 ? 1 : 0;
+    for (const key of keys) { const v = Math.max(0, cnt[key] - (key === next ? picked : 0)); n.side[key].objs.forEach((o, i) => (o.visible = i < v)); }
+    const top = S.slots[Math.max(0, cnt[next] - 1)], pick = { x: top.x, z: top.z, y: top.y + S.h / 2 }, place = { x: 0, z: 0, y: BELT_Y + 0.05 + S.h / 2 }, UP = 2.45;
+    const K = [[0, 0, 0, 0], [0.18, 1, 0, 0], [0.3, 1, 1, 0], [0.36, 1, 1, 1], [0.48, 1, 0, 1], [0.7, 0, 0, 1], [0.84, 0, 1, 1], [1, 0, 1, 1]];
+    let a = K[0], b = K[0]; for (let i = 1; i < K.length; i++) if (k <= K[i][0]) { a = K[i - 1]; b = K[i]; break; }
+    const f = b[0] > a[0] ? (k - a[0]) / (b[0] - a[0]) : 0, pos = c ? a[1] + (b[1] - a[1]) * f : 0, low = c ? a[2] + (b[2] - a[2]) * f : 0, held = c ? (f < 1 ? a[3] : b[3]) : 0;
+    P.bridge.position.x = place.x + (pick.x - place.x) * pos; P.car.position.z = place.z + (pick.z - place.z) * pos;
+    const yLow = pos > 0.5 ? pick.y : place.y; P.lift.position.y = (UP + (yLow - UP) * low) - 1.15;
+    for (const key of keys) n.side[key].held.visible = !!held && key === next;
+  }
+
+  // 셀 키 (DataHub 자산 id · 텔레메트리 ref.stationId): A_1_C03
+  sid(c) { return `${this.Z.code.replace(/-/g, '_')}_${c.id}`; }
+  // 텔레메트리용 셀 보기 (정밀조립 셀 객체와 같은 이름의 값 — telemetry.js resolve)
+  teleCell(c) {
+    const zone = this, zc = () => zone.sim?.zoneCell(zone.Z.key, c.id);
+    return c.tele ??= {
+      id: this.sid(c), name: `${this.Z.code} ${c.def.label}`, type: c.def.type, zone: this.Z.key, x: this.Z.origin.x + c.def.x, z: this.Z.origin.z + c.def.z,
+      get state() { return c.fault ?? c.state; }, get progress() { return c.progress; }, get health() { return zc()?.health ?? 100; },
+      get item() { return c.item; }, get robotUids() { return c.robotUids; }, use: c.def.use,
+    };
+  }
+  // 텔레메트리용 운반 AMR 보기: 공장 좌표 · 상태 (배터리 없음 — 정차 위치 무선 충전)
+  teleCarrier(c) {
+    const o = this.Z.origin, zone = this;
+    return c.tele ??= {
+      id: c.id, uid: c.uid, kind: 'zoneamr', zone: this.Z.key,
+      prio: 1e6, idle: false, steps: [], blockedOn: null, hzWait: false,   // 시뮬레이션 이동체 양보 규칙(sim.js yieldTo)용: 정해진 길을 도는 라인 AMR — 우선순위 최고, 서 있으면 정지 장애물로 보고 돌아간다
+      get x() { return c.x + o.x; }, get z() { return c.z + o.z; }, get heading() { return c.heading; },
+      get moving() { return c.zoneMoving?.() ?? false; }, get state() { return c.state; },
+      get task() { return { queue: '투입 대기열', park: 'Zone AMR 스테이션 대기', move: '셀 간 운반', return: '빈 AMR 복귀', toSrc: '투입 위치로 이동', work: '셀 작업 중' }[c.state] ?? c.state; },
+      get payload() { const it = c.item; return it ? `${zone.Z.products[it.product]?.label ?? it.product}#${it.id ?? ''}` : 'empty'; },
+    };
+  }
+  // 혼류 비율 변경 — 다음 투입부터 새 비율로 평준화 (진행 중인 작업물·실적은 그대로)
+  setMix(w) { this.mix = { ...w }; this.mixAcc = {}; }
   nextProduct() {
-    const w = this.Z.mix, keys = Object.keys(w).filter((k) => w[k] > 0), tot = keys.reduce((a, k) => a + w[k], 0);
+    const w = this.mix, keys = Object.keys(w).filter((k) => w[k] > 0), tot = keys.reduce((a, k) => a + w[k], 0);
     for (const k of keys) this.mixAcc[k] = (this.mixAcc[k] ?? 0) + w[k] / tot;
     const k = keys.reduce((a, b) => (this.mixAcc[b] > this.mixAcc[a] ? b : a)); this.mixAcc[k] -= 1; return k;
   }
@@ -409,6 +587,10 @@ class ExtraZone {
     // 셀 작업
     for (const c of this.order) {
       c.halt = false;
+      // 셀 고장·정비 (sim.js 확장 Zone 셀): 수리 끝날 때까지 작업이 멈춘다 · 가동 여부를 알려 마모 계산에 쓴다
+      const zc = this.sim?.zoneCell(Z.key, c.id); c.fault = zc && (zc.state === 'DOWN' || zc.state === 'MAINT') ? zc.state : null;
+      if (zc) zc.busy = c.state === 'BUSY';
+      if (c.fault) continue;
       if (c.state !== 'BUSY') continue;
       c.busy += dt; c.progress = Math.min(1, c.progress + dt / c.cur);
       if (c.progress >= 1) {
@@ -418,21 +600,47 @@ class ExtraZone {
         c.state = 'BLOCKED';   // 다음 셀이 비기를 기다림 (비면 곧바로 출발)
       }
     }
+    this.dispatchParked();
     for (const c of this.carriers) this.stepCarrier(c, dt);
   }
+  // 자기 자리로 돌아가는 길 · 자리에서 투입 대기열로 나가는 길 (Zone 로컬)
+  returnPath(c) { const S = this.st, p = S.slots[c.slot]; return [{ x: this.Z.sink.x, z: this.Z.sink.z }, ...S.keep, ...S.ret, { x: p.x, z: S.retZ }, { x: p.x, z: p.z }]; }
+  outPath(c) { const S = this.st, p = S.slots[c.slot]; return [{ x: p.x, z: p.z }, { x: p.x, z: S.outZ }, ...S.out, { x: this.Z.src.x, z: this.Z.src.z }]; }
+  // 스테이션 → 투입 대기열 (정밀조립Zone 선행 배차와 같은 방식): 대기열(가는 중 포함)이 STATION_LEAD보다 적으면
+  // 출구에 가까운 자리(번호가 작은 자리)의 AMR부터 내보낸다 — 운행 제외 · 배터리 저전압 기준 +10% 미만인 AMR은 자기 자리에서 충전하며 기다린다
+  dispatchParked() {
+    if (!this.st) return;
+    const ok = (c) => !c.outOfService && c.battery >= BATTERY.carrier.low + 10;
+    const toQ = this.carriers.filter((c) => c.state === 'queue' || c.state === 'toQ').length;
+    if (toQ >= this.qSlots.length) return;
+    const c = this.carriers.filter((k) => k.state === 'park' && ok(k)).sort((a, b) => a.slot - b.slot)[0];
+    if (c) this.go(c, this.outPath(c), 'toQ', 'Q');
+  }
+  // AMR 관제(fleet.js zflex·zadapt): 속도 배율 · 관제 정지 · 운행 제외 / 배터리: 주행 중 소모 · 정차 위치마다 무선 충전 (정밀조립Zone 운반 AMR과 같은 값)
   stepCarrier(c, dt) {
-    const Z = this.Z;
+    const fz = this.fz, x0 = c.x, z0 = c.z, B = BATTERY.carrier;
+    if (!(fz?.paused && ['move', 'toSrc', 'return', 'toQ', 'park', 'queue'].includes(c.state))) this.stepCarrierFlow(c, dt);
+    const d = Math.hypot(c.x - x0, c.z - z0); c.dist = (c.dist ?? 0) + d; c.moving = d > 1e-6; c.chgNow = !c.moving;
+    c.battery = Math.max(0, Math.min(100, (c.battery ?? 100) + (c.moving ? -B.move * Math.pow(fz?.scale ?? 1, 1.5) : B.rate) * dt));
+    c.task = { park: `스테이션 ${c.slot + 1}번 자리 대기·충전`, toQ: '투입 대기열로 출동', queue: '투입 대기', toSrc: '투입 진입', load: '적재', ready: '출발 대기', move: `운반 → ${c.target}`, work: `셀 정차 · ${c.at}`, unload: '하역', return: '빈 차 복귀' }[c.state] ?? c.state;
+  }
+  stepCarrierFlow(c, dt) {
+    const Z = this.Z, sc = this.fz?.scale ?? 1;
     switch (c.state) {
+      case 'park': break;   // 자기 대기 자리 (무선 충전) — 출동은 dispatchParked
       case 'queue': {   // 투입 대기열 — 앞자리가 비면 한 칸씩 당기고, 맨 앞이면서 투입 위치가 비면 들어간다
         const k = this.carriers.filter((o) => o.state === 'queue' && o.qAt < c.qAt).length;
         const q = this.qSlots[Math.min(k, this.qSlots.length - 1)];
         if (k === 0 && !this.src.occ) { this.src.occ = c; this.go(c, [{ x: c.x, z: c.z }, { x: Z.src.x, z: Z.src.z }], 'toSrc', 'SRC'); break; }
-        this.moveToward(c, q, Z.amr.ret, dt);
+        this.moveToward(c, q, Z.amr.ret * sc, dt);
         break;
       }
       case 'load':
         c.timer -= dt;
         if (c.timer <= 0) {
+          // 물류존 확장 선반에서 원재료 1개 · 부품 키트 1개를 꺼낸다 — 모자라면 입고될 때까지 투입 대기 (sim.js takeZoneStock)
+          if (this.sim && !this.sim.takeZoneStock(Z.key)) { this.starved = true; break; }
+          this.starved = false;
           const p = this.nextProduct();
           c.item = { id: `${Z.code}-${String(++this.seq).padStart(4, '0')}`, product: p, done: new Set(), ng: false, t0: this.time };
           this.stats.released++; this.attachItem(c);
@@ -448,16 +656,24 @@ class ExtraZone {
         this.go(c, cellPath(Z, c.at, nextId, { x: a.x, z: a.z }, { x: b.x, z: b.z }), 'move', nextId);
         break;
       }
-      case 'move': case 'toSrc': case 'return': {
-        const sp = c.state === 'move' ? Z.amr.speed : Z.amr.ret;
+      case 'move': case 'toSrc': case 'return': case 'toQ': {
+        const sp = (c.state === 'move' ? Z.amr.speed : Z.amr.ret) * sc;
         // 앞차 간격: 같은 방향으로 1.8m 안에 다른 이동 AMR이 있으면 잠시 선다 (교차 통로에서 겹치지 않게)
         // 서로 마주 보며 막히면 번호가 빠른 쪽이 먼저 가고, 3초 넘게 막히면 그대로 지나간다 (교착 방지)
-        const blocked = this.carriers.some((o) => o !== c && (o.state === 'move' || o.state === 'return') && Math.hypot(o.x - c.x, o.z - c.z) < 1.8 && this.ahead(c, o) && !(this.ahead(o, c) && c.i < o.i));
+        const blocked = this.carriers.some((o) => o !== c && (o.state === 'move' || o.state === 'return' || o.state === 'toQ') && Math.hypot(o.x - c.x, o.z - c.z) < 1.8 && this.ahead(c, o) && !(this.ahead(o, c) && c.i < o.i));
         if (blocked && c.wait < 3) { c.wait += dt; break; }
         c.wait = 0;
+        // 시뮬레이션 이동체(정비 인력·사족보행·물류 휴머노이드·AGV)가 앞길에 있으면 선다 — 그쪽이 Zone AMR을 보고 비켜 가므로 기다린다 (25초 넘으면 교착 방지로 출발)
+        const ext = this.extAhead(c);
+        if (ext) { c.extWait = (c.extWait ?? 0) + dt; if (c.extWait < 25) { c.extBlock = ext; break; } } else c.extWait = 0;
+        c.extBlock = null;
         c.s = Math.min(c.L, c.s + sp * dt);
         const p = pointAt(c.path, c.s); this.face(c, p); c.x = p.x; c.z = p.z;
-        if (c.state === 'return') {   // 복귀: 대기열 끝자리 근처에 오면 대기열로
+        if (c.state === 'return' && this.st) {   // 자기 자리 도착 → 출동 차로 쪽을 보고 대기
+          if (c.s >= c.L - 1e-6) { c.state = 'park'; c.heading = this.st.face; }
+          break;
+        }
+        if (c.state === 'toQ' || c.state === 'return') {   // 투입 대기열 끝자리 근처에 오면 대기열로 (스테이션이 없으면 복귀 = 대기열로)
           const k = this.carriers.filter((o) => o.state === 'queue').length, q = this.qSlots[Math.min(k, this.qSlots.length - 1)];
           if (Math.hypot(q.x - c.x, q.z - c.z) < 0.6 || c.s >= c.L - 0.01) { c.state = 'queue'; c.qAt = this.time + 100 + c.i * 1e-6; }
           break;
@@ -478,10 +694,21 @@ class ExtraZone {
         if (c.timer <= 0) {
           const p = c.item.product; this.stats.good[p] = (this.stats.good[p] ?? 0) + 1;
           this.detachItem(c); c.item = null; this.sink.occ = null;
-          this.go(c, this.retPath, 'return', 'Q');
+          this.go(c, this.st ? this.returnPath(c) : this.retPath, 'return', this.st ? 'PARK' : 'Q');
         }
         break;
     }
+  }
+  // 앞길(진행 방향 반지름 합 + 0.5m · 차체 폭 합의 반 + 0.1m) 안의 시뮬레이션 이동체 — sim.js sense와 같은 판정
+  extAhead(c) {
+    const ms = this.sim?.movers; if (!ms) return null;
+    const o = this.Z.origin, x = c.x + o.x, z = c.z + o.z, hx = Math.sin(c.heading), hz = Math.cos(c.heading);
+    for (const m of ms) {
+      if (m.state === 'line') continue;
+      const rx = m.x - x, rz = m.z - z, along = rx * hx + rz * hz, lat = Math.abs(rx * hz - rz * hx);
+      if (along > 0.15 && along < 0.8 + moverRadius(m) + 0.5 && lat < (0.95 + moverWidth(m)) / 2 + 0.1) return m;
+    }
+    return null;
   }
   ahead(c, o) {   // o가 c의 진행 방향 앞쪽에 있는가
     const hx = Math.sin(c.heading), hz = Math.cos(c.heading);
@@ -502,15 +729,50 @@ class ExtraZone {
 
   // ── 화면 동기화 (rdt: 실제 초, t: 화면 시간) ─────────────────
   sync(rdt, t, dts) {
+    this.animSrc();
+    if (this.board2?.g.visible) {   // 전광판 0.5초마다 · 서버 상태등 깜빡임
+      this.board2.t -= rdt; if (this.board2.t <= 0) { this.board2.t = 0.5; this.drawWall(); }
+      this.srvLeds.forEach((m, i) => (m.emissiveIntensity = Math.sin(t * 6 + i * 1.7) > 0.2 ? 2 : 0.4));
+    }
     for (const c of this.carriers) {
       c.g.position.set(c.x, 0, c.z);
       let d = c.heading - c.g.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); c.g.rotation.y += d * Math.min(1, rdt * 8);
       if (c.pm && c.item) styleProduct(c.pm, c.item);
     }
     for (const c of this.order) this.animCell(c, t, rdt, dts);
+    // IoT 데이터 패킷 (자동화·피지컬AI): 셀 IoT 노드 → Zone 데이터 서버, 고장은 빨강 · 정비는 주황 (정밀조립 factory.js와 같은 빈도·궤적)
+    if (this.pkG?.visible) {
+      for (const c of this.order) {
+        const k = (t * 0.8 + c.phase) % 1; c.pulse.scale.setScalar(1 + k * 3); c.ringM.opacity = 0.6 * (1 - k);
+        c.sensorMat.emissive.setHex(c.fault === 'DOWN' ? 0xff3030 : c.fault === 'MAINT' ? 0xffb020 : 0x37e8ff);
+        if (Math.random() < rdt * 1.6) this.spawnPacket(c);
+      }
+      this.updatePackets(rdt);
+    }
+  }
+  spawnPacket(cell) {
+    let p = this.packets.find((q) => !q.alive);
+    if (!p) {
+      if (this.packets.length > 40) return;
+      p = { m: put(new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), new THREE.MeshBasicMaterial({ color: 0x7ff3ff, toneMapped: false })), 0, 0, 0, this.pkG), alive: false };
+      this.packets.push(p);
+    }
+    p.alive = true; p.t = 0; p.m.visible = true;
+    p.a = cell.sensor.getWorldPosition(new THREE.Vector3()); p.b = this.serverPos.clone();
+    p.c = p.a.clone().lerp(p.b, 0.5); p.c.y = 9;
+    p.m.material.color.setHex(cell.fault === 'DOWN' ? 0xff5050 : 0x7ff3ff);
+  }
+  updatePackets(rdt) {
+    for (const p of this.packets) {
+      if (!p.alive) continue;
+      p.t += rdt * 0.7;
+      if (p.t >= 1) { p.alive = false; p.m.visible = false; continue; }
+      const k = p.t, j = 1 - k, { a, b, c } = p;
+      p.m.position.set(j * j * a.x + 2 * j * k * c.x + k * k * b.x, j * j * a.y + 2 * j * k * c.y + k * k * b.y, j * j * a.z + 2 * j * k * c.z + k * k * b.z);
+    }
   }
   animCell(c, t, rdt, dts) {
-    const P = c.parts, busy = c.state === 'BUSY' && !c.halt, p = c.progress, st = c.halt ? 'ESTOP' : c.state;
+    const P = c.parts, busy = c.state === 'BUSY' && !c.halt && !c.fault, p = c.progress, st = c.halt ? 'ESTOP' : c.fault ?? c.state;
     c.light.userData.set(st, t);
     for (const r of c.robots) r.anim(busy, t + r.phase, p);
     const ty = c.def.type, it = c.item, legacy = this.mode === 'traditional';
@@ -574,15 +836,16 @@ class ExtraZone {
 
   // 라벨·현황판 (0.25초마다)
   updateLabels(halted) {
-    const lab = { BUSY: '가동', IDLE: '대기', BLOCKED: '출구 대기', ESTOP: '정지' };
+    const lab = { BUSY: '가동', IDLE: '대기', BLOCKED: '출구 대기', ESTOP: '정지', DOWN: '고장 · 정비 출동', MAINT: '정비중' };
     for (const c of this.order) {
-      const s = halted ? 'ESTOP' : c.state;
+      const s = halted ? 'ESTOP' : c.fault ?? c.state;
       c.chip.className = 'chip s-' + s;
       c.chip.textContent = lab[s] + (c.state === 'BUSY' && c.item ? ` · ${this.Z.products[c.item.product].label}${c.item.rework ? ' (리워크)' : c.item.ng && c.id === this.Z.ng?.to ? ' (NG 보수)' : ''}` : '');
     }
     const q = this.carriers.filter((c) => c.state === 'queue' || c.state === 'toSrc').length;
-    this.src.chip.className = 'chip s-' + (this.src.occ ? 'BUSY' : 'IDLE');
-    this.src.chip.textContent = `${this.src.occ ? '적재 중' : '대기'} · ${this.mode === 'traditional' ? '대차' : 'AMR'} 대기 ${q}`;
+    this.src.chip.className = 'chip s-' + (this.starved ? 'NOSTOCK' : this.src.occ ? 'BUSY' : 'IDLE');
+    const raw = this.sim?.zoneRaw?.[this.Z.key];
+    this.src.chip.textContent = this.starved ? `자재 대기 · 투입구 원재료 ${raw ?? 0}` : `${this.src.occ ? '적재 중' : '대기'} · ${this.mode === 'traditional' ? '대차' : 'AMR'} 대기 ${q}${raw != null ? ` · 원재료 ${raw}` : ''}`;
     const g = this.stats.good, ps = Object.entries(this.Z.products);
     this.sink.chip.className = 'chip s-' + (this.sink.occ ? 'BUSY' : 'IDLE');
     this.sink.chip.textContent = ps.map(([k, v]) => `${v.label} ${g[k] ?? 0}`).join(' · ');
@@ -608,21 +871,39 @@ export class ExtraZones {
   // 새 실행(정밀조립Zone 시뮬레이션 시작)마다 — Blender 모델이 늦게 들어왔으면 운반체·제품도 새 모델로
   setup(sim, labelsOn = this.labelsOn) {
     this.zones.forEach((z) => z.reset(sim.mode.key, sim.seed ?? 1));
+    sim.zoneAmr = Object.fromEntries(this.zones.map((z) => [z.Z.key, z.carriers]));   // AMR·AGV 관제 창(fleet.js zflex·zadapt)이 Zone AMR을 보고 조작한다
+    // 운반 AMR = Private 5G 단말 (정밀조립 운반 AMR과 같음): 위치는 Zone 원점 기준 → 공장 좌표
+    sim.setExternalMovers?.(this.zones.flatMap((z) => z.carriers.map((c) => z.teleCarrier(c))));   // 시뮬레이션 이동체가 Zone AMR을 보고 양보·우회
+    for (const z of this.zones) { const o = z.Z.origin; z.carriers.forEach((c) => { c.zoneMoving = () => c.state === 'move' || c.state === 'return' || c.state === 'toSrc' || c.state === 'toQ'; sim.net?.bindUE(c.id, c.uid, 'carrier', () => ({ x: c.x + o.x, y: 0.9, z: c.z + o.z, m: c }), c); }); }
     this.setLabels(labelsOn);
   }
-  step(dt, sim) { const K = sim.cmd, halted = !!(K?.estopAll || K?.pstopAll); this.halted = halted; for (const z of this.zones) z.step(dt, halted); }
+  step(dt, sim) { const K = sim.cmd, halted = !!(K?.estopAll || K?.pstopAll); this.halted = halted; sim.zonesLive = true; for (const z of this.zones) { z.sim = sim; z.fz = sim.fleet?.[`z${z.Z.key}`]; z.step(dt, halted); } }   // 투입 자재는 정밀조립Zone 시뮬레이션의 물류존 재고에서 꺼낸다
   update(rdt, running, speed) {
     this.t += rdt; const dts = running ? rdt * speed : 0;
     for (const z of this.zones) z.sync(rdt, this.t, dts);
   }
   updateLabels() { for (const z of this.zones) z.updateLabels(this.halted); }
   setLabels(on) { this.labelsOn = on; for (const z of this.zones) z.setLabels(on); }
+  byKey(key) { return this.zones.find((z) => z.Z.key === key); }
+  // 셀 로봇 찾기 (factory.js cellRobot): 셀 키(A_1_C03)와 로봇 번호 → { robot, st(텔레메트리용 셀 보기) }
+  cellRobot(sid, idx) {
+    for (const z of this.zones) { const c = z.order.find((x) => z.sid(x) === sid); if (c) return c.robots[idx] ? { robot: c.robots[idx], st: z.teleCell(c) } : null; }
+    return null;
+  }
+  // 운반 AMR 찾기 (telemetry.js resolve): id(A-1-AMR01) → { mover(텔레메트리용 보기), obj(3D) }
+  // 카메라 대상 (robotcam.js): 셀 로봇 [{ ref, robot(uid), st, r }] · 운반 AMR [{ id, mover(텔레메트리용 보기), c }]
+  cellRobots() { return this.zones.flatMap((z) => z.order.flatMap((c) => c.robots.map((r, idx) => ({ ref: { type: 'cell', stationId: z.sid(c), idx }, robot: c.robotUids[idx] ?? `${z.sid(c)}-${idx + 1}`, st: z.teleCell(c), r })))); }
+  carriersAll() { return this.zones.flatMap((z) => z.carriers.map((c) => ({ id: c.id, mover: z.teleCarrier(c), c }))); }
+  carrier(id) {
+    for (const z of this.zones) { const c = z.carriers.find((x) => x.id === id); if (c) return { mover: z.teleCarrier(c), obj: c.g }; }
+    return null;
+  }
   summary() { return this.zones.map((z) => ({ key: z.Z.key, code: z.Z.code, name: z.Z.name, products: z.Z.products, byProduct: z.stats.good, ng: z.stats.ng, rework: z.stats.rework, cells: z.order.length, carriers: z.carriers.length, ...z.summary() })); }
 }
 // 카메라 바로가기 (main.js): [카메라 위치, 바라보는 점]
 export const ZONE_VIEWS = {
   all: [[-1.5, 122, 108], [-1.5, 0, 0]],
-  flex: [[-4, 36, 12], [-4, 0, -21]],
+  flex: [[-4, 36, 10.5], [-4, 0, -22.5]],
   precision: [[-10.5, 34, 34], [-5.5, 0, 0]],
   adapt: [[0, 34, 52], [0, 0, 19]],
 };
