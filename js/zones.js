@@ -332,6 +332,7 @@ class ExtraZone {
     this.cells = {}; this.order = [];
     for (const [id, c] of Object.entries(Z.cells)) {
       const g = put(new THREE.Group(), c.x, 0, c.z, this.G); g.rotation.y = c.rot ?? 0; g.scale.z = c.side ?? 1;
+      g.userData.zoneCell = { zone: Z.key, cellId: id };   // 클릭 → 셀 정보 창 (factory.js pick · ui.js renderZoneCell)
       cellBase(g, 4.6);
       const parts = BUILD[c.type](g, c);
       const light = put(makeStackLight(), -1.9, 0.15, -1.6, g);
@@ -371,7 +372,8 @@ class ExtraZone {
     } : null;
     this.retPath = [{ x: Z.sink.x, z: Z.sink.z }, ...Z.ret, { x: Z.src.x, z: Z.src.z }];   // 스테이션이 없을 때 (복귀로 끝 = 투입 대기열)
     const tail = this.st ? [...this.st.out, { x: Z.src.x, z: Z.src.z }] : this.retPath, rev = [...tail].reverse(), L = pathLength(rev);
-    this.qSlots = []; for (let s = 2.2; s < L - 1 && this.qSlots.length < (this.st ? STATION_LEAD : Z.amr.count); s += 2.0) this.qSlots.push(pointAt(rev, s));
+    // 투입 대기열 자리: 스테이션이 있으면 투입존(투입구 ±2.1m) 밖 진입 구간부터 (투입구 중심에서 3.2m · 5.2m) — 정밀조립Zone처럼 투입존 밖에서 기다린다
+    this.qSlots = []; for (let s = this.st ? 3.2 : 2.2; s < L - 1 && this.qSlots.length < (this.st ? STATION_LEAD : Z.amr.count); s += 2.0) this.qSlots.push(pointAt(rev, s));
     this.buildWall(root);
     this.reset();
   }

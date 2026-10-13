@@ -112,6 +112,7 @@ const epRec = new EpisodeRecorder(view, camWall, hub);   // VLA 에피소드 기
 view.epRec = epRec;
 const orchView = new OrchView(document.getElementById('orchPanel'), document.getElementById('orchBadge'));   // 오케스트레이터 인시던트 흐름도
 const ui = new UI();
+ui.xzones = xzones;   // 확장 Zone 셀 정보 창 (ui.js renderZoneCell)
 const llm = new LLMController();
 ui.llm = llm;
 llm.onChange = () => { ui.renderEngine(); designer?.onLLMChange(); };
@@ -793,12 +794,13 @@ labelRenderer.domElement.addEventListener('pointerup', (e) => {
   if (hit?.type === 'cctv') { closePopups(['cctvPanel', 'cctvCard']); openCctv(hit.id); return; }
   if (hit?.type === 'gnb') { closePopups(['gnbPanel', 'net5gCard']); openGnb(hit.id); return; }
   closePopups('detail');   // 로봇·설비를 누르거나 빈 곳을 누르면 CCTV·기지국 창은 닫는다
-  if (hit && hit.type !== 'station') {
+  if (hit && hit.type !== 'station' && hit.type !== 'zcell') {
     view.selected = hit.type === 'cell' ? hit.stationId : null;
     view.selectRobot(hit); ui.showRobot(); robotTimer = 1;
     return;
   }
   view.selectRobot(null);
+  if (hit?.type === 'zcell') { const zc = sim.zoneCell(hit.zone, hit.cellId); if (zc) { view.selected = null; ui.showDetail(zc); return; } }   // 확장 Zone 셀 정보 창 (sim.js zoneCells — 고장 주입·정비 지시는 정밀조립 셀과 같은 함수)
   const st = hit && (sim.stations.find((s) => s.id === hit.id) ?? sim.standby.find((s) => s.id === hit.id));
   if (st) { view.selected = hit.id; ui.showDetail(st); }
   else { view.selected = null; ui.hideDetail(); }
@@ -842,7 +844,11 @@ function pcapAsset() {
   const tel = view.telemetry, ref = tel?.ref;
   if (ref?.type === 'mover') { const a = hub.assets.find((x) => x.mover?.id === ref.id); return a ? { a, cam: ref } : null; }
   if (ref?.type === 'cell') { const a = hub.assets.filter((x) => x.kind === 'CellRobot' && x.parent === ref.stationId)[ref.idx ?? 0]; return a ? { a, cam: ref } : null; }
-  const st = ui.detailSt; if (st && !ui.robotMode) { const a = hub.assets.find((x) => x.id === st.id); return a ? { a, cam: st.def?.robot?.count ? { type: 'cell', stationId: st.id, idx: 0 } : null } : null; }
+  const st = ui.detailSt; if (st && !ui.robotMode) {
+    const zc = st.cellId != null, id = zc ? st.id.replace(/-/g, '_') : st.id, a = hub.assets.find((x) => x.id === id);   // 확장 Zone 셀 자산 id: A_1_C03
+    const robots = zc ? hub.assets.some((x) => x.kind === 'CellRobot' && x.parent === id) : st.def?.robot?.count;
+    return a ? { a, cam: robots ? { type: 'cell', stationId: id, idx: 0 } : null } : null;
+  }
   return null;
 }
 function renderPcapBox() {

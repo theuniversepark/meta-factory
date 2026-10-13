@@ -2,6 +2,7 @@
 import { Simulation, MODES, ST_LABEL, RAW_CAP, FG_CAP } from './sim.js';
 import { STATION_TYPES, ROBOT_KINDS } from './line.js';
 import { FactoryAgent } from './agent.js';
+import { zoneCellRobots } from './zonedefs.js';
 
 const $ = (id) => document.getElementById(id);
 const pct = (v, d = 1) => (v * 100).toFixed(d) + '%';
@@ -257,6 +258,7 @@ export class UI {
   }
   renderDetail() {
     const st = this.detailSt, sim = this.sim;
+    if (st.cellId != null) return this.renderZoneCell(st);   // 확장 Zone 셀 (sim.js zoneCells — 정밀조립 셀도 st.zone을 갖고 있어 cellId로 가른다)
     const el = $('detail');
     if (st.standby) {
       const u = st.def.usedBy;
@@ -298,6 +300,48 @@ export class UI {
         ${rep}
       </div>
       ${sim.mode.key === 'traditional' ? '<div class="note">※ 레거시 공장에는 센서가 없어 건강도·RUL은 현장에서 보이지 않는 시뮬레이션 내부값입니다.</div>' : ''}
+      ${this.erpLine(st)}
+      <div class="btns"><button data-act="fault">⚡ 고장 주입</button><button data-act="pm">🔧 정비 지시</button></div>
+      <div class="pcap-box" id="pcapBox"></div>`;
+    this.onDetailRendered?.();
+  }
+
+  // 확장 Zone(A-1 유연생산 · A-2 적응가공) 셀 정보 창 — 정밀조립 셀 창과 같은 항목: 설비 상태·건강도(sim.js zoneCells)와 셀 흐름(zones.js: 작업 제품·진행·처리량)
+  renderZoneCell(st) {
+    const sim = this.sim, m = sim.mode, zone = this.xzones?.byKey(st.zone), cell = zone?.cells[st.cellId], Z = zone?.Z, d = cell?.def ?? {};
+    const el = $('detail');
+    const flow = cell?.fault ?? cell?.state ?? 'IDLE', state = st.state === 'DOWN' || st.state === 'MAINT' ? st.state : flow;
+    const R = zoneCellRobots(d.robot ? d : { robot: ['none', 0] }, m.key), rb = m.key === 'traditional' ? `작업자 ${Math.max(1, Math.min(2, d.robot?.[1] || 1))}명 (수작업)` : R.count ? `${ROBOT_KINDS[R.kind]?.label ?? R.kind} ${R.count}대` : d.type === 'vision' ? '비전·치수 게이지' : '로봇 없음';
+    const util = zone?.time > 0 ? cell.busy / zone.time : 0, cyc = cell?.cycle ?? d.cycle ?? st.def.cycle;
+    const rate = st.def.wear * m.wearMul * (60 / Math.max(1, cyc)) * Math.max(0.3, util), rul = Math.max(0, (st.health - 30) / Math.max(0.05, rate));
+    const risk10 = 1 - Math.exp(-sim.hazard(st) * 600 * Math.max(0.3, util)), cpk = 1.67 / (1 + st.drift * 1.5);
+    const col = st.health > 60 ? '#3ddc84' : st.health > 40 ? '#f5b82e' : '#ff5a5a';
+    const rep = st.state === 'DOWN' || st.state === 'MAINT' ? `<span>남은 작업</span><b>${st.techOnSite ? Math.max(0, st.repairRemaining).toFixed(0) + '초' : '인력 이동 중'}</b>` : '';
+    const req = st.request ? `${st.request.kind === 'repair' ? '긴급수리' : st.request.kind === 'cal' ? '재보정' : '예지정비'}${st.request.tech ? ` · ${st.request.tech.id}` : ' · 배정 대기'}` : '없음';
+    const item = cell?.item, prod = item ? `${Z.products[item.product]?.label ?? item.product} #${String(item.id).split('-').pop()}${item.rework ? ' (리워크)' : ''}` : '-';
+    const uids = cell?.robotUids?.length ? cell.robotUids.join(' · ') : '-';
+    el.innerHTML = `<h3>${esc(st.name)}<button data-act="close">✕</button></h3>
+      <div class="task">${esc(Z?.code ?? '')} ${esc(Z?.name ?? '')} · ${esc(rb)}<br>하는 일: ${esc(d.use ?? '')}</div>
+      <div class="bar"><i style="width:${st.health}%;background:${col}"></i></div>
+      <div class="grid">
+        <span>상태</span><b>${ST_LABEL[state] ?? state}</b>
+        <span>건강도</span><b>${st.health.toFixed(1)}%</b>
+        <span>잔여수명 RUL</span><b>${rul.toFixed(0)}분</b>
+        <span>10분 고장확률</span><b>${pct(risk10)}</b>
+        <span>공정능력 Cpk</span><b>${cpk.toFixed(2)}</b>
+        <span>가동률</span><b>${pct(util)}</b>
+        <span>사이클</span><b>${cyc.toFixed(1)}초</b>
+        <span>작업 제품</span><b>${esc(prod)}${flow === 'BUSY' && cell ? ` · ${Math.round(cell.progress * 100)}%` : ''}</b>
+        <span>처리 누적</span><b>${cell?.done ?? 0}개</b>
+        <span>고장 횟수</span><b>${st.c.fails}</b>
+        <span>정비 요청</span><b>${esc(req)}</b>
+        ${st.lastScan != null ? `<span>최근 순찰 점검</span><b>${Math.round((sim.time - st.lastScan) / 60)}분 전</b>` : ''}
+        <span>고장·정비 시간</span><b>${Math.round(st.c.down + st.c.maint)}초</b>
+        ${rep}
+        <span>셀 로봇 ID</span><b>${esc(uids)}</b>
+        <span>데이터</span><b>${m.key === 'traditional' ? '수집 없음 (레거시)' : `${esc(Z?.code ?? '')} 데이터 서버 · AAS ${esc(st.id.replace(/-/g, '_'))}`}</b>
+      </div>
+      ${m.key === 'traditional' ? '<div class="note">※ 레거시 공장에는 센서가 없어 건강도·RUL은 현장에서 보이지 않는 시뮬레이션 내부값입니다.</div>' : ''}
       ${this.erpLine(st)}
       <div class="btns"><button data-act="fault">⚡ 고장 주입</button><button data-act="pm">🔧 정비 지시</button></div>
       <div class="pcap-box" id="pcapBox"></div>`;
