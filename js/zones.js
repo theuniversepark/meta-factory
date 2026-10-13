@@ -18,7 +18,7 @@ const PC = { shared: 0x2bb3a6, hood: 0xf0a030, door: 0x9a6bff, hblock: 0xf0a030,
 const USE_CLS = { hood: 'doortrim', hblock: 'doortrim', door: 'eaxle', rcover: 'eaxle' };   // 셀 라벨 색 (주황·보라)
 const hex = (c) => '#' + c.toString(16).padStart(6, '0');
 
-const STATION_LEAD = 2;   // Zone AMR 투입 대기열 칸 (나머지는 Zone AMR 스테이션에서 대기)
+const STATION_LEAD = 1;   // Zone AMR 투입 대기열: 투입존 밖에서 1대만 기다린다 (나머지는 Zone AMR 스테이션 자기 자리에서 대기)
 const MODE_MUL = { traditional: 1.3, smart: 1.0, dark: 0.9 };   // 단계별 사이클 배율 (정밀조립Zone 단계와 같은 방향)
 const ROBOT_SHORT = { articulated: '6축', cobot: '협동', ammr: 'AMMR', humanoid: '휴머노이드' };
 
