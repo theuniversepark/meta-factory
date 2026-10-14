@@ -1,7 +1,7 @@
 // 로봇 비전 관제 디스플레이 (피지컬AI 단계) — 로봇·드론에 달린 카메라 시점의 실시간 영상 8분할 + AI 추론 오버레이.
 // 영상: 각 로봇 카메라 시점으로 장면을 렌더 타깃의 한 칸에 그린다(프레임마다 한 칸씩 돌아가며 갱신).
 // 오버레이: 카메라로 투영한 객체 인식 박스·신뢰도, 추론 지연, 작업 상태, 현장 이벤트·알람 배너와 하단 알람 띠.
-import { bk, inExtraZone, LEFT_WALL } from './zonedefs.js';
+import { bk, inExtraZone, LEFT_WALL, ZONE_FAC, EXTRA_ZONES, zoneRect } from './zonedefs.js';
 import * as THREE from 'three';
 import { FIELD_EVENTS, ST_LABEL, moverRadius } from './sim.js';
 import { makeAlarmFx, blinkAlarmFx, ALARM_COLOR, ROBOT_CAMS } from './factory.js';
@@ -14,19 +14,20 @@ const CLS_COLOR = { 설비: '#37a0ff', 협동로봇: '#2bd4c6', AMR: '#3ddc84', 
 const hash = (s) => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0) / 4294967295; };
 
 export class RobotCamWall {
-  constructor(scene, renderer) {
+  // D: 화면 자리·크기 (기본 = 정밀조립 왼쪽 벽) · rot: 화면이 보는 방향 (y축 회전)
+  constructor(scene, renderer, D = DISPLAY, rot = Math.PI / 2) {
     this.scene = scene; this.renderer = renderer;
     this.rt = new THREE.WebGLRenderTarget(W, H, { samples: 0 });
     this.group = new THREE.Group(); scene.add(this.group);
-    this.group.position.set(DISPLAY.x, DISPLAY.y, DISPLAY.z); this.group.rotation.y = Math.PI / 2;
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(DISPLAY.w + 0.3, DISPLAY.h + 0.3, 0.12), new THREE.MeshStandardMaterial({ color: 0x14181e, roughness: 0.6, metalness: 0.3 }));
+    this.group.position.set(D.x, D.y, D.z); this.group.rotation.y = rot;
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(D.w + 0.3, D.h + 0.3, 0.12), new THREE.MeshStandardMaterial({ color: 0x14181e, roughness: 0.6, metalness: 0.3 }));
     frame.position.z = -0.08; this.group.add(frame);
-    this.screen = new THREE.Mesh(new THREE.PlaneGeometry(DISPLAY.w, DISPLAY.h), new THREE.MeshBasicMaterial({ map: this.rt.texture }));
+    this.screen = new THREE.Mesh(new THREE.PlaneGeometry(D.w, D.h), new THREE.MeshBasicMaterial({ map: this.rt.texture }));
     this.screen.userData.camWall = true; this.group.add(this.screen);
     this.canvas = document.createElement('canvas'); this.canvas.width = W; this.canvas.height = H;
     this.ctx = this.canvas.getContext('2d');
     this.overTex = new THREE.CanvasTexture(this.canvas); this.overTex.colorSpace = THREE.SRGBColorSpace;
-    const over = new THREE.Mesh(new THREE.PlaneGeometry(DISPLAY.w, DISPLAY.h), new THREE.MeshBasicMaterial({ map: this.overTex, transparent: true, depthWrite: false, toneMapped: false }));
+    const over = new THREE.Mesh(new THREE.PlaneGeometry(D.w, D.h), new THREE.MeshBasicMaterial({ map: this.overTex, transparent: true, depthWrite: false, toneMapped: false }));
     over.position.z = 0.01; over.userData.camWall = true; this.overlay = over; this.group.add(over);
     this.cams = Array.from({ length: COLS * ROWS }, () => new THREE.PerspectiveCamera(70, TW / TH, 0.15, 60));
     this.tile = 0; this.overT = 0; this.evMeshes = new Map(); this.t = 0;
@@ -311,9 +312,11 @@ export class RobotCamWall {
     this.t += rdt;
     this.list = this.feeds();
     this.syncEvents(rdt);
-    // 1) 영상: 프레임마다 한 칸 렌더 (6칸이 약 10fps로 돌아가며 갱신)
-    const i = this.tile % this.list.length, f = this.list[i];
-    this.tile++;
+    // 1) 영상: 프레임마다 한 칸 렌더 (6칸이 약 10fps로 돌아가며 갱신) — renderEvery > 1이면 그 프레임 수마다 한 칸 (확장 Zone 디스플레이: GPU 부담 분산)
+    this.frameN = (this.frameN ?? 0) + 1;
+    const draw = this.frameN % (this.renderEvery ?? 1) === 0;
+    const i = this.tile % Math.max(1, this.list.length), f = draw ? this.list[i] : null;
+    if (draw) this.tile++;
     if (f) {
       const cam = this.cams[i], r = this.renderer;
       this.setCam(cam, f);
@@ -465,7 +468,7 @@ export class RobotCamWall {
     g.font = `13px ${FONT}`; g.fillStyle = '#e8edf2';
     let x = 22 + g.measureText(head).width + 40;
     for (const a of alarms.slice(0, 6)) { const s = `${a.sev === 'alarm' ? '⛔' : a.sev === 'warn' ? '⚠' : 'ℹ'} ${a.text}`; g.fillText(s, x, y + 20); x += g.measureText(s).width + 28; if (x > W - 200) break; }
-    g.fillStyle = '#7fb8cc'; g.font = `12px ${FONT}`; const tag = `ROBOT VISION · AI 추론 관제 · ${clock}`; g.fillText(tag, W - g.measureText(tag).width - 12, y + 20);
+    g.fillStyle = '#7fb8cc'; g.font = `12px ${FONT}`; const tag = `${this.tagName ?? 'ROBOT VISION'} · AI 추론 관제 · ${clock}`; g.fillText(tag, W - g.measureText(tag).width - 12, y + 20);
     this.overTex.needsUpdate = true;
   }
 
@@ -568,4 +571,82 @@ function makeEventMesh(type) {
     });
   }
   return g;
+}
+
+// ── 확장 Zone 로봇 비전 관제 디스플레이 (A-1 유연생산 · A-2 적응가공) ─────────────────
+// 정밀조립 디스플레이(RobotCamWall)와 같은 4×2 분할 · 5초 순환 · 문제 현장 고정(📌) · AI 인식 박스·알람 — 후보만 그 Zone 로봇으로 바꾼다:
+// 셀 로봇(손목 카메라 · AMMR·휴머노이드 4대) · Zone 운반 AMR 전방 · Zone 정비 휴머노이드 · 물류 휴머노이드 · 사족보행 · 드론 · AGV
+// 화면은 Zone 전광판 오른쪽 (zonedefs.js ZONE_FAC[key].wall.cams) · 현장 이벤트 3D 표시는 정밀조립 디스플레이가 공장 전체를 맡는다
+export class ZoneCamWall extends RobotCamWall {
+  constructor(scene, renderer, key) {
+    const C = ZONE_FAC[key].wall.cams;
+    super(scene, renderer, C, C.rot);
+    this.key = key; this.Z = EXTRA_ZONES.find((z) => z.key === key); this.code = this.Z.code;
+    this.tagName = `${this.code} ROBOT VISION`; this.renderEvery = 2;
+  }
+  syncEvents() {}
+  // 텔레메트리용 셀 보기 (zones.js teleCell: 상태·이름·하는 일) — 알람·인식 박스가 영상 칸의 셀과 같은 객체를 가리키게
+  tc(st) { const z = this.view?.xzones?.byKey(st.zone), c = z?.cells[st.cellId]; return c ? z.teleCell(c) : st; }
+  inZone(p, pad = 3) { const r = zoneRect(this.Z, pad); return p.x > r.x0 && p.x < r.x1 && p.z > r.z0 && p.z < r.z1; }
+  zm() { const s = this.sim; return [...s.movers, ...(s.drones ?? [])].filter((m) => m.zone === this.key); }   // 이 Zone 이동 로봇 (사람 정비원 제외는 cameraFor가 null)
+  cells() { return (this.view?.xzones?.cellRobots() ?? []).filter((c) => c.st.zone === this.key); }
+  amrs() { return this.sim.mode.key === 'traditional' ? [] : (this.view?.xzones?.carriersAll() ?? []).filter((c) => c.mover.zone === this.key); }
+  feedOf(ref, robot, kind, extra = {}) { const c = this.cameraFor(ref); return c ? { ref, robot, kind, label: c.label, pose: c.pose, ...extra } : null; }
+  pinnedFeeds() {
+    const out = [], pin = (m, why) => { if (!m || out.some((f) => f.robot === m.id)) return; const f = this.feedOf({ type: 'mover', id: m.id }, m.id, m.kind, { mover: m, pin: why }); if (f) out.push(f); };
+    const ms = this.zm(), byId = (id) => ms.find((m) => m.id === id);
+    for (const ev of (this.sim.fieldEvents ?? []).filter((e) => !e.cleared)) { const L = FIELD_EVENTS[ev.type]?.label ?? '현장 이벤트'; pin(byId(ev.responder), `${L} 대응`); pin(byId(ev.detectedBy), `${L} 감지`); }
+    for (const q of ms) if (q.kind === 'quadruped' && q.scanning) pin(q, '열화상 정밀 점검');
+    for (const d of ms) if (d.kind === 'drone' && d.mission) pin(d, d.arrived ? '사고 현장 중계' : '현장 출동');
+    for (const st of this.sim.zoneCells.filter((c) => c.zone === this.key)) if (st.request?.tech && st.request.kind === 'repair') pin(st.request.tech, `${st.name} 고장 수리`);
+    return out;
+  }
+  activePool() {
+    const groups = new Map(), add = (cat, f) => { if (f) (groups.get(cat) ?? groups.set(cat, []).get(cat)).push(f); };
+    const seq = ['head', 'handR', 'handL', 'back'], rn = Math.floor(this.t / 5);
+    const busy = (m) => m.moving || (!m.idle && !m.chgNow && !m.charging);
+    for (const { ref, robot, st, r } of this.cells()) if (st.state === 'BUSY' && (r.cams || r.wristCam)) add('cell', this.feedOf(r.cams ? { ...ref, cam: seq[(rn + Math.floor(hash(robot) * 4)) % 4] } : ref, robot, r.kind, { station: st }));
+    { const cs = this.amrs().filter((c) => c.mover.moving), off = Math.floor(this.t / 5) * 2;   // 운반 AMR은 한 번에 2대까지 — 순환마다 다른 AMR
+      for (let k = 0; k < Math.min(2, cs.length); k++) { const c = cs[(off + k) % cs.length]; add('carrier', this.feedOf({ type: 'mover', id: c.id }, c.id, 'carrier', { mover: c.mover })); } }
+    for (const m of this.zm()) {
+      if (m.kind === 'drone') { if (m.y > 0.5) add('drone', this.feedOf({ type: 'mover', id: m.id }, m.id, 'drone', { mover: m })); continue; }
+      if (!busy(m)) continue;
+      add(m.kind === 'humanoid' ? 'humanoid' : m.kind === 'quadruped' ? 'quadruped' : 'vehicle', this.feedOf({ type: 'mover', id: m.id }, m.id, m.kind, { mover: m }));
+    }
+    const cats = ['cell', 'humanoid', 'carrier', 'quadruped', 'drone', 'vehicle'].filter((c) => groups.get(c)?.length), out = [], total = [...groups.values()].reduce((a, g) => a + g.length, 0);
+    for (let k = 0; out.length < total; k++) for (const c of cats) { const g = groups.get(c); if (k < g.length) out.push(g[k]); }
+    return out;
+  }
+  // 움직이는 로봇이 없을 때: 카메라를 단 셀 로봇 → 운반 AMR → 사족보행·휴머노이드·드론
+  fixedFeeds() {
+    const out = [];
+    for (const { ref, robot, st, r } of this.cells()) if (r.cams || r.wristCam) out.push(this.feedOf(r.cams ? { ...ref, cam: 'head' } : ref, robot, r.kind, { station: st }));
+    for (const c of this.amrs().slice(0, 2)) out.push(this.feedOf({ type: 'mover', id: c.id }, c.id, 'carrier', { mover: c.mover }));
+    for (const m of this.zm()) out.push(this.feedOf({ type: 'mover', id: m.id }, m.id, m.kind, { mover: m }));
+    return out.filter(Boolean).slice(0, COLS * ROWS);
+  }
+  targets() {
+    const out = [], kindCls = { agv: 'AGV', forklift: 'AGV', humanoid: '휴머노이드', quadruped: '사족보행', robot: '정비로봇', human: '사람', worker: '사람' };
+    for (const st of this.sim.zoneCells.filter((c) => c.zone === this.key)) out.push({ key: `zs${st.id}`, cls: '설비', name: st.name.replace(/^A-[12] /, '').replace('셀', ''), c: [st.x, 1.3, st.z], h: [2.2, 1.3, 2.2], st: this.tc(st) });
+    for (const { id, mover } of this.amrs()) out.push({ key: `za${id}`, cls: 'AMR', name: id, c: [mover.x, 0.7, mover.z], h: [0.6, 0.7, 0.6], m: mover });
+    for (const m of this.sim.movers) { if (m.state === 'line') continue; const tall = m.kind === 'humanoid' || m.kind === 'human' || m.kind === 'worker' ? 0.9 : m.kind === 'quadruped' ? 0.45 : m.kind === 'carrier' ? 0.7 : 0.4, r = moverRadius(m) * 0.75; out.push({ key: `m${m.id}`, cls: kindCls[m.kind] ?? 'AMR', name: m.id, c: [m.x, tall, m.z], h: [r, tall, r], m }); }
+    for (const ev of this.sim.fieldEvents ?? []) {
+      if (ev.cleared) continue;
+      const sz = { leak: [0.9, 0.05, 0.9], debris: [0.5, 0.25, 0.5], intrusion: [0.35, 0.9, 0.35], smoke: [0.9, 1.4, 0.9] }[ev.type];
+      out.push({ key: `ev${ev.id}`, cls: ev.cls, name: ev.label, c: [ev.x, ev.type === 'smoke' ? 2.2 : ev.type === 'intrusion' ? 0.9 : sz[1], ev.z], h: sz, ev });
+    }
+    return out;
+  }
+  alarms() {
+    const sim = this.sim, out = [], X = this.view?.xzones;
+    for (const st of sim.zoneCells.filter((c) => c.zone === this.key)) {
+      const at = this.tc(st);
+      if (st.state === 'DOWN') out.push({ sev: 'alarm', text: `${st.name} 설비 정지`, at });
+      else if (st.state === 'MAINT') out.push({ sev: 'warn', text: `${st.name} ${st.maintKind === 'pm' ? '예지정비' : '정비'} 중`, at });
+    }
+    for (const ev of sim.fieldEvents ?? []) if (ev.detected && !ev.cleared && this.inZone(ev)) out.push({ sev: ev.severity, text: `AI 감지 · ${ev.label} (${ev.detectedBy}${ev.responder ? ` → ${ev.responder} 대응 중` : ''})`, ev });
+    for (const m of this.zm()) if (m.blockedOn && m.blockT > 4) out.push({ sev: 'warn', text: `${m.id} 진로 장애물 대기 (${m.blockedOn.id})`, m });
+    if (X?.byKey(this.key)?.starved) out.push({ sev: 'warn', text: `${this.code} 투입 자재 대기 (확장 선반)` });
+    return out;
+  }
 }

@@ -321,7 +321,7 @@ export class UI {
     const item = cell?.item, prod = item ? `${Z.products[item.product]?.label ?? item.product} #${String(item.id).split('-').pop()}${item.rework ? ' (리워크)' : ''}` : '-';
     const uids = cell?.robotUids?.length ? cell.robotUids.join(' · ') : '-';
     el.innerHTML = `<h3>${esc(st.name)}<button data-act="close">✕</button></h3>
-      <div class="task">${esc(Z?.code ?? '')} ${esc(Z?.name ?? '')} · ${esc(rb)}<br>하는 일: ${esc(d.use ?? '')}</div>
+      <div class="task">${esc(Z?.name ?? '')} · ${esc(rb)}<br>하는 일: ${esc(d.use ?? '')}</div>
       <div class="bar"><i style="width:${st.health}%;background:${col}"></i></div>
       <div class="grid">
         <span>상태</span><b>${ST_LABEL[state] ?? state}</b>
@@ -334,7 +334,7 @@ export class UI {
         <span>작업 제품</span><b>${esc(prod)}${flow === 'BUSY' && cell ? ` · ${Math.round(cell.progress * 100)}%` : ''}</b>
         <span>처리 누적</span><b>${cell?.done ?? 0}개</b>
         <span>고장 횟수</span><b>${st.c.fails}</b>
-        <span>정비 요청</span><b>${esc(req)}</b>
+        <span>정비 요청</span><b>${esc(req)}</b>${st.stallReason ? `<span>정비 지연</span><b style="color:#ffb35a">⚠ ${esc(st.stallReason)}</b>` : ''}
         ${st.lastScan != null ? `<span>최근 순찰 점검</span><b>${Math.round((sim.time - st.lastScan) / 60)}분 전</b>` : ''}
         <span>고장·정비 시간</span><b>${Math.round(st.c.down + st.c.maint)}초</b>
         ${rep}

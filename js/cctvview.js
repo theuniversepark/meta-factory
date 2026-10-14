@@ -5,7 +5,7 @@
 // 연기 검출(D-Fire 학습 모델), 지오펜스 침입 경보 — 장면의 실제 위치·크기를 카메라로 투영해 모델 출력을 만든다.
 import { SHIP } from './shipping.js';
 import { INBOUND } from './receiving.js';
-import { bk, fr, LEFT_WALL } from './zonedefs.js';
+import { bk, fr, LEFT_WALL, ZONE_FAC, areaZone } from './zonedefs.js';
 import * as THREE from 'three';
 import { moverRadius } from './sim.js';
 import { AI_MODELS, EVENT_MODEL, blocked } from './cctv.js';
@@ -43,7 +43,9 @@ export class CCTVView {
   }
   setup(sim, view) {
     this.sim = sim; this.view = view; this.tracks.clear(); this.slots = []; this.planRef = null;
-    this.group.visible = sim.mode.key !== 'traditional';   // 레거시 공장에는 CCTV 전광판이 없다 (CCTV 녹화만, 영상 창은 그대로)
+    // 전체 분할 영상(NVR)은 화면에 걸지 않고 렌더 타깃에만 그린다 — 벽에는 Zone별 CCTV 전광판(CCTVBoard)이 이 영상에서 자기 Zone 칸만 잘라 보여 준다
+    this.group.visible = false;
+    this.boardsOn = sim.mode.key !== 'traditional';   // 레거시 공장에는 CCTV 전광판이 없다 (CCTV 녹화만, 영상 창은 그대로)
     this.layout();
   }
   // 전광판 분할: 설치된 CCTV 전체를 한 칸씩 (배치가 바뀌면 — 공정 설계로 라인이 바뀌면 — 다시 나눈다)
@@ -157,7 +159,8 @@ export class CCTVView {
   }
   // 렌더: 전광판 칸 또는 영상 창 (CCTV 지도·전광판 자신·드론 빔은 영상에서 뺀다)
   render(cam, target, viewport) {
-    const r = this.getRenderer(), v = this.view, hide = [this.group, v.cctvMap, v.selRing, ...(v.droneViews ?? []).map((d) => d.g.userData.beam)].filter(Boolean);
+    // Zone CCTV 전광판도 숨긴다 — 이 렌더 타깃을 텍스처로 읽는 화면이 보이면 같은 타깃에 그리는 동안 피드백 루프가 생긴다
+    const r = this.getRenderer(), v = this.view, hide = [this.group, ...(this.boards ?? []).map((b) => b.group), v.cctvMap, v.selRing, ...(v.droneViews ?? []).map((d) => d.g.userData.beam)].filter(Boolean);
     const vis = hide.map((o) => o.visible); hide.forEach((o) => (o.visible = false));
     // 그림자 맵은 렌더러마다 한 번은 그려야 한다 (안 그린 맵을 샘플링하면 GL 형식 불일치 오류)
     const auto = r.shadowMap.autoUpdate; r.shadowMap.autoUpdate = this.shadowR === r ? false : auto; this.shadowR = r; const prev = r.getRenderTarget();
@@ -171,7 +174,7 @@ export class CCTVView {
     this.setCam(this.cams[k], c); this.render(this.cams[k], this.rt, new THREE.Vector4(col * TW, (this.rows - 1 - row) * TH, TW, TH));
   }
   update(rdt) {
-    if (!this.sim || this.lost || (!this.group.visible && !this.recording)) return;   // 전광판이 없는 레거시 공장도 자동 녹화 중이면 영상을 그린다
+    if (!this.sim || this.lost || (!this.boardsOn && !this.recording)) return;   // 전광판이 없는 레거시 공장도 자동 녹화 중이면 영상을 그린다
     this.t += rdt; this.layout();
     const n = this.slots.length; if (!n) return;
     // 이벤트·인시던트를 잡고 있는 카메라 칸은 매 프레임, 나머지는 프레임마다 PER_FRAME칸씩 차례로 갱신
@@ -213,3 +216,64 @@ export class CCTVView {
   boardCamAt(uv) { const col = Math.min(this.cols - 1, Math.floor(uv.x * this.cols)), row = Math.min(this.rows - 1, Math.floor((1 - uv.y) * this.rows)); return this.slots[row * this.cols + col]?.id ?? null; }
 }
 export { CLS as CCTV_CLASSES };
+
+// ── Zone별 CCTV 전광판 ─────────────────
+// 정밀조립(왼쪽 벽) · 유연생산 · 적응가공(각 Zone 전광판 왼쪽) — 자기 Zone 관할 구역(zonedefs.js areaZone: Zone 셀 + 그 Zone 시설)을 비추는 카메라만
+// 영상은 새로 그리지 않고 전체 분할 영상(CCTVView 렌더 타깃)에서 그 카메라 칸을 UV로 잘라 다시 배치한다 (GPU 부담 그대로) · 오버레이(AI 검출 상자·카메라 이름)도 칸째 복사
+// 야드(입고·출하) 카메라와 물류존·정비실 등 공용 시설은 정밀조립 전광판
+export const camZone = (c) => (c.region !== 'inside' ? 'main' : areaZone(c));
+export const CCTV_BOARDS = {
+  main: { ...BOARD, rot: Math.PI / 2, title: '정밀조립Zone' },
+  flex: { ...ZONE_FAC.flex.wall.board, x: ZONE_FAC.flex.wall.board.x - ZONE_FAC.flex.wall.board.w / 2 - 0.5 - 6, w: 12, h: 4, title: '유연생산Zone' },   // 전광판 왼쪽 (뒷벽을 보고)
+  adapt: { ...ZONE_FAC.adapt.wall.board, z: ZONE_FAC.adapt.wall.board.z - ZONE_FAC.adapt.wall.board.w / 2 - 0.5 - 6, w: 12, h: 4, title: '적응가공Zone' },   // 전광판 왼쪽 (오른쪽 벽을 보고)
+};
+export class CCTVBoard {
+  constructor(nvr, parent, key) {
+    const D = CCTV_BOARDS[key];
+    this.nvr = nvr; this.key = key; this.D = D; this.title = D.title;
+    this.group = new THREE.Group(); this.group.position.set(D.x, D.y, D.z); this.group.rotation.y = D.rot; this.group.visible = false; parent.add(this.group);
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(D.w + 0.3, D.h + 0.3, 0.12), new THREE.MeshStandardMaterial({ color: 0x14181e, roughness: 0.6, metalness: 0.3 }));
+    frame.position.z = -0.08; this.group.add(frame);
+    this.tiles = new THREE.Group(); this.group.add(this.tiles);
+    this.mat = new THREE.MeshBasicMaterial({ map: nvr.rt.texture, toneMapped: false });
+    this.canvas = document.createElement('canvas'); this.ctx = this.canvas.getContext('2d');
+    this.overTex = new THREE.CanvasTexture(this.canvas); this.overTex.colorSpace = THREE.SRGBColorSpace;
+    this.screen = new THREE.Mesh(new THREE.PlaneGeometry(D.w, D.h), new THREE.MeshBasicMaterial({ map: this.overTex, transparent: true, depthWrite: false, toneMapped: false }));
+    this.screen.position.z = 0.01; this.screen.userData.cctvBoard = true; this.group.add(this.screen);
+    this.slots = []; this.ref = null; this.t = 0;
+  }
+  // 칸 배치: 전체 분할 영상의 배치(공정 설계로 카메라가 바뀌면 다시)가 바뀔 때마다
+  layout() {
+    const N = this.nvr; if (this.ref === N.planRef && this.nc === N.cols) return; this.ref = N.planRef; this.nc = N.cols;
+    this.slots = N.slots.map((c, j) => ({ c, j })).filter((o) => camZone(o.c) === this.key);
+    const n = Math.max(1, this.slots.length), { cols, rows } = gridFor(n); this.cols = cols; this.rows = rows;
+    while (this.tiles.children.length) { const m = this.tiles.children[0]; m.geometry.dispose(); this.tiles.remove(m); }
+    if (this.mat.map !== N.rt.texture) { this.mat.map = N.rt.texture; this.mat.needsUpdate = true; }
+    const tw = this.D.w / cols, th = this.D.h / rows;
+    this.slots.forEach(({ j }, k) => {
+      const g = new THREE.PlaneGeometry(tw, th), uv = g.attributes.uv, nc = j % N.cols, nr = Math.floor(j / N.cols);
+      const u0 = nc / N.cols, v0 = (N.rows - 1 - nr) / N.rows;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, u0 + uv.getX(i) / N.cols, v0 + uv.getY(i) / N.rows);
+      const m = new THREE.Mesh(g, this.mat); m.position.set(-this.D.w / 2 + tw * ((k % cols) + 0.5), this.D.h / 2 - th * (Math.floor(k / cols) + 0.5), 0); this.tiles.add(m);
+    });
+    this.canvas.width = cols * TW; this.canvas.height = rows * TH; this.overTex.dispose(); this.overTex.needsUpdate = true; this.t = 1;
+  }
+  setup(sim) { this.group.visible = sim.mode.key !== 'traditional'; this.ref = null; }
+  // 오버레이: 전체 분할 오버레이(0.25초마다 다시 그림)에서 내 칸만 복사 · 빈 칸에는 Zone 이름
+  update(rdt) {
+    if (!this.group.visible || !this.nvr.sim) return;
+    this.layout(); this.t += rdt; if (this.t < 0.25) return; this.t = 0;
+    const g = this.ctx, N = this.nvr, W = this.cols * TW, H = this.rows * TH;
+    g.clearRect(0, 0, W, H);
+    this.slots.forEach(({ j }, k) => g.drawImage(N.canvas, (j % N.cols) * TW, Math.floor(j / N.cols) * TH, TW, TH, (k % this.cols) * TW, Math.floor(k / this.cols) * TH, TW, TH));
+    for (let k = this.slots.length; k < this.cols * this.rows; k++) {
+      const x = (k % this.cols) * TW, y = Math.floor(k / this.cols) * TH; g.fillStyle = '#05080c'; g.fillRect(x, y, TW, TH);
+      g.fillStyle = '#3a4654'; g.font = `700 16px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(`${this.title} CCTV ${this.slots.length}대`, x + TW / 2, y + TH / 2); g.textAlign = 'left';
+    }
+    g.strokeStyle = '#0b0e12'; g.lineWidth = 4;
+    for (let k = 1; k < this.cols; k++) { g.beginPath(); g.moveTo(k * TW, 0); g.lineTo(k * TW, H); g.stroke(); }
+    for (let k = 1; k < this.rows; k++) { g.beginPath(); g.moveTo(0, k * TH); g.lineTo(W, k * TH); g.stroke(); }
+    this.overTex.needsUpdate = true;
+  }
+  camAt(uv) { const col = Math.min(this.cols - 1, Math.floor(uv.x * this.cols)), row = Math.min(this.rows - 1, Math.floor((1 - uv.y) * this.rows)); return this.slots[row * this.cols + col]?.c.id ?? null; }
+}

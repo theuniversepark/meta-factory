@@ -1889,7 +1889,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     if (key === B.key) return; B.key = key;
     const c = B.cv.getContext('2d'), W = B.cv.width, F = '"Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
     c.fillStyle = '#04121f'; c.fillRect(0, 0, W, B.cv.height);
-    c.fillStyle = '#e8eef4'; c.font = `800 42px ${F}`; c.textBaseline = 'middle'; c.fillText('📦 확장 선반 · A-1 유연생산 · A-2 적응가공', 30, 44);
+    c.fillStyle = '#e8eef4'; c.font = `800 42px ${F}`; c.textBaseline = 'middle'; c.fillText('📦 확장 선반 · 유연생산 · 적응가공', 30, 44);
     vals.forEach(([I, v], k) => {
       const y = 112 + k * 64, x0 = 250, w = 540, h = 36, f = Math.max(0, Math.min(1, v / I.cap));
       c.font = `700 32px ${F}`; c.fillStyle = I.zone === 'flex' ? '#6ab8ff' : '#ff9a6a'; c.fillText(I.label, 30, y);
@@ -3015,7 +3015,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     const legacy = sim.mode.key === 'traditional', agv = sim.mode.vehicleKind === 'agv';
     // 물류존: 자재창고 랙 · AGV 상차 · 부품 랙 피킹
     // 북쪽으로 확장 선반(A-1 유연생산 · A-2 적응가공 자재)까지 — 앞쪽 통로(z 9) 바로 앞
-    area(-46.3, XRACK.z - XRACK.len / 2 - 0.2, -40.6, 4.3 + LOGI_DZ, AMBER, '📦 물류존', `${agv ? '자재창고 · AGV 자재 상차 · 부품 랙 피킹' : '자재창고 · 지게차 자재 상차 · 부품 랙'} · 확장 선반(A-1·A-2 자재)`, -42.4, 3.7 + LOGI_DZ, 3.4);
+    area(-46.3, XRACK.z - XRACK.len / 2 - 0.2, -40.6, 4.3 + LOGI_DZ, AMBER, '📦 물류존', `${agv ? '자재창고 · AGV 자재 상차 · 부품 랙 피킹' : '자재창고 · 지게차 자재 상차 · 부품 랙'} · 확장 선반(유연생산·적응가공 자재)`, -42.4, 3.7 + LOGI_DZ, 3.4);
     // 입고 지게차 전용 영역: 입고 도크 ↔ 창고 랙 왼쪽 입고 칸 ↔ 대기 — 뒤쪽 통로·세로 통로와 떨어져 있어 로봇 이동 경로와 겹치지 않는다
     { const Z = INBOUND.zone; area(Z.x0, Z.z0, Z.x1, Z.z1, GREEN, `🚚 입고 ${sim.mode.key === 'dark' ? '자율 ' : ''}지게차 전용`, '로봇 통행 금지 · 도크 ↔ 선반 입고 면', (Z.x0 + Z.x1) / 2, Z.z1 - 0.6, 4.0); }
     // 입고 지게차 주차 칸 (대기 자리, 도크 쪽을 향해 반듯이 주차)
@@ -3025,7 +3025,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       flat(1.9, 0.1, pl, hx, hz + s * 1.3, 0.02); } }
     // 물류 대기: 부품 보충 휴머노이드 (피지컬AI)
     // 물류존(x −46.3 ~ −40.6)과 오른쪽 로봇 통로(x −36.8~) 사이 물류 대기 줄 — 도크 2칸씩 세 묶음 (북쪽부터 A-1 · A-2 · 정밀조립), 묶음마다 바닥 구역·이름
-    for (const [zone, title, sub] of [['flex', 'A-1 물류 대기', '부품 키트 → A-1 투입구'], ['adapt', 'A-2 물류 대기', '부품 키트 → A-2 투입구'], [null, '정밀조립 물류 대기', '부품 보충 → 셀 부품 선반']]) {
+    for (const [zone, title, sub] of [['flex', '유연생산 물류 대기', '부품 키트 → 유연생산 투입구'], ['adapt', '적응가공 물류 대기', '부품 키트 → 적응가공 투입구'], [null, '정밀조립 물류 대기', '부품 보충 → 셀 부품 선반']]) {
       const hs = (sim.helpers ?? []).filter((h) => (h.zone ?? null) === zone); if (!hs.length) continue;
       const z = hs[0].home.z; area(-40.4, z - 1.3, -37.0, z + 1.5, GREEN, title, sub, -38.7, z + 1.05, 3.0);
     }

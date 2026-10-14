@@ -21,10 +21,10 @@ export const ODOO_PRODUCTS = {
   doortrim: { code: 'FG-DT', name: '도어트림 (완제품)', price: 185000 },
   eaxle: { code: 'FG-EA', name: 'e-axle (완제품)', price: 2400000 },
   // 확장 Zone 자재 (확장 선반 보관 · 투입구에서 꺼냄)
-  'flex:raw': { code: 'A1-RM', name: 'A-1 유연생산 원재료 (후드·도어 패널)', price: 45000 },
-  'flex:parts': { code: 'A1-PT', name: 'A-1 유연생산 부품 키트 (힌지·볼트·실러)', price: 9000 },
-  'adapt:raw': { code: 'A2-RM', name: 'A-2 적응가공 원재료 (유압블록·리어커버 소재)', price: 28000 },
-  'adapt:parts': { code: 'A2-PT', name: 'A-2 적응가공 부품 키트 (플러그·실·볼트)', price: 3500 },
+  'flex:raw': { code: 'FLX-RM', name: '유연생산 원재료 (후드·도어 패널)', price: 45000 },
+  'flex:parts': { code: 'FLX-PT', name: '유연생산 부품 키트 (힌지·볼트·실러)', price: 9000 },
+  'adapt:raw': { code: 'ADP-RM', name: '적응가공 원재료 (유압블록·리어커버 소재)', price: 28000 },
+  'adapt:parts': { code: 'ADP-PT', name: '적응가공 부품 키트 (플러그·실·볼트)', price: 3500 },
 };
 export const ODOO_LOCS = {
   vendor: { name: 'Partners/Vendors', usage: 'supplier' },
@@ -32,9 +32,9 @@ export const ODOO_LOCS = {
   production: { name: 'Virtual Locations/Production', usage: 'production' },
   rackRaw: { name: 'WH/Stock/물류선반-원자재', usage: 'internal' },
   rackParts: { name: 'WH/Stock/물류선반-부품', usage: 'internal' },
-  rackX: { name: 'WH/Stock/확장선반-A1·A2', usage: 'internal' },
-  feederA1: { name: 'WH/A-1/투입구', usage: 'internal' },
-  feederA2: { name: 'WH/A-2/투입구', usage: 'internal' },
+  rackX: { name: 'WH/Stock/확장선반-유연생산·적응가공', usage: 'internal' },
+  feederA1: { name: 'WH/유연생산/투입구', usage: 'internal' },
+  feederA2: { name: 'WH/적응가공/투입구', usage: 'internal' },
   feeder: { name: 'WH/Line/투입구', usage: 'internal' },
   cells: { name: 'WH/Line/셀', usage: 'internal' },
   output: { name: 'WH/Output/구분적재장', usage: 'internal' },

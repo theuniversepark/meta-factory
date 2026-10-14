@@ -34,7 +34,7 @@ for (const mode of ['traditional', 'smart', 'dark']) {
   check('입고 지게차가 대기 주차 칸에 반듯이 주차', parked > 0 && crooked === 0, `주차 ${(parked / 10).toFixed(0)}초 · 최대 어긋남 ${(worst * 180 / Math.PI).toFixed(1)}°`);
   check('창고 원자재가 바닥나지 않음 (소진 직전 재입고)', minRaw > 0 && minRaw <= WH.rawReorder, `최저 ${minRaw}박스`);
 }
-console.log('== 확장 선반 (A-1 유연생산 · A-2 적응가공 자재)');
+console.log('== 확장 선반 (유연생산 · 적응가공 자재)');
 { const s = new Simulation('dark', 3, { line: zoneLine(), quiet: true }); const ag = new FactoryAgent(s), rcv = s.forklifts.find((f) => f.receiver);
   // Zone 투입 흐름 대신 직접 꺼내 쓴다 (zones.js가 대상물 1개마다 takeZoneStock 호출) — A-1은 시간당 약 30개, A-2는 약 200개
   let taken = { flex: 0, adapt: 0 }, starved = 0, putAt = [], minX = { flex: 1e9, adapt: 1e9 }, acc = { flex: 0, adapt: 0 };
@@ -45,7 +45,7 @@ console.log('== 확장 선반 (A-1 유연생산 · A-2 적응가공 자재)');
     if (rcv.load?.type?.includes(':') && rcv.steps.length && rcv.steps[0].wait != null && rcv.x < -46) putAt.push({ z: rcv.z, type: rcv.load.type });
   }
   const odd = putAt.filter((p) => Math.abs(p.z - xrackZ(p.type)) > 0.05);
-  check('A-1·A-2 투입분을 확장 선반에서 꺼내고 바닥나기 전 재입고 (2시간)', starved === 0 && minX.flex > 0 && minX.adapt > 0, `꺼냄 A-1 ${taken.flex} · A-2 ${taken.adapt} · 최저 A-1 ${minX.flex} · A-2 ${minX.adapt} · 자재 대기 ${starved}회`);
+  check('유연생산·적응가공 투입분을 확장 선반에서 꺼내고 바닥나기 전 재입고 (2시간)', starved === 0 && minX.flex > 0 && minX.adapt > 0, `꺼냄 유연생산 ${taken.flex} · 적응가공 ${taken.adapt} · 최저 유연생산 ${minX.flex} · 적응가공 ${minX.adapt} · 자재 대기 ${starved}회`);
   check('입고 지게차가 확장 Zone 팔레트를 확장 선반 제 열(서쪽 면)에 넣음', putAt.length > 0 && !odd.length, `${new Set(putAt.map((p) => p.type)).size}종 · 어긋남 ${odd.length}`);
   check('확장 선반 북쪽 끝이 앞쪽 통로(z 9, 폭 2.6m)와 겹치지 않음', XRACK.z - XRACK.len / 2 > 9 + 1.3 && INBOUND.zone.z0 > 9 + 1.3);
   const e = s.erp, po = e?.db.po.find((p) => p.lines.some((l) => l.product.includes(':')));

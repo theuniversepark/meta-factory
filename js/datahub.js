@@ -139,7 +139,7 @@ const ZST = { BUSY: '가동', IDLE: '대기', BLOCKED: '출구 대기', DOWN: '�
 function zoneAssets(assets, sim, xzones, plate) {
   if (!xzones || sim.mode.key === 'traditional') return;   // 레거시: IoT 수집 없음 (정밀조립 셀 로봇과 같음)
   for (const zone of xzones.zones) {
-    const Z = zone.Z, code = Z.code, pre = code.replace(/-/g, '_'), zid = `Zone_${pre}`;
+    const Z = zone.Z, code = Z.code, pre = Z.uidp, zid = `Zone_${pre}`;
     const good = (k) => zone.stats.good[k] ?? 0, tot = () => Object.values(zone.stats.good).reduce((a, b) => a + b, 0);
     assets.push({
       id: zid, kind: 'Zone', name: `${code} ${Z.name}`, nameplate: plate(zid, `${Z.name} Zone 라인`),

@@ -4,7 +4,7 @@ import { ZONE_AMR } from './line.js';
 import { EXTRA_ZONES } from './zonedefs.js';
 
 export const FLEET_RANGE = { min: 0.5, max: 1.5, step: 0.1 };
-export const FLEET_NAMES = { amr: '운반 AMR', agv: '자재 공급 AGV', zflex: 'A-1 유연생산 AMR', zadapt: 'A-2 적응가공 AMR' };
+export const FLEET_NAMES = { amr: '운반 AMR', agv: '자재 공급 AGV', zflex: '유연생산 AMR', zadapt: '적응가공 AMR' };
 // 확장 Zone AMR 관제 (A-1 · A-2): 정밀조립Zone 운반 AMR과 같은 속도 배율 · 정지/시작 · 운행 대수 — AMR은 화면 Zone 시뮬레이션(zones.js)이 sim.zoneAmr에 올려 둔다
 export const ZONE_FLEETS = ['zflex', 'zadapt'];
 export const isAmrFleet = (f) => f === 'amr' || ZONE_FLEETS.includes(f);

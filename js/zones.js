@@ -31,6 +31,29 @@ function cellPath(Z, aId, bId, a, b) {
   return [{ x: a.x, z: a.z }, { x: a.x + 2.3, z: a.z }, { x: ex - 3, z: ez }, { x: ex, z: ez }, { x: b.x, z: b.z }];
 }
 
+// ── 바닥 AMR 경로 표시 (정밀조립Zone factory.js buildGuide · buildZoneDeco와 같은 모양) ─────────────────
+// 유도 테이프: 두 줄(±0.5m) + 진행 방향 화살표 · 전용 차로: 점선
+function trimPoly(pts, s0, s1) {   // 경로 앞 s0 · 뒤 s1만큼 잘라낸 꺾은선
+  const L = pathLength(pts), e = L - s1; if (e - s0 < 0.1) return [];
+  const out = [pointAt(pts, s0)]; let acc = 0;
+  for (let i = 1; i < pts.length - 1; i++) { acc += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z); if (acc > s0 && acc < e) out.push({ ...pts[i] }); }
+  out.push(pointAt(pts, e)); return out;
+}
+function guideTape(g, pts, mat) {
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz); if (L < 0.05) continue;
+    const seg = put(new THREE.Group(), (a.x + b.x) / 2, 0, (a.z + b.z) / 2, g); seg.rotation.y = Math.atan2(-dz, dx);
+    for (const sd of [-0.5, 0.5]) put(new THREE.Mesh(new THREE.PlaneGeometry(L + 0.1, 0.07), mat), 0, 0.016, sd, seg).rotation.x = -PI / 2;
+    for (let x = -L / 2 + 0.6; x < L / 2 - 0.3; x += 1.6) { const ch = put(new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.3), mat), x, 0.016, 0, seg); ch.rotation.x = -PI / 2; ch.rotation.z = PI / 4; ch.scale.set(1, 0.35, 1); }
+  }
+}
+function dashLine(g, pts, mat) {
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], L = Math.hypot(b.x - a.x, b.z - a.z), n = Math.floor(L / 1.2);
+    for (let k = 0; k < n; k++) { const t = (k + 0.5) / n, m = put(new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.1), mat), a.x + (b.x - a.x) * t, 0.016, a.z + (b.z - a.z) * t, g); m.rotation.x = -PI / 2; m.rotation.z = -Math.atan2(b.z - a.z, b.x - a.x); }
+  }
+}
+
 // ── 설비 모델 (유연생산Zone: flexible-manufacturing · 적응가공Zone: adaptive-machining과 같은 형상) ─────────────────
 function gateOf(g, x, color) { const G = buildGate(g, x, color); return G; }
 function drawGate(gs, title, text, col) {
@@ -328,7 +351,7 @@ class ExtraZone {
     for (const c of Object.values(Z.cells)) flat(5.0, 4.6, new THREE.MeshStandardMaterial({ color: PC[c.product] ?? PC.shared, transparent: true, opacity: 0.3, roughness: 0.9, depthWrite: false }), c.x, c.z, 0.01);
     // Zone 이름: 셀·AMR 길을 비킨 빈 바닥 (유연생산 = 투입 스테이션 뒤 · 적응가공 = 소재 식별셀 앞)
     this.titleAt = Z.key === 'flex' ? { x: -24.9, z: -5.4 } : { x: -20.5, z: 5.4 };
-    put(textPlane([`${Z.code} ${Z.name}`, Z.sub], 7, 1.4, acc), this.titleAt.x, 0.02, this.titleAt.z, this.G);
+    put(textPlane([Z.name, Z.sub], 7, 1.4, acc), this.titleAt.x, 0.02, this.titleAt.z, this.G);
     this.cells = {}; this.order = [];
     for (const [id, c] of Object.entries(Z.cells)) {
       const g = put(new THREE.Group(), c.x, 0, c.z, this.G); g.rotation.y = c.rot ?? 0; g.scale.z = c.side ?? 1;
@@ -374,8 +397,45 @@ class ExtraZone {
     const tail = this.st ? [...this.st.out, { x: Z.src.x, z: Z.src.z }] : this.retPath, rev = [...tail].reverse(), L = pathLength(rev);
     // 투입 대기열 자리: 스테이션이 있으면 투입존(투입구 ±2.1m) 밖 진입 구간부터 (투입구 중심에서 3.2m · 5.2m) — 정밀조립Zone처럼 투입존 밖에서 기다린다
     this.qSlots = []; for (let s = this.st ? 3.2 : 2.2; s < L - 1 && this.qSlots.length < (this.st ? STATION_LEAD : Z.amr.count); s += 2.0) this.qSlots.push(pointAt(rev, s));
+    this.buildFloorPaths();
     this.buildWall(root);
     this.reset();
+  }
+
+  // 바닥 AMR 경로: ① 셀 사이 유도 테이프 (투입구 → 제품별 공정 순서 → 구분 적재장 · NG 분기) ② 스테이션 전용 차로 점선 (복귀 전용로 · 출동 차로 · 진입로)
+  // ③ 스테이션 대기 자리 줄 바닥색 · 투입존 밖 대기 자리 테두리 · 바닥 글씨 — 정밀조립Zone 바닥 표시와 같은 색·모양
+  buildFloorPaths() {
+    const Z = this.Z, g = put(new THREE.Group(), 0, 0, 0, this.G);
+    const guide = new THREE.MeshBasicMaterial({ color: 0x37e8ff, transparent: true, opacity: 0.8 }), tape = new THREE.MeshBasicMaterial({ color: 0x7fe0d6, transparent: true, opacity: 0.7 });
+    const at = (id) => (id === 'SRC' ? Z.src : id === 'SINK' ? Z.sink : Z.cells[id]);
+    const edges = new Set();
+    for (const r of Object.values(Z.routes)) ['SRC', ...r, 'SINK'].forEach((id, i, a) => i && edges.add(`${a[i - 1]}>${id}`));
+    if (Z.ng) { edges.add(`${Z.ng.at}>${Z.ng.to}`); edges.add(`${Z.ng.to}>SINK`); }
+    for (const e of edges) {
+      const [aId, bId] = e.split('>'), a = at(aId), b = at(bId);
+      guideTape(g, trimPoly(cellPath(Z, aId, bId, { x: a.x, z: a.z }, { x: b.x, z: b.z }), aId === 'SRC' ? 2.2 : 2.3, 0), guide);
+    }
+    const flatText = (text, w, x, z, rot = 0) => { const m = textPlane([text], w, w / 7, 'rgba(127,224,214,0.95)'); put(m, x, 0.02, z, g); m.rotation.z = rot; return m; };
+    const S = this.st; if (!S) return;
+    const sl = S.slots, first = sl[0], last = sl[sl.length - 1], rEnd = S.ret[S.ret.length - 1];
+    // 복귀 전용로: 적재장 → Zone 복귀로 → 스테이션 쪽 → 복귀 차로(자리 줄 끝까지)
+    const far = Math.abs(first.x - rEnd.x) > Math.abs(last.x - rEnd.x) ? first : last;
+    dashLine(g, [{ x: Z.sink.x, z: Z.sink.z }, ...S.keep, ...S.ret, { x: far.x, z: S.retZ }], tape);
+    // 출동 차로: 자리 줄 반대쪽 끝 → 출동 차로 → 진입로 → 투입존 앞
+    const outFar = Math.abs(first.x - S.out[0].x) > Math.abs(last.x - S.out[0].x) ? first : last;
+    dashLine(g, trimPoly([{ x: outFar.x, z: S.outZ }, ...S.out, { x: Z.src.x, z: Z.src.z }], 0, 2.2), tape);
+    // 대기 자리 줄 바닥색 · 투입존 밖 대기 자리 테두리
+    const x0 = Math.min(first.x, last.x) - 0.7, x1 = Math.max(first.x, last.x) + 0.7;
+    const strip = put(new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, 1.9), new THREE.MeshStandardMaterial({ color: 0x2bb3a6, transparent: true, opacity: 0.22, depthWrite: false })), (x0 + x1) / 2, 0.01, first.z, g); strip.rotation.x = -PI / 2;
+    for (const q of this.qSlots) {
+      for (const [w, d, dx, dz] of [[1.5, 0.08, 0, -0.55], [1.5, 0.08, 0, 0.55], [0.08, 1.1, -0.75, 0], [0.08, 1.1, 0.75, 0]]) put(new THREE.Mesh(new THREE.PlaneGeometry(w, d), tape), q.x + dx, 0.017, q.z + dz, g).rotation.x = -PI / 2;
+      flatText('투입 대기', 2.0, q.x, q.z + 1.25);   // 대기 자리 테두리 바로 옆
+    }
+    // 바닥 글씨: 대기 자리 · 복귀 전용로 · 출동 차로 (차로 바깥쪽에)
+    const side = Math.sign(S.outZ - S.retZ);   // 출동 차로가 있는 쪽 (+z/−z)
+    flatText(`${Z.code} AMR 대기 자리 1 ~ ${sl.length}`, 6, (x0 + x1) / 2, first.z);
+    flatText('AMR 복귀 전용로', 4.5, (x0 + x1) / 2, S.retZ - side * 0.9);
+    flatText('AMR 출동 차로', 4.5, (x0 + x1) / 2, S.outZ + side * 0.9);
   }
 
   // Zone 전광판 · 데이터 서버 (자동화·피지컬AI — 레거시 단계는 정밀조립Zone 관제 서버처럼 숨긴다): 위치는 zonedefs.js ZONE_FAC.wall
@@ -408,7 +468,7 @@ class ExtraZone {
     c.fillStyle = '#04121f'; c.fillRect(0, 0, W, H);
     c.fillStyle = acc; c.fillRect(0, 0, 14, H);
     const good = this.stats.good, tot = Object.values(good).reduce((a, b) => a + b, 0), uph = this.time > 120 ? Math.round((tot / this.time) * 3600) : 0;
-    c.textBaseline = 'middle'; c.fillStyle = '#e8eef4'; c.font = `800 44px ${F}`; c.fillText(`${Z.code} ${Z.name} 운영 현황`, 36, 40);
+    c.textBaseline = 'middle'; c.fillStyle = '#e8eef4'; c.font = `800 44px ${F}`; c.fillText(`${Z.name} 운영 현황`, 36, 40);
     c.font = `700 32px ${F}`; c.fillStyle = '#c9d2dc';
     c.fillText(`${Object.entries(Z.products).map(([k, v]) => `${v.label} ${good[k] ?? 0}`).join(' · ')} · UPH ${uph} · 투입 ${this.stats.released} · ${Z.ng ? `NG ${this.stats.ng}` : `리워크 ${this.stats.rework}`} · 셀 고장 누적 ${s.zoneCells.filter((x) => x.zone === Z.key).reduce((a, x) => a + x.c.fails, 0)}건`, 640, 40);
     // 셀 타일: 이름 · 상태 · 건강도 막대
@@ -543,7 +603,7 @@ class ExtraZone {
   }
 
   // 셀 키 (DataHub 자산 id · 텔레메트리 ref.stationId): A_1_C03
-  sid(c) { return `${this.Z.code.replace(/-/g, '_')}_${c.id}`; }
+  sid(c) { return `${this.Z.uidp}_${c.id}`; }
   // 텔레메트리용 셀 보기 (정밀조립 셀 객체와 같은 이름의 값 — telemetry.js resolve)
   teleCell(c) {
     const zone = this, zc = () => zone.sim?.zoneCell(zone.Z.key, c.id);
@@ -852,7 +912,7 @@ class ExtraZone {
     this.sink.chip.className = 'chip s-' + (this.sink.occ ? 'BUSY' : 'IDLE');
     this.sink.chip.textContent = ps.map(([k, v]) => `${v.label} ${g[k] ?? 0}`).join(' · ');
     const s = this.summary();
-    this.boardEl.innerHTML = `<b>${this.Z.code} ${this.Z.name}</b><span>${ps.map(([k, v]) => `${v.label} <i>${g[k] ?? 0}</i>`).join(' · ')} · UPH <i>${s.uph}</i> · 가동 셀 <i>${s.busy}/${this.order.length}</i>${this.Z.ng ? ` · NG <i>${this.stats.ng}</i>` : ''}${this.Z.rework ? ` · 리워크 <i>${this.stats.rework}</i>` : ''}</span>`;
+    this.boardEl.innerHTML = `<b>${this.Z.name}</b><span>${ps.map(([k, v]) => `${v.label} <i>${g[k] ?? 0}</i>`).join(' · ')} · UPH <i>${s.uph}</i> · 가동 셀 <i>${s.busy}/${this.order.length}</i>${this.Z.ng ? ` · NG <i>${this.stats.ng}</i>` : ''}${this.Z.rework ? ` · 리워크 <i>${this.stats.rework}</i>` : ''}</span>`;
   }
   summary() {
     const good = Object.values(this.stats.good).reduce((a, b) => a + b, 0);

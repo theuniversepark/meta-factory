@@ -9,7 +9,7 @@ const s = new Simulation('dark', 1, { line: zoneLine(), quiet: true }); const ag
 const run = (sec, until) => { for (let t = 0; t < sec; t += 0.1) { s.step(0.1); ag.update(0.1); if (until?.()) return; } };
 run(120);
 const D = () => s.drones.find((x) => x.mission) ?? s.drones[0];
-check('드론 운용 대수 3대 (산정값) · 확장 Zone(A-1·A-2) 2대씩', s.drones.filter((d) => !d.zone).length === 3 && ['flex', 'adapt'].every((z) => s.drones.filter((d) => d.zone === z).length === 2), `정밀조립 ${s.drones.filter((d) => !d.zone).length}대 · 전체 ${s.drones.length}대`);
+check('드론 운용 대수 3대 (산정값) · 확장 Zone(유연생산·적응가공) 2대씩', s.drones.filter((d) => !d.zone).length === 3 && ['flex', 'adapt'].every((z) => s.drones.filter((d) => d.zone === z).length === 2), `정밀조립 ${s.drones.filter((d) => !d.zone).length}대 · 전체 ${s.drones.length}대`);
 console.log('== 설비 고장');
 const st = s.processing.find((x) => x.id === 'EA_FAST');
 s.fail(st); const inc = s.orch.find(`fail:${st.id}`); const rep0 = st.repairRemaining;

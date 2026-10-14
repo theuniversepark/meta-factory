@@ -2,6 +2,7 @@
 // 단계(감지 → 셀 자체 조치 → 상위 보고 → 판단 → 명령 → 조치 → 완료 확인)를 시각과 함께 실시간으로 그린다.
 // 명령 콘솔 탭에서는 상위 계층이 셀 현장으로 긴급·제어 명령을 보내고, 셀별 명령 상태와 명령 이력(전송 → ACK → 완료)을 본다.
 import { LANES, STAGES, INCIDENT_TYPES, PRIORITY, prioOf } from './orchestrator.js';
+import { ZONE_LABEL } from './zonedefs.js';
 import { COMMANDS, CMD_STATE } from './commands.js';
 import { ST_LABEL } from './sim.js';
 
@@ -99,7 +100,7 @@ export class OrchView {
       const T = INCIDENT_TYPES[i.type], dur = (i.tEnd ?? now) - i.t0;
       const st = i.status === 'open' ? ['진행 중', 'open'] : i.cellResolved ? ['셀 자체 해결', 'cell'] : ['해결', 'done'];
       return `<button type="button" class="oi ${i.id === this.sel ? 'sel' : ''} st-${st[1]}" data-inc="${i.id}">
-        <span class="oi-ic">${T.icon}</span><span class="oi-t"><em class="oi-p p${prioOf(i)}" title="${esc(PRIORITY[prioOf(i)].desc)}">P${prioOf(i)}</em>${esc(i.title)}</span>
+        <span class="oi-ic">${T.icon}</span><span class="oi-t"><em class="oi-p p${prioOf(i)}" title="${esc(PRIORITY[prioOf(i)].desc)}">P${prioOf(i)}</em><em class="oi-z" title="${esc(o.nameOf(i))}">${esc(ZONE_LABEL[i.zone ?? 'main'])}</em>${esc(i.title)}</span>
         <span class="oi-m">${clock(i.t0)} · ${Math.round(dur)}초</span><span class="oi-s">${st[0]}</span></button>`;
     }).join('') || '<div class="oi-empty">아직 인시던트가 없습니다. ⚡ 설비 고장 주입, ⛔ 자재 공급 차질, ⚠ 현장 이벤트(피지컬AI)로 발생시키거나 명령 콘솔에서 명령을 보내 보세요.</div>';
     this.put(this.el.querySelector('[data-body]'), `<div class="orch-list">${items}</div><div class="orch-flow">${inc ? this.flow(inc, now) : ''}</div>`, ['.orch-list', '.sw-wrap']);

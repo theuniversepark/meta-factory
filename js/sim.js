@@ -1,5 +1,5 @@
 // 제조 라인 시뮬레이션 엔진 — 렌더링과 분리되어 있어 헤드리스(고속 비교) 실행이 가능하다.
-import { fr, bk, inExtraZone, BUILDING, AMR_LEAD, techAt, techLocal, techHeading, TECH_ROOM, TECH_ROOMS, ZONE_FAC, EXTRA_ZONES, zoneAt } from './zonedefs.js';
+import { fr, bk, inExtraZone, BUILDING, AMR_LEAD, techAt, techLocal, techHeading, TECH_ROOM, TECH_ROOMS, ZONE_FAC, EXTRA_ZONES, zoneAt, ZONE_LABEL, zoneRect } from './zonedefs.js';
 import { ImpactTracker } from './impact.js';
 import { CommandCenter } from './commands.js';
 import { TruckYard, planForklift, YARD, SHIP } from './shipping.js';
@@ -173,6 +173,7 @@ export const localLoc = (def, lx, lz, name) => { const p = toWorld(def, lx, lz);
 export const SVC_Z = 2.7;
 export const svcLoc = (st) => st.svc ?? localLoc(st.def, 0.9, SVC_Z, st.name);   // 확장 Zone 셀은 셀마다 정한 정비 자리 (buildZoneCells)
 // 확장 Zone 투입구 부품 키트 버퍼 (피지컬AI): 가득 12 · 4개 이하이면 물류 휴머노이드가 확장 선반에서 8개씩 가져온다
+export { ZONE_LABEL };
 export const ZONE_KIT = { cap: 12, reorder: 4, carry: 8 };
 const KIT_PICK = { x: -43.4, z: 14.6, aisle: 'F' };   // 확장 선반 동쪽 면 부품 열 앞 (물류 휴머노이드 키트 피킹) — 북쪽 원재료 열 앞은 Zone 전용 AGV 상차 자리
 // 확장 Zone 자재 투입구 원재료 버퍼: 양쪽(제품별) 20칸씩 40 · 20 이하로 떨어지면 Zone 전용 AGV가 확장 선반에서 20개씩 실어 온다
@@ -192,7 +193,7 @@ function buildZoneCells(sim) {
     // 사족보행 점검 자리: 정비 자리에서 셀 모서리를 따라 1.6m — 정비 자리가 셀 옆(같은 줄)이면 z로, 앞뒤면 x로 (셀 판 안으로 들어가지 않게)
     const beside = Math.abs(svc.z - z) < 0.01;
     return {
-      id: `${Z.code}-${id}`, uid: `${Z.code}-${id}`, zone: Z.key, cellId: id, name, x, z, def: { cycle: c.cycle, wear: 0.3 },
+      id: `${Z.uidp}-${id}`, uid: `${Z.uidp}-${id}`, zone: Z.key, cellId: id, name, x, z, def: { cycle: c.cycle, wear: 0.3 },
       health: 80 + sim.zrand() * 20, drift: 0, state: 'OK', request: null, repairRemaining: 0, repairTotal: 0, techOnSite: false, maintKind: null,
       c: { fails: 0, down: 0, maint: 0 }, busy: false,
       svc: { ...svc, name }, scan: beside ? { x: svc.x, z: svc.z + 1.6, aisle: svc.aisle, name } : { x: svc.x + 1.6, z: svc.z, aisle: svc.aisle, name },
@@ -1003,6 +1004,8 @@ export class Simulation {
     this.updateSource(dt);
     // 상위 명령: 전체 비상정지·보호정지면 라인 이동(AMR·컨베이어)과 이동로봇을 세우고, 안전 감속·속도 오버라이드는 이동 속도에 반영
     const K = this.cmd, halt = K.estopAll || K.pstopAll, mdt = halt ? 0 : dt * K.lineSpeed;
+    this.checkZoneSupply();
+    this.watchMaintenance();   // 고장·정비가 멈춰 있으면 그 이유를 인시던트 타임라인·로그·셀 정보 창에 남긴다
     K.update(dt);
     const F = this.fleet, amrDt = F?.amr.paused && this.useAMR ? 0 : mdt;   // AMR·AGV 관제 정지 (해당 차종만)
     if (amrDt > 0) {
@@ -1271,7 +1274,7 @@ export class Simulation {
     o.step(inc, 'field', 'detect', 'AMMR 선반 카메라: 선반 재고 0 감지');
     o.step(inc, 'cell', 'self', '셀 자체 조치: 새 대상물 받지 않음 · 선반 앞 대기');
     o.later(0.5, () => o.step(inc, 'cell', 'report', '상위 보고: 선반 보충 필요'));
-    o.later(o.latency, () => { o.step(inc, 'orch', 'decide', `판단(${o.name}): 선반 보충 우선 배정`); o.step(inc, 'orch', 'command', '명령: 부품 보충 휴머노이드 선반 보충'); });
+    o.later(o.latency, () => { o.step(inc, 'orch', 'decide', `판단(${o.nameOf(inc)}): 선반 보충 우선 배정`); o.step(inc, 'orch', 'command', '명령: 부품 보충 휴머노이드 선반 보충'); });
   }
 
   completeCycle(st) {
@@ -1328,7 +1331,7 @@ export class Simulation {
     else if (!m.agentActive) this.requestTech(st, 'repair', m.alarmDelay + 5);   // 레거시: 발견 지연 → 반장 판단 후 정비반 호출
     o.later(m.agentActive ? 0.5 : m.alarmDelay, () => o.step(inc, 'cell', 'report', `${m.agentActive ? '상위 보고' : m.andon ? '안돈 → 반장 호출' : '작업자 → 반장 보고'}: 고장 · 예상 수리 ${Math.round(st.repairTotal)}초 · 하류 셀 자재대기 예상`));
     o.later(m.agentActive ? o.latency : m.alarmDelay + 5, () => {
-      o.step(inc, 'orch', 'decide', `판단(${o.name}): 영향 분석 — 긴급수리 우선, 대기 중 투입 조정`);
+      o.step(inc, 'orch', 'decide', `판단(${o.nameOf(inc)}): 영향 분석 — 긴급수리 우선, 대기 중 투입 조정`);
       o.step(inc, 'orch', 'command', pending ? `명령: 진행 중이던 정비를 긴급수리로 전환` : `명령: ${who} 긴급수리 출동`);
       if (m.agentActive && !st.request && st.state === 'DOWN') this.requestTech(st, 'repair', 0);
     });
@@ -1374,34 +1377,85 @@ export class Simulation {
   }
 
   assignTechs() {
-    // 우선순위 순: 긴급수리(P3) → 재보정·예지정비(P5). 화재·인명(P1) 대응 중에는 예지정비·재보정을 보류해 정비 인력을 안전 대응에 남긴다
-    const KP = { repair: 3, cal: 5, pm: 5 }, p1 = this.orch.urgentOpen(1).length > 0;
+    // 우선순위 순: 긴급수리(P3) → 재보정·예지정비(P5). 화재·인명(P1) 대응 중에는 그 Zone의 예지정비·재보정을 보류해 정비 인력을 안전 대응에 남긴다 (다른 Zone은 그대로 배정)
+    // 배정이 막히지 않게 (설비 정비 지연 방지):
+    //  ① 일을 마치고 공구 반납·대기 자리로 돌아가는 인력도 바로 새 일에 배정 (배터리 교체 중 제외)
+    //  ② 긴급수리에 비어 있는 인력이 없으면 예지정비·재보정을 하러 가는 중인 인력을 돌려 긴급수리부터 (그 정비 요청은 다시 대기열로 · 현장에서 정비 중이면 그대로)
+    //  ③ 그래도 20초 넘게 아무도 없으면 다른 Zone 정비실의 비어 있는 인력을 지원으로 보낸다
+    const KP = { repair: 3, cal: 5, pm: 5 }, zoneOf = (st) => st.zone ?? 'main';
+    const p1Zones = new Set(this.orch.urgentOpen(1).map((i) => (i.where ? zoneAt(i.where.x, i.where.z, 0) : 'main')));
     const order = [...this.requests].sort((a, b) => KP[a.kind] - KP[b.kind] || a.readyAt - b.readyAt);
+    const free = (t) => !t.outOfService && (t.idle || (!t.job && !t.swapping && t.task !== '배터리 팩 교체')) && (t.kind !== 'humanoid' || t.battery > 15);
+    const near = (L, st) => L.sort((a, b) => Math.abs(a.x - st.x) + Math.abs(a.z - st.z) - (Math.abs(b.x - st.x) + Math.abs(b.z - st.z)))[0] ?? null;
     for (const req of order) {
       if (req.tech || this.time < req.readyAt) continue;
-      if (p1 && KP[req.kind] >= 5) { if (!req.deferred) { req.deferred = true; this.stats.deferred = (this.stats.deferred ?? 0) + 1; this.log('info', `${req.st.name} ${req.kind === 'pm' ? '예지정비' : '재보정'} 보류`, { obs: 'P1 화재·인명 안전 대응 중', act: '안전 확보 뒤 배정 (정비 인력 안전 대응 대기)' }); } continue; }
-      const st = req.st;
-      let best = null, bd = 1e9;
-      for (const t of this.techs) {
-        if (!t.idle || (t.zone ?? null) !== (st.zone ?? null)) continue;   // Zone마다 자기 정비실 인력이 맡는다
-        const d = Math.abs(t.x - st.x) + Math.abs(t.z - st.z);
-        if (d < bd) { bd = d; best = t; }
+      const st = req.st, zk = zoneOf(st), inc = req.kind === 'repair' ? this.orch.find(`fail:${st.id}`) : null;
+      if (KP[req.kind] >= 5 && p1Zones.has(zk)) { if (!req.deferred) { req.deferred = true; this.stats.deferred = (this.stats.deferred ?? 0) + 1; this.log('info', `${st.name} ${req.kind === 'pm' ? '예지정비' : '재보정'} 보류`, { obs: 'P1 화재·인명 안전 대응 중 (같은 Zone)', act: '안전 확보 뒤 배정 (정비 인력 안전 대응 대기)' }); } continue; }
+      req.waitFrom ??= this.time;
+      const pool = this.techs.filter((t) => (t.zone ?? 'main') === zk);   // Zone마다 자기 정비실 인력이 맡는다
+      let best = near(pool.filter(free), st), how = '';
+      if (!best && req.kind === 'repair') {   // ② 예지정비·재보정을 하러 가는 중인 인력을 긴급수리로 돌린다
+        const t = near(pool.filter((x) => x.job?.req && KP[x.job.req.kind] >= 5 && !x.job.req.st.techOnSite && (x.kind !== 'humanoid' || x.battery > 15)), st);
+        if (t) {
+          const old = t.job.req; old.tech = null; old.waitFrom = this.time; t.job = null; best = t;
+          how = `${old.st.name} ${old.kind === 'pm' ? '예지정비' : '재보정'}로 가던 ${t.id}를 긴급수리로 전환 (그 정비는 다시 대기열)`;
+          this.stats.techPreempt = (this.stats.techPreempt ?? 0) + 1;
+        }
+      }
+      let support = null;
+      if (!best && this.time - req.waitFrom > (req.kind === 'repair' ? 20 : 60)) {   // ③ 다른 Zone 오케스트레이터에 정비 지원 요청 (긴급수리 20초 · 예지정비·재보정 60초 대기 뒤)
+        const r = this.requestSupport(req, zk, inc, free, near);
+        if (r) { best = r.tech; support = r; how = `${ZONE_LABEL[r.from]} 오케스트레이터 지원 승인 — ${best.id} 파견 (${ZONE_LABEL[zk]} 정비 인력 모두 작업 중 · ${Math.round(this.time - req.waitFrom)}초 대기)`; }
       }
       if (!best) continue;
+      if (how) { this.log('act', `${st.name} 긴급수리 배정 조정`, { obs: '빈 정비 인력 없음', dec: '긴급수리(P3) 우선', act: how }); if (inc) this.orch.step(inc, 'orch', 'decide', `정비 배정 조정: ${how}`); }
       req.tech = best; best.job = { prio: KP[req.kind], st, req }; this.erp?.maintStart(st, best);
-      if (req.kind === 'repair') this.orch.step(this.orch.find(`fail:${st.id}`), 'exec', 'act', `${best.id} 배정 · 출동`);
+      if (req.kind === 'repair') this.orch.step(inc, 'exec', 'act', `${best.id} 배정 · 출동${req.waitFrom != null && this.time - req.waitFrom > 1 ? ` (배정 대기 ${Math.round(this.time - req.waitFrom)}초)` : ''}`);
       const kindLabel = { repair: '긴급수리', pm: '예지정비', cal: '재보정' }[req.kind];
-      const T = toolSteps(this, best, req.kind, req.kind === 'repair' ? this.orch.find(`fail:${st.id}`) : null);
-      best.setTask(`${kindLabel} → ${st.name} (${TOOL_KITS[req.kind].label})`, [
+      const T = toolSteps(this, best, req.kind, inc);
+      best.support = support ? { from: support.from, to: zk, st } : null;
+      const back = support ? [{ do: () => { best.support = null; this.log('ok', `${best.id} ${ZONE_LABEL[zk]} 지원 완료 · 복귀`, { obs: `${st.name} ${kindLabel} 완료`, act: `${ZONE_LABEL[support.from]} 정비실로 복귀` }); if (inc) this.orch.step(inc, 'orch', 'notify', `${ZONE_LABEL[support.from]} 오케스트레이터에 지원 완료 통보 — ${best.id} 복귀`); } }] : [];
+      best.setTask(`${support ? `[${ZONE_LABEL[zk]} 지원] ` : ''}${kindLabel} → ${st.name} (${TOOL_KITS[req.kind].label})`, [
         ...T.take,
         { go: svcLoc(st) },
         { do: () => this.techArrive(req) },
-        { until: () => !st.request },
+        { until: () => !st.request || st.request !== req || req.tech !== best },   // 다른 인력에게 넘어간 요청이면 그만둔다
         { do: () => { if (best.job?.req === req) best.job = null; } },
         ...T.back,
+        ...back,
         ...T.home(best.home),
       ]);
     }
+  }
+  // Zone 간 정비 지원: 요청 Zone 오케스트레이터 → 다른 Zone 오케스트레이터(가까운 Zone부터)에 지원 요청 — 받은 Zone은 자기 Zone 상황을 보고 승인·거절
+  //  · 승인 조건: 비어 있는 정비 인력이 있고, 자기 Zone에 아직 배정 못 한 긴급수리가 없을 것 (예지정비·재보정 지원은 자기 Zone에 배정 못 한 정비 요청이 하나도 없을 때만)
+  //  · 같은 Zone에 다시 묻는 것은 30초 뒤 · 요청·응답은 그 고장 인시던트 타임라인과 이벤트 로그에 남는다
+  requestSupport(req, zk, inc, free, near) {
+    const st = req.st, asked = (req.asked ??= {});
+    const zones = Object.keys(ZONE_LABEL).filter((z) => z !== zk && this.techs.some((t) => (t.zone ?? 'main') === z));
+    const ctr = (z) => { const L = this.techs.filter((t) => (t.zone ?? 'main') === z); return L.length ? { x: L.reduce((a, t) => a + t.home.x, 0) / L.length, z: L.reduce((a, t) => a + t.home.z, 0) / L.length } : { x: 0, z: 0 }; };
+    zones.sort((a, b) => Math.hypot(ctr(a).x - st.x, ctr(a).z - st.z) - Math.hypot(ctr(b).x - st.x, ctr(b).z - st.z));
+    const kindLabel = { repair: '긴급수리', pm: '예지정비', cal: '재보정' }[req.kind];
+    for (const z of zones) {
+      if (asked[z] != null && this.time - asked[z] < 30) continue;
+      asked[z] = this.time;
+      const msg = `${ZONE_LABEL[zk]} 오케스트레이터 → ${ZONE_LABEL[z]} 오케스트레이터: 정비 지원 요청 (${st.name} ${kindLabel} · ${ZONE_LABEL[zk]} 정비 인력 모두 작업 중 · ${Math.round(this.time - req.waitFrom)}초 대기)`;
+      if (inc) this.orch.step(inc, 'orch', 'report', msg);
+      const own = this.requests.filter((r) => !r.tech && (r.st.zone ?? 'main') === z && this.time >= r.readyAt);
+      const pool = this.techs.filter((t) => (t.zone ?? 'main') === z && free(t)), t = near(pool, st);
+      const why = !t ? `${ZONE_LABEL[z]} 정비 인력도 모두 작업 중` : own.some((r) => r.kind === 'repair') ? `${ZONE_LABEL[z]}에 배정 대기 중인 긴급수리 있음` : req.kind !== 'repair' && own.length ? `${ZONE_LABEL[z]}에 배정 대기 중인 정비 있음` : null;
+      this.stats.supportReq = (this.stats.supportReq ?? 0) + 1;
+      if (why) {
+        if (inc) this.orch.step(inc, 'orch', 'decide', `${ZONE_LABEL[z]} 오케스트레이터: 지원 불가 — ${why}`);
+        this.log('info', `${ZONE_LABEL[z]} 오케스트레이터 정비 지원 거절`, { obs: msg, dec: why });
+        continue;
+      }
+      if (inc) this.orch.step(inc, 'orch', 'decide', `${ZONE_LABEL[z]} 오케스트레이터: 지원 승인 — ${t.id} 파견 (${ZONE_LABEL[z]} 대기 작업 없음)`);
+      this.log('act', `${ZONE_LABEL[z]} 오케스트레이터 정비 지원 승인`, { obs: msg, act: `${t.id} → ${st.name} ${kindLabel}` });
+      this.stats.techBorrow = (this.stats.techBorrow ?? 0) + 1;
+      return { tech: t, from: z };
+    }
+    return null;
   }
 
   techArrive(req) {
@@ -1564,7 +1618,7 @@ export class Simulation {
       dec = t === 'leak' ? '누유 범위 확정 → 청소 범위·우회 경로 확정, 대응 휴머노이드에 위치 전달' : t === 'smoke' ? '열·연기 확산 없음 확인 → 보호정지는 가장 가까운 셀만 유지' : t === 'intrusion' ? '진입자 위치 추적 → 감속 구역 유지 · 원격 관제 경보' : '물체 위치 확정 → 제거 경로 전달';
     } else if (inc.type === 'supply') dec = `입고 트럭 미도착 확인 → 공급 차질 확정 · 안전재고 운송 우선`;
     else if (inc.type === 'parts') dec = '선반 결품 확인 → 보충 우선순위 상향';
-    o.step(inc, 'orch', 'decide', `판단 보강(${o.name} · 드론 영상): ${dec}`);
+    o.step(inc, 'orch', 'decide', `판단 보강(${o.nameOf(inc)} · 드론 영상): ${dec}`);
     this.log('info', `${d.id} 사고 현장 중계 · ${inc.title}`, { obs: obs.text, dec: '드론 영상·현장 정보를 대응 근거로 반영', act: dec });
     this.stats.droneMissions = (this.stats.droneMissions ?? 0) + 1;
   }
@@ -1641,13 +1695,13 @@ export class Simulation {
       ev.until = this.time + 60;
       act = '주변 셀 안전 감속 25% 긴급 명령 · 접근 금지 구역 설정, 원격 관제 요원 호출';
     }
-    o.step(inc, 'orch', 'decide', `우선순위 ${PRIORITY[P].label}${P === 1 ? ' — 최우선 처리 (예지정비·재보정 보류, 대응 자원 선점)' : ' — 생산·효율 작업보다 먼저'} · 판단(${o.name}): ${E.response === 'clean' ? '작업 경로 안전 위협 — 즉시 제거' : E.response === 'inspect' ? '화재 초기 징후 가능성 — 근접 확인' : '무인 구역 사람 진입 — 안전 우선'}`);
+    o.step(inc, 'orch', 'decide', `우선순위 ${PRIORITY[P].label}${P === 1 ? ' — 최우선 처리 (예지정비·재보정 보류, 대응 자원 선점)' : ' — 생산·효율 작업보다 먼저'} · 판단(${o.nameOf(inc)}): ${E.response === 'clean' ? '작업 경로 안전 위협 — 즉시 제거' : E.response === 'inspect' ? '화재 초기 징후 가능성 — 근접 확인' : '무인 구역 사람 진입 — 안전 우선'}`);
     o.step(inc, 'orch', 'command', `명령: ${act || '대응 자원 없음 — 원격 관제 호출'}`);
     // 긴급 명령을 셀 현장으로 보낸다: 사람 진입 → 주변 셀 안전 감속, 연기 의심 → 가장 가까운 셀 보호정지 (해소되면 재개 명령)
     ev.cmdCells = E.response === 'safety' ? this.processing.filter((st) => !st.standby && Math.hypot(st.x - ev.x, st.z - ev.z) < 9).map((st) => st.id) : E.response === 'inspect' ? [near.id] : [];
     if (!ev.cmdCells.length && E.response === 'safety') ev.cmdCells = [near.id];
     for (const id of ev.cmdCells) this.cmd.issue(E.response === 'safety' ? 'SAFE_SPEED' : 'SAFE_STOP', id, null, { inc, why: E.label });
-    this.log('alert', `오케스트레이터 명령 · ${E.label}`, { obs: `${by} 보고 수신`, dec: `${o.name} 판단`, act });
+    this.log('alert', `오케스트레이터 명령 · ${E.label}`, { obs: `${by} 보고 수신`, dec: `${o.nameOf(inc)} 판단`, act });
     };
     o.later(o.latencyFor(P), dispatch);   // 화재·인명(P1)은 판단 대기를 줄여 바로 명령
     this.log('alert', `AI 비전 감지 · ${E.label}`, {
@@ -1720,24 +1774,67 @@ export class Simulation {
       R[key]--;
       if (K) K[key]--; else { w.parts--; this.erp?.consume(`${key}:parts`, 1, `${XWH[key].code} 투입구`); }
     }
-    if (!ok && !this.zoneStarved[key]) this.log('warn', `${XWH[key].code} ${XWH[key].name} 자재 대기`, { obs: `투입구 원재료 ${R[key]} · ${K ? `투입구 부품 키트 ${K[key]}` : `확장 선반 부품 ${w.parts}`} · 확장 선반 원재료 ${w.raw}`, act: R[key] < 1 ? `${XWH[key].code} 전용 ${this.mode.vehicleKind === 'agv' ? 'AGV' : '지게차'} 원재료 도착까지 투입 대기` : K && K[key] < 1 ? '물류 휴머노이드 부품 키트 도착까지 투입 대기' : '입고 트럭 도착까지 투입 대기' });
+    if (!ok && !this.zoneStarved[key]) this.log('warn', `${XWH[key].name} 자재 대기`, { obs: `투입구 원재료 ${R[key]} · ${K ? `투입구 부품 키트 ${K[key]}` : `확장 선반 부품 ${w.parts}`} · 확장 선반 원재료 ${w.raw}`, act: R[key] < 1 ? `${XWH[key].code} 전용 ${this.mode.vehicleKind === 'agv' ? 'AGV' : '지게차'} 원재료 도착까지 투입 대기` : K && K[key] < 1 ? '물류 휴머노이드 부품 키트 도착까지 투입 대기' : '입고 트럭 도착까지 투입 대기' });
     this.zoneStarved[key] = !ok;
     return ok;
   }
 
+  // 확장 Zone 자재 공급 차질 (왼쪽 Zone 카드에서 고른 Zone의 ⛔ 자재 공급 차질): 확장 선반의 그 Zone 출고가 sec초 멈춘다 — 투입구 버퍼로 버티는 동안
+  // 그 Zone 오케스트레이터가 판단: 자동화·피지컬AI는 안전재고(별도 보관) 긴급 운송 + 대체 발주로 복구 30% 단축, 레거시는 반장 확인 후 납품 재개 대기
+  disruptZoneSupply(key, sec) {
+    const Z = EXTRA_ZONES.find((x) => x.key === key), lab = ZONE_LABEL[key], m = this.mode, o = this.orch, k = `supply:${key}`;
+    (this.zoneDisrupted ??= {})[key] = Math.max(this.zoneDisrupted[key] ?? 0, this.time + sec);
+    if (o.find(k)) return o.find(k);
+    const inc = o.open('supply', k, `${lab} 자재 공급 차질`, '확장 선반 (WMS)', { where: { x: Z.origin.x + Z.src.x, z: Z.origin.z + Z.src.z }, zone: key });
+    const per = { flex: 35, adapt: 200 }[key] / 60, mins = () => Math.round(this.zoneRaw[key] / per);
+    o.step(inc, 'field', 'detect', `WMS: 확장 선반 ${lab} 출고 중단 · 공급사 납품 지연 — 복구 예상 ${Math.round(sec / 60)}분`);
+    o.step(inc, 'cell', 'self', `${lab} 투입구 자체 조치: 버퍼 원재료 ${this.zoneRaw[key]}개로 투입 유지`);
+    o.later(m.agentActive ? 0.5 : m.alarmDelay, () => o.step(inc, 'cell', 'report', `상위 보고 → ${o.nameOf(inc)}: 투입구 원재료 소진 예상 약 ${mins()}분 · 복구 전 투입 정지 위험`));
+    o.later(m.agentActive ? o.latency : m.alarmDelay + 5, () => {
+      const left = Math.max(0, this.zoneDisrupted[key] - this.time);
+      if (!m.agentActive) { o.step(inc, 'orch', 'decide', `판단(${o.nameOf(inc)}): 납품 재개 대기 · 투입 버퍼 소진 시 ${lab} 투입 정지`); return; }
+      this.zoneDisrupted[key] = this.time + left * 0.7; (this.zoneSafety ??= {})[key] = true;
+      o.step(inc, 'orch', 'decide', `판단(${o.nameOf(inc)}): 복구 전 투입구 재고 소진 위험 — 안전재고 긴급 운송 · 대체 발주`);
+      o.step(inc, 'orch', 'command', `명령: ${lab} 전용 ${m.vehicleKind === 'agv' ? 'AGV' : '지게차'} 안전재고 긴급 운송 · 대체 발주 (복구 ${Math.round(left * 0.7 / 60)}분으로 단축)`);
+    });
+    this.log('warn', `${lab} 자재 공급 차질`, { obs: `확장 선반 ${lab} 출고 중단 ${Math.round(sec / 60)}분`, act: `${o.nameOf(inc)} 대응` });
+    return inc;
+  }
+  // 공급 차질 해소 확인: 출고가 재개되고 투입구 원재료가 한 번 실을 만큼 다시 차면 인시던트 종료
+  checkZoneSupply() {
+    for (const key of Object.keys(this.zoneDisrupted ?? {})) {
+      const inc = this.orch.find(`supply:${key}`); if (!inc) continue;
+      if (this.time >= this.zoneDisrupted[key] && !inc.resumed) { inc.resumed = true; this.orch.step(inc, 'exec', 'act', `확장 선반 ${ZONE_LABEL[key]} 출고 재개 — 전용 운반 재개`); }
+      if (inc.resumed && this.zoneRaw[key] >= ZONE_SRC.load) this.orch.close(inc, `${ZONE_LABEL[key]} 투입구 재고 회복 (${this.zoneRaw[key]}개) · 인시던트 종료`);
+    }
+  }
+  // 확장 Zone 현장 이벤트 (왼쪽 Zone 카드에서 고른 Zone의 ⚠ 현장 이벤트): 그 Zone 영역 안 통로 바닥(셀·투입구·적재장 위 제외) 아무 곳
+  injectZoneEvent(key, type) {
+    const Z = EXTRA_ZONES.find((x) => x.key === key), r = zoneRect(Z, 0), types = Object.keys(FIELD_EVENTS);
+    type ??= types[Math.floor(Math.random() * types.length)];
+    const blocks = [...Object.values(Z.cells).map((c) => ({ x: Z.origin.x + c.x, z: Z.origin.z + c.z, h: c.type === 'mill5' || c.type === 'turn' ? 4.6 : 3.0 })), { x: Z.origin.x + Z.src.x, z: Z.origin.z + Z.src.z, h: 3.8 }, { x: Z.origin.x + Z.sink.x, z: Z.origin.z + Z.sink.z, h: 2.6 }];
+    for (let k = 0; k < 80; k++) {
+      const x = r.x0 + 1 + Math.random() * (r.x1 - r.x0 - 2), z = r.z0 + 1 + Math.random() * (r.z1 - r.z0 - 2);
+      if (blocks.some((b) => Math.abs(x - b.x) < 3.0 && Math.abs(z - b.z) < b.h)) continue;
+      return this.injectFieldEvent(type, x, z);
+    }
+    return null;
+  }
   // 확장 Zone 전용 AGV(레거시는 유인 지게차): 투입구 원재료(+운반 중)가 한 번 실을 만큼 비면 확장 선반 동쪽 면 원재료 열에서 싣고 와 투입구 북쪽에 내린다
   assignZoneVehicles() {
     const m = this.mode;
     for (const v of this.vehicles) {
       if (!v.zone || !v.idle || v.outOfService || (m.batteryDrain && v.battery < (m.chargeAt ?? 0) * 0.6)) continue;
       const key = v.zone, w = this.whZone[key], F = ZONE_FAC[key], code = XWH[key].code;
-      if (this.zoneRaw[key] + this.zoneRawIn[key] > ZONE_SRC.cap - ZONE_SRC.load || w.raw < 1) continue;
+      const halted = this.zoneDisrupted?.[key] > this.time, safety = halted && this.zoneSafety?.[key];   // 공급 차질: 확장 선반 출고 중단 — 안전재고 긴급 운송 1회만
+      if (this.zoneRaw[key] + this.zoneRawIn[key] > ZONE_SRC.cap - ZONE_SRC.load || (halted && !safety) || (!safety && w.raw < 1)) continue;
+      if (safety) this.zoneSafety[key] = false;
       const pick = { x: -43.0, z: Math.min(xrackZ(`${key}:raw`), 13.0), aisle: 'F', name: `확장 선반 ${code} 원재료 출고` };
       v.setTask(`${code} 원재료 운반`, [
         { go: pick },
-        { wait: 4, done: () => { const n = Math.min(ZONE_SRC.load, w.raw, ZONE_SRC.cap - this.zoneRaw[key] - this.zoneRawIn[key]); w.raw -= n; this.zoneRawIn[key] += n; v.load = { type: 'raw', n }; if (n) this.erp?.consume(`${key}:raw`, n, `${code} 투입구`); } },
+        { wait: 4, done: () => { const n = Math.min(ZONE_SRC.load, safety ? ZONE_SRC.load : w.raw, ZONE_SRC.cap - this.zoneRaw[key] - this.zoneRawIn[key]); if (!safety) { w.raw -= n; if (n) this.erp?.consume(`${key}:raw`, n, `${code} 투입구`); } this.zoneRawIn[key] += n; v.load = { type: 'raw', n, safety }; } },
         { go: F.agvDrop },
-        { wait: 4, done: () => { const n = v.load?.n ?? 0; this.zoneRaw[key] = Math.min(ZONE_SRC.cap, this.zoneRaw[key] + n); this.zoneRawIn[key] -= n; v.load = null; this.stats.zoneTrips = (this.stats.zoneTrips ?? 0) + 1; } },
+        { wait: 4, done: () => { const n = v.load?.n ?? 0, sf = v.load?.safety; this.zoneRaw[key] = Math.min(ZONE_SRC.cap, this.zoneRaw[key] + n); this.zoneRawIn[key] -= n; v.load = null; this.stats.zoneTrips = (this.stats.zoneTrips ?? 0) + 1; if (sf) this.orch.step(this.orch.find(`supply:${key}`), 'exec', 'act', `${v.id} 안전재고 ${n}개 ${ZONE_LABEL[key]} 투입구 도착 (재고 ${this.zoneRaw[key]}개)`); } },
         { go: v.home },   // 내려놓은 자리(Zone AMR 투입 경로 옆)에 서 있지 않고 충전 자리로 — 다음 운반도 바로 옆 확장 선반에서 시작한다
       ]);
     }
@@ -1778,6 +1875,49 @@ export class Simulation {
       if (m.pmEnabled && m.agentActive && !st.request && st.health < m.pmThreshold && this.requestTech(st, 'pm'))
         this.log('plan', `${st.name} 예지정비`, { obs: `IoT 건강도 ${st.health.toFixed(0)}%`, act: `${XWH[st.zone].code} 정비실 인력 배정` });
     }
+  }
+  // 정비 지연 감시 (1초마다): 고장 셀 · 정비 요청이 진행되지 않으면 이유를 찾아, 이유가 8초(발견·보고 단계는 30초) 넘게 이어지면
+  // 그 고장 인시던트 타임라인과 이벤트 로그에 남기고 셀 정보 창에 보인다(st.stallReason) — 이유가 바뀌면 다시 남기고, 진행되기 시작하면 '지연 해소'
+  watchMaintenance() {
+    if (this.time - (this._mwLast ?? -9) < 1) return; this._mwLast = this.time;
+    for (const st of [...this.processing, ...this.zoneCells]) {
+      if (st.state !== 'DOWN' && !(st.request && !st.request.self)) { if (st._stall) { st._stall = null; st.stallReason = null; } continue; }
+      const r = this.maintStall(st), inc = this.orch.find(`fail:${st.id}`);
+      if (!r) {
+        if (st._stall?.logged) { this.log('ok', `${st.name} 정비 지연 해소`, { obs: `${Math.round(this.time - st._stall.t0)}초 지연 — ${st._stall.text}`, act: st.techOnSite ? '수리·정비 진행' : '정비 인력 이동 재개' }); if (inc) this.orch.step(inc, 'exec', 'act', `지연 해소 — ${st.techOnSite ? '수리 진행' : '이동 재개'}`); }
+        st._stall = null; st.stallReason = null; continue;
+      }
+      if (st._stall?.key !== r.key) st._stall = { key: r.key, text: r.text, t0: this.time, logged: false };
+      st._stall.text = r.text;
+      if (!st._stall.logged && this.time - st._stall.t0 >= (r.slow ? 30 : 8)) {
+        st._stall.logged = true; st.stallReason = r.text; this.stats.maintStalls = (this.stats.maintStalls ?? 0) + 1;
+        this.log('warn', `${st.name} 정비 지연`, { obs: r.text, act: r.act });
+        if (inc) this.orch.step(inc, 'orch', 'decide', `⚠ 정비 지연 사유: ${r.text}${r.act ? ` → ${r.act}` : ''}`);
+      } else if (st._stall.logged) st.stallReason = r.text;
+    }
+  }
+  // 고장·정비가 지금 진행되지 않는 이유 (진행 중이면 null): 명령 정지 → 발견·보고 → 배정 → 정비 인력 이동 순으로 본다
+  maintStall(st) {
+    const K = this.cmd, req = st.request, m = this.mode, nm = (t) => t.id, task = (t) => (t.task ? t.task.replace(/\s*\(.*\)$/, '') : '대기');
+    if (K.estopAll) return { key: 'estop', text: '전체 비상정지 발령 중 — 정비 인력·수리 모두 정지', act: '명령 센터에서 비상정지 리셋' };
+    if (K.pstopAll) return { key: 'pstop', text: '전체 보호정지 발령 중 — 정비 인력 이동 정지', act: '명령 센터에서 보호정지 해제' };
+    if (!st.zone && K.locked(st)) return { key: 'cellstop', text: '셀 비상정지 명령 중 — 수리 멈춤', act: '명령 센터에서 셀 리셋' };
+    if (st.techOnSite) return null;
+    if (!req) return st.state === 'DOWN' ? { key: 'report', slow: true, text: m.agentActive ? '고장 보고 → 오케스트레이터 판단 대기' : '고장 발견 · 정비반 호출 대기 (작업자 보고)', act: null } : null;
+    if (this.time < req.readyAt) return { key: 'call', slow: true, text: '정비반 호출 대기 (작업자 발견·반장 판단 지연)', act: null };
+    if (!req.tech) {
+      if (req.kind !== 'repair' && req.deferred) return { key: 'p1', text: '화재·인명(P1) 대응 중 — 같은 Zone 예지정비·재보정 보류', act: '안전 확보 뒤 자동 배정' };
+      const zk = st.zone ?? 'main', pool = this.techs.filter((t) => (t.zone ?? 'main') === zk);
+      return { key: 'none', text: `배정할 정비 인력 없음 — ${pool.map((t) => `${nm(t)} ${task(t)}`).join(' · ') || '정비 인력 없음'}`, act: req.kind === 'repair' ? '예지정비로 가던 인력 전환 · 20초 뒤 다른 Zone 오케스트레이터에 지원 요청' : '앞선 작업이 끝나면 배정' };
+    }
+    const t = req.tech;
+    if (t.job && t.job.req !== req && t.job.ev) return { key: 'diverted', text: `${nm(t)} 현장 이벤트(${t.job.label ?? '이벤트'}) 대응으로 전환 — 처리 후 이어서`, act: null };
+    if (t.hzWait) return { key: 'hazard', text: `${nm(t)} 진로 위 현장 이벤트(${t.hzWait.ev?.label ?? '현장 이벤트'}) 앞에서 해결 대기`, act: '현장 이벤트 처리 (대응 로봇 출동·해소 확인)' };
+    if (K.evac) return { key: 'evac', text: `대피 명령 중 — ${nm(t)} 대피`, act: '대피 해제' };
+    if (t.swapping || t.task === '배터리 팩 교체') return { key: 'battery', text: `${nm(t)} 배터리 팩 교체 중`, act: null };
+    if (/보관대 차례 대기/.test(t.task ?? '')) return { key: 'tool', text: `${nm(t)} 공구 보관대 차례 대기`, act: null };
+    if (t.blockedOn && !t.moving) return { key: `block:${t.blockedOn.id}`, text: `${nm(t)} 통행 정체 — ${t.blockedOn.id}에 막힘`, act: '양보·우회 (10초 넘으면 우선 통행)' };
+    return null;
   }
   zoneCell(key, id) { return this.zoneCells.find((c) => c.zone === key && c.cellId === id); }
 
@@ -1826,7 +1966,7 @@ export class Simulation {
   supplyCommand(act) {
     const o = this.orch, inc = o.find('supply'); if (!inc) return;
     o.later(Math.max(0, o.latency - 0.5), () => {
-      o.step(inc, 'orch', 'decide', `판단(${o.name}): 공급 복구 전 재고 소진 — 라인 정지 회피 필요`);
+      o.step(inc, 'orch', 'decide', `판단(${o.nameOf(inc)}): 공급 복구 전 재고 소진 — 라인 정지 회피 필요`);
       o.step(inc, 'orch', 'command', `명령: ${act ?? 'SCM 대체 발주 · AGV 우선 배차'}`);
       o.step(inc, 'exec', 'act', 'AGV 안전재고 운송 출발 · 다른 AGV는 창고에서 출고 대기');
     });

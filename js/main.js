@@ -11,6 +11,7 @@ import { HybridAgent, compareArchitecturesAsync } from './multiagent.js';
 import { agentStructureHTML } from './agentinfo.js';
 import { FactoryView } from './factory.js';
 import { ExtraZones, ZONE_VIEWS, EXTRA_ZONES } from './zones.js';
+import { ZONE_LABEL } from './zonedefs.js';
 import { UI } from './ui.js';
 import { LLMController } from './llm.js';
 import { LineDesigner } from './designer.js';
@@ -19,7 +20,7 @@ import { DataHub, PUBLISHER_ID, WRITER_GROUP } from './datahub.js';
 import { PacketCapture } from './pcap.js';
 import { RENDER, loadBlenderAssets, applyRenderEnv, resetRenderEnv, primKey, blenderize } from './blender.js';
 import { ODOO_PRODUCTS, ODOO_LOCS } from './odoo.js';
-import { RobotCamWall, COLS as CAM_COLS } from './robotcam.js';
+import { RobotCamWall, ZoneCamWall, COLS as CAM_COLS } from './robotcam.js';
 import { GateView } from './gateview.js';
 import { EpisodeRecorder, buildEpisodesZip, EP_HZ, SAMPLE } from './vla.js';
 import { impactHTML, impactClick } from './impactview.js';
@@ -28,7 +29,7 @@ import { RobotVideoRecorder, downloadVideos } from './robotrec.js';
 import { buildAiosZip, HEADS as AIOS_HEADS, FEATURES as AIOS_FEATURES, SAMPLE_S as AIOS_SAMPLE_S, CHUNK as AIOS_CHUNK, TRAIN_MIN as AIOS_TRAIN_MIN } from './aios.js';
 import { zipStore } from './aasx.js';
 import { DRONE_SIZING } from './drone.js';
-import { CCTVView, CCTV_CLASSES } from './cctvview.js';
+import { CCTVView, CCTVBoard, CCTV_CLASSES } from './cctvview.js';
 import { AI_MODELS } from './cctv.js';
 import { NR, STACK, LAT, UE_LOAD, maxRobots } from './net5g.js';
 import { setAasVersion, AAS_VERSIONS } from './aas.js';
@@ -103,7 +104,9 @@ const xzones = new ExtraZones(scene);   // 정밀조립Zone 뒤 유연생산Zone
 view.xzones = xzones;   // 확장 Zone 셀 로봇·운반 AMR 클릭 · 텔레메트리 (factory.js cellRobot · pickTargets)
 const hub = new DataHub();
 const camWall = new RobotCamWall(scene, renderer);   // 로봇 비전 관제 디스플레이 (피지컬AI 단계)
-const cctvView = new CCTVView(scene, () => camWall.renderer, scene);   // CCTV 전광판 · CCTV 영상 창
+const zoneWalls = ['flex', 'adapt'].map((k) => new ZoneCamWall(scene, renderer, k));   // 확장 Zone 로봇 비전 관제 디스플레이 — 각 Zone 전광판 오른쪽 (robotcam.js ZoneCamWall)
+const cctvView = new CCTVView(scene, () => camWall.renderer, scene);   // CCTV 전체 분할 영상(녹화·AI 분석) · CCTV 영상 창
+const cctvBoards = cctvView.boards = ['main', 'flex', 'adapt'].map((k) => new CCTVBoard(cctvView, scene, k));   // Zone별 CCTV 전광판 — 자기 Zone 관할 카메라만 (cctvview.js CCTVBoard)
 const cctvRec = new CCTVRecorder(cctvView, () => camWall.renderer), cctvClip = new CameraClip();
 let ffmpegVer = null;   // 서버 ffmpeg 버전 (MP4 변환)
 cctvClip.mp4 = () => cctvRec.server && cctvRec.ffmpeg;   // 개별 녹화는 서버 ffmpeg로 MP4 저장
@@ -197,7 +200,7 @@ function setRender(style) {
   if (!sim) return;
   view.setup(sim, labelsOn, changedIds); view.selected = null; view.selectRobot(null);
   xzones.setup(sim, labelsOn);
-  camWall.setup(sim, view); cctvView.setup(sim, view);
+  camWall.setup(sim, view); for (const w of zoneWalls) w.setup(sim, view); cctvView.setup(sim, view); for (const b of cctvBoards) b.setup(sim);
   applyLook(); RENDER.swapped = 0; blenderize(scene);
 }
 
@@ -212,8 +215,8 @@ function start(key) {
   xzones.setup(sim, labelsOn);
   view.selected = null;
   hub.reset(sim, view, xzones);
-  camWall.setup(sim, view);
-  cctvView.setup(sim, view);
+  camWall.setup(sim, view); for (const w of zoneWalls) w.setup(sim, view);
+  cctvView.setup(sim, view); for (const b of cctvBoards) b.setup(sim);
   epRec.attach(sim);
   cctvRec.attach(sim, epRec.runId, (t) => hub.iso(t)); cctvClip.stop();
   robotRec.attach(sim, epRec.runId, (t) => hub.iso(t));
@@ -270,8 +273,8 @@ for (const Z of EXTRA_ZONES) xzones.byKey(Z.key).setMix(Z.mixes[zonePick.mix[Z.k
 function saveZonePick() { try { localStorage.setItem(ZONE_PICK_KEY, JSON.stringify(zonePick)); } catch { /* 이번 실행에만 적용 */ } }
 function zoneDropdown() {
   const cur = ZONE_PICKS.find((z) => z.key === zonePick.view);
-  const items = ZONE_PICKS.map((z) => `<button type="button" class="zc-dd-it${z.key === cur.key ? ' on' : ''}" data-pick="${z.key}"><b>${escH(z.code ? `${z.code} ${z.name}` : z.name)}</b><small>${escH(z.sub)}</small></button>`).join('');
-  return `<div class="zc-dd"><button type="button" class="zc-dd-btn" data-dd aria-haspopup="listbox" title="Zone 선택">${escH(cur.code ? `${cur.code} ${cur.name}` : cur.name)} <i>▾</i></button><div class="zc-dd-menu" role="listbox">${items}</div></div>`;
+  const items = ZONE_PICKS.map((z) => `<button type="button" class="zc-dd-it${z.key === cur.key ? ' on' : ''}" data-pick="${z.key}"><b>${escH(z.name)}</b><small>${escH(z.sub)}</small></button>`).join('');
+  return `<div class="zc-dd"><button type="button" class="zc-dd-btn" data-dd aria-haspopup="listbox" title="Zone 선택">${escH(cur.name)} <i>▾</i></button><div class="zc-dd-menu" role="listbox">${items}</div></div>`;
 }
 function renderZoneCard() {
   if (zonePick.view !== 'precision') return renderXzZoneCard();
@@ -301,7 +304,7 @@ function renderXzZoneCard() {
   const cellRow = (id) => { const c = Z.cells[id], no = c.no ?? id; return `<div class="zc-cell p-${XZ_CLS[c.product] ?? c.product}" data-xcell="${id}"><b class="${no.length > 1 ? 'wide' : ''}">${escH(no)}</b><span>${escH(c.label)}</span><em>${escH(c.use)}</em><i class="chip" data-xchip="${id}"></i></div>`; };
   const cells = Z.card.map((it) => typeof it === 'string' ? cellRow(it)
     : `<div class="zc-branch">${it.map((br) => `<div class="zc-line p-${XZ_CLS[br.product] ?? br.product}"><small>▶ ${escH(br.title)}</small>${br.cells.map(cellRow).join('')}</div>`).join('')}</div>`).join('');
-  zoneCard.innerHTML = `<div class="zc-h">${zoneDropdown()}<small>메타팩토리 테스트베드 ${Z.code} · ${Object.keys(Z.cells).length}셀 혼류</small></div>
+  zoneCard.innerHTML = `<div class="zc-h">${zoneDropdown()}<small>메타팩토리 테스트베드 · ${Object.keys(Z.cells).length}셀 혼류</small></div>
     <div class="zc-sub">혼류 비율 (${ps.map((p) => p.label).join(' : ')})</div>
     <div class="seg small zc-mix">${mixSeg}</div>
     <div class="zc-cells">${cells}</div>
@@ -332,13 +335,14 @@ document.addEventListener('click', (e) => { if (!e.target.closest('.zc-dd')) zon
 xzCard?.addEventListener('click', (e) => { const b = e.target.closest('button[data-view]'); if (b) flyTo(b.dataset.view); });
 function updateXzCard() {
   if (!xzCard) return;
-  const rows = xzones.summary().map((z) => `<div class="xz-row"><div class="xz-h"><b>${z.code} ${z.name}</b><button type="button" class="xz-go" data-view="${z.key}">보기 ▸</button></div>`
+  const rows = xzones.summary().map((z) => `<div class="xz-row"><div class="xz-h"><b>${z.name}</b><button type="button" class="xz-go" data-view="${z.key}">보기 ▸</button></div>`
     + `<div class="xz-s">${Object.entries(z.products).map(([k, v]) => `${v.label} <b>${z.byProduct[k] ?? 0}</b>`).join(' · ')} · UPH <b>${z.uph}</b> · 가동 셀 <b>${z.busy}/${z.cells}</b>${z.key === 'flex' ? ` · NG <b>${z.ng}</b>` : ` · 리워크 <b>${z.rework}</b>`}</div></div>`).join('');
   const html = `<div class="zc-h"><b>메타팩토리 3 Zone</b><small>서버실 ↔ AMR 스테이션 사이 · 위 유연생산 · 가운데 정밀조립 · 아래 적응가공</small></div>`
     + `<div class="seg small xz-views"><button type="button" data-view="all">전체</button><button type="button" data-view="flex">유연생산</button><button type="button" data-view="precision">정밀조립</button><button type="button" data-view="adapt">적응가공</button></div>${rows}`;
   if (xzCard.dataset.h !== html) { xzCard.dataset.h = html; xzCard.innerHTML = html; }
 }
 function updateZoneCard() {
+  updateInjectButtons();
   if (zonePick.view !== 'precision') return updateXzZoneCard();
   if (!isZone(currentLine)) return;
   for (const el of zoneCard.querySelectorAll('[data-chip]')) {
@@ -371,7 +375,7 @@ zoneCard.addEventListener('click', (e) => {
     zonePick.mix[Z.key] = xm.dataset.xmix; saveZonePick();
     xzones.byKey(Z.key).setMix(m.w);
     renderZoneCard();
-    sim.log('act', `${Z.code} ${Z.name} 혼류 비율 변경 · ${Object.values(Z.products).map((p) => p.label).join(' : ')} = ${m.label}`, {
+    sim.log('act', `${Z.name} 혼류 비율 변경 · ${Object.values(Z.products).map((p) => p.label).join(' : ')} = ${m.label}`, {
       obs: `투입 순서를 비율에 맞춰 평준화 (${Object.entries(m.w).map(([k, w]) => `${Z.products[k].label} ${w}`).join(' : ')})`,
       act: '다음 투입부터 적용 · 라인 안 재공은 그대로',
     });
@@ -427,8 +431,11 @@ document.getElementById('speedSeg').addEventListener('click', (e) => {
 });
 const playBtn = document.getElementById('playBtn');
 playBtn.addEventListener('click', () => { running = !running; playBtn.textContent = running ? '❚❚' : '▶'; });
+// 하단 이벤트 주입(설비 고장 · 자재 공급 차질 · 현장 이벤트)은 왼쪽 Zone 카드에서 고른 Zone에 발생하고, 그 Zone 오케스트레이터가 대응한다
+const pickZone = () => (zonePick.view === 'precision' ? null : zonePick.view);   // null = 정밀조립Zone
 document.getElementById('btnFault').addEventListener('click', () => {
-  const cands = sim.processing.filter((s) => s.state !== 'DOWN' && s.state !== 'MAINT');
+  const z = pickZone();
+  const cands = z ? sim.zoneCells.filter((c) => c.zone === z && c.state === 'OK') : sim.processing.filter((s) => !s.standby && s.state !== 'DOWN' && s.state !== 'MAINT');
   const st = cands[Math.floor(Math.random() * cands.length)];
   if (st) { sim.log('warn', `[시나리오] ${st.name} 고장 주입`, {}); sim.injectFault(st); orchView.show('equipment'); }
 });
@@ -455,13 +462,23 @@ function updateCmdUI() {
   if (msg) { cmdBanner.textContent = msg[0]; cmdBanner.className = `cmd-banner ${msg[1]}`; }
 }
 document.getElementById('btnEvent').addEventListener('click', () => {
-  const ev = camWall.injectRandom();
+  const z = pickZone(), ev = z ? sim.injectZoneEvent(z) : camWall.injectRandom();
   if (ev) { sim.log('warn', `[시나리오] 현장 이벤트 발생 · ${ev.label}`, { obs: '아직 아무도 인지하지 못한 상태 — 로봇 카메라 영상의 AI 추론으로 감지되면 자율 대응합니다' }); orchView.show('field'); }
 });
 document.getElementById('btnSupply').addEventListener('click', () => {
+  const z = pickZone();
+  if (z) { sim.disruptZoneSupply(z, 600); orchView.show('supply'); sim.log('warn', `[시나리오] 확장 선반 ${ZONE_LABEL[z]} 출고 10분 중단`, { obs: '협력사 납품 지연 상황 재현' }); return; }
   sim.disruptSupply(600); orchView.show('supply');
   sim.log('warn', '[시나리오] 자재 창고 출고 10분 중단', { obs: '협력사 납품 지연 상황 재현' });
 });
+// 버튼에 지금 주입 대상 Zone을 표시 (Zone 카드 선택이 바뀌면 따라 바뀜)
+function updateInjectButtons() {
+  const z = pickZone(), lab = ZONE_LABEL[z ?? 'main'], key = z ?? 'main';
+  for (const [id, text, tip] of [['btnFault', '⚡ 설비 고장 주입', '셀 하나에 돌발 고장을 주입합니다'], ['btnSupply', '⛔ 자재 공급 차질', z ? '확장 선반 출고를 10분간 중단합니다' : '자재 창고 출고를 10분간 중단합니다'], ['btnEvent', '⚠ 현장 이벤트', '누유·이물질·무단 진입·연기 의심 중 하나를 발생시킵니다 — AI 추론으로 감지해 자율 대응합니다']]) {
+    const b = document.getElementById(id); if (!b || b.dataset.zk === key) continue;
+    b.dataset.zk = key; b.innerHTML = `${text} <small class="inj-z">${lab}</small>`; b.title = `${lab}Zone — ${tip} (왼쪽 Zone 카드에서 대상 Zone 선택 · ${lab} 오케스트레이터가 대응)`;
+  }
+}
 document.getElementById('btnLabels').addEventListener('click', (e) => {
   labelsOn = !labelsOn; e.currentTarget.classList.toggle('on', labelsOn); view.setLabels(labelsOn); xzones.setLabels(labelsOn);
 });
@@ -779,13 +796,13 @@ labelRenderer.domElement.addEventListener('pointerup', (e) => {
   ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
   ray.setFromCamera(ndc, camera);
   // CCTV 전광판 칸을 누르면 그 CCTV 영상 창
-  if (cctvView.group.visible) { const b = ray.intersectObject(cctvView.screen, false)[0]; if (b?.uv) { const id = cctvView.boardCamAt(b.uv); if (id) { closePopups(['cctvPanel', 'cctvCard']); openCctv(id); return; } } }
+  for (const bd of cctvBoards) if (bd.group.visible) { const b = ray.intersectObject(bd.screen, false)[0]; if (b?.uv) { const id = bd.camAt(b.uv); if (id) { closePopups(['cctvPanel', 'cctvCard']); openCctv(id); return; } } }
   // 로봇 비전 관제 화면의 영상 칸을 누르면 그 로봇을 선택한다
-  if (camWall.group.visible) {
-    const w = ray.intersectObject(camWall.screen, false)[0];
-    if (w?.uv && camWall.list?.length) {
+  for (const cw of [camWall, ...zoneWalls]) if (cw.group.visible) {   // 정밀조립 · A-1 · A-2 로봇 비전 관제 화면
+    const w = ray.intersectObject(cw.screen, false)[0];
+    if (w?.uv && cw.list?.length) {
       const col = Math.min(CAM_COLS - 1, Math.floor(w.uv.x * CAM_COLS)), row = w.uv.y > 0.5 ? 0 : 1;
-      const f = camWall.list[row * CAM_COLS + col];
+      const f = cw.list[row * CAM_COLS + col];
       if (f) { closePopups('detail'); view.selected = f.ref.type === 'cell' ? f.ref.stationId : null; view.selectRobot(f.ref); ui.showRobot(); robotTimer = 1; return; }
     }
   }
@@ -845,7 +862,7 @@ function pcapAsset() {
   if (ref?.type === 'mover') { const a = hub.assets.find((x) => x.mover?.id === ref.id); return a ? { a, cam: ref } : null; }
   if (ref?.type === 'cell') { const a = hub.assets.filter((x) => x.kind === 'CellRobot' && x.parent === ref.stationId)[ref.idx ?? 0]; return a ? { a, cam: ref } : null; }
   const st = ui.detailSt; if (st && !ui.robotMode) {
-    const zc = st.cellId != null, id = zc ? st.id.replace(/-/g, '_') : st.id, a = hub.assets.find((x) => x.id === id);   // 확장 Zone 셀 자산 id: A_1_C03
+    const zc = st.cellId != null, id = zc ? st.id.replace(/-/g, '_') : st.id, a = hub.assets.find((x) => x.id === id);   // 확장 Zone 셀 자산 id: FLX_C03
     const robots = zc ? hub.assets.some((x) => x.kind === 'CellRobot' && x.parent === id) : st.def?.robot?.count;
     return a ? { a, cam: robots ? { type: 'cell', stationId: id, idx: 0 } : null } : null;
   }
@@ -1150,7 +1167,7 @@ function watchContext(r) {
   r.domElement.addEventListener('webglcontextlost', (e) => {
     e.preventDefault();
     if (r !== renderer) return;
-    glLost = true; camWall.lost = true; cctvView.lost = true; glNote.hidden = false;
+    glLost = true; camWall.lost = true; for (const w of zoneWalls) w.lost = true; cctvView.lost = true; glNote.hidden = false;
     console.warn('[피지컬AI 실증 메타팩토리] WebGL 컨텍스트 손실 — 복구 대기');
     clearTimeout(glTimer); glTimer = setTimeout(rebuildRenderer, 1500);
   });
@@ -1160,7 +1177,7 @@ function watchContext(r) {
   });
 }
 function glRecovered(how) {
-  glLost = false; camWall.lost = false; cctvView.lost = false; glNote.hidden = true;
+  glLost = false; camWall.lost = false; for (const w of zoneWalls) w.lost = false; cctvView.lost = false; glNote.hidden = true;
   composer.setSize(innerWidth, innerHeight);
   scene.traverse((o) => { if (o.material) for (const m of [].concat(o.material)) m.needsUpdate = true; });
   console.info(`[피지컬AI 실증 메타팩토리] WebGL 컨텍스트 ${how} 완료`);
@@ -1176,7 +1193,7 @@ function rebuildRenderer() {
   renderer = r; watchContext(r);
   old.domElement.replaceWith(r.domElement);
   try { old.dispose(); } catch { /* 이미 잃은 컨텍스트 */ }
-  camWall.renderer = r; camWall.panelRT = camWall.capRT = null;
+  camWall.renderer = r; camWall.panelRT = camWall.capRT = null; for (const w of zoneWalls) { w.renderer = r; w.panelRT = w.capRT = null; }
   renderer.toneMappingExposure = old.toneMappingExposure;
   resetRenderEnv(); applyRenderEnv(scene, renderer);   // 환경광 텍스처는 렌더러(GPU 컨텍스트)마다 다시 만든다
   makeComposer();
@@ -1187,7 +1204,7 @@ watchContext(renderer);
 // 창이 다시 보일 때 컨텍스트가 조용히 사라져 있는 경우도 잡는다
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && !glLost && renderer.getContext().isContextLost()) {
-    glLost = true; camWall.lost = true; cctvView.lost = true; glNote.hidden = false; rebuildRenderer();
+    glLost = true; camWall.lost = true; for (const w of zoneWalls) w.lost = true; cctvView.lost = true; glNote.hidden = false; rebuildRenderer();
   }
 });
 
@@ -1245,8 +1262,8 @@ function frame() {
   cctvT += rdt; if (cctvSel && cctvT > 0.12) { cctvT = 0; renderCctvPanel(); }
   if (!glLost) {
     try {
-      camWall.update(rdt);
-      cctvView.update(rdt);
+      camWall.update(rdt); for (const w of zoneWalls) w.update(rdt);
+      cctvView.update(rdt); for (const b of cctvBoards) b.update(rdt);
       cctvRec.update(rdt);
       robotRec.update(rdt);
       composer.render();
@@ -1505,7 +1522,7 @@ function renderFleet() {
       ${R.map((r) => `<tr${r.on ? ' style="background:rgba(245,184,46,.10)"' : ''}><td><b>${escV(r.k)}</b></td><td class="ins" title="${escV(r.eff)}">${escV(r.eff)}</td><td>${r.on ? (r.n != null ? `${r.n}대` : '적용 중') : '-'}</td><td class="ins" title="${escV(r.src)}">${escV(r.src)}</td></tr>`).join('')}</tbody></table></div></div>
     <h4>설정 변경 — 예상 문제점 · 기대효과 <small>현재 관제 설정 기준</small></h4>
     <table class="vla-t"><tbody>${adv.map((a) => `<tr><td style="white-space:nowrap" class="${ADV[a.kind][1]}">${ADV[a.kind][0]}</td><td>${a.f ? `<b>${FLEET_NAMES[a.f]}</b> · ` : ''}${escV(a.text)}</td></tr>`).join('')}</tbody></table>
-    ${has.zflex || has.zadapt ? '<p class="vla-note">확장 Zone(A-1 유연생산 · A-2 적응가공) AMR은 화면의 Zone 시뮬레이션에서 운행합니다 — 속도·정지·운행 대수·배터리는 바로 반영되고, 아래 디지털트윈 예측·운행 대수별 비교는 정밀조립Zone 운반 AMR·자재 공급 AGV 기준입니다.</p>' : ''}
+    ${has.zflex || has.zadapt ? '<p class="vla-note">확장 Zone(유연생산 · 적응가공) AMR은 화면의 Zone 시뮬레이션에서 운행합니다 — 속도·정지·운행 대수·배터리는 바로 반영되고, 아래 디지털트윈 예측·운행 대수별 비교는 정밀조립Zone 운반 AMR·자재 공급 AGV 기준입니다.</p>' : ''}
     <div class="ai-bar" style="margin-top:8px"><button type="button" class="ai-btn" data-fl-predict ${fleetBusy ? 'disabled' : ''}>🔬 디지털트윈 예측 (15분 · 기준 100% 운행 vs 현재 설정)</button><small>${fleetBusy ? '예측 중…' : P ? `예측 완료 ${fclock(P.at)} — 설정: AMR ${P.cfg.amr} · AGV ${P.cfg.agv}` : '같은 라인·단계로 헤드리스 시뮬레이션 두 번(약 2초)'}</small></div>
     ${P ? `<table class="vla-t"><thead><tr><th>지표 (15분)</th><th>기준 100% · 전체 운행</th><th>현재 설정</th><th>변화</th></tr></thead><tbody>${predRows}</tbody></table>` : ''}
     <div class="ai-bar" style="margin-top:8px"><button type="button" class="ai-btn" data-fl-counts ${fleetCntBusy ? 'disabled' : ''}>📊 운행 대수별 비교 (15분씩 · 현재 속도 설정)</button><small>${fleetCntBusy ? `계산 중… ${fleetCntBusy}` : fleetCnt ? `완료 ${fclock(fleetCnt.at)} — AMR ${fleetCnt.amrScale} · AGV ${fleetCnt.agvScale}` : 'AMR 운행 대수(설치 대수 안에서 4단계)와 AGV 운행 대수별 UPH·재공·대기·자재대기를 비교해 적정 대수를 찾습니다'}</small></div>
@@ -1749,4 +1766,4 @@ fcBody.addEventListener('click', (e) => {
   const sf = e.target.closest('[data-sec-flow]'); if (sf) { secFlowSel = +sf.dataset.secFlow; renderFacosView(true); }
 });
 
-window.__twin = { xzones, flyTo, primKey, setRender, RENDER, openGnb: (id) => openGnb(id), cctvRec, robotRec, cctvView, epRec, get sim() { return sim; }, get agent() { return agent; }, view, ui, hub, camWall, orchView, persp, ctlP, llm };
+window.__twin = { cctvBoards, zoneWalls, xzones, flyTo, primKey, setRender, RENDER, openGnb: (id) => openGnb(id), cctvRec, robotRec, cctvView, epRec, get sim() { return sim; }, get agent() { return agent; }, view, ui, hub, camWall, orchView, persp, ctlP, llm };

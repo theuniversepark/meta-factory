@@ -2,6 +2,8 @@
 // 현장 감지 → 셀 자체 조치 → 상위 보고 → 판단 → 명령 → 실행 자원 조치 → 완료 확인 흐름으로 처리하고 단계마다 기록한다.
 // 셀에서 해결되는 일(자율 재보정 등)은 셀 자체 조치 후 결과만 상위에 통보한다.
 // 렌더링과 분리되어 있어 헤드리스 시뮬레이션에서도 같은 흐름으로 동작한다.
+// Zone마다 오케스트레이터가 있다 (정밀조립 · 유연생산 · 적응가공): 인시던트는 발생 위치(또는 opts.zone)의 Zone이 맡고, 판단·명령은 그 Zone 오케스트레이터 이름으로 남는다
+import { zoneAt, ZONE_LABEL } from './zonedefs.js';
 
 export const LANES = [
   { key: 'field', label: '현장 감지', sub: '로봇·센서·카메라' },
@@ -41,10 +43,11 @@ export class Orchestrator {
   }
   // 오케스트레이터 이름·판단 지연 (단계별): 레거시는 작업반장이 직접 확인하고 판단한다
   get name() { return { traditional: '작업반장 (수동 판단)', smart: '공장 오케스트레이터 (MES)', dark: `피지컬AI 오케스트레이터${this.sim.aios?.latest ? ` · AIOS ${this.sim.aios.version}` : ''}` }[this.sim.mode.key]; }
+  nameOf(inc) { return `${ZONE_LABEL[inc?.zone ?? 'main']} ${this.name}`; }   // 그 인시던트를 맡은 Zone 오케스트레이터
   get latency() { return this.sim.mode.orchLatency ?? { traditional: 40, smart: 3, dark: 1.5 }[this.sim.mode.key]; }
 
   open(type, key, title, source, opts = {}) {
-    const inc = { id: ++this.seq, type, key, title, source, t0: this.sim.time, steps: [], status: 'open', cellResolved: !!opts.cellResolved, where: opts.where ?? null, prio: opts.prio ?? TYPE_PRIO[type] ?? 4 };   // prio: 문제 해결 우선순위 (PRIORITY)   // where: 현장 위치 (드론 우선 출동)
+    const inc = { id: ++this.seq, type, key, title, source, t0: this.sim.time, steps: [], status: 'open', cellResolved: !!opts.cellResolved, where: opts.where ?? null, zone: opts.zone ?? (opts.where ? zoneAt(opts.where.x, opts.where.z, 0) : 'main'), prio: opts.prio ?? TYPE_PRIO[type] ?? 4 };   // prio: 문제 해결 우선순위 (PRIORITY)   // where: 현장 위치 (드론 우선 출동)
     this.incidents.unshift(inc);
     if (this.incidents.length > 40) this.incidents.pop();
     this.onOpen?.(inc);

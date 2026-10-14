@@ -782,6 +782,7 @@ em.up { color: var(--good); } em.dn { color: var(--bad); }
 
 /* 문제 해결 우선순위 배지 (P1 화재·인명 → P5 효율·품질) */
 .oi-p { font-style: normal; font-size: 10px; font-weight: 800; border-radius: 5px; padding: 0 5px; margin-right: 5px; vertical-align: 1px; }
+.oi-z { font-style: normal; font-size: 10px; font-weight: 700; border-radius: 5px; padding: 0 5px; margin-right: 5px; vertical-align: 1px; background: rgba(55, 232, 255, 0.16); color: #9fe8ff; }
 .oi-p.p1 { background: #ff5a5a; color: #fff; }
 .oi-p.p2 { background: #ff9152; color: #1a0d00; }
 .oi-p.p3 { background: #f5b82e; color: #1a1200; }
@@ -849,3 +850,6 @@ em.up { color: var(--good); } em.dn { color: var(--bad); }
 .xz-card .xz-go:hover { background: rgba(55, 232, 255, 0.22); }
 .xz-card .xz-s { color: var(--muted); margin-top: 2px; line-height: 1.5; }
 .xz-card .xz-s b { color: var(--ink); }
+
+/* 하단 이벤트 주입 버튼: 대상 Zone 표시 (왼쪽 Zone 카드 선택) */
+.inj-z { font-size: 10px; font-weight: 700; margin-left: 4px; padding: 0 5px; border-radius: 5px; background: rgba(55, 232, 255, 0.16); color: #9fe8ff; }

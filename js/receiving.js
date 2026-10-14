@@ -38,8 +38,8 @@ export const XRACK = { x: WH_RACK.x, z: WH_RACK.z - 8.9, len: 7.2, pitch: 1.8 };
 // 확장 Zone 자재 (zonedefs.js EXTRA_ZONES key) — Zone이 대상물 1개를 투입할 때 원재료 1개 · 부품 키트 1개를 꺼낸다 (zones.js)
 // 팔레트 크기는 투입량에 맞춤 (A-1 시간당 약 30개 · A-2 약 200개 → 선반 3칸 가득이면 1~2시간분), 재주문점 = 팔레트 1개분 남음
 export const XWH = {
-  flex: { code: 'A-1', name: '유연생산', col: 0x2f9bff, raw: { pallet: 16, label: '원재료', unit: '장' }, parts: { pallet: 32, label: '부품', unit: '키트' } },
-  adapt: { code: 'A-2', name: '적응가공', col: 0xff7a45, raw: { pallet: 72, label: '원재료', unit: '개' }, parts: { pallet: 144, label: '부품', unit: '키트' } },
+  flex: { code: '유연생산', name: '유연생산', col: 0x2f9bff, raw: { pallet: 16, label: '원재료', unit: '장' }, parts: { pallet: 32, label: '부품', unit: '키트' } },
+  adapt: { code: '적응가공', name: '적응가공', col: 0xff7a45, raw: { pallet: 72, label: '원재료', unit: '개' }, parts: { pallet: 144, label: '부품', unit: '키트' } },
 };
 const XCOL = ['flex:raw', 'adapt:raw', 'flex:parts', 'adapt:parts'];   // 북 → 남
 // 물류 선반 품목 목록 (팔레트 종류): 정밀조립 원자재·부품 + 확장 Zone 자재 4종
