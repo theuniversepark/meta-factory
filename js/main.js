@@ -25,6 +25,8 @@ import { RobotCamWall, ZoneCamWall, InspCamWall, COLS as CAM_COLS } from './robo
 import { GateView } from './gateview.js';
 import { EpisodeRecorder, buildEpisodesZip, EP_HZ, SAMPLE } from './vla.js';
 import { impactHTML, impactClick } from './impactview.js';
+import { traceHTML, traceClick, traceState } from './traceview.js';
+import { caseFiles, allFiles } from './trace.js';
 import { CCTVRecorder, CameraClip, saveSnapshot, REC as CCTV_REC } from './cctvrec.js';
 import { RobotVideoRecorder, downloadVideos } from './robotrec.js';
 import { buildAiosZip, HEADS as AIOS_HEADS, FEATURES as AIOS_FEATURES, SAMPLE_S as AIOS_SAMPLE_S, CHUNK as AIOS_CHUNK, TRAIN_MIN as AIOS_TRAIN_MIN } from './aios.js';
@@ -290,8 +292,8 @@ function renderZoneCard() {
     body = `<div class="zc-sub">혼류 비율 (도어트림 : e-axle)</div>
       <div class="seg small zc-mix">${mixSeg}</div>
       <div class="zc-cells">${cellRow('SORT')}
-        <div class="zc-branch"><div class="zc-line p-doortrim"><small>▶ 도어트림 라인 · ${escH(ZONE_PRODUCTS.doortrim.customer)}</small>${cellRow('DT_ASSY')}${cellRow('DT_FAST')}</div>
-        <div class="zc-line p-eaxle"><small>▶ e-axle 라인 · ${escH(ZONE_PRODUCTS.eaxle.customer)}</small>${cellRow('EA_ASSY')}${cellRow('EA_FAST')}</div></div>
+        <div class="zc-branch"><div class="zc-line p-doortrim"><small>▶ 도어트림 라인</small>${cellRow('DT_ASSY')}${cellRow('DT_FAST')}</div>
+        <div class="zc-line p-eaxle"><small>▶ e-axle 라인</small>${cellRow('EA_ASSY')}${cellRow('EA_FAST')}</div></div>
         ${cellRow('PACK')}</div>
       <div class="zc-amr" id="zcAmr"></div>
       <div class="zc-flow">투입 → 1.분류 → <span class="t-dt">도어트림 2.조립 → 3.체결</span> / <span class="t-ea">e-axle 4.조립 → 5.체결</span> → 6.포장 → 구분 적재</div>`;
@@ -494,7 +496,7 @@ playBtn.addEventListener('click', () => { running = !running; playBtn.textConten
 // 하단 이벤트 주입(설비 고장 · 자재 공급 차질 · 현장 이벤트)은 왼쪽 Zone 카드에서 고른 Zone에 발생하고, 그 Zone 오케스트레이터가 대응한다
 const pickZone = () => (zonePick.view === 'precision' || zonePick.view === 'insp' ? null : zonePick.view);   // null = 정밀조립Zone (정밀검사Zone 시나리오 주입은 정밀조립 오케스트레이터가 맡는다)
 document.getElementById('btnFault').addEventListener('click', () => {
-  const z = pickZone();
+  const z = zonePick.view === 'insp' ? 'insp' : pickZone();   // 정밀검사Zone도 셀 고장 주입 (정밀검사 정비실 인력이 수리)
   const cands = z ? sim.zoneCells.filter((c) => c.zone === z && c.state === 'OK') : sim.processing.filter((s) => !s.standby && s.state !== 'DOWN' && s.state !== 'MAINT');
   const st = cands[Math.floor(Math.random() * cands.length)];
   if (st) { sim.log('warn', `[시나리오] ${st.name} 고장 주입`, {}); sim.injectFault(st); orchView.show('equipment'); }
@@ -535,8 +537,9 @@ document.getElementById('btnSupply').addEventListener('click', () => {
 function updateInjectButtons() {
   const z = pickZone(), lab = ZONE_LABEL[z ?? 'main'], key = z ?? 'main';
   for (const [id, text, tip] of [['btnFault', '⚡ 설비 고장 주입', '셀 하나에 돌발 고장을 주입합니다'], ['btnSupply', '⛔ 자재 공급 차질', z ? '확장 선반 출고를 10분간 중단합니다' : '자재 창고 출고를 10분간 중단합니다'], ['btnEvent', '⚠ 현장 이벤트', '누유·이물질·무단 진입·연기 의심 중 하나를 발생시킵니다 — AI 추론으로 감지해 자율 대응합니다']]) {
-    const b = document.getElementById(id); if (!b || b.dataset.zk === key) continue;
-    b.dataset.zk = key; b.innerHTML = `${text} <small class="inj-z">${lab}</small>`; b.title = `${lab}Zone — ${tip} (왼쪽 Zone 카드에서 대상 Zone 선택 · ${lab} 오케스트레이터가 대응)`;
+    const zk = id === 'btnFault' && zonePick.view === 'insp' ? 'insp' : key, lab = ZONE_LABEL[zk];   // 정밀검사Zone은 고장 주입만 (자재·현장 이벤트는 정밀조립)
+    const b = document.getElementById(id); if (!b || b.dataset.zk === zk) continue;
+    b.dataset.zk = zk; b.innerHTML = `${text} <small class="inj-z">${lab}</small>`; b.title = `${lab}Zone — ${tip} (왼쪽 Zone 카드에서 대상 Zone 선택 · ${lab} 오케스트레이터가 대응)`;
   }
 }
 document.getElementById('btnLabels').addEventListener('click', (e) => {
@@ -874,7 +877,7 @@ labelRenderer.domElement.addEventListener('pointerup', (e) => {
     return;
   }
   view.selectRobot(null);
-  if (hit?.type === 'zcell' && hit.zone === 'insp') { view.selected = null; ui.showDetail({ insp: true, id: `QIS_${hit.cellId}`, cellId: hit.cellId, name: `정밀검사 ${insp.Z.cells[hit.cellId]?.label ?? hit.cellId}` }); return; }   // 정밀검사존 셀 정보 창
+  if (hit?.type === 'zcell' && hit.zone === 'insp') { view.selected = null; ui.showDetail(sim.zoneCell('insp', hit.cellId) ?? { insp: true, id: `QIS_${hit.cellId}`, cellId: hit.cellId, name: `정밀검사 ${insp.Z.cells[hit.cellId]?.label ?? hit.cellId}` }); return; }   // 정밀검사Zone 셀 정보 창 (설비 관리 셀 — 고장 주입·정비 지시)   // 정밀검사존 셀 정보 창
   if (hit?.type === 'zcell') { const zc = sim.zoneCell(hit.zone, hit.cellId); if (zc) { view.selected = null; ui.showDetail(zc); return; } }   // 확장 Zone 셀 정보 창 (sim.js zoneCells — 고장 주입·정비 지시는 정밀조립 셀과 같은 함수)
   const st = hit && (sim.stations.find((s) => s.id === hit.id) ?? sim.standby.find((s) => s.id === hit.id));
   if (st) { view.selected = hit.id; ui.showDetail(st); }
@@ -1316,7 +1319,7 @@ function frame() {
   if (view.telemetry && ui.robotMode) placeRobotPanel();
   if (screenTimer > 0.6 && modeKey !== 'traditional') { screenTimer = 0; view.drawScreen(sim.kpi(), agent.lastThought, { hub: hub.stats(), msgs: hub.msgs, bytes: hub.bytes }); }
   epRec.update();
-  vlaTimer += rdt; if (vlaTimer > 0.5) { vlaTimer = 0; renderVla(); renderAios(); renderImpact(); aiosUpload(); renderFacos(); renderFacosView(); }
+  vlaTimer += rdt; if (vlaTimer > 0.5) { vlaTimer = 0; renderVla(); renderAios(); renderImpact(); renderTrace(); aiosUpload(); renderFacos(); renderFacosView(); }
   cctvT += rdt; if (cctvSel && cctvT > 0.12) { cctvT = 0; renderCctvPanel(); }
   if (!glLost) {
     try {
@@ -1456,6 +1459,39 @@ function renderImpact(force) {
   if (impactModal.classList.contains('hidden') && !force) return;
   if (!force && impactBody.querySelector('button:hover')) return;
   setHTML(impactBody, impactHTML(sim));
+}
+
+// ── 품질 추적 · 불량 원인 분석 · 8D CAPA 창 (traceview.js) ─────────────────
+const traceModal = document.getElementById('traceModal'), traceBody = document.getElementById('traceBody');
+document.getElementById('btnTrace').addEventListener('click', () => { traceModal.classList.remove('hidden'); renderTrace(true); });
+document.getElementById('closeTrace').addEventListener('click', () => traceModal.classList.add('hidden'));
+traceModal.addEventListener('click', (e) => { if (e.target === traceModal) traceModal.classList.add('hidden'); });
+traceBody.addEventListener('click', (e) => {
+  const r = traceClick(sim, e); if (!r) return;
+  if (r.dl) {
+    const T = sim.trace, c = T.cases.find((x) => x.id === r.caseId), iso = (t) => hub.iso(t);
+    if (r.dl === 'case' && !c) return;
+    const zip = zipStore(r.dl === 'case' ? caseFiles(T, c, iso) : allFiles(T, iso));
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([zip], { type: 'application/zip' }));
+    a.download = r.dl === 'case' ? `RCA_${c.id}_${c.serial}.zip` : `RCA_dataset_${T.stats.released}products_${T.cases.length}cases_${epRec.runId}.zip`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    sim.sec?.onExport('불량 원인 분석 데이터', a.download, zip.byteLength ?? zip.length);
+    return;
+  }
+  renderTrace(true);
+});
+traceBody.addEventListener('input', (e) => {
+  if (e.target.id !== 'qtSearch') return;
+  traceState.q = e.target.value; const pos = e.target.selectionStart; renderTrace(true);
+  const el = document.getElementById('qtSearch'); el?.focus(); el?.setSelectionRange(pos, pos);
+});
+function renderTrace(force) {
+  const C = sim.capa, n = C ? C.pending.length : 0, badge = document.getElementById('qtBadge');
+  if (badge) { badge.hidden = !n; badge.textContent = n; }
+  if (traceModal.classList.contains('hidden') && !force) return;
+  if (!force && (traceBody.querySelector('button:hover, input:focus, tr:hover') || window.getSelection()?.toString())) return;
+  const sc = traceBody.querySelectorAll('.qt-split > div, .qt-swim'), keep = [...sc].map((el) => el.scrollTop);
+  setHTML(traceBody, traceHTML(sim));
+  traceBody.querySelectorAll('.qt-split > div, .qt-swim').forEach((el, i) => { if (keep[i]) el.scrollTop = keep[i]; });
 }
 
 // ── AIOS 공장 운영 AI 창 ─────────────────

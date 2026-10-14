@@ -59,8 +59,8 @@ export const DEFAULT_LINE = {
 // side -1: 설비 앞면(작업자·AGV 쪽)이 뒤쪽 통로를 향하도록 앞뒤 반전 배치
 export const ZONE_NAME = '정밀조립Zone';
 export const ZONE_PRODUCTS = {
-  doortrim: { label: '도어트림', customer: '서연인테크' },
-  eaxle: { label: 'e-axle', customer: '쉐플러코리아' },
+  doortrim: { label: '도어트림' },
+  eaxle: { label: 'e-axle' },
 };
 export const ZONE_CELLS = {
   SORT:    { no: '1', type: 'sort',     label: '부품분류셀',      product: 'shared',   use: '공동 · 부품 종류 판별·분기', x: -19, z: 0 },

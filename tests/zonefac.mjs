@@ -15,7 +15,7 @@ console.log('== 구성 (피지컬AI)');
     check(`${z}: 정비 인력 대기 자리 = 자기 Zone 정비실 양쪽 끝 충전 스테이션`, T.every((t) => { const l = techLocal(t.home, TECH_ROOMS[z]); return Math.abs(l.lz + 2.5) < 1e-6; }));
     check(`${z}: 드론은 자기 Zone 이착륙장`, D.every((d, i) => d.home.x === ZONE_FAC[z].pads[i].x && d.home.z === ZONE_FAC[z].pads[i].z));
   }
-  check('확장 Zone 셀 14개 (유연생산 8 · 적응가공 6) 고장·정비 대상', s.zoneCells.length === 14 && s.zoneCells.filter((c) => c.zone === 'flex').length === 8);
+  check('설비 관리 셀 20개 (유연생산 8 · 적응가공 6 · 정밀검사 6) 고장·정비 대상', s.zoneCells.length === 20 && s.zoneCells.filter((c) => c.zone === 'flex').length === 8 && s.zoneCells.filter((c) => c.zone === 'insp').length === 6);
 }
 console.log('== 셀 고장 → 자기 Zone 정비 인력 출동·수리');
 for (const mode of ['smart', 'dark']) {
@@ -78,9 +78,9 @@ console.log('== 선택 Zone 이벤트 주입 → 그 Zone 오케스트레이터 
 }
 console.log('== 순찰 · 물류 (피지컬AI)');
 { const s = new Simulation('dark', 5, { line: zoneLine(), quiet: true }), ag = new FactoryAgent(s);
-  const seen = Object.fromEntries(ZK.map((z) => [z, new Set()])), wrong = [];
+  const seen = Object.fromEntries([...ZK, 'insp'].map((z) => [z, new Set()])), wrong = [];
   run(s, ag, 1800, () => { for (const q of s.quads) if (q.zone && q.target) { if (q.target.zone !== q.zone) wrong.push(q.id); seen[q.zone].add(q.target.id); } });
-  for (const z of ZK) check(`${z}: 사족보행이 자기 Zone 셀만 순찰 (30분)`, !wrong.length && seen[z].size >= 4, `순찰한 셀 ${seen[z].size}개`);
+  for (const z of [...ZK, 'insp']) check(`${z}: 사족보행이 자기 Zone 셀만 순찰 (30분)`, !wrong.length && seen[z].size >= 4, `순찰한 셀 ${seen[z].size}개`);
   // 투입구 부품 키트가 재주문점 아래로 떨어지면 자기 Zone 물류 휴머노이드가 확장 선반에서 가져와 채운다
   for (const z of ZK) { s.zoneKits[z] = ZONE_KIT.reorder - 1; }
   const parts0 = Object.fromEntries(ZK.map((z) => [z, s.whZone[z].parts]));

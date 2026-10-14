@@ -657,10 +657,9 @@ export class InspCamWall extends ZoneCamWall {
   get I() { return this.view?.xzones?.insp; }
   tc(st) { return st; }
   inZone(p) { return inInsp(p); }
-  zm() { return []; }
   cells() { return this.I?.cellRobots() ?? []; }
   amrs() { return this.sim.mode.key === 'traditional' || !this.I ? [] : this.I.carriers.map((c) => ({ id: c.id, mover: this.I.tele(c), c })); }
-  pinnedFeeds() { return []; }
+  // zm()·pinnedFeeds()는 확장 Zone과 같음 — 정밀검사 정비 휴머노이드 · 사족보행 · 드론 (zone 'insp') · 셀 고장 수리 현장 고정
   targets() {
     const out = [], I = this.I; if (!I) return out;
     for (const c of I.order) out.push({ key: `qs${c.id}`, cls: '설비', name: c.def.label, c: [c.def.x, 1.3, c.def.z], h: [2.2, 1.3, 2.2], st: I.teleCell(c) });

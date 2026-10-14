@@ -1,5 +1,5 @@
 // 제조 라인 시뮬레이션 엔진 — 렌더링과 분리되어 있어 헤드리스(고속 비교) 실행이 가능하다.
-import { fr, bk, inExtraZone, BUILDING, AMR_LEAD, techAt, techLocal, techHeading, TECH_ROOM, TECH_ROOMS, ZONE_FAC, EXTRA_ZONES, zoneAt, ZONE_LABEL, zoneRect } from './zonedefs.js';
+import { fr, bk, inExtraZone, BUILDING, AMR_LEAD, techAt, techLocal, techHeading, TECH_ROOM, TECH_ROOMS, ZONE_FAC, EXTRA_ZONES, zoneAt, ZONE_LABEL, zoneRect, INSP_CELLS, INSP_FAC, zoneDef, facOf } from './zonedefs.js';
 import { ImpactTracker } from './impact.js';
 import { CommandCenter } from './commands.js';
 import { TruckYard, planForklift, YARD, SHIP } from './shipping.js';
@@ -9,6 +9,8 @@ import { InboundYard, planReceiver, WH, INBOUND, LOGI_DZ, XWH, xrackZ } from './
 import { PatrolDrone, MISSION_PRIO } from './drone.js';
 import { planCCTV, CCTVAgent } from './cctv.js';
 import { Private5G } from './net5g.js';
+import { ProductTrace } from './trace.js';
+import { CapaManager } from './capa.js';
 import { FacLedger } from './fac.js';
 import { VLAPipeline } from './vla.js';
 import { AIOSPipeline } from './aios.js';
@@ -182,7 +184,16 @@ export const ZONE_SRC = { cap: 40, load: 20 };
 //  · A-1 유연생산: 북쪽 줄 → 뒤쪽 시설 통로(BB) 쪽, 가운데·남쪽 줄 → 서쪽 셀 사이 틈 (모두 뒤쪽 시설 통로에서 곧게 들어감)
 //  · A-2 적응가공: 북쪽 줄 → 앞 통로(F) 쪽, 남쪽 줄 → 앞쪽 시설 통로(FF) 쪽, 가운데 줄 → Zone 가운데 쪽 셀 사이 틈 (앞 통로에서 들어감)
 function buildZoneCells(sim) {
-  return EXTRA_ZONES.flatMap((Z) => Object.entries(Z.cells).map(([id, c]) => {
+  // 정밀검사Zone 셀 (inspzone.js 흐름): 정비 자리는 셀의 가운데 AMR 차로 쪽 옆 — 북쪽 두 줄은 뒤쪽 시설 통로(BB)에서, 남쪽 줄은 앞 통로(F)에서 곧게 들어간다
+  const insp = () => Object.entries(INSP_CELLS).map(([id, c]) => {
+    const name = `정밀검사 ${c.label}`, svc = { x: c.x < 39.25 ? c.x + 2.7 : c.x - 2.7, z: c.z, aisle: c.z > -10 ? 'F' : 'BB', name };
+    return {
+      id: `QIS-${id}`, uid: `QIS-${id}`, zone: 'insp', cellId: id, name, x: c.x, z: c.z, def: { cycle: c.cycle, wear: 0.25 },
+      health: 80 + sim.zrand() * 20, drift: 0, state: 'OK', request: null, repairRemaining: 0, repairTotal: 0, techOnSite: false, maintKind: null,
+      c: { fails: 0, down: 0, maint: 0 }, busy: false, svc, scan: { x: svc.x, z: svc.z + 1.6, aisle: svc.aisle, name },
+    };
+  });
+  const ext = EXTRA_ZONES.flatMap((Z) => Object.entries(Z.cells).map(([id, c]) => {
     const x = Z.origin.x + c.x, z = Z.origin.z + c.z, half = c.type === 'mill5' || c.type === 'turn' ? 4.3 : 2.3, row = c.z < -1 ? -1 : c.z > 1 ? 1 : 0;
     const svc = Z.key === 'flex'
       ? (row < 0 ? { x: x + 0.9, z: z - half - 0.7, aisle: 'BB' } : { x: x - 3.4, z, aisle: 'BB' })   // 가운데·남쪽 줄은 서쪽 셀 사이 틈으로 (뒤 통로 B·출하 쪽 혼잡 구간을 지나지 않는다)
@@ -199,6 +210,7 @@ function buildZoneCells(sim) {
       svc: { ...svc, name }, scan: beside ? { x: svc.x, z: svc.z + 1.6, aisle: svc.aisle, name } : { x: svc.x + 1.6, z: svc.z, aisle: svc.aisle, name },
     };
   }));
+  return [...ext, ...insp()];   // 정밀검사 셀은 맨 뒤 (난수 순서 — 기존 Zone 셀 초기 건강도가 그대로)
 }
 
 // 통로(폭 2.6m)는 진행 방향별 차로로 나눈다 (+x 방향은 통로 중심 -0.7, -x 방향은 +0.7 / 세로 통로도 같은 방식)
@@ -500,15 +512,15 @@ export class Simulation {
     const nd = opts.drones ?? m.drones ?? 1;
     this.drones = m.key === 'dark' ? Array.from({ length: nd }, (_, i) => new PatrolDrone(this, i, nd)) : [];
     // 확장 Zone(A-1 유연생산 · A-2 적응가공)마다 드론 2대 — 자기 Zone 이착륙장에서 자기 Zone을 순찰하고 자기 Zone 인시던트에 출동 (zonedefs.js ZONE_FAC)
-    if (m.key === 'dark') for (const key of Object.keys(ZONE_FAC)) for (let i = 0; i < ZONE_FAC[key].pads.length; i++) this.drones.push(new PatrolDrone(this, i, ZONE_FAC[key].pads.length, key));
+    if (m.key === 'dark') for (const key of [...Object.keys(ZONE_FAC), 'insp']) for (let i = 0; i < facOf(key).pads.length; i++) this.drones.push(new PatrolDrone(this, i, facOf(key).pads.length, key));   // + 정밀검사Zone 드론 2대
     this.techs = [];
     for (let i = 0; i < m.techs; i++) {
       const home = { ...LOC.TECH, ...roomDocks()[i % 2] };   // 정비실 양쪽 끝 충전 스테이션 (서로 마주 봄)   // 정비실 오른쪽 앞 대기 자리 — 도구 보관대로 드나드는 길(x 11~13.2, 17.2)과 떨어져 있다
       this.techs.push(new Mover(m.techKind === 'humanoid' ? `휴머노이드-정비${i + 1}` : `정비원-${i + 1}`, m.techKind, home, m.techSpeed));
     }
     // 확장 Zone 정비 인력 2명씩 — 자기 Zone 정비실(양쪽 끝 충전 스테이션)에서 대기하다 자기 Zone 셀 고장·정비에 출동 (레거시·자동화는 정비원, 피지컬AI는 정비 휴머노이드)
-    for (const key of Object.keys(ZONE_FAC)) {
-      const R = TECH_ROOMS[key], D = roomDocks(R), code = EXTRA_ZONES.find((Z) => Z.key === key).code;
+    for (const key of [...Object.keys(ZONE_FAC), 'insp']) {   // + 정밀검사Zone 정비 인력 2명 (정밀검사 정비실)
+      const R = TECH_ROOMS[key], D = roomDocks(R), code = zoneDef(key).code;
       for (let i = 0; i < 2; i++) {
         const t = new Mover(m.techKind === 'humanoid' ? `${code} 휴머노이드-정비${i + 1}` : `${code} 정비원-${i + 1}`, m.techKind, { ...roomPt(-0.8, -3.0, R.label, R), ...D[i] }, m.techSpeed);
         t.zone = key; t.room = R; this.techs.push(t);
@@ -530,9 +542,9 @@ export class Simulation {
     }
     // 확장 Zone 물류 휴머노이드 2대씩 (피지컬AI): 물류 대기 줄의 Zone 도크 묶음에서 대기하다 자기 Zone 투입구 부품 키트가 줄면 확장 선반에서 꺼내 가져다 놓는다
     // 확장 Zone 사족보행 2대씩 (피지컬AI): 자기 Zone 스테이션에서 자기 Zone 셀을 순찰 점검
-    for (const key of Object.keys(ZONE_FAC)) {
-      const F = ZONE_FAC[key], code = EXTRA_ZONES.find((Z) => Z.key === key).code;
-      if (m.helpers) F.helpers.forEach((p, i) => {
+    for (const key of [...Object.keys(ZONE_FAC), 'insp']) {   // 정밀검사Zone은 사족보행만 (물류 휴머노이드 없음 — 투입 자재가 없다)
+      const F = facOf(key), code = zoneDef(key).code;
+      if (m.helpers && F.helpers) F.helpers.forEach((p, i) => {
         const h = new Mover(`${code} 휴머노이드-물류${i + 1}`, 'humanoid', { ...p, aisle: 'F', name: `${code} 부품 키트 대기`, heading: Math.PI, crossX: LOC.WH_LANE_OUT, laneZ: LOC.WH_TOP_Z }, 1.6);
         h.zone = key; h.role = 'kit'; h.carry = false; this.helpers.push(h);
       });
@@ -611,6 +623,8 @@ export class Simulation {
     this.cctvAgent = new CCTVAgent(this);   // 피지컬AI: CCTV 에이전트 (영상 감시 · 오케스트레이터 보고 · 이벤트 이력)
     this.net = new Private5G(this);   // Private 5G 특화망: 음영 없는 기지국 배치 · 이동 로봇 5G 모뎀 · 핸드오버 · 무손실 업링크 (자동화·피지컬AI)
     this.fac = new FacLedger(this);   // FAC(FACOS 업무 기록): 발주·재고·설비보전 (자동화·피지컬AI)
+    new ProductTrace(this, seed);   // 제품 추적 관리: 시리얼·계보 · 공장 환경 센서 · 불량 사례·AI 원인 분석 (js/trace.js)
+    new CapaManager(this);   // 품질 불량 → Zone·총괄 오케스트레이터 8D CAPA → 운영 정책 반영 (js/capa.js)
   }
 
   // 설비·로봇 고유 ID — 현황판·라벨·텔레메트리·데이터 연동에 같은 ID를 쓴다 (사람은 제외)
@@ -1073,6 +1087,7 @@ export class Simulation {
     this.fac?.update();
     this.cctvAgent?.update(dt);   // 피지컬AI: CCTV 에이전트 — 영상 감시·오케스트레이터 보고·이벤트 이력
     this.updateFieldEvents();
+    this.trace?.update(dt);
     this.orch.update();
     // 자재 공급이 재개되면 공급 차질 인시던트를 닫는다
     const sup = this.orch.find('supply');
@@ -1107,6 +1122,7 @@ export class Simulation {
         if (product) this.releasedBy[product]++;
         const item = { id: this.nextItemId++, defect: false, defectBy: null, product, carrier: car };
         if (car) { car.state = 'line'; car.steps = []; car.task = '운반'; }
+        this.trace?.release(item, car);   // 제품 시리얼·계보 시작
         src.out.items.push({ item, s: 0 });
         this.rawStock--; this.releaseTimer = 0; this.stats.released++;
         src.state = 'BUSY';
@@ -1147,6 +1163,7 @@ export class Simulation {
         S.grabBy ??= {}; S.grabBy[P] = (S.grabBy[P] ?? 0) + 1;
       }
       const { item } = c.items.shift();
+      this.trace?.finish(item);
       if (item.defect) this.stats.escaped++; else { this.stats.good++; if (item.product) this.stats.goodBy[item.product] = (this.stats.goodBy[item.product] ?? 0) + 1; }
       if (item.product) this.fgBy[item.product]++;
       this.fac?.produced(item.product ?? 'doortrim');   // FAC: 생산 입고 (구분 적재장에 들어온 수량 — 유출 불량 포함)
@@ -1259,7 +1276,8 @@ export class Simulation {
       st.itemFrom = inC.path[inC.path.length - 1];   // 들어온 경로의 끝점 (합류 대기 차로는 중심선에서 비켜 있음)
       st.item = e.item; st.progress = 0; st.done = false; st.itemT = 0;
       this.gateDecide(st);
-      const base = st.def.cycle * m.cycleMul * st.speedMul * (this.vla?.cycleFactor(st) ?? 1);   // 배포된 VLA 모델 버전만큼 사이클 단축
+      this.trace?.enter(st, st.item);   // 제품 계보: 셀 투입 순간 설비·로봇·AMR·환경
+      const base = st.def.cycle * m.cycleMul * st.speedMul * (this.vla?.cycleFactor(st) ?? 1) * (this.trace?.cycleFactor(st) ?? 1);   // 배포된 VLA 모델 버전만큼 사이클 단축 · 환경 인터록 정책(공정 보상)
       st.cycleTime = st.item.scrap ? 0.5 : Math.max(base * 0.6, base * (1 + m.cycleVar * gauss(this.rand)));
     }
     if (!st.item && cycleStop) { st.state = 'CSTOP'; st.c.stop = (st.c.stop ?? 0) + dt; }
@@ -1314,6 +1332,7 @@ export class Simulation {
       if (it.defect && this.rand() < m.catchRate) {
         st.c.defects++;
         this.stats.rejected++;
+        this.trace?.inspect(st, it, 'NG');   // 불량 판정 → 불량 사례 · AI 원인 분석 · 8D CAPA
         this.emit('reject', { item: { ...it, carrier: null }, st });
         if (it.carrier) {
           // AMR 운반: 불량품만 배출함으로 빼고, 빈 AMR은 정상 경로로 적재장까지 가서 복귀 흐름에 합류한다
@@ -1323,9 +1342,12 @@ export class Simulation {
         st.item = null; st.done = false;
         return;
       }
+      this.trace?.inspect(st, it, it.defect ? 'MISS' : 'OK');
     } else {
-      const p = (m.defectBase / 4) * (st.def.defectMul ?? 1) * (1 + (100 - st.health) / 50) * (1 + st.drift * 1.5) * (this.vla?.defectFactor(st) ?? 1);
-      if (!it.defect && this.rand() < p) { it.defect = true; it.defectBy = st.id; st.c.defects++; }
+      const p = (m.defectBase / 4) * (st.def.defectMul ?? 1) * (1 + (100 - st.health) / 50) * (1 + st.drift * 1.5) * (this.vla?.defectFactor(st) ?? 1) * (this.trace?.envMul(st) ?? 1);   // 환경 이상(공정별 민감 요인)도 불량 확률에
+      const made = !it.defect && this.rand() < p;
+      if (made) { it.defect = true; it.defectBy = st.id; st.c.defects++; }
+      this.trace?.done(st, it, made, p);
     }
     if (st.def.effect === 'sort') it.sorted = true;
     else if (st.def.effect === 'press') it.pressed = true;
@@ -1546,7 +1568,7 @@ export class Simulation {
     if (q.battery < 30) {
       this.log('info', `${q.id} 충전 스테이션 복귀`, { obs: `배터리 ${q.battery.toFixed(0)}%`, act: '도킹 충전 후 순찰 재개' });
       q.target = null;
-      q.setTask('충전 스테이션 복귀', [{ go: q.home }, { do: () => { q.heading = q.zone ? ZONE_FAC[q.zone].quadHeading : Math.PI; q.task = '도킹 충전'; } }, { charge: true }]);
+      q.setTask('충전 스테이션 복귀', [{ go: q.home }, { do: () => { q.heading = q.zone ? facOf(q.zone).quadHeading : Math.PI; q.task = '도킹 충전'; } }, { charge: true }]);
       return;
     }
     // 다른 순찰 로봇이 향하는 설비는 건너뛴다 (같은 곳에 몰리지 않게)
@@ -1894,7 +1916,7 @@ export class Simulation {
       st.health = Math.max(0, st.health - (st.def.wear * m.wearMul / st.def.cycle) * u * dt);
       if (this.zrand() < this.hazard(st) * u * dt) { this.fail(st); continue; }
       if (m.pmEnabled && m.agentActive && !st.request && st.health < m.pmThreshold && this.requestTech(st, 'pm'))
-        this.log('plan', `${st.name} 예지정비`, { obs: `IoT 건강도 ${st.health.toFixed(0)}%`, act: `${XWH[st.zone].code} 정비실 인력 배정` });
+        this.log('plan', `${st.name} 예지정비`, { obs: `IoT 건강도 ${st.health.toFixed(0)}%`, act: `${ZONE_LABEL[st.zone]} 정비실 인력 배정` });
     }
   }
   // 정비 지연 감시 (1초마다): 고장 셀 · 정비 요청이 진행되지 않으면 이유를 찾아, 이유가 8초(발견·보고 단계는 30초) 넘게 이어지면

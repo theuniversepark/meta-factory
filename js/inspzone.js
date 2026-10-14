@@ -10,7 +10,7 @@ import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { KIT } from './factory.js';
 import { route, moverRadius, moverWidth } from './sim.js';
 import { pointAt, pathLength } from './line.js';
-import { INSP_AREA } from './zonedefs.js';
+import { INSP_AREA, INSP_SERVER, INSP_CELLS } from './zonedefs.js';
 
 const { std, emis, mesh, box, cyl, put, MAT, BELT_Y, makeRobot, makeWorker, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK } = KIT;
 const PI = Math.PI;
@@ -19,14 +19,7 @@ export const INSP = {
   key: 'insp', code: '정밀검사', uidp: 'QIS', name: '정밀검사Zone', sub: 'AI정밀검사(QMS) · 샘플링 검사',
   area: INSP_AREA,
   lane: 39.25,   // 두 셀 줄 사이 AMR 차로 (x)
-  cells: {
-    DOCK: { no: '0', type: 'dock', label: '시료 접수·도킹', use: 'AMR 도킹 · 제품 ID·공정이력 확인 · 검사 레시피 Task 생성', x: 35, z: -25, cycle: 8 },
-    VIS: { no: '1', type: 'vision', label: '로봇형 비전 검사 Cell', use: 'ABIS 표면결함 · AIMAX 기준홀·Feature 편차', x: 43.5, z: -25, cycle: 40, robots: 1 },
-    SCAN: { no: '2', type: 'scan', label: '3D 스캔·초음파 용접검사 Cell', use: 'ScanBox 3D 형상·치수 · 용접부 초음파(UT) NDT', x: 43.5, z: -15, cycle: 90, robots: 2 },
-    OINS: { no: '3', type: 'oins', label: 'O-INSPECT 정밀 재측정', use: '정반 안착 · 접촉·광학 복합 정밀측정 · 재측정', x: 35, z: -15, cycle: 110, robots: 1 },
-    ATOS: { no: '4', type: 'atos', label: 'ATOS 3D 형상편차', use: '블루라이트 Point Cloud · CAD 대비 형상편차', x: 35, z: -5, cycle: 60, robots: 1 },
-    JUDGE: { no: '5', type: 'judge', label: 'AI 판정·결과 버퍼', use: 'OK · 판정 불확실 · NG → QMS 저장 · 선행공정 환류', x: 43.5, z: -5, cycle: 10 },
-  },
+  cells: INSP_CELLS,
   // 제품별 검사 경로 (접수 다음 ~ 판정 앞)
   routes: { doortrim: ['VIS', 'SCAN'], eaxle: ['VIS', 'OINS'], hood: ['VIS', 'SCAN'], door: ['VIS', 'SCAN'], hblock: ['ATOS', 'OINS'], rcover: ['ATOS', 'OINS'] },
   products: { doortrim: ['main', '도어트림', 0xf0a030], eaxle: ['main', 'e-axle', 0x9a6bff], hood: ['flex', '후드', 0xf0a030], door: ['flex', '도어', 0x9a6bff], hblock: ['adapt', '유압블록', 0xf0a030], rcover: ['adapt', '리어커버', 0x9a6bff] },
@@ -35,8 +28,7 @@ export const INSP = {
   // 샘플 수거 위치 (각 Zone 적재장 옆 통로 쪽) — aisle은 공장 통로 동선 계산용 (sim.js route)
   pickup: { main: { x: 21, z: 6.8, aisle: 'F' }, flex: { x: 22.5, z: -11.6, aisle: 'B' }, adapt: { x: 18, z: 11.4, aisle: 'F' } },
   entryZ: -29.2,   // 뒤쪽 통로에서 들어와 접수 도킹 앞에서 대기하는 줄
-  station: { z: 3.4, xs: [41.6, 43.5, 45.4], exitZ: 6.6 },   // 검사 AMR 대기·무선 충전 (앞쪽 통로로 나간다)
-  board: { x: 35.2, z: 3.6 },
+  station: { z: 3.4, xs: [33.3, 35.2, 37.1], exitZ: 6.6 },   // 검사 AMR 대기·무선 충전 — Zone 앞쪽(남쪽) 끝 왼쪽 (앞쪽 통로로 나간다)
   // 오른쪽 벽 (적응가공Zone 전광판·CCTV 전광판과 같은 벽 · 같은 높이 · 같은 0.5m 간격): 적응가공·정밀검사 CCTV 전광판(z −2 ~ 10) 바로 왼쪽에 전광판, 그 왼쪽에 로봇 비전 관제 디스플레이
   wall: { x: 47.8, y: 5.1, z: -2 - 0.5 - 9, rot: -PI / 2, w: 18, h: 4 },
   cams: { x: 47.8, y: 5.1, z: -2 - 0.5 - 18 - 0.5 - 6, rot: -PI / 2, w: 12, h: 4 },
@@ -166,13 +158,13 @@ export class InspZone {
     const gl = (x0, z0, x1, z1) => { const w = Math.abs(x1 - x0) || 0.1, d = Math.abs(z1 - z0) || 0.1; const m = put(new THREE.Mesh(new THREE.PlaneGeometry(w, d), guide), (x0 + x1) / 2, 0.018, (z0 + z1) / 2, g); m.rotation.x = -PI / 2; };
     gl(INSP.lane, INSP.cells.DOCK.z, INSP.lane, INSP.station.z);
     for (const c of Object.values(INSP.cells)) gl(Math.min(c.x, INSP.lane), c.z, Math.max(c.x, INSP.lane), c.z);
-    gl(INSP.station.xs[0], INSP.station.z, INSP.lane, INSP.station.z);
+    gl(Math.min(INSP.station.xs[0], INSP.lane), INSP.station.z, Math.max(INSP.station.xs[2], INSP.lane), INSP.station.z);
     gl(INSP.cells.DOCK.x, INSP.entryZ, INSP.cells.DOCK.x, INSP.cells.DOCK.z);
     const ttl = put(textPlane(['정밀검사Zone · AI정밀검사(QMS)'], 13, 1.3), INSP.lane, 0.02, -10, g); ttl.rotation.z = PI / 2;
     const sub = put(textPlane(['샘플링 검사 · 제품별 검사 경로 · AI 판정 → 공정 환류'], 13, 0.8, 'rgba(127,224,214,0.75)', 500), INSP.lane + 1.1, 0.02, -10, g); sub.rotation.z = PI / 2;
     // 검사 AMR 대기·충전 자리
     for (const x of INSP.station.xs) { const pad = put(new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.7), new THREE.MeshStandardMaterial({ color: 0x2bb3a6, transparent: true, opacity: 0.3, depthWrite: false })), x, 0.012, INSP.station.z, g); pad.rotation.x = -PI / 2; }
-    put(textPlane(['검사 AMR 대기·충전'], 5.2, 0.6), 43.5, 0.02, INSP.station.z + 1.5, g);
+    put(textPlane(['검사 AMR 대기·충전'], 5.2, 0.6), INSP.station.xs[1], 0.02, INSP.station.z + 1.5, g);
     for (let i = 0; i < INSP.amr.count; i++) put(textPlane(['접수 대기'], 1.6, 0.4), this.entryX(i), 0.02, INSP.entryZ - 1.05, g);
   }
   entryX(i) { return INSP.cells.DOCK.x - 1.8 + i * 1.8; }
@@ -182,29 +174,68 @@ export class InspZone {
       cellBase(g);
       const parts = BUILD[d.type](g);
       const light = put(makeStackLight(), -1.9, 0.15, -1.6, g);
+      // IoT 노드 (정밀조립·확장 Zone 셀과 같은 자리·모양): 셀 데이터를 정밀검사 데이터 서버로 올린다
+      const sensorMat = emis(0x37e8ff, 2.5), ringM = new THREE.MeshBasicMaterial({ color: 0x37e8ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false });
+      const iot = put(new THREE.Group(), 1.7, 3.2, -1.4, g), sensor = put(mesh(new THREE.SphereGeometry(0.12, 12, 10), sensorMat, false), 0, 0, 0, iot);
+      const pulse = put(new THREE.Mesh(new THREE.RingGeometry(0.2, 0.26, 24), ringM), 0, 0, 0, iot); pulse.rotation.x = -PI / 2;
       const robotsG = put(new THREE.Group(), 0, 0, 0, g), workersG = put(new THREE.Group(), 0, 0, 0, g);
       const el = document.createElement('div'); el.className = 'st-label xz';
       el.innerHTML = `<div class="nm"><b class="no">${d.no}</b><span>${d.label}</span><i class="uid">${INSP.uidp}-${id}</i></div><div class="use u-shared">${d.use}</div><div class="row"><span class="chip s-IDLE">대기</span></div><div class="rb"></div>`;
       const label = new CSS2DObject(el); label.position.set(0, 4.0, 0); g.add(label);
       g.traverse((o) => { o.userData.zoneCell = { zone: 'insp', cellId: id }; });   // 클릭 → 셀 정보 창 (main.js · ui.renderInspCell)
-      const c = { id, def: d, g, parts, light, robotsG, workersG, robots: [], robotUids: [], plates: [], el, chip: el.querySelector('.chip'), rb: el.querySelector('.rb'), label, occ: null, state: 'IDLE', progress: 0, cur: 0, item: null, busy: 0, done: 0 };
+      const c = { id, def: d, g, parts, light, iot, sensor, pulse, ringM, phase: Math.random() * 6, robotsG, workersG, robots: [], robotUids: [], plates: [], el, chip: el.querySelector('.chip'), rb: el.querySelector('.rb'), label, occ: null, state: 'IDLE', progress: 0, cur: 0, item: null, busy: 0, done: 0 };
       this.cells[id] = c; this.order.push(c);
     }
   }
   buildBoard() {
-    const B = INSP.board, g = put(new THREE.Group(), B.x, 0, B.z, this.G);
-    for (const x of [-1.7, 1.7]) put(box(0.12, 2.0, 0.12, MAT.dark), x, 1.0, 0, g);
-    put(box(3.8, 2.1, 0.12, MAT.dark), 0, 2.85, 0, g);
-    const c = document.createElement('canvas'); c.width = 1024; c.height = 560; this.boardCv = c;
-    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; this.boardTex = tex;
-    const scr = put(new THREE.Mesh(new THREE.PlaneGeometry(3.6, 1.97), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false })), 0, 2.85, 0.07, g);
-    scr.userData.inspCell = 'BOARD'; this.boardT = 0;
+    this.boardT = 0;   // (Zone 바닥 입간판은 없앴다 — 오른쪽 벽 전광판이 같은 내용을 크게 보여 준다)
     // 오른쪽 벽 전광판: 셀별 상태 · 판정 실적 · 제품별 결과 · 검사 AMR · 최근 판정
     const W = INSP.wall, wg = put(new THREE.Group(), W.x, W.y, W.z, this.G); wg.rotation.y = W.rot; this.wallG = wg;
     put(box(W.w + 0.3, W.h + 0.3, 0.12, std(0x14181e, { roughness: 0.6, metalness: 0.3 })), 0, 0, -0.08, wg);
     const wc = document.createElement('canvas'); wc.width = 2304; wc.height = 512; this.wallCv = wc;
     const wt = new THREE.CanvasTexture(wc); wt.colorSpace = THREE.SRGBColorSpace; wt.anisotropy = 8; this.wallTex = wt;
     put(new THREE.Mesh(new THREE.PlaneGeometry(W.w, W.h), new THREE.MeshBasicMaterial({ map: wt, toneMapped: false })), 0, 0, 0.01, wg);
+    // 정밀검사 데이터 서버: 랙 4대 (앞면 = 건물 안쪽) · 전광판 아래 — 셀 IoT 노드 · 셀 로봇 · 검사 AMR이 보내는 데이터 패킷이 여기로 (QMS · 검사 영상 · Point Cloud)
+    const SV = INSP_SERVER, srv = put(new THREE.Group(), SV.x, 0, SV.z, this.G); srv.rotation.y = SV.rot; this.srvG = srv; this.srvLeds = [];
+    for (const x of [-1.65, -0.55, 0.55, 1.65]) {
+      const rk = put(box(0.9, 2.3, 1.0, MAT.dark), x, 1.15, 0, srv);
+      for (let k = 0; k < 6; k++) { const m = emis(k % 2 ? 0x3dff8a : 0x2aa8ff, 2); this.srvLeds.push(m); put(box(0.6, 0.04, 0.02, m, false), 0, -0.8 + k * 0.32, 0.51, rk); }
+    }
+    const sl = put(textPlane(['정밀검사 데이터 서버', 'QMS · 검사 영상 · Point Cloud · AAS'], 3.0, 0.6, 'rgba(127,224,214,0.95)'), 0, 2.72, 0.45, srv); sl.rotation.x = 0;
+    this.serverPos = new THREE.Vector3(SV.x + Math.sin(SV.rot) * 0.5, 2.6, SV.z + Math.cos(SV.rot) * 0.5);
+    this.pkG = put(new THREE.Group(), 0, 0, 0, this.G); this.packets = [];
+  }
+  // 데이터 패킷: 보내는 쪽(셀 IoT 노드 · 로봇 · AMR) → 서버로 포물선 (정밀조립·확장 Zone 패킷과 같은 꼴) · NG 판정은 빨강
+  spawnPacket(from, color = 0x7ff3ff) {
+    let p = this.packets.find((q) => !q.alive);
+    if (!p) { if (this.packets.length > 50) return; p = { m: put(new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), new THREE.MeshBasicMaterial({ color, toneMapped: false })), 0, 0, 0, this.pkG), alive: false }; this.packets.push(p); }
+    p.alive = true; p.t = 0; p.m.visible = true; p.m.material.color.setHex(color);
+    p.a = from.clone(); p.b = this.serverPos.clone(); p.c = p.a.clone().lerp(p.b, 0.5); p.c.y = Math.max(p.a.y, p.b.y) + 4;
+  }
+  updatePackets(rdt) {
+    for (const p of this.packets) {
+      if (!p.alive) continue;
+      p.t += rdt * 0.7;
+      if (p.t >= 1) { p.alive = false; p.m.visible = false; this.stats.rx = (this.stats.rx ?? 0) + 1; continue; }
+      const k = p.t, j = 1 - k, { a, b, c } = p;
+      p.m.position.set(j * j * a.x + 2 * j * k * c.x + k * k * b.x, j * j * a.y + 2 * j * k * c.y + k * k * b.y, j * j * a.z + 2 * j * k * c.z + k * k * b.z);
+    }
+  }
+  sendData(rdt, t) {
+    const live = this.mode !== 'traditional' && !this.halted;   // 레거시: IoT 수집 없음
+    this.srvG.visible = this.mode !== 'traditional';
+    if (live) {
+      const v = new THREE.Vector3();
+      for (const c of this.order) {
+        const k = (t * 0.8 + c.phase) % 1; c.pulse.scale.setScalar(1 + k * 3); c.ringM.opacity = 0.6 * (1 - k);
+        if (Math.random() < rdt * (c.state === 'BUSY' ? 1.6 : 0.6)) this.spawnPacket(c.sensor.getWorldPosition(v));   // 셀 IoT 노드 (장비 상태·측정값)
+        for (const r of c.robots) if (Math.random() < rdt * (c.state === 'BUSY' ? 0.8 : 0.25)) this.spawnPacket(r.tip.getWorldPosition(v), 0xb48cff);   // 셀 로봇 (관절·TCP · 손목 카메라)
+      }
+      for (const a of this.carriers) if (Math.random() < rdt * (a.state === 'park' ? 0.15 : 0.5)) this.spawnPacket(v.set(a.x, 1.0, a.z), 0x3ddc84);   // 검사 AMR (5G 업링크: 위치·상태·샘플)
+      this.srvLeds.forEach((m, i) => (m.emissiveIntensity = Math.sin(t * 6 + i * 1.7) > 0.2 ? 2 : 0.4));
+    }
+    for (const c of this.order) { c.iot.visible = live || this.mode !== 'traditional'; }
+    this.updatePackets(rdt);
   }
   drawWall() {
     const cv = this.wallCv, x = cv.getContext('2d'), s = this.stats, F = '"Apple SD Gothic Neo", "Noto Sans KR", sans-serif', S = INSP;
@@ -215,9 +246,9 @@ export class InspZone {
     x.fillStyle = '#3ddc84'; x.fillText(`OK ${s.ok}`, 1560, 62); x.fillStyle = '#f5b82e'; x.fillText(`불확실 ${s.unc}`, 1720, 62); x.fillStyle = '#ff6b6b'; x.fillText(`NG ${s.ng}`, 1920, 62);
     x.fillStyle = '#e6edf3'; x.fillText(`OK율 ${okr}%`, 2060, 62);
     // 셀 카드 6개
-    const lab = { IDLE: ['대기', '#3a4654'], BUSY: ['검사 중', '#2f9bff'], DONE: ['다음 셀 대기', '#f5b82e'] };
+    const lab = { IDLE: ['대기', '#3a4654'], BUSY: ['검사 중', '#2f9bff'], DONE: ['다음 셀 대기', '#f5b82e'], DOWN: ['고장 · 수리 대기', '#ff4d4d'], MAINT: ['정비 중', '#ffb020'] };
     this.order.forEach((c, i) => {
-      const cx = 30 + i * 375, cy = 96, w = 355, h = 200, st = this.halted ? ['비상정지', '#ff4d4d'] : lab[c.state] ?? [c.state, '#3a4654'];
+      const cx = 30 + i * 375, cy = 96, w = 355, h = 200, st = this.halted ? ['비상정지', '#ff4d4d'] : lab[c.fault ?? c.state] ?? [c.state, '#3a4654'];
       x.fillStyle = '#121a24'; x.fillRect(cx, cy, w, h); x.fillStyle = st[1]; x.fillRect(cx, cy, w, 8);
       x.fillStyle = '#7fe0d6'; let fs = 30; do { x.font = `800 ${fs}px ${F}`; fs -= 1; } while (x.measureText(`${c.def.no} ${c.def.label}`).width > w - 24 && fs > 18); x.fillText(`${c.def.no} ${c.def.label}`, cx + 14, cy + 48);
       x.fillStyle = st[1] === '#3a4654' ? '#9fb3c8' : st[1]; x.font = `700 28px ${F}`; x.fillText(st[0], cx + 14, cy + 92);
@@ -232,7 +263,7 @@ export class InspZone {
       const b = s.by[k] ?? { ok: 0, unc: 0, ng: 0 }, cx = 30 + (i % 3) * 470, cy = 350 + Math.floor(i / 3) * 40;
       x.font = `600 23px ${F}`; x.fillStyle = '#9fb3c8'; x.fillText(`${zl(zk)} ${l}`, cx, cy); x.fillStyle = '#e6edf3'; x.fillText(`OK ${b.ok} · 불확실 ${b.unc} · NG ${b.ng}`, cx + 185, cy);
     });
-    x.fillStyle = '#9fb3c8'; x.fillText('최근 판정', 1450, 350);
+    x.fillStyle = '#9fb3c8'; x.fillText(`최근 판정 · 데이터 서버 수신 ${(s.rx ?? 0).toLocaleString('ko-KR')}건`, 1450, 350);
     this.recent.slice(0, 4).forEach((r, i) => { x.fillStyle = r.res === 'ok' ? '#3ddc84' : r.res === 'ng' ? '#ff6b6b' : '#f5b82e'; x.fillText(`${r.id} ${zl(r.zone)} ${S.products[r.product][1]} ${r.res === 'ok' ? 'OK' : r.res === 'ng' ? 'NG' : '불확실'}`, 1450 + (i % 2) * 420, 390 + Math.floor(i / 2) * 40); });
     x.fillStyle = '#9fb3c8'; x.fillText('검사 AMR', 30, 460);
     const T = { park: '대기·충전', out: '샘플 수거 이동', load: '샘플 인수', in: '정밀검사Zone으로', queue: '접수 대기', move: '셀 간 이동', work: '검사 중', ready: '다음 셀 대기', home: '스테이션 복귀' };
@@ -244,7 +275,8 @@ export class InspZone {
   reset(modeKey, seed) {
     this.mode = modeKey; this.rng = mulberry((seed ?? 1) * 7919 + 11); this.time = 0; this.seq = 0;
     this.queue = []; this.counts = { main: 0, flex: 0, adapt: 0 }; this.unsampled = {}; this.base = null; this.recent = [];
-    this.stats = { samples: 0, done: 0, ok: 0, unc: 0, ng: 0, by: {} };
+    this.stats = { samples: 0, done: 0, ok: 0, unc: 0, ng: 0, by: {}, rx: 0 };
+    for (const p of this.packets ?? []) { p.alive = false; p.m.visible = false; }
     const legacy = modeKey === 'traditional';
     this.mul = legacy ? 1.8 : modeKey === 'dark' ? 0.85 : 1;
     for (const c of this.order) {
@@ -352,7 +384,11 @@ export class InspZone {
     this.halted = halted; if (halted) return;
     this.time += dt;
     this.sampleTick();
-    for (const c of this.order) if (c.state === 'BUSY') {
+    for (const c of this.order) {
+      // 셀 고장·정비 (sim.js 설비 관리 — 정밀검사 정비실 인력이 수리): 끝날 때까지 검사가 멈춘다 · 가동 여부를 알려 마모 계산에 쓴다
+      const zc = this.sim.zoneCell?.('insp', c.id); c.fault = zc && (zc.state === 'DOWN' || zc.state === 'MAINT') ? zc.state : null;
+      if (zc) zc.busy = c.state === 'BUSY';
+      if (c.fault || c.state !== 'BUSY') continue;
       c.busy += dt; c.progress = Math.min(1, c.progress + dt / c.cur);
       if (c.progress >= 1) { c.state = 'DONE'; c.done++; }
     }
@@ -395,7 +431,7 @@ export class InspZone {
         }
         break;
       case 'queue': {   // 접수 도킹 앞 대기 → 비면 들어간다
-        const dock = this.cells.DOCK; if (dock.occ) break;
+        const dock = this.cells.DOCK; if (dock.occ || dock.fault) break;
         dock.occ = c; c.target = 'DOCK'; this.go(c, [{ x: c.x, z: c.z }, { x: c.x, z: dock.def.z - 2.6 }, { x: dock.def.x, z: dock.def.z - 1.2 }, { x: dock.def.x, z: dock.def.z }], 'move');
         break;
       }
@@ -417,6 +453,7 @@ export class InspZone {
           break;
         }
         const nx = this.cells[next], o = nx.occ;
+        if (nx.fault) break;   // 다음 검사 셀이 고장·정비 중이면 지금 자리에서 기다린다
         if (o) {   // 서로 상대 셀을 기다리면 (재측정 ↔ 판정) 자리를 맞바꾼다 — 교착 방지 (가운데 차로는 방향별 두 줄이라 엇갈려 지나간다)
           if (!(o.state === 'ready' && this.nextOf(o) === c.at)) break;
           for (const [a, from, to] of [[c, cur, nx], [o, nx, cur]]) { if (a.item?.redo && to.id === 'OINS') a.item.redo = false; to.occ = a; a.target = to.id; this.go(a, this.inPath(from.def, to.def), 'move'); }
@@ -444,6 +481,7 @@ export class InspZone {
     s.done++; s[res]++; by[res]++; this.push(it, res);
     cell.flash = { col: res === 'ok' ? 0x3ddc84 : 0xff4d4d, t: 2 };
     const sh = cell.parts.shelves[res === 'ok' ? 'ok' : 'ng'], n = res === 'ok' ? s.ok : s.ng; sh.forEach((b, i) => (b.visible = i < Math.min(6, n)));
+    if (res === 'ng' && this.mode !== 'traditional') this.spawnPacket(cell.sensor.getWorldPosition(new THREE.Vector3()), 0xff4d4d);   // NG 판정 → 서버 (QMS 저장 · 오케스트레이터 알림)
     if (res === 'ng') this.sim.log('warn', `정밀검사 NG — ${zl(zk)} ${plabel} ${it.id}`, { obs: `검사 경로 ${S.routes[it.product].map((id) => S.cells[id].label).join(' → ')}${it.rechecked ? ' → O-INSPECT 재측정' : ''}`, dec: 'Quality & Recovery Agent 최종 NG · QMS 저장', act: `${zl(zk)} 오케스트레이터에 리워크 Task · 선행공정 조건 보정 요청` });
     this.detach(c); c.item = null;
   }
@@ -472,11 +510,12 @@ export class InspZone {
       let d = c.heading - c.g.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d)); c.g.rotation.y += d * Math.min(1, rdt * 8);
     }
     for (const c of this.order) this.animCell(c, t, rdt, dts);
-    this.boardT -= rdt; if (this.boardT <= 0) { this.boardT = 0.5; this.drawBoard(); if (this.wallG.visible) this.drawWall(); }
+    this.sendData(rdt, t);
+    this.boardT -= rdt; if (this.boardT <= 0) { this.boardT = 0.5; if (this.wallG.visible) this.drawWall(); }
   }
   animCell(c, t, rdt, dts) {
-    const P = c.parts, busy = c.state === 'BUSY' && !this.halted, p = c.progress;
-    const st = this.halted ? 'ESTOP' : c.state === 'DONE' ? 'BUSY' : c.state;
+    const P = c.parts, busy = c.state === 'BUSY' && !this.halted && !c.fault, p = c.progress;
+    const st = this.halted ? 'ESTOP' : c.fault ?? (c.state === 'DONE' ? 'BUSY' : c.state);
     c.light.userData.set(st, t);
     for (const r of c.robots) r.anim(busy, t + r.phase, p);
     switch (c.def.type) {
@@ -500,32 +539,12 @@ export class InspZone {
       }
     }
   }
-  drawBoard() {
-    const cv = this.boardCv, x = cv.getContext('2d'), s = this.stats, F = '"Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
-    x.fillStyle = '#0c1118'; x.fillRect(0, 0, cv.width, cv.height);
-    x.fillStyle = '#7fe0d6'; x.font = `800 40px ${F}`; x.fillText('정밀검사Zone · DCC 품질 관제', 28, 54);
-    const okr = s.done ? Math.round((s.ok / s.done) * 1000) / 10 : 0;
-    x.font = `700 30px ${F}`; x.fillStyle = '#e6edf3';
-    x.fillText(`샘플 ${s.samples} · 판정 완료 ${s.done} · 검사 중 ${this.carriers.filter((c) => c.item).length} · 대기 ${this.queue.length}`, 28, 104);
-    x.fillStyle = '#3ddc84'; x.fillText(`OK ${s.ok}`, 28, 150); x.fillStyle = '#f5b82e'; x.fillText(`판정 불확실 ${s.unc}`, 200, 150); x.fillStyle = '#ff6b6b'; x.fillText(`NG ${s.ng}`, 470, 150);
-    x.fillStyle = '#e6edf3'; x.fillText(`OK율 ${okr}%`, 640, 150);
-    x.font = `600 25px ${F}`;
-    Object.entries(INSP.products).forEach(([k, [zk, lab]], i) => {
-      const b = s.by[k] ?? { ok: 0, unc: 0, ng: 0 }, y = 200 + i * 38;
-      x.fillStyle = '#9fb3c8'; x.fillText(`${zl(zk)} ${lab}`, 28, y);
-      x.fillStyle = '#e6edf3'; x.fillText(`OK ${b.ok} · 불확실 ${b.unc} · NG ${b.ng}`, 300, y);
-      x.fillStyle = '#6b7c8f'; x.fillText(INSP.routes[k].map((id) => INSP.cells[id].no).join('→') + '→5', 700, y);
-    });
-    x.fillStyle = '#9fb3c8'; x.font = `600 24px ${F}`; x.fillText('최근 판정', 28, 450);
-    this.recent.slice(0, 4).forEach((r, i) => { x.fillStyle = r.res === 'ok' ? '#3ddc84' : r.res === 'ng' ? '#ff6b6b' : '#f5b82e'; x.fillText(`${r.id} ${INSP.products[r.product][1]} ${r.res === 'ok' ? 'OK' : r.res === 'ng' ? 'NG' : '불확실'}`, 160 + (i % 2) * 420, 450 + Math.floor(i / 2) * 36); });
-    this.boardTex.needsUpdate = true;
-  }
   updateLabels() {
-    const lab = { IDLE: '대기', BUSY: '검사 중', DONE: '다음 셀 대기' };
+    const lab = { IDLE: '대기', BUSY: '검사 중', DONE: '다음 셀 대기', DOWN: '고장 · 수리 대기', MAINT: '정비 중' };
     for (const c of this.order) {
-      const st = this.halted ? 'ESTOP' : c.state;
+      const st = this.halted ? 'ESTOP' : c.fault ?? c.state;
       c.chip.className = 'chip s-' + (st === 'DONE' ? 'BLOCKED' : st);
-      const it = c.item; c.chip.textContent = (this.halted ? '비상정지' : lab[c.state] ?? c.state) + (it && c.state === 'BUSY' ? ` · ${zl(it.zone)} ${INSP.products[it.product][1]}` : '');
+      const it = c.item; c.chip.textContent = (this.halted ? '비상정지' : lab[c.fault ?? c.state] ?? c.state) + (it && c.state === 'BUSY' ? ` · ${zl(it.zone)} ${INSP.products[it.product][1]}` : '');
     }
   }
   setLabels(on) { this.labelsOn = on; for (const c of this.order) { c.label.visible = on; for (const sp of c.plates) sp.visible = on; } }

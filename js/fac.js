@@ -47,7 +47,7 @@ export const FAC_LOCS = {
 // 품목별 선반 로케이션 · 꺼내 가는 곳
 const rackOf = (p) => (p === 'raw' ? 'rackRaw' : p === 'parts' ? 'rackParts' : 'rackX');
 const useOf = (p) => (p === 'raw' ? 'feeder' : p === 'parts' ? 'cells' : p.startsWith('flex:') ? 'feederA1' : 'feederA2');
-export const SUPPLIER = '공급사 (원자재·부품)', CUSTOMER = '완성차 고객사 (서연인테크 · 쉐플러코리아)';
+export const SUPPLIER = '공급사 (원자재·부품)', CUSTOMER = '완성차 고객사';
 const WINDOW = 600;   // 내부 이동·생산 입고 묶음 (공장 시계 초)
 
 export class FacLedger {

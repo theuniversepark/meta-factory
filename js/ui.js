@@ -258,7 +258,7 @@ export class UI {
   }
   renderDetail() {
     const st = this.detailSt, sim = this.sim;
-    if (st.insp) return this.renderInspCell(st);   // 정밀검사Zone 셀 (inspzone.js)
+    if (st.insp || st.zone === 'insp') return this.renderInspCell(st);   // 정밀검사Zone 셀 (inspzone.js)
     if (st.cellId != null) return this.renderZoneCell(st);   // 확장 Zone 셀 (sim.js zoneCells — 정밀조립 셀도 st.zone을 갖고 있어 cellId로 가른다)
     const el = $('detail');
     if (st.standby) {
@@ -311,17 +311,23 @@ export class UI {
   renderInspCell(st) {
     const I = this.xzones?.insp, f = I?.cellInfo(st.cellId), el = $('detail'); if (!f) return;
     const d = f.def, legacy = f.mode === 'traditional', S = f.stats;
-    const lab = { IDLE: '대기', BUSY: '검사 중', DONE: '다음 셀 대기 (검사 완료)', ESTOP: '비상정지' }[f.state] ?? f.state;
+    const zc = this.sim.zoneCell?.('insp', st.cellId), fs = f.c.fault ?? f.state;
+    const lab = { IDLE: '대기', BUSY: '검사 중', DONE: '다음 셀 대기 (검사 완료)', ESTOP: '비상정지', DOWN: '고장 · 수리 대기', MAINT: '정비 중' }[fs] ?? fs;
+    const hcol = !zc ? '#37e8ff' : zc.health > 60 ? '#3ddc84' : zc.health > 40 ? '#f5b82e' : '#ff5a5a';
+    const req = zc?.request ? `${zc.request.kind === 'repair' ? '긴급수리' : zc.request.kind === 'cal' ? '재보정' : '예지정비'}${zc.request.tech ? ` · ${zc.request.tech.id}` : ' · 배정 대기'}` : '없음';
+    const rep = zc && (zc.state === 'DOWN' || zc.state === 'MAINT') ? `<span>남은 작업</span><b>${zc.techOnSite ? Math.max(0, zc.repairRemaining).toFixed(0) + '초' : '인력 이동 중'}</b>` : '';
+    const eq = zc ? `<span>건강도</span><b>${zc.health.toFixed(1)}%</b><span>고장 횟수</span><b>${zc.c.fails}</b><span>정비 요청</span><b>${esc(req)}</b>${zc.stallReason ? `<span>정비 지연</span><b style="color:#ffb35a">⚠ ${esc(zc.stallReason)}</b>` : ''}${rep}` : '';
     const rb = legacy ? '검사원 1명 (수작업)' : f.robots.length ? `6축 로봇 ${f.robots.length}대` : d.type === 'judge' ? 'AI 판정 에이전트 (엣지 서버)' : 'ID 리더 · 도킹 스테이션';
     const judge = d.type === 'judge' ? `<span>판정 누적</span><b>OK ${S.ok} · 불확실 ${S.unc} · NG ${S.ng}</b><span>OK율</span><b>${S.done ? ((S.ok / S.done) * 100).toFixed(1) : '0.0'}%</b>` : '';
     const recent = d.type === 'judge' && f.recent.length ? `<div class="note" style="color:var(--ink2)">최근 판정 · ${f.recent.slice(0, 4).map((r) => `${esc(r.id)} ${r.res === 'ok' ? 'OK' : r.res === 'ng' ? '<b style="color:#ff8a8a">NG</b>' : '<b style="color:#f5b82e">불확실</b>'}`).join(' · ')}</div>` : '';
     el.innerHTML = `<h3>${esc(st.name)}<button data-act="close">✕</button></h3>
       <div class="task">정밀검사Zone (AI정밀검사 · QMS) · ${esc(rb)}<br>하는 일: ${esc(d.use)}</div>
-      <div class="bar"><i style="width:${Math.round(f.util * 100)}%;background:#37e8ff"></i></div>
+      <div class="bar"><i style="width:${zc ? zc.health : Math.round(f.util * 100)}%;background:${hcol}"></i></div>
       <div class="grid">
         <span>상태</span><b>${esc(lab)}</b>
         <span>검사 샘플</span><b>${esc(f.item)}${f.state === 'BUSY' ? ` · ${Math.round(f.progress * 100)}%` : ''}</b>
         <span>도킹 AMR</span><b>${esc(f.amr)}</b>
+        ${eq}
         <span>사이클</span><b>${f.cycle.toFixed(0)}초</b>
         <span>가동률</span><b>${pct(f.util)}</b>
         <span>처리 누적</span><b>${f.done}개</b>
@@ -332,6 +338,7 @@ export class UI {
         <span>데이터</span><b>${legacy ? '검사 성적서 수기 기록 (레거시)' : `QMS 저장 · AAS ${esc(st.id)}`}</b>
       </div>
       ${recent}
+      ${zc ? '<div class="btns"><button data-act="fault">⚡ 고장 주입</button><button data-act="pm">🔧 정비 지시</button></div>' : ''}
       <div class="note" style="color:var(--muted)">샘플링: 정밀조립 30개 · 유연생산 10개 · 적응가공 20개마다 1개 — 판정 불확실은 O-INSPECT 재측정, NG는 해당 Zone 오케스트레이터에 리워크·공정 보정 요청</div>`;
     this.onDetailRendered?.();
   }

@@ -34,6 +34,7 @@ export const TECH_ROOMS = {
   main: { key: 'main', x: -43.0, z: -7.7, rot: -Math.PI / 2, aisle: 'T', label: '정비실' },
   flex: { key: 'flex', x: -37.9, z: -42.0, rot: Math.PI, aisle: 'BB', label: '유연생산 정비실' },
   adapt: { key: 'adapt', x: -13.0, z: 41.0, rot: 0, aisle: 'FF', label: '적응가공 정비실' },   // x −15.5 ~ −7.9 — 서쪽은 A-2 AMR 스테이션
+  insp: { key: 'insp', x: 31.0, z: -42.0, rot: Math.PI, aisle: 'BB', label: '정밀검사 정비실' },   // 뒷벽 앞 (x 25.9 ~ 33.5) · 출입구가 남쪽 뒤쪽 시설 통로(BB)를 본다 — 유연생산 정비실과 같은 꼴
 };
 export const TECH_ROOM = TECH_ROOMS.main;
 export const techAt = (lx, lz, R = TECH_ROOM) => { const c = Math.cos(R.rot), s = Math.sin(R.rot); return { x: R.x + lx * c + lz * s, z: R.z - lx * s + lz * c }; };
@@ -74,12 +75,12 @@ export const ZONE_FAC = {
     wall: { board: { x: 47.8, y: 5.1, z: 19.5, rot: -Math.PI / 2, w: 18, h: 4 }, server: { x: 47.35, z: 19.5, rot: -Math.PI / 2 }, cams: { x: 47.8, y: 5.1, z: 35, rot: -Math.PI / 2, w: 12, h: 4 } },
   },
 };
-export const ZONE_LABEL = { main: '정밀조립', flex: '유연생산', adapt: '적응가공' };   // Zone별 오케스트레이터 · 정비실 이름
+export const ZONE_LABEL = { main: '정밀조립', flex: '유연생산', adapt: '적응가공', insp: '정밀검사' };   // Zone별 오케스트레이터 · 정비실 이름
 // 셀 위치(월드) → 어느 Zone 시설이 맡는지 (확장 Zone 영역 안이면 그 Zone, 아니면 정밀조립 main)
 // Zone 서버 랙 4대 바닥 영역 (CCTV 시야 가림) — 랙 0.9 × 1.0m, 서버 기준점에서 로컬 x −1.65 ~ 1.65
-export const zoneServerBoxes = () => Object.entries(ZONE_FAC).map(([k, F]) => { const S = F.wall.server, along = Math.abs(Math.sin(S.rot)) > 0.5;
+export const zoneServerBoxes = () => [...Object.entries(ZONE_FAC), ['insp', { wall: { server: INSP_SERVER } }]].map(([k, F]) => { const S = F.wall.server, along = Math.abs(Math.sin(S.rot)) > 0.5;
   return along ? { x0: S.x - 0.5, x1: S.x + 0.5, z0: S.z - 2.1, z1: S.z + 2.1, h: 2.3, name: `${k} 데이터 서버 랙` } : { x0: S.x - 2.1, x1: S.x + 2.1, z0: S.z - 0.5, z1: S.z + 0.5, h: 2.3, name: `${k} 데이터 서버 랙` }; });
-export const zoneAt = (x, z, pad = 2) => EXTRA_ZONES.find((Z) => { const r = zoneRect(Z, pad); return x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1; })?.key ?? 'main';
+export const zoneAt = (x, z, pad = 2) => (inInsp({ x, z }) ? 'insp' : null) ?? EXTRA_ZONES.find((Z) => { const r = zoneRect(Z, pad); return x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1; })?.key ?? 'main';
 // Zone 관할 구역 (CCTV 전광판 분할 — cctvview.js): Zone 셀 영역(바깥 벽까지) + 그 Zone 시설(정비실 · 사족보행·드론 스테이션 · Zone AMR 스테이션 · 전광판·데이터 서버 벽 앞)
 // 그 밖(정밀조립 셀 · 물류존 · 정밀조립 정비실·AMR 스테이션 · 입고·출하 야드 등 공용 시설)은 정밀조립Zone(main)
 const box = (pts, pad) => ({ x0: Math.min(...pts.map((p) => p.x)) - pad, x1: Math.max(...pts.map((p) => p.x)) + pad, z0: Math.min(...pts.map((p) => p.z)) - pad, z1: Math.max(...pts.map((p) => p.z)) + pad });
@@ -92,6 +93,15 @@ export const zoneAreas = (key) => {
   return [ext, F.robotArea, F.station.area, box([-2.6, 5.2].flatMap((lx) => [-3.6, 0.4].map((lz) => techAt(lx, lz, R))), 0.3),
     box([...wallPts, ...wallPts.map((p) => ({ x: p.x + inward.x, z: p.z + inward.z }))], 0.3)];
 };
+// CCTV 관할 구역 (cctv.js Zone별 배치 · cctvview.js Zone별 전광판): 정밀검사 → 유연생산 → 적응가공 → 정밀조립 → 그 밖은 공용 시설(shared — 물류존·입고·출하 도크·관제실·공용 통로)
+//  · 정밀검사: 검사 셀 영역 · 로봇 스테이션 · 정비실(뒷벽 앞) · 유연생산·적응가공: zoneAreas (셀 영역~바깥 벽 · Zone 시설)
+//  · 정밀조립: 셀 영역과 앞뒤 통로(오른쪽 세로 통로까지) · 왼쪽 확장동의 정밀조립 시설(AMR 대기열·출동/복귀 차로 · 정비실 · 사족보행·드론 스테이션 · 왼쪽 벽 화면·서버)
+export const MAIN_AREAS = [{ x0: -36.8, x1: 31.6, z0: -13.2, z1: 11.2 }, { x0: BUILDING.x0, x1: -36.8, z0: -38.5, z1: 2.5 }];
+const inR = (p, r) => p.x > r.x0 && p.x < r.x1 && p.z > r.z0 && p.z < r.z1;
+const inspAreas = () => [{ ...INSP_AREA, x1: BUILDING.x1 }, box([-2.6, 5.2].flatMap((lx) => [-3.6, 0.4].map((lz) => techAt(lx, lz, TECH_ROOMS.insp))), 0.3)];
+// 적응가공Zone 동쪽 ~ 오른쪽 벽 (앞뒤 통로 사이): 적응가공 전광판·데이터 서버·로봇 비전 디스플레이가 걸린 벽 앞까지 적응가공 관할
+const adaptEast = () => { const r = zoneRect(EXTRA_ZONES.find((z) => z.key === 'adapt'), 1); return { x0: r.x1, x1: BUILDING.x1, z0: r.z0, z1: fr(9) }; };
+export const camArea = (p) => (inspAreas().some((r) => inR(p, r)) ? 'insp' : null) ?? ['flex', 'adapt'].find((k) => zoneAreas(k).some((r) => inR(p, r)) || (k === 'adapt' && inR(p, adaptEast()))) ?? (MAIN_AREAS.some((r) => inR(p, r)) ? 'main' : 'shared');
 export const areaZone = (p) => ['flex', 'adapt'].find((k) => zoneAreas(k).some((r) => p.x > r.x0 && p.x < r.x1 && p.z > r.z0 && p.z < r.z1)) ?? 'main';
 
 const TOP = -4.6, BOT = 4.6, MID = 0, PI = Math.PI;
@@ -135,6 +145,13 @@ export const EXTRA_ZONES = [
     foot: { x0: -32.6, x1: 28.0, z0: -7.2, z1: 8.2 },
     // 포장·구분 적재 (정밀조립 구분 적재장과 같은 구성): 제품별 적재 팔레트(적재장 북쪽) · 팔레타이징 로봇 · 출하 지게차가 북쪽(뒤쪽 통로 BB)에서 들어와 팔레트를 실어 간다
     pack: { pallets: { hood: { x: 23.2, z: 2.1 }, door: { x: 26.1, z: 2.1 } }, aisle: 'BB' },   // 셀·AMR 차로가 차지하는 영역 (로컬)
+    // 바닥 Zone 이름·라인 설명 (zones.js — 정밀조립Zone factory.js buildZoneDeco와 같은 바닥 글씨): 위 줄 셀 아래 · C07 왼쪽 빈 바닥 (x −21 ~ −5)
+    floor: { title: { x: -13, z: 1.3, text: '유연생산Zone · 후드·도어 혼류' }, x: -21, w: 16, size: 40, lines: [
+      { z: 3.1, color: 'rgba(127,224,214,0.95)', text: '▶ 공용 라인  C01 키팅 → C02 보정 → C03 용접 → C04 실링 → C05 헤밍' },
+      { z: 4.4, color: 'rgba(245,189,92,0.95)', text: '▶ 후드  헤밍 → C06 치수·외관검사 → 구분 적재' },
+      { z: 5.7, color: 'rgba(184,155,255,0.95)', text: '▶ 도어  헤밍 → C10 정밀 장착 → C06 검사 → 구분 적재' },
+      { z: 7.0, color: 'rgba(255,128,128,0.95)', text: '▶ NG  C07 재작업 → C06 재검' },
+    ] },
   },
   {
     key: 'adapt', code: '적응가공', uidp: 'ADP', name: '적응가공Zone', sub: '유압블록 · 리어커버 혼류', origin: { x: 0, z: 19.5 }, accent: 0xff7a45,
@@ -163,6 +180,12 @@ export const EXTRA_ZONES = [
     foot: { x0: -34.1, x1: 21.6, z0: -7.2, z1: 9.6 },
     // 포장·구분 적재: 제품별 적재 팔레트(적재장 북쪽 — 동쪽은 자체 복귀로) · 팔레타이징 로봇 · 출하 지게차는 앞쪽 통로(z 9)에서 내려와 실어 간다
     pack: { pallets: { hblock: { x: 16.6, z: -2.5 }, rcover: { x: 19.6, z: -2.5 } }, aisle: 'F' },
+    // 바닥 Zone 이름·라인 설명: 소재 식별셀 앞 빈 바닥 (x −31 ~ −12) · 두 가공 줄 사이에 라인 이름 (정밀조립Zone과 같은 꼴 — 위 줄 리어커버 · 아래 줄 유압블록)
+    floor: { title: { x: -22, z: 6.0, text: '적응가공Zone · 유압블록·리어커버 혼류' }, x: -31, w: 19, size: 40, lines: [
+      { z: 7.7, color: 'rgba(127,224,214,0.95)', text: '▶ ① 소재 식별·3D측정 → 제품별 가공 → ⑥ CMM 판정 (NG → 리워크) → 합격품 적재' },
+      { z: -1.6, x: -6.2, w: 10, size: 56, color: 'rgba(184,155,255,0.95)', text: '▶ 리어커버 라인' },
+      { z: 1.6, x: -6.2, w: 10, size: 56, color: 'rgba(245,189,92,0.95)', text: '▶ 유압블록 라인' },
+    ] },
   },
 ];
 
@@ -170,6 +193,27 @@ export const EXTRA_ZONES = [
 // 확장 Zone 포장·구분 적재: 제품별 팔레트 적재 한도 (4 × 2 × 3단) · 로봇(적재장 쪽 1.25m) · 출하 지게차 집는 자리(팔레트 바깥 1.9m — 통로에서 곧장 들어와 팔레트를 마주 본다)
 // 정밀검사존 영역 (inspzone.js) — 오른쪽 세로 통로(x 30)와 오른쪽 벽 사이 · 뒤쪽 통로(z −32)와 앞쪽 통로(z 9) 사이 · CCTV는 적응가공Zone 전광판에 함께 (cctvview.js camZone)
 export const INSP_AREA = { x0: 31.6, x1: 47.6, z0: -30.5, z1: 7.5 };
+// 정밀검사Zone 셀 (월드 좌표 — inspzone.js 흐름 · sim.js 설비 관리(건강도·고장·정비) 공용): 두 줄(x 35 · 43.5) 사이 가운데 x 39.25가 AMR 차로
+export const INSP_CELLS = {
+  DOCK: { no: '0', type: 'dock', label: '시료 접수·도킹', use: 'AMR 도킹 · 제품 ID·공정이력 확인 · 검사 레시피 Task 생성', x: 35, z: -25, cycle: 8 },
+  VIS: { no: '1', type: 'vision', label: '로봇형 비전 검사 Cell', use: 'ABIS 표면결함 · AIMAX 기준홀·Feature 편차', x: 43.5, z: -25, cycle: 40, robots: 1 },
+  SCAN: { no: '2', type: 'scan', label: '3D 스캔·초음파 용접검사 Cell', use: 'ScanBox 3D 형상·치수 · 용접부 초음파(UT) NDT', x: 43.5, z: -15, cycle: 90, robots: 2 },
+  OINS: { no: '3', type: 'oins', label: 'O-INSPECT 정밀 재측정', use: '정반 안착 · 접촉·광학 복합 정밀측정 · 재측정', x: 35, z: -15, cycle: 110, robots: 1 },
+  ATOS: { no: '4', type: 'atos', label: 'ATOS 3D 형상편차', use: '블루라이트 Point Cloud · CAD 대비 형상편차', x: 35, z: -5, cycle: 60, robots: 1 },
+  JUDGE: { no: '5', type: 'judge', label: 'AI 판정·결과 버퍼', use: 'OK · 판정 불확실 · NG → QMS 저장 · 선행공정 환류', x: 43.5, z: -5, cycle: 10 },
+};
+// 시설 코드용 Zone 보기 (드론 순찰 경로 · Zone 영역 · 이름) — 확장 Zone(EXTRA_ZONES)과 같은 꼴 (원점 기준 로컬 좌표)
+const IO = { x: 39.6, z: -11.5 };
+export const INSP_ZONE = {
+  key: 'insp', code: '정밀검사', uidp: 'QIS', name: '정밀검사Zone', origin: IO, foot: { x0: 31.6 - IO.x, x1: 47.6 - IO.x, z0: -30.5 - IO.z, z1: 7.5 - IO.z },
+  cells: Object.fromEntries(Object.entries(INSP_CELLS).map(([k, c]) => [k, { ...c, x: c.x - IO.x, z: c.z - IO.z }])),
+  src: { x: INSP_CELLS.DOCK.x - IO.x, z: INSP_CELLS.DOCK.z - IO.z }, sink: { x: INSP_CELLS.JUDGE.x - IO.x, z: INSP_CELLS.JUDGE.z - IO.z },
+};
+// 정밀검사Zone 로봇 스테이션: Zone 남쪽 끝 (판정 셀과 서버 사이) — 사족보행 2대(앞쪽 통로 F를 보고 섬) · 드론 이착륙 패드 2개(그 뒤)
+export const INSP_FAC = { quads: [{ x: 42.3, z: 5.0 }, { x: 44.3, z: 5.0 }], quadHeading: 0, quadAisle: 'F', pads: [{ x: 42.1, z: 1.4 }, { x: 44.6, z: 1.4 }], robotArea: { x0: 40.7, z0: -0.2, x1: 46.3, z1: 6.4 } };
+export const zoneDef = (k) => EXTRA_ZONES.find((Z) => Z.key === k) ?? (k === 'insp' ? INSP_ZONE : null);
+export const facOf = (k) => ZONE_FAC[k] ?? (k === 'insp' ? INSP_FAC : null);
+export const INSP_SERVER = { x: 47.35, z: 3.6, rot: -Math.PI / 2 };   // 정밀검사 데이터 서버 랙 4대 — 오른쪽 벽에 붙여 (적응가공 서버와 같은 꼴 · 적응가공·정밀검사 CCTV 전광판 아래), 앞면 = 건물 안쪽
 export const inInsp = (p) => p.x > INSP_AREA.x0 && p.x < BUILDING.x1 && p.z > INSP_AREA.z0 && p.z < INSP_AREA.z1;
 export const ZONE_FG_CAP = 24;
 export const zonePack = (Z) => Z.pack && Object.entries(Z.pack.pallets).map(([p, q]) => {

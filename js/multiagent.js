@@ -111,7 +111,8 @@ export class HybridAgent extends FactoryAgent {
     let bott = null, bc = 0; for (const st of s.processing) { const c = st.def.cycle * m.cycleMul * st.speedMul * (st.def.share ?? 1); if (c > bc) { bc = c; bott = st; } }
     const keep = [];
     const order = [...this.queue].sort((a, b) => a.prio - b.prio || (a.st?.health ?? 100) - (b.st?.health ?? 100));
-    let pmSlots = Math.max(0, (s.techs?.length ?? 1) - s.requests.filter((r) => r.kind === 'pm' && !r.st?.request?.self).length);   // 동시에 걸 수 있는 예지정비 (정비 인력 수)
+    // 동시에 걸 수 있는 예지정비 = 정밀조립 정비 인력 수 − 정밀조립 셀 예지정비 — 확장 Zone(유연생산·적응가공·정밀검사) 셀은 자기 Zone 정비 인력이 맡아 정밀조립 몫을 쓰지 않는다
+    let pmSlots = Math.max(0, ((s.techs ?? []).filter((x) => !x.zone).length || 1) - s.requests.filter((r) => r.kind === 'pm' && !r.st?.request?.self && !r.st?.cellId).length);
     for (const p of order) {
       const st = p.st;
       // 이미 처리됐거나 상태가 바뀐 제안은 정리
@@ -122,8 +123,8 @@ export class HybridAgent extends FactoryAgent {
         // 가동 중인 셀은 위급하지 않으면 대기 구간까지 미룬다 — 직렬 라인이라 병목이 아닌 셀도 작업 중에 서면 그 대상물이 멈춰 흐름이 끊긴다 (단일 에이전트와 같은 기준)
         // 사족보행 순찰 보고(p.source)로 올라온 정비는 미루지 않는다 — 순찰이 이른 징후를 잡은 것이라 미루다 60초가 지나 버려지면 그 이점이 사라진다 (단일 에이전트도 바로 정비 요청)
         if (st.state === 'BUSY' && !p.critical && !p.source) { this.ma.deferred++; if (st === bott) { this.ma.conflicts++; this.ma.rule.bott++; } else this.ma.rule.nearBott++; keep.push(p); continue; }
-        if (pmSlots <= 0 && !p.critical) { this.ma.deferred++; this.ma.rule.slots++; keep.push(p); continue; }   // 정비 인력이 모두 바쁨
-        if (s.requestTech(st, 'pm')) { pmSlots--; this.exec(p, `${st.name} 예지정비 지시`, { obs: p.why, dec: `메인 조정: ${st.state === 'BUSY' ? '고장 임박 — 가동 중이지만 즉시' : '설비 대기 구간 활용'}`, act: '정비 인력 배정' }, 'plan'); }
+        if (pmSlots <= 0 && !p.critical && !st.cellId) { this.ma.deferred++; this.ma.rule.slots++; keep.push(p); continue; }   // 정밀조립 정비 인력이 모두 바쁨
+        if (s.requestTech(st, 'pm')) { if (!st.cellId) pmSlots--; this.exec(p, `${st.name} 예지정비 지시`, { obs: p.why, dec: `메인 조정: ${st.state === 'BUSY' ? '고장 임박 — 가동 중이지만 즉시' : '설비 대기 구간 활용'}`, act: '정비 인력 배정' }, 'plan'); }
         else { this.ma.deferred++; keep.push(p); }
       } else if (p.kind === 'cal') {
         if (P1 && m.key !== 'dark') { this.ma.deferred++; this.ma.rule.p1++; keep.push(p); continue; }

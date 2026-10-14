@@ -205,6 +205,65 @@ function zoneAssets(assets, sim, xzones, plate) {
       });
     });
   }
+  inspAssets(assets, sim, xzones?.insp, plate);
+}
+// 정밀검사Zone (inspzone.js): Zone · 검사 셀 6 · 셀 로봇(관절·TCP) · 검사 AMR — 정밀검사 데이터 서버로 수집 (확장 Zone과 같은 필드 꼴)
+function inspAssets(assets, sim, I, plate) {
+  if (!I) return;
+  const S = I.Z, code = S.code, pre = S.uidp, zid = `Zone_${pre}`, st = I.stats, LAB = { IDLE: '대기', BUSY: '검사 중', DONE: '다음 셀 대기' };
+  assets.push({
+    id: zid, kind: 'Zone', name: `${code} ${S.name}`, nameplate: plate(zid, `${S.name} (AI정밀검사 · QMS)`),
+    tech: { ZoneCode: code, ZoneName: S.name, Cells: I.order.length, Products: Object.values(S.products).map(([z, l]) => `${l}`).join(' · '), DataServer: `${code} 데이터 서버`, Sampling: `정밀조립 ${S.sample.main} · 유연생산 ${S.sample.flex} · 적응가공 ${S.sample.adapt}개마다 1개` },
+    fields: [
+      f('Samples', '샘플 누적', 'int', 'pcs', () => st.samples), f('Judged', '판정 누적', 'int', 'pcs', () => st.done),
+      f('OkCount', 'OK', 'int', 'pcs', () => st.ok), f('UncertainCount', '판정 불확실 (재측정)', 'int', 'pcs', () => st.unc), f('NgCount', 'NG', 'int', 'pcs', () => st.ng),
+      f('OkRate', 'OK율', 'double', '%', () => (st.done ? (st.ok / st.done) * 100 : null)),
+      f('SampleQueue', '샘플 대기', 'int', 'count', () => I.queue.length), f('BusyCells', '가동 셀', 'int', 'count', () => I.order.filter((c) => c.state === 'BUSY').length),
+    ],
+  });
+  for (const cell of I.order) {
+    const d = cell.def, id = `${pre}_${cell.id}`;
+    assets.push({
+      id, kind: 'Station', parent: zid, name: `${code} ${d.label}`, nameplate: plate(id, d.label),
+      tech: { EquipmentId: `${pre}-${cell.id}`, Zone: code, StationType: d.type, Robot: d.robots ? `6축 다관절 로봇 ${d.robots}대` : '없음', BaseCycleTime: d.cycle, Task: d.use },
+      fields: [
+        f('State', '상태', 'string', null, () => (I.halted ? 'ESTOP' : cell.fault ?? cell.state)), f('StateText', '상태(한글)', 'string', null, () => ({ DOWN: '고장', MAINT: '정비 중' })[cell.fault] ?? LAB[cell.state] ?? cell.state),
+        f('Health', '건강도', 'double', '%', () => sim.zoneCell('insp', cell.id)?.health ?? null),
+        f('Failures', '고장 누적', 'int', 'count', () => sim.zoneCell('insp', cell.id)?.c.fails ?? 0),
+        f('Utilization', '가동률', 'double', '%', () => (I.time > 0 ? (cell.busy / I.time) * 100 : 0)),
+        f('CycleTime', '사이클', 'double', 's', () => d.cycle * (I.mul ?? 1)), f('Progress', '검사 진행', 'double', '%', () => (cell.state === 'BUSY' ? cell.progress * 100 : 0)),
+        f('CurrentSample', '검사 샘플', 'string', null, () => (cell.item ? `${S.products[cell.item.product][1]}#${cell.item.id}` : '')),
+        f('SourceZone', '샘플 출처 Zone', 'string', null, () => (cell.item ? S.zones[cell.item.zone] : '')),
+        f('Processed', '처리 누적', 'int', 'pcs', () => cell.done),
+        ...(cell.id === 'JUDGE' ? [f('LastResult', '최근 판정', 'string', null, () => I.recent[0]?.res ?? '')] : []),
+      ],
+    });
+    (cell.def.robots ? Array.from({ length: cell.def.robots }) : []).forEach((_, i) => {
+      const rid = `${id}_R${i + 1}`, rb = () => cell.robots[i];
+      const fields = [f('State', '상태', 'string', null, () => (cell.state === 'BUSY' ? 'Operating' : 'Idle'))];
+      ['J1 베이스 회전', 'J2 어깨', 'J3 팔꿈치', 'J4 손목 굽힘', 'J5 손목 비틀기', 'J6 툴 플랜지'].forEach((nm, j) => fields.push(f(`Joint${j + 1}`, nm, 'double', 'deg', () => (rb() ? rb().joints()[j] * DEG : null))));
+      const tcp = () => { const r = rb(); if (!r) return { x: null, y: null, z: null }; const w = r.tip.getWorldPosition(r.tip.position.clone()), b = r.root.getWorldPosition(r.root.position.clone()); return { x: (w.x - b.x) * 1000, y: -(w.z - b.z) * 1000, z: (w.y - b.y) * 1000 }; };
+      fields.push(f('TcpX', 'TCP X', 'double', 'mm', () => tcp().x), f('TcpY', 'TCP Y', 'double', 'mm', () => tcp().y), f('TcpZ', 'TCP Z', 'double', 'mm', () => tcp().z));
+      assets.push({ id: rid, kind: 'CellRobot', parent: id, name: `${code} ${d.label} 6축 다관절 로봇 #${i + 1}`, nameplate: plate(rid, '6축 다관절 로봇'),
+        tech: { EquipmentId: `${pre}-RB-${cell.id}-${i + 1}`, RobotType: '6축 다관절 로봇', Axes: 6, Payload: 20, Cell: `${pre}-${cell.id}`, Zone: code }, fields });
+    });
+  }
+  I.carriers.forEach((c0, i) => {
+    const am = () => I.carriers[i] ?? c0, aid = `${pre}_AMR${String(i + 1).padStart(2, '0')}`, ue = () => sim.net?.ueOf(am());
+    let prev = null;
+    assets.push({
+      get mover() { return am(); },
+      id: aid, kind: 'AMR', name: `${c0.id} (${code} 검사 AMR)`, nameplate: plate(aid, '검사 AMR (샘플 수거·이송)'), tech: { EquipmentId: c0.uid, RobotType: '검사 AMR', DisplayName: c0.id, Zone: code },
+      fields: [
+        f('PositionX', '위치 X', 'double', 'm', () => am().x), f('PositionZ', '위치 Z', 'double', 'm', () => am().z),
+        f('Heading', '방위', 'double', 'deg', () => ((am().heading * DEG) % 360 + 360) % 360),
+        f('Speed', '주행 속도', 'double', 'm/s', () => { const c = am(), t = sim.time, v = prev && t > prev.t ? Math.hypot(c.x - prev.x, c.z - prev.z) / (t - prev.t) : 0; prev = { x: c.x, z: c.z, t }; return v; }),
+        f('OperationState', '운행 상태', 'string', null, () => am().state),
+        f('Payload', '탑재 샘플', 'string', null, () => { const it = am().item; return it ? `${it.product}#${it.id}` : 'empty'; }),
+        ...(ue() ? [f('ServingPCI', '5G 서빙 셀 PCI', 'int', null, () => ue()?.servCell?.pci ?? null), f('RSRP', '5G RSRP', 'double', 'dBm', () => ue()?.rsrp ?? null), f('Handovers', '5G 핸드오버', 'int', 'count', () => ue()?.hoN ?? 0)] : []),
+      ],
+    });
+  });
 }
 
 export class DataHub {

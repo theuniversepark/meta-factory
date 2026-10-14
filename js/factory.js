@@ -7,7 +7,7 @@ import { BELT_Y, AISLE, chgLoc, FG_CAP, RAW_CAP, ST_LABEL, TOOL_KITS, SINK_PICK 
 import { YARD, SHIP, SHIP_FRAME, shipToWorld } from './shipping.js';
 import { INBOUND, WH, WH_RACK, LOGI_DZ, XRACK, XWH, WH_ITEMS, xrackZ, stockOf } from './receiving.js';
 import { DRONE_PAD, dronePad } from './drone.js';
-import { bk, fr, BUILDING, TECH_ROOM, TECH_ROOMS, ZONE_FAC, EXTRA_ZONES, LEFT_WALL, SRV } from './zonedefs.js';
+import { bk, fr, BUILDING, TECH_ROOM, TECH_ROOMS, ZONE_FAC, EXTRA_ZONES, LEFT_WALL, SRV, INSP_FAC, zoneDef, facOf } from './zonedefs.js';
 import { STAGES, INCIDENT_TYPES, prioOf } from './orchestrator.js';
 import { NR } from './net5g.js';
 import { blenderOn, cloneAsset, RENDER } from './blender.js';
@@ -1973,7 +1973,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     // 드론 이착륙·충전 패드 (피지컬AI 단계에서만 보임)
     // 드론마다 이착륙·충전 패드 (H1·H2·H3…, 사족보행 충전 스테이션 바로 아래 세로 한 줄) — 운용 대수만큼 보인다. 무선 충전기는 서쪽
     // 확장 Zone 드론 이착륙장도 같은 모양 (A-1 위쪽 · A-2 아래쪽 로봇 스테이션 — zonedefs.js ZONE_FAC.pads) · 그 Zone 드론이 운용 중일 때만 보인다
-    const padList = [...[0, 1, 2, 3].map((i) => ({ i, zone: null, p: dronePad(i) })), ...Object.entries(ZONE_FAC).flatMap(([zone, F]) => F.pads.map((p, i) => ({ i, zone, p })))];
+    const padList = [...[0, 1, 2, 3].map((i) => ({ i, zone: null, p: dronePad(i) })), ...[...Object.entries(ZONE_FAC), ['insp', INSP_FAC]].flatMap(([zone, F]) => F.pads.map((p, i) => ({ i, zone, p })))];
     this.dronePads = padList.map(({ i, zone, p }) => {
       const g = put(new THREE.Group(), p.x, 0, p.z, r); g.userData.pad = { i, zone };
       const padC = document.createElement('canvas'); padC.width = padC.height = 256;
@@ -2298,8 +2298,8 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     };
     const mix = ZONE_MIXES[sim.line.mix] ?? ZONE_MIXES['1:1'];
     decal(`${ZONE_NAME} · 혼류 ${mix.label}`, 'rgba(55,232,255,0.9)', 16, -20.5, -5.6);
-    decal(`▶ 도어트림 라인 (${ZONE_PRODUCTS.doortrim.customer})`, 'rgba(245,189,92,0.95)', 12, 1, 1.6, 56);
-    decal(`▶ e-axle 라인 (${ZONE_PRODUCTS.eaxle.customer})`, 'rgba(184,155,255,0.95)', 12, 1, -1.6, 56);
+    decal('▶ 도어트림 라인', 'rgba(245,189,92,0.95)', 12, 1, 1.6, 56);
+    decal('▶ e-axle 라인', 'rgba(184,155,255,0.95)', 12, 1, -1.6, 56);
     if (!sim.useAMR) return;
     // AMR 전용 동선 (왼쪽 확장동 위쪽 AMR 스테이션): 대기열(남북 한 줄), 복귀 전용로(적재장 → 뒤 통로 뒤 → 대기열 동쪽 복귀 차로), 출동 차로(대기열 서쪽 → 남쪽 끝 → 동쪽 투입 스테이션)
     const p0 = amrPark(0), pN = amrPark(ZONE_AMR.count - 1);
@@ -3050,8 +3050,8 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       area(x0, zc - 1.2, x1, z1, '90,169,255', nd ? '🔋 로봇 스테이션' : '🔋 사족보행 충전 스테이션', nd ? `사족보행 ${mq.length}대 도킹 충전 · 드론 ${nd}대 이착륙·무선 충전` : `순찰 로봇 ${mq.length}대 · 30% 이하 자동 복귀 도킹 충전`, (x0 + x1) / 2, z1 + 0.65, 4.6);
     }
     // 확장 Zone 로봇 스테이션 (A-1 위쪽 · A-2 아래쪽): 그 Zone 사족보행 2대 + 드론 2대
-    for (const [zone, F] of Object.entries(ZONE_FAC)) {
-      const qs = (sim.quads ?? []).filter((q) => q.zone === zone), nd = (sim.drones ?? []).filter((d) => d.zone === zone).length, A = F.robotArea, code = EXTRA_ZONES.find((Z) => Z.key === zone).code;
+    for (const [zone, F] of [...Object.entries(ZONE_FAC), ['insp', INSP_FAC]]) {   // + 정밀검사Zone (Zone 남쪽 끝)
+      const qs = (sim.quads ?? []).filter((q) => q.zone === zone), nd = (sim.drones ?? []).filter((d) => d.zone === zone).length, A = F.robotArea, code = zoneDef(zone).code;
       if (!qs.length && !nd) continue;
       const tz = zone === 'flex' ? A.z1 + 0.65 : A.z0 - 0.65;   // 이름은 통로 쪽
       area(A.x0, A.z0, A.x1, A.z1, '90,169,255', `🔋 ${code} 로봇 스테이션`, `사족보행 ${qs.length}대 도킹 충전 · 드론 ${nd}대 이착륙·무선 충전`, (A.x0 + A.x1) / 2, tz, 4.6);
@@ -3063,7 +3063,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     }
     if (sim.quads?.length) {
       for (const q of sim.quads) {
-        const d = put(new THREE.Group(), q.home.x, 0, q.home.z, g); d.rotation.y = (q.zone ? ZONE_FAC[q.zone].quadHeading : Math.PI) - Math.PI;   // 도크는 로봇 뒤쪽 (통로 반대쪽)
+        const d = put(new THREE.Group(), q.home.x, 0, q.home.z, g); d.rotation.y = (q.zone ? facOf(q.zone).quadHeading : Math.PI) - Math.PI;   // 도크는 로봇 뒤쪽 (통로 반대쪽)
         put(new THREE.Mesh(new THREE.CircleGeometry(0.7, 28), new THREE.MeshStandardMaterial({ color: 0x1d2a3a, roughness: 0.7 })), 0, 0.012, 0, d).rotation.x = -Math.PI / 2;
         put(box(0.7, 0.55, 0.28, MAT.white), 0, 0.28, 1.05, d);                 // 충전 도크 (로봇 뒤쪽)
         put(box(0.5, 0.06, 0.4, MAT.dark), 0, 0.03, 0.75, d);                    // 충전 접점 판

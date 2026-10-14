@@ -2,6 +2,7 @@
 // ① 배치: 건물 안 바닥을 2m 간격 점으로 나누고, 천장 후보 자리(4m 격자)마다 3GPP TR 38.901 InF(실내 공장) 경로손실로 RSRP를 계산한다.
 //    큰 설비(셀·선반·서버 랙)가 시선을 가리면 NLOS 식을 쓴다. 설계 기준(RSRP ≥ −80dBm, 셀 반경 18m 이내 — 로봇 밀도·용량)을
 //    만족하지 못하는 점을 가장 많이 덮는 자리부터 골라(탐욕적 집합 덮개) 모든 점이 덮일 때까지 기지국을 단다.
+//    동점 처리를 바꿔 여러 번 돌리고 빼도 음영이 안 생기는 기지국을 덜어, 가장 적은 대수(같으면 셀 겹침이 가장 적은 — SINR이 좋은) 배치를 고른다.
 // ② PCI: 기지국마다 고유한 물리 셀 ID(PCI = 3 × SSS + PSS, 0~1007). 이웃 기지국끼리는 PCI mod 3(PSS)이 겹치지 않게 칠한다.
 // ③ UE: AMR·AGV·자율 지게차·휴머노이드·사족보행·드론·AMMR마다 5G 모뎀. 100ms마다 모든 셀의 RSRP를 재고(L3 필터),
 //    A3 이벤트(인접 셀 > 서빙 셀 + 3dB, TTT 160ms)가 나면 Xn 핸드오버를 한다. 실행 중(약 30~45ms) 올라온 패킷은 PDCP 버퍼에 담았다가
@@ -93,13 +94,23 @@ export function plan5G(sim) {
   }
   const R = cands.map((c) => pts.map((p) => rsrp(c, p, ob).v));
   const ok = (k, i) => R[k][i] >= NR.design && Math.hypot(cands[k].x - pts[i].x, cands[k].z - pts[i].z) <= NR.R;
-  const covered = new Uint8Array(pts.length), chosen = [];
-  let left = pts.length;
-  while (left > 0) {
-    let best = -1, bn = 0;
-    cands.forEach((c, k) => { if (chosen.includes(k)) return; let n = 0; for (let i = 0; i < pts.length; i++) if (!covered[i] && ok(k, i)) n++; if (n > bn) { bn = n; best = k; } });
-    if (best < 0) break;
-    chosen.push(best); for (let i = 0; i < pts.length; i++) if (!covered[i] && ok(best, i)) { covered[i] = 1; left--; }
+  // 탐욕적 선택 + 중복 정리(빼도 음영이 안 생기는 기지국 덜어 내기)를 동점 처리만 바꿔 여러 번 돌려 가장 적은 대수 · 같으면 겹침(2셀 이상 설계 기준) 가장 적은 배치 (난수 씨앗 고정)
+  const rel = cands.map((c, k) => pts.flatMap((p, i) => (ok(k, i) ? [i] : [])));
+  let chosen = null, bestOv = Infinity, seed = 777;
+  const rnd = () => ((seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 4294967296);
+  for (let run = 0; run < 40; run++) {
+    const cov = new Uint8Array(pts.length), pick = [], used = new Set(), jit = cands.map(() => (run ? rnd() * 0.9 : 0));
+    let left = pts.length;
+    while (left > 0) {
+      let best = -1, bn = 0;
+      rel.forEach((r, k) => { if (used.has(k)) return; let n = 0; for (const i of r) if (!cov[i]) n++; if (n && n + jit[k] > bn) { bn = n + jit[k]; best = k; } });
+      if (best < 0) break;
+      pick.push(best); used.add(best); for (const i of rel[best]) if (!cov[i]) { cov[i] = 1; left--; }
+    }
+    const cnt = new Uint8Array(pts.length); for (const k of pick) for (const i of rel[k]) cnt[i]++;
+    for (const k of [...pick].sort((x, y) => rel[x].length - rel[y].length)) if (rel[k].every((i) => cnt[i] > 1)) { pick.splice(pick.indexOf(k), 1); for (const i of rel[k]) cnt[i]--; }
+    const ov = cnt.reduce((x, v) => x + (v > 1 ? v - 1 : 0), 0);
+    if (!chosen || pick.length < chosen.length || (pick.length === chosen.length && ov < bestOv)) { chosen = pick; bestOv = ov; }
   }
   const cells = chosen.map((k, n) => ({ ...cands[k], idx: n, id: `gNB-${String(n + 1).padStart(2, '0')}`, k }));
   // 이웃(1차 인접): 최강 셀 서비스 영역이 맞닿은 셀 — 핸드오버가 일어나는 경계를 공유한다. 가중치 = 맞닿은 경계 길이(2m 칸 수)

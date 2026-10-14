@@ -375,9 +375,18 @@ class ExtraZone {
     for (let x = F.x0; x < F.x1; x += 1.6) for (const z of [F.z0, F.z1]) flat(Math.min(1.0, F.x1 - x), 0.12, edge, x + 0.5, z, 0.012);
     for (let z = F.z0; z < F.z1; z += 1.6) for (const x of [F.x0, F.x1]) flat(0.12, Math.min(1.0, F.z1 - z), edge, x, z + 0.5, 0.012);
     for (const c of Object.values(Z.cells)) flat(5.0, 4.6, new THREE.MeshStandardMaterial({ color: PC[c.product] ?? PC.shared, transparent: true, opacity: 0.3, roughness: 0.9, depthWrite: false }), c.x, c.z, 0.01);
-    // Zone 이름: 셀·AMR 길을 비킨 빈 바닥 (유연생산 = 투입 스테이션 뒤 · 적응가공 = 소재 식별셀 앞)
-    this.titleAt = Z.key === 'flex' ? { x: -24.9, z: -5.4 } : { x: -20.5, z: 5.4 };
-    put(textPlane([Z.name, Z.sub], 7, 1.4, acc), this.titleAt.x, 0.02, this.titleAt.z, this.G);
+    // Zone 이름·라인 설명: 셀·AMR 길을 비킨 빈 바닥 (Z.floor — 정밀조립Zone 바닥 글씨와 같은 꼴: 왼쪽 정렬 · 라인 색)
+    const FL = Z.floor;
+    this.titleAt = { x: FL.title.x, z: FL.title.z };
+    put(textPlane([FL.title.text], 15, 1.5, acc), this.titleAt.x, 0.02, this.titleAt.z, this.G);
+    for (const L of FL.lines) {
+      const w = L.w ?? FL.w, c = document.createElement('canvas'); c.width = 1024; c.height = 128;
+      const x = c.getContext('2d'); x.fillStyle = L.color; const fnt = (px) => `bold ${px}px "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`, px = L.size ?? FL.size;
+      x.font = fnt(px); const tw = x.measureText(L.text).width; if (tw > 1000) x.font = fnt(Math.floor(px * 1000 / tw));   // 넘치면 글자를 줄여 맞춘다
+      x.textBaseline = 'middle'; x.fillText(L.text, 12, 64);
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+      flat(w, w / 8, new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false }), (L.x ?? FL.x) + w / 2, L.z, 0.014);
+    }
     this.cells = {}; this.order = [];
     for (const [id, c] of Object.entries(Z.cells)) {
       const g = put(new THREE.Group(), c.x, 0, c.z, this.G); g.rotation.y = c.rot ?? 0; g.scale.z = c.side ?? 1;
@@ -409,7 +418,7 @@ class ExtraZone {
     if (Z.pack) this.buildPack();
     // Zone 현황판 (Zone 위 공중, 라벨과 함께 켜고 끔)
     const bel = document.createElement('div'); bel.className = 'xz-board'; bel.style.setProperty('--zc', acc);
-    this.board = new CSS2DObject(bel); this.board.position.set(this.titleAt.x, 3.4, this.titleAt.z); this.G.add(this.board); this.boardEl = bel;   // 바닥 Zone 이름 바로 위
+    this.board = new CSS2DObject(bel); this.board.position.set(this.titleAt.x, 3.4, this.titleAt.z - 1.7); this.G.add(this.board); this.boardEl = bel;   // 바닥 Zone 이름 바로 뒤 위 (위에서 볼 때 이름을 가리지 않게)
     // Zone AMR 스테이션 (정밀조립Zone AMR 스테이션과 같은 구조 — zonedefs.js ZONE_FAC.station): AMR마다 자기 대기 자리(AMR i ↔ 자리 i)
     //  · 복귀: 적재 → Zone 복귀로 → 복귀 차로 → 자기 자리로 들어가 출동 차로 쪽을 보고 선다 (무선 충전)
     //  · 출동: 투입 대기열(투입구 앞 STATION_LEAD칸)이 비면 출구에 가까운 자리의 AMR부터 → 출동 차로 → 투입 진입로 → 대기열 → 투입구

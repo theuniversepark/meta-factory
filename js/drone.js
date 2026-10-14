@@ -4,7 +4,7 @@
 
 // 이착륙·충전 패드: 왼쪽 확장동 위쪽, 사족보행 충전 스테이션(z −28) 바로 아래에 세로 한 줄 — 드론마다 앞쪽(남쪽)으로 1.7m씩 (H1 z −24.4 · H2 −22.7 · H3 −21.0)
 // 사족보행 도크(z −26.8)와 1.5m, 왼쪽 세로 로봇 통로(x −36.8~)와 1.5m 떨어진 빈 바닥 — 지나가는 지상 동선이 없다 (사족보행은 북쪽 뒤 통로로, AMR 복귀 차로는 x −45.2)
-import { BUILDING, ZONE_FAC, EXTRA_ZONES } from './zonedefs.js';
+import { BUILDING, ZONE_FAC, EXTRA_ZONES, zoneDef, facOf } from './zonedefs.js';
 import { INBOUND, WH_RACK } from './receiving.js';
 export const DRONE_PAD = { x: -39.0, z: -24.4, pitch: 1.7, r: 0.7 };   // 사족보행 스테이션 가운데(x −39) 아래 — 두 순찰 로봇 스테이션을 한 구역으로
 export const dronePad = (i) => ({ x: DRONE_PAD.x, z: DRONE_PAD.z + i * DRONE_PAD.pitch });
@@ -31,9 +31,9 @@ const HOVER = 4, DRAIN = 100 / (24 * 60), CHARGE = 100 / (4 * 60);   // 비행 2
 export class PatrolDrone {
   // zone: 확장 Zone 드론이면 그 Zone 키 (zonedefs.js ZONE_FAC — 자기 Zone 이착륙장 · 자기 Zone 순찰 · 자기 Zone 인시던트 출동)
   constructor(sim, i = 0, n = 1, zone = null) {
-    const Z = zone && EXTRA_ZONES.find((x) => x.key === zone);
+    const Z = zone && zoneDef(zone);
     this.sim = sim; this.id = Z ? `${Z.code} 순찰 드론-${i + 1}` : `순찰 드론-${i + 1}`; this.kind = 'drone'; this.idx = i; this.fleet = n; this.zone = zone;
-    const pad = Z ? ZONE_FAC[zone].pads[i] : dronePad(i);
+    const pad = Z ? facOf(zone).pads[i] : dronePad(i);
     this.x = pad.x; this.z = pad.z; this.y = 0.25; this.heading = Math.PI; this.battery = 100 - i * (60 / Math.max(1, n));   // 충전이 겹치지 않게 배터리를 엇갈려 시작
     this.home = { ...pad, aisle: 'F', name: Z ? `${Z.code} 드론 이착륙장 ${i + 1}` : `드론 이착륙장 ${i + 1}` };
     this.task = '이륙 준비'; this.mode = 'patrol'; this.wp = 0; this.hover = 0; this.moving = false; this.charging = false;
@@ -43,7 +43,7 @@ export class PatrolDrone {
   route() {
     const s = this.sim, pts = [];
     if (this.zone) {   // 확장 Zone 드론: 자기 Zone 투입구 → 셀(정의 순서) → 구분 적재장 상공
-      const Z = EXTRA_ZONES.find((x) => x.key === this.zone), at = (p) => ({ x: Z.origin.x + p.x, z: Z.origin.z + p.z });
+      const Z = zoneDef(this.zone), at = (p) => ({ x: Z.origin.x + p.x, z: Z.origin.z + p.z });
       pts.push({ ...at(Z.src), name: `${Z.code} 자재 투입 상공` });
       for (const c of s.zoneCells.filter((x) => x.zone === this.zone)) pts.push({ x: c.x, z: c.z, name: `${c.name} 상공` });
       pts.push({ ...at(Z.sink), name: `${Z.code} 구분 적재장 상공` });

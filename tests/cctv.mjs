@@ -2,13 +2,22 @@
 // 피지컬AI에서 어디서 난 현장 이벤트든 CCTV AI가 2초대에 감지하는지, CCTV 에이전트 이력이 오케스트레이터와 맞물리는지. 실행: npm test
 import { zoneLine, DEFAULT_LINE } from '../js/line.js';
 import { Simulation } from '../js/sim.js';
-import { planCCTV, camerasSeeing } from '../js/cctv.js';
+import { planCCTV, camerasSeeing, blocked } from '../js/cctv.js';
+import { camZone } from '../js/cctvview.js';
+import { camArea } from '../js/zonedefs.js';
 let pass = 0, fail = 0;
 const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  — ' + info : ''}`); };
 console.log('== 사각지대');
 for (const [nm, ln] of [['정밀조립Zone 1:1', zoneLine()], ['정밀조립Zone 2:1', zoneLine('2:1')], ['기본 라인', DEFAULT_LINE]]) {
   const s = new Simulation('dark', 1, { line: ln, quiet: true }), t0 = performance.now(), p = planCCTV(s), S = p.stats;
   check(`${nm}: 사각지대 0곳 (건물 안·입고·출하 야드)`, S.blind === 0 && S.coverage === 1, `CCTV ${p.cams.length}대 (안 ${S.inside} · 야드 ${S.outside}) · 지점 ${S.points} · 이중 감시 ${(S.redundancy * 100).toFixed(0)}% · ${Math.round(performance.now() - t0)}ms`);
+}
+console.log('== Zone별 배치 · Zone CCTV 전광판');
+{ const s = new Simulation('dark', 1, { line: zoneLine(), quiet: true }), p = s.cctv, I = p.regions.inside, ins = p.cams.filter((c) => c.region === 'inside');
+  const own = I.pts.filter((q) => q.area !== 'shared' && !ins.some((c) => camArea(c) === q.area && Math.hypot(q.x - c.x, q.z - c.z) <= c.R && !blocked(c, q, p.obstacles)));
+  check('Zone 바닥(정밀조립·유연생산·적응가공·정밀검사)은 모두 그 Zone에 달린 카메라가 봄', own.length === 0, own.slice(0, 4).map((q) => `${q.area}(${q.x},${q.z})`).join(' '));
+  const by = {}; for (const c of p.cams) by[camZone(c) ?? '전광판 밖'] = (by[camZone(c) ?? '전광판 밖'] ?? 0) + 1;
+  check('전광판 3개 = 정밀조립 · 유연생산 · 적응가공+정밀검사 (공용 시설·트럭 야드는 전광판 밖)', by.main > 0 && by.flex > 0 && by.adapt > 0 && ins.filter((c) => camArea(c) === 'insp').every((c) => camZone(c) === 'adapt') && p.cams.filter((c) => c.region !== 'inside' || camArea(c) === 'shared').every((c) => camZone(c) === null), JSON.stringify(by));
 }
 console.log('== CCTV AI 감지 (피지컬AI)');
 { const s = new Simulation('dark', 2, { line: zoneLine(), quiet: true }); for (let t = 0; t < 60; t += 0.1) s.step(0.1);

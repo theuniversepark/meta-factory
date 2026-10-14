@@ -1,9 +1,10 @@
-import { bk, BUILDING, extraCellBoxes, inBuilding, SRV, zoneServerBoxes } from './zonedefs.js';
+import { bk, BUILDING, extraCellBoxes, inBuilding, SRV, zoneServerBoxes, INSP_CELLS, camArea } from './zonedefs.js';
 import { shipToWorld, SHIP_FRAME } from './shipping.js';
 import { INBOUND, LOGI_DZ, XRACK } from './receiving.js';
 // CCTV — 사각지대 없는 배치. 바닥을 1m 간격 점으로 나누고, 카메라에서 각 점까지 시야가 큰 설비(셀·창고 랙·서버 랙)에
 // 가리지 않는지 따져 "보이는 점"을 구한 뒤, 아직 안 보이는 점을 가장 많이 덮는 후보 자리부터 차례로 골라(탐욕적 집합 덮개)
-// 모든 점이 최소 한 대에 보일 때까지 설치한다. 건물 안은 천장 돔 카메라(높이 7.5m, 반경 9m 어안),
+// 모든 점이 최소 한 대에 보일 때까지 설치한다. 건물 안은 Zone별로 나눠(정밀검사 → 유연생산 → 적응가공 → 정밀조립 → 공용 시설, zonedefs.js camArea) Zone 바닥을 그 Zone 천장 카메라로만 덮고,
+// 동점 처리를 바꿔 여러 번 돌린 뒤 빼도 사각지대가 안 생기는 카메라를 덜어 가장 적은 대수를 고른다 (Zone CCTV 전광판 = 그 Zone 카메라). 건물 안은 천장 돔 카메라(높이 7.5m, 반경 9m 어안),
 // 입고·출하 트럭 야드는 외벽·야드 가장자리 기둥의 실외 PTZ 돔 카메라(높이 7.5m, 줌 반경 20m).
 // 라인 배치(셀 위치)가 바뀌면 다시 계산하고, 같은 배치는 캐시를 쓴다. 렌더링과 분리되어 헤드리스에서도 같은 결과.
 // 피지컬AI 단계에서는 CCTV 영상 AI 분석으로 현장 이벤트를 2초 안에 감지한다 (sim.updateFieldEvents).
@@ -28,6 +29,7 @@ function obstacles(sim) {
   ob.push({ x0: -46.3, x1: -44.1, z0: XRACK.z - XRACK.len / 2, z1: XRACK.z + XRACK.len / 2, h: 5.2, name: '확장 선반' });   // 물류 선반 북쪽 (A-1·A-2 자재)
   ob.push({ x0: SRV.x - 0.55, x1: SRV.x + 0.55, z0: SRV.z - 2.2, z1: SRV.z + 2.2, h: 2.3, name: '정밀조립 데이터 서버 랙' });   // 왼쪽 벽 앞 (zonedefs.js SRV)
   ob.push(...zoneServerBoxes());   // A-1 · A-2 데이터 서버 랙 (뒷벽 · 오른쪽 벽 앞)
+  ob.push(...Object.values(INSP_CELLS).map((c) => ({ x0: c.x - 2.3, x1: c.x + 2.3, z0: c.z - 2.3, z1: c.z + 2.3, h: 2.8, name: `정밀검사 ${c.label}` })));   // 정밀검사Zone 셀
   ob.push(...extraCellBoxes());   // 유연생산·적응가공 Zone 셀   // 중앙 관제 디스플레이 가운데 아래
   return ob;
 }
@@ -46,29 +48,60 @@ export function blocked(c, p, ob) {
   return false;
 }
 // 한 구역: 바닥 점 · 후보 자리 → 탐욕적으로 덮기
+// region.area가 있으면 Zone별로 나눠 덮는다: Zone(정밀검사·유연생산·적응가공·정밀조립) 바닥은 그 Zone 천장 카메라로만 — 카메라 하나가 한 Zone에만 속해 Zone 전광판에 그대로 건다
+// 공용 시설 바닥은 Zone 카메라가 이미 보는 곳을 빼고 공용 자리 카메라로 채운다. 마지막에 빼도 사각지대가 안 생기는 카메라를 덜어 낸다(중복 정리)
+const AREA_ORDER = ['insp', 'flex', 'adapt', 'main', 'shared'];
 function coverRegion(region, ob) {
   const pts = [];
   for (let x = region.x0; x <= region.x1 + 1e-9; x += STEP) for (let z = region.z0; z <= region.z1 + 1e-9; z += STEP) {
     if (ob.some((b) => x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1)) continue;   // 설비가 서 있는 자리는 사람이 설 수 없다
     if (region.keep && !region.keep({ x, z })) continue;   // 건물 밖 (꺾인 뒷벽 바깥)
-    pts.push({ x, z });
+    pts.push({ x, z, area: region.area ? region.area({ x, z }) : null });
   }
-  const sees = region.cands.map((c) => {
+  const cands = region.cands.map((c) => (region.area ? { ...c, area: region.area(c) } : c));
+  const sees = cands.map((c) => {
     const s = [];
     pts.forEach((p, i) => { if (Math.hypot(p.x - c.x, p.z - c.z) <= c.R && !blocked(c, p, ob)) s.push(i); });
     return s;
   });
-  const covered = new Uint8Array(pts.length), chosen = [];
-  let left = pts.length;
-  while (left > 0) {
-    let best = -1, bn = 0;
-    sees.forEach((s, k) => { if (chosen.includes(k)) return; let n = 0; for (const i of s) if (!covered[i]) n++; if (n > bn) { bn = n; best = k; } });
-    if (best < 0) break;   // 어떤 후보로도 못 보는 점 (없어야 정상)
-    chosen.push(best); for (const i of sees[best]) if (!covered[i]) { covered[i] = 1; left--; }
+  // 점 묶음(want · 이미 덮인 점 base)을 후보(allow)로 덮는다: 탐욕적 선택 + 중복 정리를 동점 처리만 바꿔 여러 번 돌려 가장 적은 대수를 고른다 (난수 씨앗 고정 — 같은 배치는 같은 결과)
+  const solve = (want, allow, base) => {
+    const rel = new Map();   // 후보마다 아직 덮어야 할 점만
+    cands.forEach((c, k) => { if (!allow(c)) return; const r = sees[k].filter((i) => want.has(i) && !base[i]); if (r.length) rel.set(k, r); });
+    const ks = [...rel.keys()], need = [...want].filter((i) => !base[i]).length;
+    let best = null, seed = 12345;
+    const rnd = () => ((seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 4294967296);
+    for (let run = 0; run < 40; run++) {
+      const cov = new Uint8Array(pts.length), pick = [], used = new Set(), jit = ks.map(() => (run ? rnd() * 0.9 : 0));
+      let left = need;
+      while (left > 0) {
+        let bk = -1, bn = 0;
+        ks.forEach((k, j) => { if (used.has(k)) return; let n = 0; for (const i of rel.get(k)) if (!cov[i]) n++; if (n && n + jit[j] > bn) { bn = n + jit[j]; bk = k; } });
+        if (bk < 0) break;
+        pick.push(bk); used.add(bk); for (const i of rel.get(bk)) if (!cov[i]) { cov[i] = 1; left--; }
+      }
+      const cnt = new Uint8Array(pts.length); for (const k of pick) for (const i of rel.get(k)) cnt[i]++;   // 덜어 내기: 맡은 점이 모두 다른 카메라로도 보이면
+      for (const k of [...pick].sort((x, y) => rel.get(x).length - rel.get(y).length)) if (rel.get(k).every((i) => cnt[i] > 1)) { pick.splice(pick.indexOf(k), 1); for (const i of rel.get(k)) cnt[i]--; }
+      if (!best || pick.length < best.length) best = pick;
+    }
+    return best;
+  };
+  const chosen = [];
+  const cover = (want, allow, base) => { const pick = solve(want, allow, base); chosen.push(...pick); for (const k of pick) for (const i of sees[k]) if (want.has(i)) base[i] = 1; };
+  if (!region.area) cover(new Set(pts.keys()), () => true, new Uint8Array(pts.length));
+  else {
+    for (const a of AREA_ORDER.slice(0, -1)) {   // Zone 바닥: 자기 Zone 카메라로 (못 보는 점만 다른 자리 카메라로 보충)
+      const want = new Set(pts.flatMap((p, i) => (p.area === a ? [i] : []))), base = new Uint8Array(pts.length);
+      cover(want, (c) => c.area === a, base); cover(want, () => true, base);
+    }
+    const want = new Set(pts.flatMap((p, i) => (p.area === 'shared' ? [i] : []))), base = new Uint8Array(pts.length);   // 공용 바닥: Zone 카메라가 보는 곳은 빼고
+    for (const k of chosen) for (const i of sees[k]) base[i] = 1;
+    cover(want, (c) => c.area === 'shared', base); cover(want, () => true, base);
   }
   const count = new Uint8Array(pts.length);
   for (const k of chosen) for (const i of sees[k]) count[i]++;
-  return { pts, count, cams: chosen.map((k) => region.cands[k]), blind: left };
+  const blind = count.reduce((x, v) => x + (v ? 0 : 1), 0);
+  return { pts, count, cams: chosen.map((k) => cands[k]), blind };
 }
 
 export function planCCTV(sim) {
@@ -78,7 +111,7 @@ export function planCCTV(sim) {
   const grid = (x0, x1, z0, z1, step, y, R, kind, extra = {}) => { const c = []; for (let x = x0; x <= x1 + 1e-9; x += step) for (let z = z0; z <= z1 + 1e-9; z += step) c.push({ x, y, z, R, kind, ...extra }); return c; };
   const D = CCTV_SPEC.dome, O = CCTV_SPEC.outdoor;
   // 건물 안: 천장 2m 격자 후보
-  const inside = coverRegion({ x0: -50.6, x1: BUILDING.x1 - 0.4, z0: BUILDING.z0 + 0.4, z1: BUILDING.z1 - 0.4, keep: (p) => inBuilding(p, 0.4), cands: grid(-50, BUILDING.x1 - 2, BUILDING.z0 + 2, BUILDING.z1 - 2, 2, D.y, D.R, 'dome').filter((c) => inBuilding(c, 1.5)) }, ob);   // 앞뒤로 넓힌 건물 전체 (3 Zone · 출하 도크 쪽 꺾인 뒷벽 반영)   // 왼쪽 확장동(물류존) 포함
+  const inside = coverRegion({ area: camArea, x0: -50.6, x1: BUILDING.x1 - 0.4, z0: BUILDING.z0 + 0.4, z1: BUILDING.z1 - 0.4, keep: (p) => inBuilding(p, 0.4), cands: grid(-50, BUILDING.x1 - 2, BUILDING.z0 + 2, BUILDING.z1 - 2, 2, D.y, D.R, 'dome').filter((c) => inBuilding(c, 1.5)) }, ob);   // 앞뒤로 넓힌 건물 전체 (3 Zone · 출하 도크 쪽 꺾인 뒷벽 반영)   // 왼쪽 확장동(물류존) 포함
   // 입고 트럭 야드: 왼쪽 확장동 외벽(x −51.4)과 야드 가장자리 기둥 후보
   // 입고 야드는 건물 앞쪽(왼쪽 아래): 도크(z 35.8) 위쪽 회전 구역 ~ 건물 앞쪽 진입로(z 54)
   const DZ = INBOUND.dockZ, RZ = INBOUND.roadZ, Y0 = DZ - 10.5, Y1 = RZ + 4;
