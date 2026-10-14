@@ -1266,6 +1266,8 @@ function frame() {
       cctvView.update(rdt); for (const b of cctvBoards) b.update(rdt);
       cctvRec.update(rdt);
       robotRec.update(rdt);
+      // 안개는 카메라 거리를 따라 민다 — 줌 아웃해도 공장이 배경색(어두운 색)으로 바래지 않고 밝기를 유지한다 (가까이서는 기존 70~160m 그대로)
+      if (scene.fog) { const d = camera.position.distanceTo(controls.target); scene.fog.near = Math.max(70, d + 40); scene.fog.far = Math.max(160, d + 160); }
       composer.render();
     } catch (e) { if (!frame.errAt || performance.now() - frame.errAt > 5000) { frame.errAt = performance.now(); console.error('[피지컬AI 실증 메타팩토리] 렌더 오류', e); } }
   }
