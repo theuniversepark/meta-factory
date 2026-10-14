@@ -87,7 +87,7 @@ export class UI {
       ? `<b>현재 판단</b> · ${this.agent.lastThought}`
       : '<b>수동 운영</b> · 설비 데이터가 수집되지 않아 고장·자재 부족을 사람이 발견한 뒤에 대응합니다.';
     this.renderLogs();
-    if (this.detailSt) this.renderDetail();
+    if (this.detailSt) { const el = $('detail'), top = el.scrollTop; this.renderDetail(); el.scrollTop = top; }   // 주기 갱신 때 스크롤 위치 유지 (내용을 통째로 다시 그리면 맨 위로 튀었다)
   }
 
   renderLogs() {
@@ -342,7 +342,7 @@ export class UI {
         <span>데이터</span><b>${m.key === 'traditional' ? '수집 없음 (레거시)' : `${esc(Z?.code ?? '')} 데이터 서버 · AAS ${esc(st.id.replace(/-/g, '_'))}`}</b>
       </div>
       ${m.key === 'traditional' ? '<div class="note">※ 레거시 공장에는 센서가 없어 건강도·RUL은 현장에서 보이지 않는 시뮬레이션 내부값입니다.</div>' : ''}
-      ${this.erpLine(st)}
+      ${this.facLine(st)}
       <div class="btns"><button data-act="fault">⚡ 고장 주입</button><button data-act="pm">🔧 정비 지시</button></div>
       <div class="pcap-box" id="pcapBox"></div>`;
     this.onDetailRendered?.();

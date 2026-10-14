@@ -3278,6 +3278,6 @@ function lerpAngle(a, b, k) {
 // 확장 Zone(js/zones.js — 유연생산Zone · 적응가공Zone)이 정밀조립Zone과 같은 재질·로봇·설비 모델을 쓰도록 내보낸다
 export const KIT = {
   std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, ZONE_COLOR,
-  makeRobot, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate,
+  makeRobot, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK,
   buildWeld, buildSort, buildGate, buildVision, fillBins,
 };

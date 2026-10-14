@@ -150,7 +150,7 @@ body.llm-on .agent-avatar { background: linear-gradient(135deg, #d97757, #f0c27b
 .chatbox button:disabled { opacity: 0.35; background: transparent; border-color: var(--line); cursor: not-allowed; }
 
 /* 상세 패널 */
-.detail { left: var(--lx); bottom: 64px; width: 300px; padding: 12px; }
+.detail { left: var(--lx); bottom: 64px; width: 300px; padding: 12px; max-height: calc(100vh - 150px); overflow-y: auto; overscroll-behavior: contain; }   /* 내용이 길면 창 안에서 위아래 스크롤 */
 .detail.hidden, .modal.hidden { display: none; }
 .detail h3 { margin: 0 0 6px; font-size: 15px; display: flex; justify-content: space-between; align-items: center; }
 .detail h3 button { border: 0; background: none; color: var(--ink2); font-size: 14px; }

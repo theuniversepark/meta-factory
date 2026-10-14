@@ -12,7 +12,7 @@ import { EXTRA_ZONES, ZONE_FAC, zoneRobotUid, zoneAmrUid } from './zonedefs.js';
 import { BATTERY, moverRadius, moverWidth } from './sim.js';
 export { EXTRA_ZONES };
 
-const { std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, makeRobot, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, buildWeld, buildGate, buildVision } = KIT;
+const { std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, makeRobot, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK, buildWeld, buildGate, buildVision } = KIT;
 const PI = Math.PI;
 const PC = { shared: 0x2bb3a6, hood: 0xf0a030, door: 0x9a6bff, hblock: 0xf0a030, rcover: 0x9a6bff, ng: 0xd23b3b };
 const USE_CLS = { hood: 'doortrim', hblock: 'doortrim', door: 'eaxle', rcover: 'eaxle' };   // 셀 라벨 색 (주황·보라)
@@ -132,8 +132,28 @@ function buildRework(g) {
   put(box(0.3, 0.14, 0.3, MAT.white), 1.25, 1.85, 0, g);
   return { sparks: put(makeSparks(0xffc060, 24, 0.05), 0, 0, 0, g) };
 }
-// 머신텐딩 배치 (adaptive-machining TEND): 로봇 −z 1.3m, 머시닝센터 −z 3.25m (통로 반대쪽), 테이블 앞 −z 3.05m
-const TEND = { robot: { x: -0.8, z: -1.3 }, mc: { z: -3.25 }, table: { x: -0.1, z: -3.05 } };
+// 머신텐딩 배치 (adaptive-machining TEND): 로봇 −z 1.25m (문 중심선 x −0.1 위 — 팔이 문 열림 폭 1.3m 가운데로 드나든다), 머시닝센터 −z 3.25m (통로 반대쪽, 앞면 −z 2.25m), 테이블 앞 −z 3.05m
+const TEND = { robot: { x: -0.1, z: -1.25 }, mc: { z: -3.25 }, table: { x: -0.1, z: -3.05 } };
+// 머신텐딩 동작 경유점 (로봇 루트 로컬: +z = 기계 쪽, 높이는 루트 기준) — 문 밖 대기 · 문 앞 · 테이블/척 · AMR 위 · AMR 지그
+const TEND_PTS = (() => {
+  const fwd = TEND.robot.z - TEND.table.z, back = -TEND.robot.z, Y0 = 0.15;
+  return { home: [0, 1.35, 0.45], entry: [0, 1.15, 0.72], table: [0, 1.05 - Y0, fwd], over: [0, 1.4, -back + 0.35], amr: [0, BELT_Y + 0.28 - Y0, -back] };
+})();
+// 진행률(p) 구간별 경로 — 문은 p < 0.15 · p > 0.85에만 열려 있다 (animCell): 팔은 p 0.145 전에 문 밖으로 나오고, 문이 다 열린 p 0.89 뒤에 들어간다
+const TEND_SEQ = [
+  [0.00, 'home'], [0.035, 'over'], [0.05, 'amr'], [0.065, 'over'], [0.09, 'entry'], [0.11, 'table'], [0.125, 'entry'], [0.145, 'home'],
+  [0.89, 'home'], [0.91, 'entry'], [0.93, 'table'], [0.945, 'entry'], [0.97, 'over'], [0.985, 'amr'], [1.0, 'over'],
+];
+const tendJoints = (s) => Object.fromEntries(Object.entries(TEND_PTS).map(([k, [x, y, z]]) => [k, armIK(s, x, y, z)]));
+// 관절 공간 보간 (J1은 기계 쪽 0 ↔ AMR 쪽 π를 늘 같은 쪽으로 돌아 간다 — 팔 반경 0.9m 안이라 기계 앞면·적재함·경광등에 닿지 않는다)
+function tendPose(r, p) {
+  const J = (r.tendJ ??= tendJoints(r.scale ?? 1));
+  let i = 0; while (i < TEND_SEQ.length - 2 && p >= TEND_SEQ[i + 1][0]) i++;
+  const [p0, a] = TEND_SEQ[i], [p1, b] = TEND_SEQ[i + 1], k0 = Math.min(1, Math.max(0, (p - p0) / Math.max(1e-6, p1 - p0))), k = k0 * k0 * (3 - 2 * k0);
+  const A = J[a], B = J[b], yaw = (q) => (Math.abs(q) > 3 ? PI : q);
+  const q = A.map((v, j) => (j === 0 ? yaw(v) + (yaw(B[0]) - yaw(v)) * k : v + (B[j] - v) * k));
+  r.arm.pose(q[0], q[1], q[2], q[3], 0, (a === 'table' || b === 'table') ? k * 0.6 : 0);
+}
 function mcEnclosure(g, w, d, h, z, col) {
   const G = put(new THREE.Group(), 0, 0, z, g);
   put(box(w, 0.35, d, MAT.dark), 0, 0.175, 0, G);
@@ -153,7 +173,7 @@ function mcExtras(E) {
   put(box(0.5, 0.4, 2.0, MAT.dark), -1.75, 0.2, 0, E.G);
   const bin = put(box(0.6, 0.55, 0.6, std(0x5a6470, { metalness: 0.4 })), -1.8, 0.28, 1.25, E.G);
   put(box(0.55, 0.06, 0.55, std(0xc9ced4, { metalness: 0.7, roughness: 0.4 })), 0, 0.3, 0, bin);
-  const panel = put(box(0.55, 0.8, 0.2, MAT.dark), 1.25, 1.55, E.d / 2 + 0.12, E.G);
+  const panel = put(box(0.55, 0.8, 0.2, MAT.dark), 1.25, 1.55, E.d / 2 + 0.2, E.G);   // 미닫이 문(앞면 +0.02, 열면 x +1.25)보다 앞에 — 문이 조작반을 뚫지 않게
   const screen = emis(0x58c4ff, 1.2); put(box(0.42, 0.3, 0.02, screen, false), 0, 0.15, 0.11, panel);
   const edge = put(box(0.28, 0.18, 0.12, std(0x111418)), -1.25, 2.35, E.d / 2 + 0.07, E.G);
   const edgeLed = emis(0x3ddc84, 2); put(box(0.2, 0.03, 0.01, edgeLed, false), 0, 0.03, 0.065, edge);
@@ -199,8 +219,10 @@ function buildDeburr(g) {
   put(box(0.22, 0.22, 3.14, MAT.steel), -0.35, 2.8, 0, g);
   const head = put(new THREE.Group(), -0.35, 2.3, 0, g);
   put(box(0.3, 0.35, 0.3, MAT.accent), 0, 0.15, 0, head); put(box(0.08, 1.2, 0.08, MAT.steel), 0, 0.85, 0, head);
-  const spin = put(new THREE.Group(), 0, -0.1, 0, head); spin.rotation.z = 0.5;
-  const bit = put(cyl(0.03, 0.05, 0.5, MAT.steel, 10), 0, -0.25, 0, spin);
+  // 사선 주축(헤드 바로 아래에 붙음) + 드릴: 헤드가 내려오면(y 1.85) 날 끝이 지그 위 소재 윗면(약 1.13m)에 닿는다 — 대기(y 2.3) 때는 소재 위 0.45m
+  const spin = put(new THREE.Group(), 0, -0.02, 0, head); spin.rotation.z = 0.5;
+  put(cyl(0.07, 0.07, 0.5, MAT.dark, 14), 0, -0.25, 0, spin);
+  const bit = put(cyl(0.025, 0.04, 0.32, MAT.steel, 10), 0, -0.66, 0, spin);
   const wash = put(new THREE.Group(), 1.55, 0, 0, g);
   for (const z of [-0.9, 0.9]) put(box(0.12, 2.0, 0.12, MAT.white), 0, 1.0, z, wash);
   put(box(0.7, 0.25, 1.95, MAT.white), 0, 2.0, 0, wash);
@@ -236,8 +258,9 @@ function buildCMM(g) {
   const car = put(new THREE.Group(), 0, 2.55, 0, bridge);
   put(box(0.3, 0.34, 0.3, MAT.accent), 0, 0, 0, car);
   const quill = put(new THREE.Group(), 0, 0, 0, car);
-  put(box(0.1, 1.1, 0.1, MAT.steel), 0, -0.55, 0, quill);
-  const tipMat = emis(0xff4d6d, 1.5); put(mesh(new THREE.SphereGeometry(0.03, 12, 8), tipMat), 0, -1.12, 0, quill);
+  // 프로브 램: 캐리지를 관통하는 긴 봉 (위로 0.6m) — 측정 때 0.39m 내려가도 캐리지에서 빠지지 않고, 탐침 끝이 소재 윗면(약 1.13m)에 닿는다
+  put(box(0.1, 1.6, 0.1, MAT.steel), 0, -0.2, 0, quill);
+  const tipMat = emis(0xff4d6d, 1.5); put(mesh(new THREE.SphereGeometry(0.03, 12, 8), tipMat), 0, -1.02, 0, quill);
   const rw = put(new THREE.Group(), 1.95, 0, -1.55, g);
   put(box(0.7, 0.9, 0.6, MAT.dark), 0, 0.45, 0, rw);
   const rwSpin = put(cyl(0.06, 0.08, 0.3, MAT.steel, 12), 0, 1.15, 0, rw);
@@ -558,6 +581,8 @@ class ExtraZone {
         }
         r.root.traverse((o) => { o.userData.stationId = this.sid(c); o.userData.robotIdx = i; });   // 클릭 → 셀 로봇 텔레메트리 (factory.js pick · DataHub 자산 id와 같은 셀 키)
         r.phase = i * 1.3; c.robots.push(r); c.robotUids.push(zoneRobotUid(this.Z, c.id, i));   // 셀 로봇 고유 ID (zonedefs.js)
+        // 머신텐딩: 문이 열렸을 때만 AMR 지그 ↔ 테이블(척)로 넣고 빼며, 가공 중(문 닫힘)에는 문 밖에서 기다린다 — 정지·고장 중에는 그 자세 그대로
+        if (tend && r.arm) r.anim = (busy, t, p) => { if (busy) tendPose(r, p); else if (c.state !== 'BUSY') tendPose(r, 0); };
         const sp = idPlate(c.robotUids[i]); sp.position.set(0, kind === 'ammr' ? 2.55 : 2.35, 0); r.root.add(sp); sp.visible = this.labelsOn ?? true; c.plates.push(sp);   // 로봇 위 ID 명판 (정밀조립 셀 로봇과 같은 모양 · 라벨 버튼으로 켜고 끔)
       }
       c.rb.textContent = `🤖 ${ROBOT_SHORT[kind] ?? kind}×${count}`;
@@ -888,7 +913,7 @@ class ExtraZone {
         const meas = busy && p > 0.3 && p < 0.9;
         P.bridge.position.x = 0.15 + (meas ? Math.sin(p * PI * 6) * 0.35 : 0);
         P.car.position.z = meas ? Math.cos(p * PI * 7) * 0.3 : 0;
-        const tq = meas ? -0.95 * (0.6 + 0.4 * Math.abs(Math.sin(p * PI * 14))) : 0;
+        const tq = meas ? -(0.23 + 0.16 * Math.abs(Math.sin(p * PI * 14))) : 0;   // 탐침 끝 y 1.30 → 1.14 (소재 윗면 접촉) 반복
         P.quill.position.y += (tq - P.quill.position.y) * Math.min(1, rdt * 8);
         P.tipMat.emissiveIntensity = meas && Math.sin(p * PI * 14) > 0.9 ? 6 : 1.2;
         const rw = busy && it?.rework && p < 0.6; if (rw) P.rwSpin.rotation.y += dts * 40;
