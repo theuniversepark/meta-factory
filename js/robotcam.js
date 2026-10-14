@@ -1,7 +1,7 @@
 // 로봇 비전 관제 디스플레이 (피지컬AI 단계) — 로봇·드론에 달린 카메라 시점의 실시간 영상 8분할 + AI 추론 오버레이.
 // 영상: 각 로봇 카메라 시점으로 장면을 렌더 타깃의 한 칸에 그린다(프레임마다 한 칸씩 돌아가며 갱신).
 // 오버레이: 카메라로 투영한 객체 인식 박스·신뢰도, 추론 지연, 작업 상태, 현장 이벤트·알람 배너와 하단 알람 띠.
-import { bk, inExtraZone, LEFT_WALL, ZONE_FAC, EXTRA_ZONES, zoneRect } from './zonedefs.js';
+import { bk, inExtraZone, LEFT_WALL, ZONE_FAC, EXTRA_ZONES, zoneRect, inInsp } from './zonedefs.js';
 import * as THREE from 'three';
 import { FIELD_EVENTS, ST_LABEL, moverRadius } from './sim.js';
 import { makeAlarmFx, blinkAlarmFx, ALARM_COLOR, ROBOT_CAMS } from './factory.js';
@@ -578,10 +578,9 @@ function makeEventMesh(type) {
 // 셀 로봇(손목 카메라 · AMMR·휴머노이드 4대) · Zone 운반 AMR 전방 · Zone 정비 휴머노이드 · 물류 휴머노이드 · 사족보행 · 드론 · AGV
 // 화면은 Zone 전광판 오른쪽 (zonedefs.js ZONE_FAC[key].wall.cams) · 현장 이벤트 3D 표시는 정밀조립 디스플레이가 공장 전체를 맡는다
 export class ZoneCamWall extends RobotCamWall {
-  constructor(scene, renderer, key) {
-    const C = ZONE_FAC[key].wall.cams;
+  constructor(scene, renderer, key, C = ZONE_FAC[key]?.wall.cams) {
     super(scene, renderer, C, C.rot);
-    this.key = key; this.Z = EXTRA_ZONES.find((z) => z.key === key); this.code = this.Z.code;
+    this.key = key; this.Z = EXTRA_ZONES.find((z) => z.key === key); this.code = this.Z?.code ?? '정밀검사';
     this.tagName = `${this.code} ROBOT VISION`; this.renderEvery = 2;
   }
   syncEvents() {}
@@ -647,6 +646,31 @@ export class ZoneCamWall extends RobotCamWall {
     for (const ev of sim.fieldEvents ?? []) if (ev.detected && !ev.cleared && this.inZone(ev)) out.push({ sev: ev.severity, text: `AI 감지 · ${ev.label} (${ev.detectedBy}${ev.responder ? ` → ${ev.responder} 대응 중` : ''})`, ev });
     for (const m of this.zm()) if (m.blockedOn && m.blockT > 4) out.push({ sev: 'warn', text: `${m.id} 진로 장애물 대기 (${m.blockedOn.id})`, m });
     if (X?.byKey(this.key)?.starved) out.push({ sev: 'warn', text: `${this.code} 투입 자재 대기 (확장 선반)` });
+    return out;
+  }
+}
+
+// ── 정밀검사Zone 로봇 비전 관제 디스플레이 — 오른쪽 벽 정밀검사Zone 전광판 왼쪽 (inspzone.js INSP.cams)
+// 확장 Zone 디스플레이와 같은 4×2 분할 · 5초 순환 · AI 인식 박스 — 후보: 검사 셀 로봇(끝단 센서·손목 카메라) · 검사 AMR 전방 카메라
+export class InspCamWall extends ZoneCamWall {
+  constructor(scene, renderer, C) { super(scene, renderer, 'insp', C); this.tagName = '정밀검사 ROBOT VISION'; }
+  get I() { return this.view?.xzones?.insp; }
+  tc(st) { return st; }
+  inZone(p) { return inInsp(p); }
+  zm() { return []; }
+  cells() { return this.I?.cellRobots() ?? []; }
+  amrs() { return this.sim.mode.key === 'traditional' || !this.I ? [] : this.I.carriers.map((c) => ({ id: c.id, mover: this.I.tele(c), c })); }
+  pinnedFeeds() { return []; }
+  targets() {
+    const out = [], I = this.I; if (!I) return out;
+    for (const c of I.order) out.push({ key: `qs${c.id}`, cls: '설비', name: c.def.label, c: [c.def.x, 1.3, c.def.z], h: [2.2, 1.3, 2.2], st: I.teleCell(c) });
+    for (const { id, mover } of this.amrs()) out.push({ key: `qa${id}`, cls: 'AMR', name: id, c: [mover.x, 0.7, mover.z], h: [0.6, 0.7, 0.6], m: mover });
+    return out;
+  }
+  alarms() {   // 최근 90초 안의 NG 판정 · 판정 불확실(재측정) · 샘플 대기 적체
+    const I = this.I, out = []; if (!I) return out;
+    for (const r of I.recent) if (r.res !== 'ok' && I.time - r.t < 90) out.push({ sev: r.res === 'ng' ? 'alarm' : 'warn', text: `${r.id} ${I.Z.products[r.product][1]} ${r.res === 'ng' ? 'NG 판정 → 리워크·공정 보정 요청' : '판정 불확실 → O-INSPECT 재측정'}` });
+    if (I.queue.length >= 3) out.push({ sev: 'warn', text: `샘플 대기 ${I.queue.length}건 (검사 AMR 모두 운행 중)` });
     return out;
   }
 }

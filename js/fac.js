@@ -25,6 +25,11 @@ export const FAC_PRODUCTS = {
   'flex:parts': { code: 'FLX-PT', name: '유연생산 부품 키트 (힌지·볼트·실러)', price: 9000 },
   'adapt:raw': { code: 'ADP-RM', name: '적응가공 원재료 (유압블록·리어커버 소재)', price: 28000 },
   'adapt:parts': { code: 'ADP-PT', name: '적응가공 부품 키트 (플러그·실·볼트)', price: 3500 },
+  // 확장 Zone 완제품 (포장·구분 적재 팔레트 → 출하 트럭)
+  hood: { code: 'FLX-FG-HD', name: "LT2 후드 Ass'y (완제품)", price: 320000 },
+  door: { code: 'FLX-FG-DR', name: "상용트럭 도어 Ass'y (완제품)", price: 410000 },
+  hblock: { code: 'ADP-FG-HB', name: '유압 매니폴드 블록 (완제품)', price: 260000 },
+  rcover: { code: 'ADP-FG-RC', name: '다이캐스팅 리어커버 (완제품)', price: 150000 },
 };
 export const FAC_LOCS = {
   vendor: { name: '거래처/공급사', usage: 'supplier' },
@@ -132,14 +137,14 @@ export class FacLedger {
 
   // ── 내부 이동 · 생산 입고 (10분 묶음) ─────────────────
   window() {
-    if (!this.win) this.win = { t0: this.now(), int: [], prod: { doortrim: 0, eaxle: 0 } };
+    if (!this.win) this.win = { t0: this.now(), int: [], prod: { doortrim: 0, eaxle: 0, hood: 0, door: 0, hblock: 0, rcover: 0 } };
     return this.win;
   }
   consume(type, qty, toName) {   // 선반 → 투입구(원자재) / 셀(부품) / 확장 Zone 투입구
     if (!this.on || qty <= 0) return;
     this.window().int.push({ product: type, qty, from: rackOf(type), to: useOf(type), ref: toName });
   }
-  produced(product, n = 1) { if (this.on && product) this.window().prod[product] += n; }
+  produced(product, n = 1) { if (this.on && product) { const w = this.window(); w.prod[product] = (w.prod[product] ?? 0) + n; } }
   closeWindow() {
     const w = this.win; if (!w) return; this.win = null;
     const agg = new Map();
@@ -153,7 +158,7 @@ export class FacLedger {
     }
     const prod = Object.entries(w.prod).filter(([, v]) => v > 0);
     if (prod.length) {
-      const pk = { id: this.db.picking.length + 1, name: this.name('mrp'), type: 'production', origin: '정밀조립Zone 생산 실적', from: 'production', to: 'output', state: 'done', created: w.t0, done: this.now(), lines: prod.map(([p, q]) => ({ product: p, qty: q, done: q, from: 'production', to: 'output' })) };
+      const pk = { id: this.db.picking.length + 1, name: this.name('mrp'), type: 'production', origin: '생산 실적 (정밀조립 · 확장 Zone 포장·구분 적재)', from: 'production', to: 'output', state: 'done', created: w.t0, done: this.now(), lines: prod.map(([p, q]) => ({ product: p, qty: q, done: q, from: 'production', to: 'output' })) };
       for (const [p, q] of prod) this.quant.output[p] += q;
       this.db.picking.unshift(pk);
       this.emit({ type: 'production.done', key: pk.name, lines: pk.lines.map(({ product, qty }) => ({ product, qty, from: 'production', to: 'output' })) });

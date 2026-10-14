@@ -119,20 +119,22 @@ export const EXTRA_ZONES = [
       C07: { type: 'rework', label: 'NG·재작업', product: 'ng', use: 'NG 재용접·재도포 보수 → 재검', x: -2, z: MID, rot: PI, side: -1, cycle: 120, robot: ['articulated', 1, 'humanoid', 1] },
     },
     routes: { hood: ['C01', 'C02', 'C03', 'C04', 'C05', 'C06'], door: ['C01', 'C02', 'C03', 'C04', 'C05', 'C10', 'C06'] },
-    src: { x: -26.5, z: 0 }, sink: { x: 23.5, z: BOT, rot: PI },   // 구분 적재(포장)는 Zone 오른쪽 끝 — 투입(왼쪽) → 공정 → 적재(오른쪽)
+    src: { x: -26.5, z: 0 }, sink: { x: 24.6, z: BOT, rot: PI },   // 구분 적재(포장)는 Zone 오른쪽 끝 — 투입(왼쪽) → 공정 → 적재(오른쪽)
     // 셀 사이 AMR 경유점 (flexible-manufacturing ZONE_PATHS와 같은 모양) — 오른쪽 통제 이송 통로 x 20.5, 합류 대기 차로 ±0.75m
     paths: {
       'C05>C06': [{ x: 20.5, z: TOP }, { x: 20.5, z: BOT - 0.75 }, { x: 8.5, z: BOT - 0.75 }],
       'C05>C10': [{ x: 20.5, z: TOP }, { x: 20.5, z: MID }, { x: 16, z: MID }],
       'C10>C06': [{ x: 11.7, z: MID }, { x: 10.4, z: BOT - 0.75 }, { x: 8.5, z: BOT - 0.75 }],
-      'C06>SINK': [{ x: 8.8, z: BOT + 0.75 }, { x: 21.5, z: BOT + 0.75 }],   // C06 → 적재: 남쪽 동행 차로 (C06 진입 서행 차로 BOT −0.75와 1.5m 분리)
+      'C06>SINK': [{ x: 8.8, z: BOT + 0.75 }, { x: 22.6, z: BOT + 0.75 }],   // C06 → 적재: 남쪽 동행 차로 (C06 진입 서행 차로 BOT −0.75와 1.5m 분리)
       'C06>C07': [{ x: 4.2, z: BOT }, { x: 1.4, z: MID }, { x: 0, z: MID }],
-      'C07>SINK': [{ x: 0.6, z: MID - 0.75 }, { x: 9.6, z: MID - 0.75 }, { x: 9.6, z: BOT + 0.75 }, { x: 21.5, z: BOT + 0.75 }],   // 재작업 → 가운데 줄 동쪽 → C06·C10 사이로 내려가 같은 동행 차로
+      'C07>SINK': [{ x: 0.6, z: MID - 0.75 }, { x: 9.6, z: MID - 0.75 }, { x: 9.6, z: BOT + 0.75 }, { x: 22.6, z: BOT + 0.75 }],   // 재작업 → 가운데 줄 동쪽 → C06·C10 사이로 내려가 같은 동행 차로
     },
-    ret: [{ x: 23.5, z: 7.6 }, { x: -32.1, z: 7.6 }, { x: -32.1, z: 0 }],   // 적재(오른쪽 끝) → 정밀조립Zone 쪽 복귀로(z 7.6) → 투입 왼쪽 진입로 (x −33.6 — 스테이션이 있으면 끝 두 점 대신 스테이션 고리)
+    ret: [{ x: 24.6, z: 7.6 }, { x: -32.1, z: 7.6 }, { x: -32.1, z: 0 }],   // 적재(오른쪽 끝) → 정밀조립Zone 쪽 복귀로(z 7.6) → 투입 왼쪽 진입로 (x −33.6 — 스테이션이 있으면 끝 두 점 대신 스테이션 고리)
     ng: { at: 'C06', to: 'C07', rate: 0.07 },
     amr: { count: 15, speed: 1.1, ret: 1.5 }, load: 6, unload: 5,
-    foot: { x0: -32.6, x1: 26.0, z0: -7.2, z1: 8.2 },   // 셀·AMR 차로가 차지하는 영역 (로컬)
+    foot: { x0: -32.6, x1: 28.0, z0: -7.2, z1: 8.2 },
+    // 포장·구분 적재 (정밀조립 구분 적재장과 같은 구성): 제품별 적재 팔레트(적재장 북쪽) · 팔레타이징 로봇 · 출하 지게차가 북쪽(뒤쪽 통로 BB)에서 들어와 팔레트를 실어 간다
+    pack: { pallets: { hood: { x: 23.2, z: 2.1 }, door: { x: 26.1, z: 2.1 } }, aisle: 'BB' },   // 셀·AMR 차로가 차지하는 영역 (로컬)
   },
   {
     key: 'adapt', code: '적응가공', uidp: 'ADP', name: '적응가공Zone', sub: '유압블록 · 리어커버 혼류', origin: { x: 0, z: 19.5 }, accent: 0xff7a45,
@@ -159,10 +161,21 @@ export const EXTRA_ZONES = [
     rework: { at: 'CMM', rate: 0.06 },
     amr: { count: 15, speed: 1.6, ret: 2.6 }, load: 4, unload: 4,
     foot: { x0: -34.1, x1: 21.6, z0: -7.2, z1: 9.6 },
+    // 포장·구분 적재: 제품별 적재 팔레트(적재장 북쪽 — 동쪽은 자체 복귀로) · 팔레타이징 로봇 · 출하 지게차는 앞쪽 통로(z 9)에서 내려와 실어 간다
+    pack: { pallets: { hblock: { x: 16.6, z: -2.5 }, rcover: { x: 19.6, z: -2.5 } }, aisle: 'F' },
   },
 ];
 
 // 확장 Zone 셀·차로 영역 (월드 좌표) — 현장 이벤트·비켜서기 자리·CCTV 장애물 판정에 쓴다
+// 확장 Zone 포장·구분 적재: 제품별 팔레트 적재 한도 (4 × 2 × 3단) · 로봇(적재장 쪽 1.25m) · 출하 지게차 집는 자리(팔레트 바깥 1.9m — 통로에서 곧장 들어와 팔레트를 마주 본다)
+// 정밀검사존 영역 (inspzone.js) — 오른쪽 세로 통로(x 30)와 오른쪽 벽 사이 · 뒤쪽 통로(z −32)와 앞쪽 통로(z 9) 사이 · CCTV는 적응가공Zone 전광판에 함께 (cctvview.js camZone)
+export const INSP_AREA = { x0: 31.6, x1: 47.6, z0: -30.5, z1: 7.5 };
+export const inInsp = (p) => p.x > INSP_AREA.x0 && p.x < BUILDING.x1 && p.z > INSP_AREA.z0 && p.z < INSP_AREA.z1;
+export const ZONE_FG_CAP = 24;
+export const zonePack = (Z) => Z.pack && Object.entries(Z.pack.pallets).map(([p, q]) => {
+  const sd = Math.sign(q.z - Z.sink.z) || -1, o = Z.origin;
+  return { product: p, sd, pallet: { x: q.x, z: q.z }, arm: { x: q.x, z: Z.sink.z + sd * 1.25 }, pick: { x: o.x + q.x, z: o.z + q.z + sd * 1.9, aisle: Z.pack.aisle, name: `${Z.code} ${Z.products[p].label} 적재 팔레트` } };
+});
 export const zoneRect = (Z, pad = 0) => ({ x0: Z.origin.x + Z.foot.x0 - pad, x1: Z.origin.x + Z.foot.x1 + pad, z0: Z.origin.z + Z.foot.z0 - pad, z1: Z.origin.z + Z.foot.z1 + pad });
 export const inExtraZone = (p, pad = 0) => EXTRA_ZONES.some((Z) => { const r = zoneRect(Z, pad); return p.x > r.x0 && p.x < r.x1 && p.z > r.z0 && p.z < r.z1; });
 // 셀 바닥(4.6m 정사각형)의 월드 영역 + 설비 높이 — CCTV 시야 가림·5G 안테나 후보 제외

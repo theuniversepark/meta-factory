@@ -258,6 +258,7 @@ export class UI {
   }
   renderDetail() {
     const st = this.detailSt, sim = this.sim;
+    if (st.insp) return this.renderInspCell(st);   // 정밀검사Zone 셀 (inspzone.js)
     if (st.cellId != null) return this.renderZoneCell(st);   // 확장 Zone 셀 (sim.js zoneCells — 정밀조립 셀도 st.zone을 갖고 있어 cellId로 가른다)
     const el = $('detail');
     if (st.standby) {
@@ -303,6 +304,35 @@ export class UI {
       ${this.facLine(st)}
       <div class="btns"><button data-act="fault">⚡ 고장 주입</button><button data-act="pm">🔧 정비 지시</button></div>
       <div class="pcap-box" id="pcapBox"></div>`;
+    this.onDetailRendered?.();
+  }
+
+  // 정밀검사Zone 셀 정보 창 — 검사 장비 · 지금 검사 중인 샘플 · 진행 · 가동률 · 검사 실적 · 판정 결과 (inspzone.js cellInfo)
+  renderInspCell(st) {
+    const I = this.xzones?.insp, f = I?.cellInfo(st.cellId), el = $('detail'); if (!f) return;
+    const d = f.def, legacy = f.mode === 'traditional', S = f.stats;
+    const lab = { IDLE: '대기', BUSY: '검사 중', DONE: '다음 셀 대기 (검사 완료)', ESTOP: '비상정지' }[f.state] ?? f.state;
+    const rb = legacy ? '검사원 1명 (수작업)' : f.robots.length ? `6축 로봇 ${f.robots.length}대` : d.type === 'judge' ? 'AI 판정 에이전트 (엣지 서버)' : 'ID 리더 · 도킹 스테이션';
+    const judge = d.type === 'judge' ? `<span>판정 누적</span><b>OK ${S.ok} · 불확실 ${S.unc} · NG ${S.ng}</b><span>OK율</span><b>${S.done ? ((S.ok / S.done) * 100).toFixed(1) : '0.0'}%</b>` : '';
+    const recent = d.type === 'judge' && f.recent.length ? `<div class="note" style="color:var(--ink2)">최근 판정 · ${f.recent.slice(0, 4).map((r) => `${esc(r.id)} ${r.res === 'ok' ? 'OK' : r.res === 'ng' ? '<b style="color:#ff8a8a">NG</b>' : '<b style="color:#f5b82e">불확실</b>'}`).join(' · ')}</div>` : '';
+    el.innerHTML = `<h3>${esc(st.name)}<button data-act="close">✕</button></h3>
+      <div class="task">정밀검사Zone (AI정밀검사 · QMS) · ${esc(rb)}<br>하는 일: ${esc(d.use)}</div>
+      <div class="bar"><i style="width:${Math.round(f.util * 100)}%;background:#37e8ff"></i></div>
+      <div class="grid">
+        <span>상태</span><b>${esc(lab)}</b>
+        <span>검사 샘플</span><b>${esc(f.item)}${f.state === 'BUSY' ? ` · ${Math.round(f.progress * 100)}%` : ''}</b>
+        <span>도킹 AMR</span><b>${esc(f.amr)}</b>
+        <span>사이클</span><b>${f.cycle.toFixed(0)}초</b>
+        <span>가동률</span><b>${pct(f.util)}</b>
+        <span>처리 누적</span><b>${f.done}개</b>
+        ${judge}
+        <span>샘플 대기</span><b>${f.queue}건</b>
+        <span>검사 대상</span><b>${esc(f.products.join(' · ') || '-')}</b>
+        <span>셀 로봇 ID</span><b>${esc(f.robots.join(' · ') || '-')}</b>
+        <span>데이터</span><b>${legacy ? '검사 성적서 수기 기록 (레거시)' : `QMS 저장 · AAS ${esc(st.id)}`}</b>
+      </div>
+      ${recent}
+      <div class="note" style="color:var(--muted)">샘플링: 정밀조립 30개 · 유연생산 10개 · 적응가공 20개마다 1개 — 판정 불확실은 O-INSPECT 재측정, NG는 해당 Zone 오케스트레이터에 리워크·공정 보정 요청</div>`;
     this.onDetailRendered?.();
   }
 

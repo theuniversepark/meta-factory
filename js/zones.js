@@ -8,11 +8,11 @@ import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { KIT } from './factory.js';
 import { blenderOn, cloneAsset, RENDER } from './blender.js';
 import { pointAt, pathLength } from './line.js';
-import { EXTRA_ZONES, ZONE_FAC, zoneRobotUid, zoneAmrUid } from './zonedefs.js';
+import { EXTRA_ZONES, ZONE_FAC, zoneRobotUid, zoneAmrUid, ZONE_FG_CAP, zonePack } from './zonedefs.js';
 import { BATTERY, moverRadius, moverWidth } from './sim.js';
 export { EXTRA_ZONES };
 
-const { std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, makeRobot, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK, buildWeld, buildGate, buildVision } = KIT;
+const { std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, makeRobot, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK, makeArm, ARM_JOINTS, buildWeld, buildGate, buildVision } = KIT;
 const PI = Math.PI;
 const PC = { shared: 0x2bb3a6, hood: 0xf0a030, door: 0x9a6bff, hblock: 0xf0a030, rcover: 0x9a6bff, ng: 0xd23b3b };
 const USE_CLS = { hood: 'doortrim', hblock: 'doortrim', door: 'eaxle', rcover: 'eaxle' };   // 셀 라벨 색 (주황·보라)
@@ -301,6 +301,9 @@ function buildPort(g, Z, kind) {
       put(textPlane([Z.products[k].label], 2.4, 0.6, hex(PC[k])), 0, 0.08, i ? -3.65 : 3.65, g);
     });
     return { auto, bridge, car, lift };
+  } else if (Z.pack) {   // 포장·구분 적재: AMR 하역 자리 바닥판만 (팔레트·로봇은 ExtraZone.buildPack)
+    put(box(3.2, 0.06, 2.4, MAT.dark), 0, 0.03, 0, g);
+    put(box(3.2, 0.01, 1.5, MAT.lane), 0, 0.065, 0, g);
   } else {
     Object.keys(Z.products).forEach((k, i) => {
       const z = i ? -1.35 : 1.35;
@@ -399,10 +402,11 @@ class ExtraZone {
       const g = put(new THREE.Group(), n.def.x, 0, n.def.z, this.G); g.rotation.y = n.def.rot ?? 0; n.port = buildPort(g, Z, kind);
       if (kind === 'src') { n.stockG = put(new THREE.Group(), 0, 0, 0, g); n.heldG = put(new THREE.Group(), 0, 0, 0, n.port.lift); }
       const el = document.createElement('div'); el.className = 'st-label xz';
-      el.innerHTML = `<div class="nm"><span>${kind === 'src' ? '자재 투입 (AS/RS)' : '양품 구분 적재'}</span><i class="uid">${Z.uidp}-${kind === 'src' ? 'AS' : 'PL'}-01</i></div><div class="row"><span class="chip s-IDLE"></span></div>`;
+      el.innerHTML = `<div class="nm"><span>${kind === 'src' ? '자재 투입 (AS/RS)' : Z.pack ? '포장·구분 적재 (제품별)' : '양품 구분 적재'}</span><i class="uid">${Z.uidp}-${kind === 'src' ? 'AS' : 'PL'}-01</i></div><div class="row"><span class="chip s-IDLE"></span></div>`;
       const label = new CSS2DObject(el); label.position.set(0, 4.0, 0); g.add(label);
       Object.assign(n, { g, el, label, chip: el.querySelector('.chip') });
     }
+    if (Z.pack) this.buildPack();
     // Zone 현황판 (Zone 위 공중, 라벨과 함께 켜고 끔)
     const bel = document.createElement('div'); bel.className = 'xz-board'; bel.style.setProperty('--zc', acc);
     this.board = new CSS2DObject(bel); this.board.position.set(this.titleAt.x, 3.4, this.titleAt.z); this.G.add(this.board); this.boardEl = bel;   // 바닥 Zone 이름 바로 위
@@ -424,6 +428,62 @@ class ExtraZone {
     this.buildWall(root);
     this.reset();
   }
+
+  // 포장·구분 적재 (정밀조립 구분 적재장과 같은 구성 — factory.js buildSink): 제품별 적재 팔레트 · 팔레타이징 로봇(제품 색 받침) · 포장 박스 적재
+  // AMR이 적재장 가운데 서면 그 제품 로봇이 지그 위 제품을 포장 박스째 집어 다음 칸에 쌓는다 → 출하 지게차가 팔레트(8개)씩 트럭으로 (shipping.js planForklift)
+  buildPack() {
+    const Z = this.Z, g = put(new THREE.Group(), 0, 0, 0, this.G); this.packG = g;
+    this.pack = {};
+    for (const q of zonePack(Z)) {
+      const col = PC[q.product], { x, z } = q.pallet;
+      const pad = put(new THREE.Mesh(new THREE.PlaneGeometry(2.9, 1.7), new THREE.MeshStandardMaterial({ color: col, transparent: true, opacity: 0.35, depthWrite: false })), x, 0.02, z, g); pad.rotation.x = -PI / 2;
+      put(box(2.6, 0.12, 1.4, MAT.pallet), x, 0.12, z, g);
+      const mat = std(q.product === 'hood' || q.product === 'hblock' ? 0xc9a36a : 0xb59adf, { roughness: 0.8 });
+      const stack = [];
+      for (let i = 0; i < ZONE_FG_CAP; i++) { const lx = i % 4, lz = Math.floor(i / 4) % 2, ly = Math.floor(i / 8); const b = put(box(0.6, 0.45, 0.6, mat), x - 0.96 + lx * 0.64, 0.41 + ly * 0.47, z - 0.32 + lz * 0.64, g); b.visible = false; stack.push(b); }
+      const lab = put(textPlane([`${Z.products[q.product].label} 팔레트`], 2.4, 0.4, 'rgba(255,255,255,0.9)'), x, 0.03, z + q.sd * 1.05, g);
+      put(cyl(0.55, 0.6, 0.06, std(col, { roughness: 0.5 })), q.arm.x, 0.03, q.arm.z, g);   // 로봇 받침 (제품 색)
+      const idx = Object.keys(this.pack).length;
+      this.pack[q.product] = { ...q, armPos: q.arm, arm: null, stack, mat, col, uid: `${Z.uidp}-RB-PL-${idx + 1}`, idx, lab };
+    }
+    this.packArmsG = put(new THREE.Group(), 0, 0, 0, g);
+  }
+  // 팔레타이징 로봇은 실행마다 새로 만든다 (Blender 모델이 늦게 들어오면 그 모델로 — 셀 로봇 buildCrew와 같음)
+  packArms() {
+    if (!this.pack) return;
+    this.packArmsG.clear();
+    for (const P of Object.values(this.pack)) {
+      const arm = makeArm(std(P.col, { roughness: 0.45, metalness: 0.3 }), 1.2); put(arm.root, P.armPos.x, 0.06, P.armPos.z, this.packArmsG);
+      arm.root.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+      const held = put(box(0.6, 0.45, 0.6, P.mat), 0, -0.25, 0, arm.tip); held.visible = false;
+      arm.root.traverse((o) => { o.userData.stationId = `${this.Z.uidp}_PACK`; o.userData.robotIdx = P.idx; });
+      const sp = idPlate(P.uid); sp.position.set(0, 3.0, 0); arm.root.add(sp);
+      Object.assign(P, { arm, held, sp, robot: null });
+    }
+  }
+  // 팔레타이징 로봇 자세 (진행률 u: 0 대기 → 집기 → 옮기기 → 내려놓기 → 복귀) — 정밀조립 animatePalletizers와 같은 경유점
+  animPack() {
+    if (!this.pack || !Object.values(this.pack)[0]?.arm) return;
+    const s = 1.2, job = this.packJob, legacy = this.mode === 'traditional';
+    const lerpA = (a, b, k) => a.map((v, i) => v + (b[i] - v) * k), ease = (k) => k * k * (3 - 2 * k);
+    for (const [p, P] of Object.entries(this.pack)) {
+      const n = Math.min(ZONE_FG_CAP, this.fgOf(p)); P.stack.forEach((b, i) => (b.visible = i < n));
+      P.arm.root.visible = !legacy; P.sp.visible = this.labelsOn !== false && !legacy;
+      const A = P.armPos, rel = (x, y, z) => armIK(s, x - A.x, y - 0.06, z - A.z);
+      const home = rel(A.x, 1.9, A.z - P.sd * 0.6);
+      let q = home;
+      if (job && job.product === p && !legacy) {
+        const u = Math.min(1, job.u), sk = this.Z.sink, idx = Math.min(ZONE_FG_CAP - 1, n), b = P.stack[idx].position, top = BELT_Y + 0.45;
+        const keys = [[0, home], [0.22, rel(sk.x, top + 0.6, sk.z)], [0.32, rel(sk.x, top, sk.z)], [0.42, rel(sk.x, top + 0.6, sk.z)], [0.7, rel(b.x, b.y + 0.95, b.z)], [0.8, rel(b.x, b.y + 0.25, b.z)], [0.9, rel(b.x, b.y + 0.95, b.z)], [1, home]];
+        const i = keys.findIndex((kf) => kf[0] >= u), [t0, p0] = keys[Math.max(0, i - 1)], [t1, p1] = keys[i];
+        q = lerpA(p0, p1, ease(t1 > t0 ? (u - t0) / (t1 - t0) : 1));
+        P.held.visible = u >= 0.32 && u < 0.8;
+        if (job.c.pm) job.c.pm.visible = u < 0.32;
+      } else P.held.visible = false;
+      P.arm.pose(q[0], q[1], q[2], q[3]);
+    }
+  }
+  fgOf(p) { return this.sim?.zoneFg?.[p] ?? (this.fgLocal?.[p] ?? 0); }
 
   // 바닥 AMR 경로: ① 셀 사이 유도 테이프 (투입구 → 제품별 공정 순서 → 구분 적재장 · NG 분기) ② 스테이션 전용 차로 점선 (복귀 전용로 · 출동 차로 · 진입로)
   // ③ 스테이션 대기 자리 줄 바닥색 · 투입존 밖 대기 자리 테두리 · 바닥 글씨 — 정밀조립Zone 바닥 표시와 같은 색·모양
@@ -536,7 +596,7 @@ class ExtraZone {
     this.buildSrcStock();
     this.stats = { good: {}, ng: 0, rework: 0, released: 0 };
     for (const c of this.order) Object.assign(c, { occ: null, state: 'IDLE', progress: 0, item: null, busy: 0, done: 0 });
-    this.src.occ = null; this.sink.occ = null;
+    this.src.occ = null; this.sink.occ = null; this.packJob = null; this.sinkFull = false; this.fgLocal = {}; this.packArms();
     this.dyn.clear();
     const legacy = modeKey === 'traditional';
     // 처음: 투입 대기열 칸만큼 대기열에, 나머지는 스테이션 대기 줄에
@@ -638,6 +698,16 @@ class ExtraZone {
       get state() { return c.fault ?? c.state; }, get progress() { return c.progress; }, get health() { return zc()?.health ?? 100; },
       get item() { return c.item; }, get robotUids() { return c.robotUids; }, use: c.def.use,
     };
+  }
+  // 팔레타이징 로봇 텔레메트리 (factory.js pick → ExtraZones.cellRobot · 정밀조립 구분 적재장 로봇과 같은 항목)
+  packRobot(idx) {
+    const P = Object.values(this.pack ?? {})[idx]; if (!P) return null;
+    const zone = this, job = () => zone.packJob;
+    const robot = P.robot ??= { root: P.arm.root, kind: 'articulated', tip: P.arm.tip, jointDefs: ARM_JOINTS, joints: P.arm.joints, payload: 30, arm: P.arm, scale: 1.2, anim() {} };
+    const st = this.telePack ??= { id: `${this.Z.uidp}_PACK`, name: `${this.Z.code} 포장·구분 적재`, type: 'sink', zone: this.Z.key, x: this.Z.origin.x + this.Z.sink.x, z: this.Z.origin.z + this.Z.sink.z,
+      get state() { return job() ? 'BUSY' : zone.sinkFull ? 'BLOCKED' : 'IDLE'; }, get progress() { return job()?.u ?? 0; }, health: 100, get item() { return job()?.c.item ?? null; },
+      get robotUids() { return Object.values(zone.pack).map((q) => q.uid); }, use: '포장 박스째 집어 제품별 팔레트에 적재 (8개 = 팔레트 1개 → 출하 지게차)' };
+    return { robot, st };
   }
   // 텔레메트리용 운반 AMR 보기: 공장 좌표 · 상태 (배터리 없음 — 정차 위치 무선 충전)
   teleCarrier(c) {
@@ -779,6 +849,19 @@ class ExtraZone {
       }
       case 'work': if (this.cells[c.at].state === 'BLOCKED') c.state = 'ready'; break;
       case 'unload':
+        if (Z.pack) {   // 포장·구분 적재: 팔레트에 자리가 있으면 그 제품 로봇이 집어 쌓는다 (가득 차면 출하 지게차가 실어 갈 때까지 AMR이 기다린다)
+          const p = c.item.product;
+          if (!c.packing) { if (this.fgOf(p) >= ZONE_FG_CAP) { this.sinkFull = true; break; } this.sinkFull = false; c.packing = true; c.packT = c.timer = Z.unload + 1; this.packJob = { product: p, c, u: 0 }; }
+          c.timer -= dt; this.packJob.u = 1 - Math.max(0, c.timer) / c.packT;
+          if (c.timer > 0) break;
+          c.packing = false; this.packJob = null;
+          if (this.sim?.zoneFg) this.sim.zoneFg[p] = (this.sim.zoneFg[p] ?? 0) + 1; else (this.fgLocal ??= {})[p] = (this.fgLocal[p] ?? 0) + 1;
+          this.sim?.fac?.produced(p);   // FAC: 생산 입고 (확장 Zone 완제품 → 출하 대기)
+          this.stats.good[p] = (this.stats.good[p] ?? 0) + 1;
+          this.detachItem(c); c.item = null; this.sink.occ = null;
+          this.go(c, this.st ? this.returnPath(c) : this.retPath, 'return', this.st ? 'PARK' : 'Q');
+          break;
+        }
         c.timer -= dt;
         if (c.timer <= 0) {
           const p = c.item.product; this.stats.good[p] = (this.stats.good[p] ?? 0) + 1;
@@ -819,6 +902,7 @@ class ExtraZone {
 
   // ── 화면 동기화 (rdt: 실제 초, t: 화면 시간) ─────────────────
   sync(rdt, t, dts) {
+    this.animPack();
     this.animSrc();
     if (this.board2?.g.visible) {   // 전광판 0.5초마다 · 서버 상태등 깜빡임
       this.board2.t -= rdt; if (this.board2.t <= 0) { this.board2.t = 0.5; this.drawWall(); }
@@ -938,7 +1022,8 @@ class ExtraZone {
     this.src.chip.textContent = this.starved ? `자재 대기 · 투입구 원재료 ${raw ?? 0}` : `${this.src.occ ? '적재 중' : '대기'} · ${this.mode === 'traditional' ? '대차' : 'AMR'} 대기 ${q}${raw != null ? ` · 원재료 ${raw}` : ''}`;
     const g = this.stats.good, ps = Object.entries(this.Z.products);
     this.sink.chip.className = 'chip s-' + (this.sink.occ ? 'BUSY' : 'IDLE');
-    this.sink.chip.textContent = ps.map(([k, v]) => `${v.label} ${g[k] ?? 0}`).join(' · ');
+    this.sink.chip.textContent = this.Z.pack ? `${this.sinkFull ? '적재 공간 대기 · ' : ''}${ps.map(([k, v]) => `${v.label} 팔레트 ${this.fgOf(k)}/${ZONE_FG_CAP}`).join(' · ')}` : ps.map(([k, v]) => `${v.label} ${g[k] ?? 0}`).join(' · ');
+    if (this.Z.pack && this.sinkFull) this.sink.chip.className = 'chip s-BLOCKED';
     const s = this.summary();
     this.boardEl.innerHTML = `<b>${this.Z.name}</b><span>${ps.map(([k, v]) => `${v.label} <i>${g[k] ?? 0}</i>`).join(' · ')} · UPH <i>${s.uph}</i> · 가동 셀 <i>${s.busy}/${this.order.length}</i>${this.Z.ng ? ` · NG <i>${this.stats.ng}</i>` : ''}${this.Z.rework ? ` · 리워크 <i>${this.stats.rework}</i>` : ''}</span>`;
   }
@@ -977,8 +1062,8 @@ export class ExtraZones {
   byKey(key) { return this.zones.find((z) => z.Z.key === key); }
   // 셀 로봇 찾기 (factory.js cellRobot): 셀 키(A_1_C03)와 로봇 번호 → { robot, st(텔레메트리용 셀 보기) }
   cellRobot(sid, idx) {
-    for (const z of this.zones) { const c = z.order.find((x) => z.sid(x) === sid); if (c) return c.robots[idx] ? { robot: c.robots[idx], st: z.teleCell(c) } : null; }
-    return null;
+    for (const z of this.zones) { const c = z.order.find((x) => z.sid(x) === sid); if (c) return c.robots[idx] ? { robot: c.robots[idx], st: z.teleCell(c) } : null; if (sid === `${z.Z.uidp}_PACK`) return z.packRobot(idx); }
+    return this.insp?.cellRobot(sid, idx) ?? null;   // 정밀검사존 (inspzone.js)
   }
   // 운반 AMR 찾기 (telemetry.js resolve): id(A-1-AMR01) → { mover(텔레메트리용 보기), obj(3D) }
   // 카메라 대상 (robotcam.js): 셀 로봇 [{ ref, robot(uid), st, r }] · 운반 AMR [{ id, mover(텔레메트리용 보기), c }]
@@ -986,7 +1071,7 @@ export class ExtraZones {
   carriersAll() { return this.zones.flatMap((z) => z.carriers.map((c) => ({ id: c.id, mover: z.teleCarrier(c), c }))); }
   carrier(id) {
     for (const z of this.zones) { const c = z.carriers.find((x) => x.id === id); if (c) return { mover: z.teleCarrier(c), obj: c.g }; }
-    return null;
+    return this.insp?.carrier(id) ?? null;
   }
   summary() { return this.zones.map((z) => ({ key: z.Z.key, code: z.Z.code, name: z.Z.name, products: z.Z.products, byProduct: z.stats.good, ng: z.stats.ng, rework: z.stats.rework, cells: z.order.length, carriers: z.carriers.length, ...z.summary() })); }
 }
@@ -996,4 +1081,5 @@ export const ZONE_VIEWS = {
   flex: [[-4, 36, 10.5], [-4, 0, -22.5]],
   precision: [[-10.5, 34, 34], [-5.5, 0, 0]],
   adapt: [[0, 34, 52], [0, 0, 19]],
+  insp: [[30, 36, 14], [39.5, 0, -11.5]],
 };

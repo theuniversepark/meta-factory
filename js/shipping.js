@@ -6,7 +6,11 @@
 // 화면(월드)에는 직사각형 건물의 오른쪽 벽 위쪽에 90° 시계 방향으로 돌려 놓는다 (shipToWorld): 도크 1개 z −38 (뒷벽과 뒤쪽 통로 사이 모서리) · 트럭은 한 대만
 // (출하 지게차는 정밀조립Zone 뒤 통로(z −9) → 오른쪽 세로 통로로 바로 닿는다)
 // 트럭 움직임은 로컬 좌표로 계산하고(Truck.lx·lz·lh), 바깥(화면·지게차·CCTV)에는 월드 좌표(x·z·heading)로 보인다
-import { BUILDING } from './zonedefs.js';
+import { BUILDING, EXTRA_ZONES, ZONE_FG_CAP, zonePack } from './zonedefs.js';
+import { FG_ZONE_CAP } from './line.js';
+// 확장 Zone 완제품(포장·구분 적재 팔레트) — 제품 → { 이름, 집는 자리 } (zonedefs.js zonePack)
+const ZONE_FG = Object.fromEntries(EXTRA_ZONES.flatMap((Z) => (zonePack(Z) ?? []).map((q) => [q.product, { label: Z.products[q.product].label, zone: Z.code, pick: q.pick }])));
+export const FG_LABEL = { doortrim: '도어트림', eaxle: 'e-axle', ...Object.fromEntries(Object.entries(ZONE_FG).map(([k, v]) => [k, v.label])) };
 export const YARD = {
   wallZ: -20, bays: [20.5], enterX: 2, roadZ: -40,   // 도크 1개 (오른쪽 벽 위 모서리 · 월드 z −38) · 트럭은 도로 북쪽 끝(enterX)에서 들어온다
   truckLen: 10.5, truckW: 2.5, cap: 32,      // 트럭 길이·폭(m), 적재 용량(개 = 팔레트 4개 × 8개)
@@ -91,7 +95,7 @@ export class TruckYard {
       t.go([{ x: bx, z: YARD.roadZ + 3 }, { x: bx + 4, z: YARD.roadZ }, { x: 90, z: YARD.roadZ }], 'depart');
       t.bay = null; t.bayLeft = bx;
       s.stats.trucks = (s.stats.trucks ?? 0) + 1; s.fac?.shipDone(t);   // FAC: 출고 확정
-      const mix = Object.entries(t.by).map(([k, v]) => `${k === 'doortrim' ? '도어트림' : k === 'eaxle' ? 'e-axle' : k} ${v}`).join(' · ');
+      const mix = Object.entries(t.by).map(([k, v]) => `${FG_LABEL[k] ?? k} ${v}`).join(' · ');
       s.log('ok', `${t.id} 만재 출발`, { obs: `적재 ${t.load}/${YARD.cap}개${mix ? ` (${mix})` : ''}`, act: `도크 ${this.bayNo(bx)} 비움 → 다음 트럭 진입` });
     }
   }
@@ -102,10 +106,13 @@ export function planForklift(sim, f) {
   const yard = sim.yard, m = sim.mode;
   const trigger = m.key === 'traditional' ? 16 : YARD.pallet;   // 레거시는 많이 쌓인 뒤에야 움직인다 (작업자 판단)
   let product = null, avail;
+  let zfg = null;
   if (sim.zone) {
-    const p = ['doortrim', 'eaxle'].filter((k) => sim.fgBy[k] >= trigger).sort((a, b) => sim.fgBy[b] - sim.fgBy[a])[0];
+    // 정밀조립 구분 적재장 + 확장 Zone 포장·구분 적재 팔레트 중 적재 한도 대비 가장 많이 찬 쪽부터 (한쪽이 차서 라인이 서지 않게)
+    const zs = sim.zoneFg ?? {}, stock = (k) => (k in sim.fgBy ? sim.fgBy[k] : zs[k]), cap = (k) => (k in sim.fgBy ? FG_ZONE_CAP : ZONE_FG_CAP);
+    const p = [...Object.keys(sim.fgBy), ...Object.keys(zs)].filter((k) => stock(k) >= trigger).sort((a, b) => stock(b) / cap(b) - stock(a) / cap(a))[0];
     if (!p) return false;
-    product = p; avail = sim.fgBy[p];
+    product = p; avail = stock(p); zfg = p in sim.fgBy ? null : zs;
   } else {
     if (sim.fgStock < trigger) return false;
     avail = sim.fgStock;
@@ -114,14 +121,15 @@ export function planForklift(sim, f) {
   const n = Math.min(avail >= 2 * YARD.pallet ? 2 * YARD.pallet : YARD.pallet, avail, YARD.cap - t.load - (t.reserved ?? 0));   // 두 팔레트 이상 쌓였으면 2단으로 한 번에
   if (n <= 0) return false;
   t.reserved = (t.reserved ?? 0) + n;
-  const pick = product === 'eaxle' ? sim.loc.PICK_EA : sim.loc.PICK_DT;
+  const pick = zfg ? ZONE_FG[product].pick : product === 'eaxle' ? sim.loc.PICK_EA : sim.loc.PICK_DT;
   // 도크 앞(벽에서 2.6m)에서 트럭 쪽을 보고 서서 포크를 적재함 높이로 올린 뒤 들어가고, 내려놓으면 포크를 넣은 채 반듯이 후진해 나온 뒤 돈다
-  const bx = t.bay, dock = { ...shipToWorld(bx, YARD.wallZ + 2.6), aisle: 'B', name: `출하 도크 ${yard.bayNo(bx)}` };
-  const inside = { ...shipToWorld(bx, YARD.wallZ + 0.7), aisle: 'B', name: `${t.id} 적재함` };   // 도크 레벨러 끝에서 포크를 적재함에 넣어 내려놓는다
-  const pName = product === 'eaxle' ? 'e-axle' : product === 'doortrim' ? '도어트림' : '완제품';
+  const bx = t.bay, dock = { ...shipToWorld(bx, YARD.wallZ + 2.6), aisle: 'BB', name: `출하 도크 ${yard.bayNo(bx)}` };
+  const inside = { ...shipToWorld(bx, YARD.wallZ + 0.7), aisle: 'BB', name: `${t.id} 적재함` };   // 도크 레벨러 끝에서 포크를 적재함에 넣어 내려놓는다
+  const pName = FG_LABEL[product] ?? '완제품';
   f.setTask(`${pName} 출하 → ${t.id}`, [
     { go: pick },
     { wait: m.key === 'traditional' ? 8 : 5, done: () => {
+      if (zfg) { const k = Math.min(n, zfg[product]); zfg[product] -= k; f.load = { type: 'fg', n: k, product }; return; }   // 확장 Zone 팔레트
       const k = Math.min(n, product ? sim.fgBy[product] : sim.fgStock);
       if (product) sim.fgBy[product] -= k;
       sim.fgStock -= k; f.load = { type: 'fg', n: k, product };
@@ -131,14 +139,14 @@ export function planForklift(sim, f) {
     { wait: m.key === 'traditional' ? 6 : 4, done: () => {
       const k = f.load?.n ?? 0; f.load = null;
       if (t.state === 'dock') yard.unload(t, k, product);
-      else { sim.fgStock += k; if (product) sim.fgBy[product] += k; t.reserved = 0; }   // 그 사이 트럭이 떠났으면 되돌린다
+      else { if (zfg) zfg[product] += k; else { sim.fgStock += k; if (product) sim.fgBy[product] += k; } t.reserved = 0; }   // 그 사이 트럭이 떠났으면 되돌린다
     } },
     { go: dock, via: [], rev: true },
     // 복귀: 도크 앞 줄을 따라 곧장 옆의 대기 자리(도크 왼쪽)로 — 통로까지 내려갔다 올라오지 않고 지나쳤다 되돌아오지도 않는다 (서면 벽 쪽을 보고 주차)
     { go: f.home, via: [] },
   ]);
   sim.log(m.agentActive ? 'act' : 'warn', `출하 지게차 배차 → ${t.id}`, {
-    obs: sim.zone ? `구분 적재장 ${pName} ${avail}개 (기준 ${trigger}개)` : `완제품 ${avail}개`,
+    obs: zfg ? `${ZONE_FG[product].zone} 포장·구분 적재 ${pName} ${avail}개 (기준 ${trigger}개)` : sim.zone ? `구분 적재장 ${pName} ${avail}개 (기준 ${trigger}개)` : `완제품 ${avail}개`,
     dec: `트럭 ${t.id} 적재 ${t.load}/${YARD.cap}개`,
     act: `${f.id} 팔레트 ${n}개 → 도크 ${yard.bayNo(bx)}`,
   });

@@ -1479,9 +1479,9 @@ export class FactoryView {
     // 앞쪽 통로(z 9)는 확장동 AGV 충전 패드 앞까지, 앞쪽 시설 통로(z 31)는 확장동 물류존(AGV 원자재 상차·부품 피킹) 앞까지 이어지고, 왼쪽 세로 통로는 동선 계산의 교차 통로(x −35.5)와 같은 자리
     // 정밀조립Zone 앞뒤 통로(z ±9) · 확장 Zone 바깥 시설 통로(앞 FF · 뒤 BB) · 좌우 끝 세로 통로(시설 ↔ 정밀조립Zone 연결)
 const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
-    // 앞뒤 통로는 넓힌 오른쪽(x 48 벽 앞)까지 이어 그린다 — 출하 지게차가 오른쪽 세로 통로(x 30)에서 벽 쪽 도크로 간다
+    // 앞뒤 통로는 넓힌 오른쪽(x 48 벽 앞)까지 이어 그린다 — 단 가운데 통로(z −9)는 오른쪽 세로 통로(x 30)까지만: 그 오른쪽은 정밀검사존 (inspzone.js) · 출하 지게차는 뒤쪽 통로(z −32)로 도크에 간다
     const LX1 = BUILDING.x1 - 1.3, lane = (x0, z) => [(x0 + LX1) / 2, z, LX1 - x0, 2.6];
-    const lanes = [lane(-49, 9), lane(-37, -9), lane(-45.2, fr(9)), lane(-42, bk(-9)), [-35.5, VZ, 2.6, VL], [30, VZ, 2.6, VL], [(-39.6 - 36.8) / 2, AISLE.T, 2.8, 2.6]];   // 마지막: 정비실 앞 짧은 통로 (정비실 출입구 → 왼쪽 세로 통로)   // 입고 지게차 운행 구간은 바닥 초록 전용 표시로만 구분
+    const lanes = [lane(-49, 9), [(-37 + 31.3) / 2, -9, 31.3 + 37, 2.6], lane(-45.2, fr(9)), lane(-42, bk(-9)), [-35.5, VZ, 2.6, VL], [30, VZ, 2.6, VL], [(-39.6 - 36.8) / 2, AISLE.T, 2.8, 2.6]];   // 마지막: 정비실 앞 짧은 통로 (정비실 출입구 → 왼쪽 세로 통로)   // 입고 지게차 운행 구간은 바닥 초록 전용 표시로만 구분
     for (const [x, z, w, d] of lanes) {
       const l = put(new THREE.Mesh(laneGeo(w, d), MAT.lane), x, 0.005, z, r); l.rotation.x = -Math.PI / 2; l.receiveShadow = true;
       for (const s of [-1, 1]) {
@@ -3278,6 +3278,6 @@ function lerpAngle(a, b, k) {
 // 확장 Zone(js/zones.js — 유연생산Zone · 적응가공Zone)이 정밀조립Zone과 같은 재질·로봇·설비 모델을 쓰도록 내보낸다
 export const KIT = {
   std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, ZONE_COLOR,
-  makeRobot, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK,
+  makeRobot, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK, makeArm, ARM_JOINTS,
   buildWeld, buildSort, buildGate, buildVision, fillBins,
 };

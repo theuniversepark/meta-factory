@@ -11,7 +11,8 @@ import { HybridAgent, compareArchitecturesAsync } from './multiagent.js';
 import { agentStructureHTML } from './agentinfo.js';
 import { FactoryView } from './factory.js';
 import { ExtraZones, ZONE_VIEWS, EXTRA_ZONES } from './zones.js';
-import { ZONE_LABEL } from './zonedefs.js';
+import { InspZone } from './inspzone.js';
+import { ZONE_LABEL, inInsp, areaZone, zoneRect } from './zonedefs.js';
 import { UI } from './ui.js';
 import { LLMController } from './llm.js';
 import { LineDesigner } from './designer.js';
@@ -20,7 +21,7 @@ import { DataHub, PUBLISHER_ID, WRITER_GROUP } from './datahub.js';
 import { PacketCapture } from './pcap.js';
 import { RENDER, loadBlenderAssets, applyRenderEnv, resetRenderEnv, primKey, blenderize } from './blender.js';
 import { FAC_PRODUCTS, FAC_LOCS } from './fac.js';
-import { RobotCamWall, ZoneCamWall, COLS as CAM_COLS } from './robotcam.js';
+import { RobotCamWall, ZoneCamWall, InspCamWall, COLS as CAM_COLS } from './robotcam.js';
 import { GateView } from './gateview.js';
 import { EpisodeRecorder, buildEpisodesZip, EP_HZ, SAMPLE } from './vla.js';
 import { impactHTML, impactClick } from './impactview.js';
@@ -61,7 +62,7 @@ host.appendChild(labelRenderer.domElement);
 const scene = new THREE.Scene();
 
 // ── 카메라: 3D 원근 ─────────────────
-const target = new THREE.Vector3(-1.5, 0, 0);   // 건물 가운데 (생산동 + 왼쪽 물류 확장동, 앞뒤로 유연생산 · 정밀조립 · 적응가공 3 Zone)
+const target = new THREE.Vector3(-1.5, 0, 0);   // 건물 가운데 (생산동 + 왼쪽 물류 확장동, 앞뒤로 유연생산 · 정밀조립 · 적응가공 3 Zone + 오른쪽 정밀검사Zone)
 const persp = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.5, 400);
 persp.position.set(-4.5, 80, 95);
 const ctlP = new OrbitControls(persp, labelRenderer.domElement);
@@ -101,10 +102,11 @@ makeComposer();
 // ── 시뮬레이션 ─────────────────────────────
 const view = new FactoryView(scene);
 const xzones = new ExtraZones(scene);   // 정밀조립Zone 뒤 유연생산Zone · 앞 적응가공Zone (zonedefs.js)
+const insp = new InspZone(xzones.root); xzones.insp = insp;   // 정밀검사존 (오른쪽 세로 통로와 오른쪽 벽 사이 · inspzone.js) — 세 생산 Zone 샘플링 검사
 view.xzones = xzones;   // 확장 Zone 셀 로봇·운반 AMR 클릭 · 텔레메트리 (factory.js cellRobot · pickTargets)
 const hub = new DataHub();
 const camWall = new RobotCamWall(scene, renderer);   // 로봇 비전 관제 디스플레이 (피지컬AI 단계)
-const zoneWalls = ['flex', 'adapt'].map((k) => new ZoneCamWall(scene, renderer, k));   // 확장 Zone 로봇 비전 관제 디스플레이 — 각 Zone 전광판 오른쪽 (robotcam.js ZoneCamWall)
+const zoneWalls = [...['flex', 'adapt'].map((k) => new ZoneCamWall(scene, renderer, k)), new InspCamWall(scene, renderer, insp.Z.cams)];   // + 정밀검사Zone (오른쪽 벽 전광판 왼쪽)   // 확장 Zone 로봇 비전 관제 디스플레이 — 각 Zone 전광판 오른쪽 (robotcam.js ZoneCamWall)
 const cctvView = new CCTVView(scene, () => camWall.renderer, scene);   // CCTV 전체 분할 영상(녹화·AI 분석) · CCTV 영상 창
 const cctvBoards = cctvView.boards = ['main', 'flex', 'adapt'].map((k) => new CCTVBoard(cctvView, scene, k));   // Zone별 CCTV 전광판 — 자기 Zone 관할 카메라만 (cctvview.js CCTVBoard)
 const cctvRec = new CCTVRecorder(cctvView, () => camWall.renderer), cctvClip = new CameraClip();
@@ -199,7 +201,7 @@ function setRender(style) {
   RENDER.style = style; document.body.dataset.render = style;
   if (!sim) return;
   view.setup(sim, labelsOn, changedIds); view.selected = null; view.selectRobot(null);
-  xzones.setup(sim, labelsOn);
+  xzones.setup(sim, labelsOn); insp.setup(sim, xzones, labelsOn);
   camWall.setup(sim, view); for (const w of zoneWalls) w.setup(sim, view); cctvView.setup(sim, view); for (const b of cctvBoards) b.setup(sim);
   applyLook(); RENDER.swapped = 0; blenderize(scene);
 }
@@ -212,7 +214,7 @@ function start(key) {
   agent = agentArch === 'hybrid' ? new HybridAgent(sim) : new FactoryAgent(sim);
   document.querySelectorAll('#archSeg button').forEach((b) => b.classList.toggle('on', b.dataset.arch === agentArch));
   view.setup(sim, labelsOn, changedIds);
-  xzones.setup(sim, labelsOn);
+  xzones.setup(sim, labelsOn); insp.setup(sim, xzones, labelsOn);
   view.selected = null;
   hub.reset(sim, view, xzones);
   camWall.setup(sim, view); for (const w of zoneWalls) w.setup(sim, view);
@@ -257,7 +259,7 @@ const cellBadge = (id) => `${ZONE_CELLS[id].no}.${ZONE_CELLS[id].label.replace('
 // 왼쪽 패널 위 Zone 카드: 제목 드롭다운으로 정밀조립Zone(혼류·사용자 라인) · A-1 유연생산Zone · A-2 적응가공Zone을 고른다
 // 확장 Zone은 js/zones.js 시뮬레이션(셀 상태·혼류 비율·실적)을 보여 준다 — 고른 Zone과 확장 Zone 혼류 비율은 다음 실행 때도 유지
 const ZONE_PICK_KEY = 'metafactory.zonePick.v1';
-const ZONE_PICKS = [{ key: 'precision', code: '', name: ZONE_NAME, sub: '도어트림 · e-axle 혼류 · 6셀' }, ...EXTRA_ZONES.map((Z) => ({ key: Z.key, code: Z.code, name: Z.name, sub: `${Z.sub} · ${Object.keys(Z.cells).length}셀` }))];
+const ZONE_PICKS = [{ key: 'precision', code: '', name: ZONE_NAME, sub: '도어트림 · e-axle 혼류 · 6셀' }, ...EXTRA_ZONES.map((Z) => ({ key: Z.key, code: Z.code, name: Z.name, sub: `${Z.sub} · ${Object.keys(Z.cells).length}셀` })), { key: 'insp', code: '정밀검사', name: '정밀검사Zone', sub: `AI정밀검사(QMS) · 샘플링 검사 · ${Object.keys(insp.Z.cells).length}셀` }];
 const XZ_CLS = { hood: 'doortrim', hblock: 'doortrim', door: 'eaxle', rcover: 'eaxle', ng: 'ng' };   // 셀 색 (주황·보라·빨강)
 const XZ_LAB = { BUSY: '가동', IDLE: '대기', BLOCKED: '출구 대기', ESTOP: '정지' };
 const zonePick = (() => {
@@ -277,6 +279,7 @@ function zoneDropdown() {
   return `<div class="zc-dd"><button type="button" class="zc-dd-btn" data-dd aria-haspopup="listbox" title="Zone 선택">${escH(cur.name)} <i>▾</i></button><div class="zc-dd-menu" role="listbox">${items}</div></div>`;
 }
 function renderZoneCard() {
+  if (zonePick.view === 'insp') return renderInspZoneCard();
   if (zonePick.view !== 'precision') return renderXzZoneCard();
   const zone = isZone(currentLine);
   const seg = `<button data-slot="zone" class="${lineSlot === 'zone' ? 'on' : ''}">정밀조립Zone (혼류)</button><button data-slot="custom" class="${lineSlot === 'custom' ? 'on' : ''}">사용자 라인</button>`;
@@ -325,7 +328,56 @@ function updateXzZoneCard() {
     + (Z.ng ? ` · NG <b>${z.stats.ng}</b>` : '') + (Z.rework ? ` · 리워크 <b>${z.stats.rework}</b>` : '')
     + `<br>🛻 ${z.mode === 'traditional' ? '대차' : 'AMR'} ${z.carriers.length}대 · 적재 운반 <b>${n('move', 'work', 'ready')}</b> · 빈차 복귀 <b>${n('return')}</b> · 대기 <b>${n('queue', 'toSrc', 'load', 'unload')}</b> · 투입 <b>${z.stats.released}</b>`;
 }
-// 3 Zone 카드: 카메라 바로가기 + 유연생산·적응가공 Zone 생산 현황
+// 정밀검사Zone 카드: 셀 목록(상태 칩) · 샘플링 · 판정 실적 · 검사 AMR · 흐름 (inspzone.js)
+function renderInspZoneCard() {
+  const S = insp.Z;
+  const cellRow = (id) => { const c = S.cells[id]; return `<div class="zc-cell p-shared" data-icell="${id}"><b>${escH(c.no)}</b><span>${escH(c.label)}</span><em>${escH(c.use)}</em><i class="chip" data-ichip="${id}"></i></div>`; };
+  zoneCard.innerHTML = `<div class="zc-h">${zoneDropdown()}<small>메타팩토리 테스트베드 · ${Object.keys(S.cells).length}셀 샘플링 검사</small></div>
+    <div class="zc-sub">샘플링 (양품 N개마다 1개) · 정밀조립 ${S.sample.main} · 유연생산 ${S.sample.flex} · 적응가공 ${S.sample.adapt}</div>
+    <div class="zc-cells">${cellRow('DOCK')}
+      <div class="zc-branch"><div class="zc-line p-doortrim"><small>▶ 비전 · 3D 스캔·UT (판넬 · 도어트림)</small>${cellRow('VIS')}${cellRow('SCAN')}</div>
+      <div class="zc-line p-eaxle"><small>▶ 형상 · 정밀 재측정 (블록 · 커버 · e-axle)</small>${cellRow('ATOS')}${cellRow('OINS')}</div></div>
+      ${cellRow('JUDGE')}</div>
+    <div class="zc-amr" id="zcAmr"></div>
+    <div class="zc-flow">샘플 수거 → 0.접수 → <span class="t-dt">1.비전 → 2.3D스캔·UT</span> / <span class="t-ea">4.ATOS → 3.O-INSPECT</span> → 5.AI 판정 (불확실 → 3.재측정 · NG → 리워크·공정 환류)</div>`;
+  updateZoneCard();
+}
+function updateInspZoneCard() {
+  const lab = { IDLE: '대기', BUSY: '검사 중', DONE: '다음 셀 대기' }, halted = !!insp.halted;
+  for (const el of zoneCard.querySelectorAll('[data-ichip]')) {
+    const c = insp.cells[el.dataset.ichip], s = halted ? 'ESTOP' : c.state === 'DONE' ? 'BLOCKED' : c.state;
+    el.className = 'chip s-' + s;
+    el.textContent = (halted ? '정지' : lab[c.state] ?? c.state) + (c.state === 'BUSY' && c.item ? ` · ${insp.Z.products[c.item.product][1]}` : '');
+  }
+  const s = insp.stats, n = (...k) => insp.carriers.filter((c) => k.includes(c.state)).length, amr = document.getElementById('zcAmr');
+  if (amr) amr.innerHTML = `샘플 <b>${s.samples}</b> · 판정 <b>${s.done}</b> · OK율 <b>${s.done ? ((s.ok / s.done) * 100).toFixed(1) : '0.0'}%</b> · 불확실 <b>${s.unc}</b> · NG <b>${s.ng}</b> · 대기 <b>${insp.queue.length}</b>`
+    + `<br>🛻 검사 AMR ${insp.carriers.length}대 · 수거·이송 <b>${n('out', 'load', 'in', 'queue')}</b> · 검사 <b>${n('move', 'work', 'ready')}</b> · 복귀·대기 <b>${n('home', 'park')}</b>`;
+}
+// 3D 화면에서 누른 곳(Zone 영역 · 그 Zone의 로봇 · 설비 · AMR)의 Zone → 왼쪽 Zone 카드 드롭다운을 그 Zone으로
+const UIDP_ZONE = { QIS: 'insp', ...Object.fromEntries(EXTRA_ZONES.map((Z) => [Z.uidp, Z.key])) };
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), groundHit = new THREE.Vector3();
+function zoneOfClick(hit, r) {
+  if (hit?.type === 'zcell') return hit.zone;
+  if (hit?.type === 'cell') return UIDP_ZONE[String(hit.stationId).split('_')[0]] ?? 'precision';
+  if (hit?.type === 'station') return 'precision';
+  if (hit?.type === 'mover') {
+    if (insp.carriers.some((c) => c.id === hit.id)) return 'insp';
+    const Z = EXTRA_ZONES.find((z) => hit.id.startsWith(`${z.code}-AMR`)); if (Z) return Z.key;
+    if (sim.carriers.some((c) => c.id === hit.id)) return 'precision';
+  }
+  if (!r.ray.intersectPlane(groundPlane, groundHit)) return null;
+  const p = groundHit;
+  if (inInsp(p)) return 'insp';
+  for (const Z of EXTRA_ZONES) { const q = zoneRect(Z, 1); if (p.x > q.x0 && p.x < q.x1 && p.z > q.z0 && p.z < q.z1) return Z.key; }
+  const a = areaZone(p); if (a !== 'main') return a;
+  if (p.x > -36.8 && p.x < 31.3 && p.z > -10.3 && p.z < 10.3) return 'precision';   // 정밀조립Zone (좌우 세로 통로 · 앞뒤 통로 사이)
+  return null;
+}
+function selectZone(key) {
+  if (!key || key === zonePick.view || !ZONE_PICKS.some((z) => z.key === key)) return;
+  zonePick.view = key; saveZonePick(); renderZoneCard();
+}
+// 4 Zone 카드: 카메라 바로가기 + 유연생산·정밀조립·적응가공 생산 현황 · 정밀검사 판정 현황
 const xzCard = document.getElementById('xzCard');
 function flyTo(key) {
   const [p, t] = ZONE_VIEWS[key];
@@ -340,13 +392,15 @@ function updateXzCard() {
   // 정밀조립Zone (메인 시뮬레이션): 제품별 양품 · UPH · 가동 셀 · 불량 배출 — 확장 Zone 행과 같은 꼴
   const P = sim.processing.filter((st) => !st.standby), pg = sim.stats.goodBy ?? {};
   const prow = row('precision', '정밀조립Zone', `도어트림 <b>${pg.doortrim ?? 0}</b> · e-axle <b>${pg.eaxle ?? 0}</b>`, `UPH <b>${Math.round(sim.kpi().uphRecent || 0)}</b> · 가동 셀 <b>${P.filter((st) => st.state === 'BUSY').length}/${P.length}</b> · 불량 <b>${sim.stats.rejected ?? 0}</b>`);
-  const zs = xzones.summary(), rows = [...zs.filter((z) => z.key === 'flex').map(zrow), prow, ...zs.filter((z) => z.key !== 'flex').map(zrow)].join('');   // 위 유연생산 · 가운데 정밀조립 · 아래 적응가공
-  const html = `<div class="zc-h"><b>메타팩토리 3 Zone</b></div>`
-    + `<div class="seg small xz-views"><button type="button" data-view="all">전체</button><button type="button" data-view="flex">유연생산</button><button type="button" data-view="precision">정밀조립</button><button type="button" data-view="adapt">적응가공</button></div>${rows}`;
+  const qs = insp.stats, irow = row('insp', '정밀검사Zone', `샘플 <b>${qs.samples}</b> · 판정 <b>${qs.done}</b> · OK율 <b>${qs.done ? ((qs.ok / qs.done) * 100).toFixed(1) : '0.0'}%</b>`, `가동 셀 <b>${insp.order.filter((c) => c.state === 'BUSY').length}/${insp.order.length}</b> · NG <b>${qs.ng}</b> · 대기 <b>${insp.queue.length}</b>`);
+  const zs = xzones.summary(), rows = [...zs.filter((z) => z.key === 'flex').map(zrow), prow, ...zs.filter((z) => z.key !== 'flex').map(zrow), irow].join('');   // 위 유연생산 · 가운데 정밀조립 · 아래 적응가공 · 오른쪽 정밀검사   // 위 유연생산 · 가운데 정밀조립 · 아래 적응가공
+  const html = `<div class="zc-h"><b>메타팩토리 4 Zone</b></div>`
+    + `${rows}`;
   if (xzCard.dataset.h !== html) { xzCard.dataset.h = html; xzCard.innerHTML = html; }
 }
 function updateZoneCard() {
   updateInjectButtons();
+  if (zonePick.view === 'insp') return updateInspZoneCard();
   if (zonePick.view !== 'precision') return updateXzZoneCard();
   if (!isZone(currentLine)) return;
   for (const el of zoneCard.querySelectorAll('[data-chip]')) {
@@ -385,6 +439,8 @@ zoneCard.addEventListener('click', (e) => {
     });
     return;
   }
+  const ic = e.target.closest('[data-icell]');
+  if (ic) { const c = insp.Z.cells[ic.dataset.icell]; persp.position.set(c.x - 10, 14, c.z + 10); ctlP.target.set(c.x, 0, c.z); ctlP.update(); return; }   // 정밀검사Zone 셀: 카메라를 그 셀로
   const xc = e.target.closest('[data-xcell]');
   if (xc) {   // 확장 Zone 셀: 카메라를 그 셀로
     const Z = EXTRA_ZONES.find((z) => z.key === zonePick.view), c = Z.cells[xc.dataset.xcell];
@@ -436,7 +492,7 @@ document.getElementById('speedSeg').addEventListener('click', (e) => {
 const playBtn = document.getElementById('playBtn');
 playBtn.addEventListener('click', () => { running = !running; playBtn.textContent = running ? '❚❚' : '▶'; });
 // 하단 이벤트 주입(설비 고장 · 자재 공급 차질 · 현장 이벤트)은 왼쪽 Zone 카드에서 고른 Zone에 발생하고, 그 Zone 오케스트레이터가 대응한다
-const pickZone = () => (zonePick.view === 'precision' ? null : zonePick.view);   // null = 정밀조립Zone
+const pickZone = () => (zonePick.view === 'precision' || zonePick.view === 'insp' ? null : zonePick.view);   // null = 정밀조립Zone (정밀검사Zone 시나리오 주입은 정밀조립 오케스트레이터가 맡는다)
 document.getElementById('btnFault').addEventListener('click', () => {
   const z = pickZone();
   const cands = z ? sim.zoneCells.filter((c) => c.zone === z && c.state === 'OK') : sim.processing.filter((s) => !s.standby && s.state !== 'DOWN' && s.state !== 'MAINT');
@@ -484,7 +540,7 @@ function updateInjectButtons() {
   }
 }
 document.getElementById('btnLabels').addEventListener('click', (e) => {
-  labelsOn = !labelsOn; e.currentTarget.classList.toggle('on', labelsOn); view.setLabels(labelsOn); xzones.setLabels(labelsOn);
+  labelsOn = !labelsOn; e.currentTarget.classList.toggle('on', labelsOn); view.setLabels(labelsOn); xzones.setLabels(labelsOn); insp.setLabels(labelsOn);
 });
 // 에이전트 구조 전환 (운전 중에도): 의사결정 기록·쿨다운·고속 운전 상태를 넘겨받는다
 function setArch(arch) {
@@ -808,6 +864,7 @@ labelRenderer.domElement.addEventListener('pointerup', (e) => {
   }
   // 로봇(셀 로봇·AMR·AGV·휴머노이드·사족보행)을 누르면 관절·센서 텔레메트리, 설비를 누르면 설비 상세
   const hit = view.pick(ray.intersectObjects(view.pickTargets(), true));
+  selectZone(zoneOfClick(hit, ray));   // 누른 Zone으로 왼쪽 Zone 카드 드롭다운 자동 전환
   if (hit?.type === 'cctv') { closePopups(['cctvPanel', 'cctvCard']); openCctv(hit.id); return; }
   if (hit?.type === 'gnb') { closePopups(['gnbPanel', 'net5gCard']); openGnb(hit.id); return; }
   closePopups('detail');   // 로봇·설비를 누르거나 빈 곳을 누르면 CCTV·기지국 창은 닫는다
@@ -817,6 +874,7 @@ labelRenderer.domElement.addEventListener('pointerup', (e) => {
     return;
   }
   view.selectRobot(null);
+  if (hit?.type === 'zcell' && hit.zone === 'insp') { view.selected = null; ui.showDetail({ insp: true, id: `QIS_${hit.cellId}`, cellId: hit.cellId, name: `정밀검사 ${insp.Z.cells[hit.cellId]?.label ?? hit.cellId}` }); return; }   // 정밀검사존 셀 정보 창
   if (hit?.type === 'zcell') { const zc = sim.zoneCell(hit.zone, hit.cellId); if (zc) { view.selected = null; ui.showDetail(zc); return; } }   // 확장 Zone 셀 정보 창 (sim.js zoneCells — 고장 주입·정비 지시는 정밀조립 셀과 같은 함수)
   const st = hit && (sim.stations.find((s) => s.id === hit.id) ?? sim.standby.find((s) => s.id === hit.id));
   if (st) { view.selected = hit.id; ui.showDetail(st); }
@@ -1221,7 +1279,7 @@ function frame() {
     let left = rdt * speed;
     while (left > 1e-6) {
       const h = Math.min(0.1, left);
-      sim.step(h); agent.update(h); xzones.step(h, sim);
+      sim.step(h); agent.update(h); xzones.step(h, sim); insp.step(h, !!xzones.halted);
       left -= h;
     }
     llm.update();
@@ -1231,13 +1289,13 @@ function frame() {
   pcapVideoTick(rdt);
   facPushTick(rdt);
   view.update(rdt, running, speed);
-  xzones.update(rdt, running && !llm.holdSim, speed);
+  xzones.update(rdt, running && !llm.holdSim, speed); insp.update(rdt, running && !llm.holdSim, speed);
   keyPan(rdt, shiftHeld);
   netT += rdt; if (netT > 1 && !netCard.hidden) { netT = 0; renderNetCard(); }
   gnbT += rdt; if (gnbT > 1 && gnbSel) { gnbT = 0; renderGnb(); }
   controls.update();
   uiTimer += rdt; screenTimer += rdt;
-  if (uiTimer > 0.25) { uiTimer = 0; ui.update(); view.updateLabels(); xzones.updateLabels(); updateZoneCard(); updateXzCard(); orchView.tick(); gateView.tick(); updateAlarmButtons(); updateCmdUI(); clockEl.title = `기준 시계 (UTC) ${hub.iso()} · 모든 데이터·메시지가 이 시각을 씁니다`; }
+  if (uiTimer > 0.25) { uiTimer = 0; ui.update(); view.updateLabels(); xzones.updateLabels(); insp.updateLabels(); updateZoneCard(); updateXzCard(); orchView.tick(); gateView.tick(); updateAlarmButtons(); updateCmdUI(); clockEl.title = `기준 시계 (UTC) ${hub.iso()} · 모든 데이터·메시지가 이 시각을 씁니다`; }
   robotTimer += rdt;
   if (view.telemetry && robotTimer > 0.12) { robotTimer = 0; ui.renderRobot(view.telemetry.snapshot(), hub.robotCounts(view.telemetry)); }
   pcapBoxT += rdt; if (pcapBoxT > 0.5 && ui.robotMode && !document.getElementById('detail').classList.contains('hidden') && !document.getElementById('pcapBox')?.contains(document.activeElement)) { pcapBoxT = 0; renderPcapBox(); }
@@ -1768,4 +1826,4 @@ fcBody.addEventListener('click', (e) => {
   const sf = e.target.closest('[data-sec-flow]'); if (sf) { secFlowSel = +sf.dataset.secFlow; renderFacosView(true); }
 });
 
-window.__twin = { cctvBoards, zoneWalls, xzones, flyTo, primKey, setRender, RENDER, openGnb: (id) => openGnb(id), cctvRec, robotRec, cctvView, epRec, get sim() { return sim; }, get agent() { return agent; }, view, ui, hub, camWall, orchView, persp, ctlP, llm };
+window.__twin = { insp, cctvBoards, zoneWalls, xzones, flyTo, primKey, setRender, RENDER, openGnb: (id) => openGnb(id), cctvRec, robotRec, cctvView, epRec, get sim() { return sim; }, get agent() { return agent; }, view, ui, hub, camWall, orchView, persp, ctlP, llm };

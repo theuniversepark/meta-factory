@@ -5,7 +5,7 @@
 // 연기 검출(D-Fire 학습 모델), 지오펜스 침입 경보 — 장면의 실제 위치·크기를 카메라로 투영해 모델 출력을 만든다.
 import { SHIP } from './shipping.js';
 import { INBOUND } from './receiving.js';
-import { bk, fr, LEFT_WALL, ZONE_FAC, areaZone } from './zonedefs.js';
+import { bk, fr, LEFT_WALL, ZONE_FAC, areaZone, inInsp } from './zonedefs.js';
 import * as THREE from 'three';
 import { moverRadius } from './sim.js';
 import { AI_MODELS, EVENT_MODEL, blocked } from './cctv.js';
@@ -64,7 +64,8 @@ export class CCTVView {
   place(c) {
     if (c.region === 'yardIn') return '입고 트럭 야드'; if (c.region === 'yardOut') return '출하 트럭 야드';
     const st = [...this.sim.stations].sort((a, b) => Math.hypot(a.x - c.x, a.z - c.z) - Math.hypot(b.x - c.x, b.z - c.z))[0];
-    if (c.x < -38) return c.z > INBOUND.dockZ - 4 ? '입고 도크 · 입고 지게차' : c.z > 17.5 ? '물류존 · 물류 선반' : c.z > 2.5 ? 'AGV 충전' : c.z < -19 ? (c.x > -44 ? '로봇 스테이션 (사족보행·드론)' : 'AMR 대기열') : c.z > -11 && c.x > -44 ? '정비실' : 'AMR 대기열 · 출동·복귀 차로'; if (c.x > SHIP.wallX - 8 && c.z < -14 && c.z > bk(-20)) return '출하 도크';
+    if (inInsp(c)) { const I = this.sim.inspCells ?? [], n = [...I].sort((a, b) => Math.hypot(a.x - c.x, a.z - c.z) - Math.hypot(b.x - c.x, b.z - c.z))[0]; return n ? `정밀검사Zone · ${n.label}` : '정밀검사Zone'; }
+    if (c.x < -38) return c.z > INBOUND.dockZ - 4 ? '입고 도크 · 입고 지게차' : c.z > 17.5 ? '물류존 · 물류 선반' : c.z > 2.5 ? 'AGV 충전' : c.z < -19 ? (c.x > -44 ? '로봇 스테이션 (사족보행·드론)' : 'AMR 대기열') : c.z > -11 && c.x > -44 ? '정비실' : 'AMR 대기열 · 출동·복귀 차로'; if (c.x > SHIP.wallX - 8 && c.z < -31 && c.z > bk(-20)) return '출하 도크';
   if (c.z < bk(-9)) return '관제실 · 뒤쪽 시설 통로';
   if (c.z < -11) return '유연생산Zone';
   if (c.z > 11 && c.z < fr(9)) return '적응가공Zone';
@@ -221,11 +222,11 @@ export { CLS as CCTV_CLASSES };
 // 정밀조립(왼쪽 벽) · 유연생산 · 적응가공(각 Zone 전광판 왼쪽) — 자기 Zone 관할 구역(zonedefs.js areaZone: Zone 셀 + 그 Zone 시설)을 비추는 카메라만
 // 영상은 새로 그리지 않고 전체 분할 영상(CCTVView 렌더 타깃)에서 그 카메라 칸을 UV로 잘라 다시 배치한다 (GPU 부담 그대로) · 오버레이(AI 검출 상자·카메라 이름)도 칸째 복사
 // 야드(입고·출하) 카메라와 물류존·정비실 등 공용 시설은 정밀조립 전광판
-export const camZone = (c) => (c.region !== 'inside' ? 'main' : areaZone(c));
+export const camZone = (c) => (c.region !== 'inside' ? 'main' : inInsp(c) ? 'adapt' : areaZone(c));   // 정밀검사Zone 카메라는 적응가공Zone 전광판에 함께 (같은 오른쪽 벽)
 export const CCTV_BOARDS = {
   main: { ...BOARD, rot: Math.PI / 2, title: '정밀조립Zone' },
   flex: { ...ZONE_FAC.flex.wall.board, x: ZONE_FAC.flex.wall.board.x - ZONE_FAC.flex.wall.board.w / 2 - 0.5 - 6, w: 12, h: 4, title: '유연생산Zone' },   // 전광판 왼쪽 (뒷벽을 보고)
-  adapt: { ...ZONE_FAC.adapt.wall.board, z: ZONE_FAC.adapt.wall.board.z - ZONE_FAC.adapt.wall.board.w / 2 - 0.5 - 6, w: 12, h: 4, title: '적응가공Zone' },   // 전광판 왼쪽 (오른쪽 벽을 보고)
+  adapt: { ...ZONE_FAC.adapt.wall.board, z: ZONE_FAC.adapt.wall.board.z - ZONE_FAC.adapt.wall.board.w / 2 - 0.5 - 6, w: 12, h: 4, title: '적응가공 · 정밀검사' },   // 전광판 왼쪽 (오른쪽 벽을 보고)
 };
 export class CCTVBoard {
   constructor(nvr, parent, key) {

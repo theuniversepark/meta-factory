@@ -461,6 +461,7 @@ export class Simulation {
     this.mix = this.zone ? (ZONE_MIXES[this.line.mix] ?? ZONE_MIXES['1:1']).w : null;
     this.releasedBy = { doortrim: 0, eaxle: 0 }; this.mixBase = { doortrim: 0, eaxle: 0 };
     this.fgBy = { doortrim: 0, eaxle: 0 };
+    this.zoneFg = Object.fromEntries(EXTRA_ZONES.flatMap((Z) => Object.keys(Z.pack?.pallets ?? {}).map((k) => [k, 0])));   // 확장 Zone 포장·구분 적재 팔레트 재고 (zones.js가 쌓고 출하 지게차가 실어 간다)
 
     // 투입·적재 도크는 레이아웃에 따라 달라진다 (U자형이면 적재는 뒤쪽 통로)
     // 적재장 상차 위치: Zone 구분 적재장은 제품 구역(앞쪽 적재 팔레트)과 겹치지 않게 조금 더 앞에서 싣는다
@@ -487,7 +488,7 @@ export class Simulation {
       v.zone = key;
     }
     // 출하 지게차: 구분 적재장 → 뒷벽 출하 도크 → 트럭 야드 화물트럭 (레거시·자동화는 사람이 운전, 피지컬AI만 자율 지게차)
-    this.forklifts = [new Mover(m.key === 'dark' ? '자율 지게차' : '출하 지게차 (유인)', 'forklift', { ...SHIP_PARK, aisle: 'B', name: '출하 지게차 대기 (출하 도크 옆)' }, m.key === 'traditional' ? 1.5 : m.key === 'smart' ? 1.9 : 2.1)];
+    this.forklifts = [new Mover(m.key === 'dark' ? '자율 지게차' : '출하 지게차 (유인)', 'forklift', { ...SHIP_PARK, aisle: 'BB', name: '출하 지게차 대기 (출하 도크 옆)' }   /* 뒤쪽 통로(z −32)로 오간다 — 가운데 통로 오른쪽 끝은 정밀검사존 */, m.key === 'traditional' ? 1.5 : m.key === 'smart' ? 1.9 : 2.1)];
     this.forklifts[0].shipper = true; this.forklifts[0].auto = m.key === 'dark';
     // 입고 지게차: 입고 도크(왼쪽 벽)에 접안한 공급사 트럭에서 팔레트를 내려 자재창고 랙에 넣는다 (피지컬AI만 자율)
     const rcv = new Mover(m.key === 'dark' ? '입고 자율 지게차' : '입고 지게차 (유인)', 'forklift', { ...INBOUND.park, aisle: 'FF', name: '입고 지게차 대기 (맨 아래)' }, m.key === 'traditional' ? 1.5 : m.key === 'smart' ? 1.9 : 2.1);

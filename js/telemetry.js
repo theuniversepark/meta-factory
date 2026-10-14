@@ -318,7 +318,7 @@ export class RobotTelemetry {
       ] });
     } else {
       const m = R.mover;
-      const kindLabel = { agv: 'AGV', forklift: '지게차', carrier: '운반 AMR', zoneamr: `${m.zone === 'flex' ? '유연생산' : '적응가공'} 운반 AMR`, humanoid: '휴머노이드', quadruped: '사족보행 로봇', robot: '정비로봇', drone: '순찰 드론' }[m.kind] ?? m.kind;
+      const kindLabel = { agv: 'AGV', forklift: '지게차', carrier: '운반 AMR', zoneamr: m.zone === 'insp' ? '정밀검사 AMR' : `${m.zone === 'flex' ? '유연생산' : '적응가공'} 운반 AMR`, humanoid: '휴머노이드', quadruped: '사족보행 로봇', robot: '정비로봇', drone: '순찰 드론' }[m.kind] ?? m.kind;
       out.title = `${m.uid ? `[${m.uid}] ` : ''}${m.id} · ${kindLabel}`;
       const lidar = this.lidar(m);
       const field = m.blockedOn ? [`정지 — 전방 ${m.blockedOn.id}`, 'warn'] : !m.moving ? ['정지 (대기)', ''] : lidar < 0.5 ? ['보호 필드 침범', 'bad'] : lidar < 1.5 ? ['경고 필드 — 감속', 'warn'] : ['정상', 'ok'];
