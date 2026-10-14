@@ -37,9 +37,20 @@ export const PRIORITY = {
 const TYPE_PRIO = { field: 2, equipment: 3, supply: 4, parts: 4, command: 4, quality: 5, security: 2 };   // 보안 위협: 위조 제어 명령 등은 물리 안전과 직결 → P2
 export const prioOf = (inc) => inc?.prio ?? TYPE_PRIO[inc?.type] ?? 4;
 
+// 제어·이벤트 흐름 분류 — 흐름 기록·집계는 공정·운영 흐름 분석(제어 흐름 탭)에 쓴다.
+// 계층을 건너는 흐름은 방향으로 나눈다: 위로(현장 → 셀 → 오케스트레이터 → FAC) 올라가는 것은 이벤트(감지·보고·결과 통보),
+// 아래로 내려가는 것은 제어(명령). 같은 계층 안의 흐름은 단계 종류로 나눈다: 자체 조치·명령·조치는 제어, 판단·완료 확인은 판단
+export const FLOW_CLASS = { detect: 'event', report: 'event', notify: 'event', self: 'control', command: 'control', act: 'control', decide: 'decision', done: 'decision' };
+export const FLOW_CLASS_LABEL = { event: '이벤트', control: '제어', decision: '판단' };
+const LEVEL = { fac: 0, orch: 1, cell: 2, exec: 2, field: 3 };
+export const flowClass = (from, to, kind) => (from && LEVEL[from] !== LEVEL[to] ? (LEVEL[to] < LEVEL[from] ? 'event' : 'control') : FLOW_CLASS[kind] ?? 'control');
+
 export class Orchestrator {
   constructor(sim) {
     this.sim = sim; this.incidents = []; this.seq = 0; this.jobs = [];
+    // journal: 최근 흐름 기록 (레인 → 레인) · flows: 레인 사이 흐름 누적 (건수·지연) · stages: 인시던트 종류별 단계 도달 시간 누적
+    // 목록이 넘쳐 오래된 인시던트가 빠져도 누적 집계는 남는다
+    this.journal = []; this.flows = {}; this.stages = {};
   }
   // 오케스트레이터 이름·판단 지연 (단계별): 레거시는 작업반장이 직접 확인하고 판단한다
   get name() { return { traditional: '작업반장 (수동 판단)', smart: '공장 오케스트레이터 (MES)', dark: `피지컬AI 오케스트레이터${this.sim.aios?.latest ? ` · AIOS ${this.sim.aios.version}` : ''}` }[this.sim.mode.key]; }
@@ -57,12 +68,26 @@ export class Orchestrator {
   // kind: detect · self · report · decide · command · act · notify · done
   step(inc, lane, kind, text) {
     if (!inc || inc.status !== 'open') return;
-    inc.steps.push({ t: this.sim.time, lane, kind, text });
+    const prev = inc.steps[inc.steps.length - 1], t = this.sim.time, from = prev?.lane ?? null, cls = flowClass(from, lane, kind);
+    inc.steps.push({ t, lane, kind, text });
+    // 흐름 집계: 이전 단계 레인 → 이번 단계 레인 (첫 단계는 발생원에서 시작)
+    const f = (this.flows[`${from ?? 'src'}>${lane}>${cls}`] ??= { from, to: lane, cls, n: 0, dt: 0, kinds: {} });
+    f.n++; f.dt += prev ? t - prev.t : 0; f.kinds[kind] = (f.kinds[kind] ?? 0) + 1;
+    if (this.sim.quiet) return;
+    this.journal.unshift({ t, inc: inc.id, type: inc.type, prio: prioOf(inc), from, to: lane, kind, cls, text });
+    if (this.journal.length > 300) this.journal.pop();
   }
   close(inc, text, lane = 'orch') {
     if (!inc || inc.status !== 'open') return;
     this.step(inc, lane, 'done', text);
     inc.status = 'resolved'; inc.tEnd = this.sim.time;
+    // 단계 지연 집계: 종류별로 각 단계(처음 도달)까지 걸린 시간
+    const S = (this.stages[inc.type] ??= { n: 0, cell: 0, at: {}, hit: {} });
+    S.n++; if (inc.cellResolved) S.cell++;
+    for (const st of STAGES) {
+      const s = inc.steps.find((x) => x.kind === st.key);
+      if (s) { S.at[st.key] = (S.at[st.key] ?? 0) + (s.t - inc.t0); S.hit[st.key] = (S.hit[st.key] ?? 0) + 1; }
+    }
   }
   later(delay, fn) { this.jobs.push({ at: this.sim.time + delay, fn }); }
   update() {

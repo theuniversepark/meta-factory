@@ -48,8 +48,8 @@ console.log('== 확장 선반 (유연생산 · 적응가공 자재)');
   check('유연생산·적응가공 투입분을 확장 선반에서 꺼내고 바닥나기 전 재입고 (2시간)', starved === 0 && minX.flex > 0 && minX.adapt > 0, `꺼냄 유연생산 ${taken.flex} · 적응가공 ${taken.adapt} · 최저 유연생산 ${minX.flex} · 적응가공 ${minX.adapt} · 자재 대기 ${starved}회`);
   check('입고 지게차가 확장 Zone 팔레트를 확장 선반 제 열(서쪽 면)에 넣음', putAt.length > 0 && !odd.length, `${new Set(putAt.map((p) => p.type)).size}종 · 어긋남 ${odd.length}`);
   check('확장 선반 북쪽 끝이 앞쪽 통로(z 9, 폭 2.6m)와 겹치지 않음', XRACK.z - XRACK.len / 2 > 9 + 1.3 && INBOUND.zone.z0 > 9 + 1.3);
-  const e = s.erp, po = e?.db.po.find((p) => p.lines.some((l) => l.product.includes(':')));
-  check('Odoo: 확장 Zone 자재 구매오더 · 확장 선반 재고', !!po && Object.keys(XWH).every((z) => e.quant.rackX[`${z}:raw`] >= 0), po ? `${po.name} ${po.lines.map((l) => l.product).join(',')}` : '구매오더 없음');
+  const e = s.fac, po = e?.db.po.find((p) => p.lines.some((l) => l.product.includes(':')));
+  check('FAC: 확장 Zone 자재 구매오더 · 확장 선반 재고', !!po && Object.keys(XWH).every((z) => e.quant.rackX[`${z}:raw`] >= 0), po ? `${po.name} ${po.lines.map((l) => l.product).join(',')}` : '구매오더 없음');
   const s2 = new Simulation('smart', 3, { line: zoneLine(), quiet: true }); s2.whZone.flex.parts = 0;
   check('재고가 없으면 투입 대기 (꺼내지 않음)', !s2.takeZoneStock('flex') && s2.zoneStarved.flex && s2.whZone.flex.raw === stockOf(s2, 'flex:raw'));
 }

@@ -2,18 +2,17 @@
 // 건물 밖 트럭 야드의 화물트럭에 상차한다. 트럭이 가득 차면 출발하고, 대기하던 트럭이 빈 도크로 후진 접안하며,
 // 새 트럭이 대기 자리로 들어온다. 렌더링과 분리되어 헤드리스 시뮬레이션에서도 같은 흐름으로 동작한다.
 
-// 트럭 야드 배치 — 야드 로컬 좌표: 도크 벽 z = -20, 도크 2개가 벽을 따라(x) 늘어서고 바깥 = −z, 가운데 대기 자리, z -40 진출입 도로.
-// 화면(월드)에는 직사각형 건물의 오른쪽 벽(x 38) 위쪽에 90° 시계 방향으로 돌려 놓는다 (shipToWorld): 도크 1 z −31 · 도크 2 z −19 · 진출입 도로 x 58
+// 트럭 야드 배치 — 야드 로컬 좌표: 도크 벽 z = -20, 바깥 = −z, z -40 진출입 도로.
+// 화면(월드)에는 직사각형 건물의 오른쪽 벽 위쪽에 90° 시계 방향으로 돌려 놓는다 (shipToWorld): 도크 1개 z −38 (뒷벽과 뒤쪽 통로 사이 모서리) · 트럭은 한 대만
 // (출하 지게차는 정밀조립Zone 뒤 통로(z −9) → 오른쪽 세로 통로로 바로 닿는다)
 // 트럭 움직임은 로컬 좌표로 계산하고(Truck.lx·lz·lh), 바깥(화면·지게차·CCTV)에는 월드 좌표(x·z·heading)로 보인다
 import { BUILDING } from './zonedefs.js';
 export const YARD = {
-  wallZ: -20, bays: [27.5, 39.5], waitX: 33.5, roadZ: -40,
+  wallZ: -20, bays: [20.5], enterX: 2, roadZ: -40,   // 도크 1개 (오른쪽 벽 위 모서리 · 월드 z −38) · 트럭은 도로 북쪽 끝(enterX)에서 들어온다
   truckLen: 10.5, truckW: 2.5, cap: 32,      // 트럭 길이·폭(m), 적재 용량(개 = 팔레트 4개 × 8개)
   pallet: 8,                                   // 지게차 1회 운반량 (팔레트 1개)
 };
 const DOCK_Z = YARD.wallZ - YARD.truckLen / 2 - 0.15;   // 접안 트럭 중심 (뒤쪽 끝이 벽 바로 바깥)
-const WAIT_Z = DOCK_Z - 2;
 const FWD = 4.2, REV = 1.8;                    // 전진·후진 속도 (m/s)
 // 야드 로컬 → 월드: 오른쪽 벽 x 38, 로컬 x 27.5 → 월드 z −31 (회전 −90°: 월드 = (−z, x) + 평행이동)
 export const SHIP = { wallX: BUILDING.x1, zOff: -58.5 };   // 오른쪽 벽(zonedefs.js BUILDING.x1)
@@ -52,10 +51,8 @@ export class Truck {
 export class TruckYard {
   constructor(sim) {
     this.sim = sim; this.seq = 0; this.trucks = []; this.gone = 0;
-    // 시작: 두 도크에 빈 트럭이 접안해 있고 한 대가 대기 중
+    // 시작: 도크 하나에 빈 트럭 한 대만 접안 (대기 트럭 없음)
     for (const bx of YARD.bays) { const t = this.spawn(bx, DOCK_Z); t.state = 'dock'; t.bay = bx; }
-    const w = this.spawn(YARD.waitX, WAIT_Z); w.state = 'wait';
-    this.nextArrive = null;
   }
   spawn(x, z) { const t = new Truck(`화물트럭-${++this.seq}`, x, z, Math.PI, FRAME); this.trucks.push(t); return t; }
   docked(bx) { return this.trucks.find((t) => t.bay === bx && t.state === 'dock'); }
@@ -67,28 +64,18 @@ export class TruckYard {
     for (const t of this.trucks) {
       const arrived = t.update(dt);
       if (!arrived) continue;
-      if (t.state === 'arrive') { t.state = 'wait'; s.log('info', `${t.id} 대기 자리 도착`, { obs: '출하 트럭 야드 대기' }); }
-      else if (t.state === 'toDock') { t.state = 'dock'; s.log('info', `${t.id} 도크 ${this.bayNo(t.bay)} 접안`, { obs: '후진 접안 완료 · 상차 대기' }); }
+      if (t.state === 'toDock') { t.state = 'dock'; s.log('info', `${t.id} 도크 ${this.bayNo(t.bay)} 접안`, { obs: '후진 접안 완료 · 상차 대기' }); }
       else if (t.state === 'depart') { t.state = 'gone'; }
     }
     this.trucks = this.trucks.filter((t) => t.state !== 'gone');
-    // 빈 도크(앞 트럭이 충분히 빠져나감)로 대기 트럭을 넣는다
+    // 만재 트럭이 도로로 빠져나가(남쪽 +x로) 도크 앞을 비우면 다음 트럭 한 대가 도로 북쪽 끝에서 들어와 곧장 후진 접안한다 (대기 자리 없음)
     for (const bx of YARD.bays) {
-      // 떠나는 트럭이 도로까지 빠져나가 옆으로 비킨 뒤에 들어간다 (대기 트럭 경로와 겹치지 않게)
       const busy = this.trucks.some((t) => (t.bay === bx && (t.state === 'dock' || t.state === 'toDock')) || (t.state === 'depart' && t.bayLeft === bx && t.lx < bx + 14));
-      const w = this.trucks.find((t) => t.state === 'wait');
-      if (busy || !w) continue;
-      const side = Math.sign(bx - YARD.waitX);
-      w.bay = bx;
-      w.go([{ x: YARD.waitX, z: YARD.roadZ + 4 }, { x: bx + side * 7, z: YARD.roadZ - 1 }, { x: bx + side * 1.5, z: YARD.roadZ + 4, rev: true }, { x: bx, z: DOCK_Z - 6, rev: true }, { x: bx, z: DOCK_Z, rev: true }], 'toDock');
-      this.nextArrive ??= s.time + 15;   // 대기 자리가 비면 새 트럭을 부른다
+      if (busy) continue;
+      const t = this.spawn(YARD.enterX, YARD.roadZ - 1.5); t.heading = Math.PI / 2; t.bay = bx;
+      t.go([{ x: bx + 7, z: YARD.roadZ - 1.5 }, { x: bx + 1.5, z: YARD.roadZ + 4, rev: true }, { x: bx, z: DOCK_Z - 6, rev: true }, { x: bx, z: DOCK_Z, rev: true }], 'toDock');
+      s.log('info', `${t.id} 출하 야드 진입`, { obs: `도크 ${this.bayNo(bx)} 후진 접안` });
     }
-    if (this.nextArrive != null && s.time >= this.nextArrive && !this.trucks.some((t) => t.state === 'wait' || t.state === 'arrive')) {
-      const t = this.spawn(80, YARD.roadZ);
-      t.heading = -Math.PI / 2;
-      t.go([{ x: YARD.waitX + 9, z: YARD.roadZ }, { x: YARD.waitX + 2, z: YARD.roadZ - 2 }, { x: YARD.waitX, z: YARD.roadZ + 4, rev: true }, { x: YARD.waitX, z: WAIT_Z, rev: true }], 'arrive');
-      this.nextArrive = null;
-    } else if (this.nextArrive == null && !this.trucks.some((t) => t.state === 'wait' || t.state === 'arrive')) this.nextArrive = s.time + 15;
   }
   bayNo(bx) { return YARD.bays.indexOf(bx) + 1; }
 
@@ -97,15 +84,15 @@ export class TruckYard {
     const s = this.sim;
     t.reserved = Math.max(0, (t.reserved ?? 0) - n);
     t.load += n; if (product) t.by[product] = (t.by[product] ?? 0) + n;
-    (t.pallets ??= []).push(product ?? 'fg');   // 3D 적재함에 놓이는 팔레트 순서
-    s.stats.shipped += n; s.erp?.ship(t, n, product);
+    for (let k = 0; k < Math.ceil(n / YARD.pallet); k++) (t.pallets ??= []).push(product ?? 'fg');   // 3D 적재함에 놓이는 팔레트 순서 (2단 운반이면 두 개)
+    s.stats.shipped += n; s.fac?.ship(t, n, product);
     if (t.load >= YARD.cap) {
       const bx = t.bay;
       t.go([{ x: bx, z: YARD.roadZ + 3 }, { x: bx + 4, z: YARD.roadZ }, { x: 90, z: YARD.roadZ }], 'depart');
       t.bay = null; t.bayLeft = bx;
-      s.stats.trucks = (s.stats.trucks ?? 0) + 1; s.erp?.shipDone(t);   // Odoo: 출고 확정
+      s.stats.trucks = (s.stats.trucks ?? 0) + 1; s.fac?.shipDone(t);   // FAC: 출고 확정
       const mix = Object.entries(t.by).map(([k, v]) => `${k === 'doortrim' ? '도어트림' : k === 'eaxle' ? 'e-axle' : k} ${v}`).join(' · ');
-      s.log('ok', `${t.id} 만재 출발`, { obs: `적재 ${t.load}/${YARD.cap}개${mix ? ` (${mix})` : ''}`, act: `도크 ${this.bayNo(bx)} 비움 → 대기 트럭 접안` });
+      s.log('ok', `${t.id} 만재 출발`, { obs: `적재 ${t.load}/${YARD.cap}개${mix ? ` (${mix})` : ''}`, act: `도크 ${this.bayNo(bx)} 비움 → 다음 트럭 진입` });
     }
   }
 }
@@ -124,7 +111,7 @@ export function planForklift(sim, f) {
     avail = sim.fgStock;
   }
   const t = yard.loadable(); if (!t) return false;
-  const n = Math.min(avail, YARD.pallet, YARD.cap - t.load - (t.reserved ?? 0));
+  const n = Math.min(avail >= 2 * YARD.pallet ? 2 * YARD.pallet : YARD.pallet, avail, YARD.cap - t.load - (t.reserved ?? 0));   // 두 팔레트 이상 쌓였으면 2단으로 한 번에
   if (n <= 0) return false;
   t.reserved = (t.reserved ?? 0) + n;
   const pick = product === 'eaxle' ? sim.loc.PICK_EA : sim.loc.PICK_DT;
@@ -147,7 +134,7 @@ export function planForklift(sim, f) {
       else { sim.fgStock += k; if (product) sim.fgBy[product] += k; t.reserved = 0; }   // 그 사이 트럭이 떠났으면 되돌린다
     } },
     { go: dock, via: [], rev: true },
-    // 복귀: 도크 앞 줄을 따라 곧장 옆의 대기 자리(두 출하 도크 사이)로 — 통로까지 내려갔다 올라오지 않고 지나쳤다 되돌아오지도 않는다 (서면 벽 쪽을 보고 주차)
+    // 복귀: 도크 앞 줄을 따라 곧장 옆의 대기 자리(도크 왼쪽)로 — 통로까지 내려갔다 올라오지 않고 지나쳤다 되돌아오지도 않는다 (서면 벽 쪽을 보고 주차)
     { go: f.home, via: [] },
   ]);
   sim.log(m.agentActive ? 'act' : 'warn', `출하 지게차 배차 → ${t.id}`, {

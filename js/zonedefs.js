@@ -14,7 +14,7 @@
 export const BACK_SHIFT = 23, FRONT_SHIFT = 22;   // 뒤쪽: 21m + 바닥 격자 2칸(2m) 더 넓힘
 export const bk = (z) => z - BACK_SHIFT;    // 뒤쪽 시설 좌표 (원래 z → 옮긴 z)
 export const fr = (z) => z + FRONT_SHIFT;   // 앞쪽 시설 좌표
-// 오른쪽 벽은 원래 x 38에서 바닥 격자 10칸(10m) 오른쪽으로 옮겨 공간을 넓혔다 — 안쪽 통로(오른쪽 세로 통로 x 35)·설비는 그대로, 벽에 붙은 것(출하 도크·야드)만 벽과 함께
+// 오른쪽 벽은 원래 x 38에서 바닥 격자 10칸(10m) 오른쪽으로 옮겨 공간을 넓혔다 — 안쪽 통로(오른쪽 세로 통로 — 지금 x 30)·설비는 그대로, 벽에 붙은 것(출하 도크·야드)만 벽과 함께
 export const RIGHT_SHIFT = 10;
 export const BUILDING = { x0: -51, x1: 38 + RIGHT_SHIFT, z0: bk(-20), z1: fr(20) };   // 건물 안쪽 (오른쪽 벽 x 48 · 뒷벽 z −43 · 앞쪽 열린 면 z 42)
 // 정밀조립 화면·서버: 왼쪽 벽(x −51) 안쪽에 건물 안(+x)을 보고 뒤(−z)부터 한 줄로 — 로봇 디스플레이(12m) → 관제 화면(18m) → CCTV 전광판(12m), 간격 0.5m (z −37.4 ~ 5.6, 벽을 보고 왼쪽 옆(앞쪽 +z)으로 바닥 격자 5칸 옮김). 서버 랙과 로고는 로봇 디스플레이 아래 벽 앞 — AMR 대기열·출동 차로(z −23 ~ 0)보다 뒤쪽
@@ -119,20 +119,20 @@ export const EXTRA_ZONES = [
       C07: { type: 'rework', label: 'NG·재작업', product: 'ng', use: 'NG 재용접·재도포 보수 → 재검', x: -2, z: MID, rot: PI, side: -1, cycle: 120, robot: ['articulated', 1, 'humanoid', 1] },
     },
     routes: { hood: ['C01', 'C02', 'C03', 'C04', 'C05', 'C06'], door: ['C01', 'C02', 'C03', 'C04', 'C05', 'C10', 'C06'] },
-    src: { x: -26.5, z: 0 }, sink: { x: -13.5, z: BOT, rot: PI },
+    src: { x: -26.5, z: 0 }, sink: { x: 23.5, z: BOT, rot: PI },   // 구분 적재(포장)는 Zone 오른쪽 끝 — 투입(왼쪽) → 공정 → 적재(오른쪽)
     // 셀 사이 AMR 경유점 (flexible-manufacturing ZONE_PATHS와 같은 모양) — 오른쪽 통제 이송 통로 x 20.5, 합류 대기 차로 ±0.75m
     paths: {
-      'C05>C06': [{ x: 20.5, z: TOP }, { x: 20.5, z: BOT + 0.75 }, { x: 8.5, z: BOT + 0.75 }],
+      'C05>C06': [{ x: 20.5, z: TOP }, { x: 20.5, z: BOT - 0.75 }, { x: 8.5, z: BOT - 0.75 }],
       'C05>C10': [{ x: 20.5, z: TOP }, { x: 20.5, z: MID }, { x: 16, z: MID }],
       'C10>C06': [{ x: 11.7, z: MID }, { x: 10.4, z: BOT - 0.75 }, { x: 8.5, z: BOT - 0.75 }],
-      'C06>SINK': [{ x: 4.2, z: BOT }, { x: 0, z: BOT + 0.75 }, { x: -11.5, z: BOT + 0.75 }],
+      'C06>SINK': [{ x: 8.8, z: BOT + 0.75 }, { x: 21.5, z: BOT + 0.75 }],   // C06 → 적재: 남쪽 동행 차로 (C06 진입 서행 차로 BOT −0.75와 1.5m 분리)
       'C06>C07': [{ x: 4.2, z: BOT }, { x: 1.4, z: MID }, { x: 0, z: MID }],
-      'C07>SINK': [{ x: -4.3, z: MID }, { x: -8.2, z: BOT - 0.75 }, { x: -11.5, z: BOT - 0.75 }],
+      'C07>SINK': [{ x: 0.6, z: MID - 0.75 }, { x: 9.6, z: MID - 0.75 }, { x: 9.6, z: BOT + 0.75 }, { x: 21.5, z: BOT + 0.75 }],   // 재작업 → 가운데 줄 동쪽 → C06·C10 사이로 내려가 같은 동행 차로
     },
-    ret: [{ x: -13.5, z: 7.6 }, { x: -32.1, z: 7.6 }, { x: -32.1, z: 0 }],   // 적재 → 정밀조립Zone 쪽 복귀로(z 7.6) → 투입 왼쪽 진입로 (x −33.6 — 스테이션이 있으면 끝 두 점 대신 스테이션 고리)
+    ret: [{ x: 23.5, z: 7.6 }, { x: -32.1, z: 7.6 }, { x: -32.1, z: 0 }],   // 적재(오른쪽 끝) → 정밀조립Zone 쪽 복귀로(z 7.6) → 투입 왼쪽 진입로 (x −33.6 — 스테이션이 있으면 끝 두 점 대신 스테이션 고리)
     ng: { at: 'C06', to: 'C07', rate: 0.07 },
     amr: { count: 15, speed: 1.1, ret: 1.5 }, load: 6, unload: 5,
-    foot: { x0: -32.6, x1: 21.0, z0: -7.2, z1: 8.2 },   // 셀·AMR 차로가 차지하는 영역 (로컬)
+    foot: { x0: -32.6, x1: 26.0, z0: -7.2, z1: 8.2 },   // 셀·AMR 차로가 차지하는 영역 (로컬)
   },
   {
     key: 'adapt', code: '적응가공', uidp: 'ADP', name: '적응가공Zone', sub: '유압블록 · 리어커버 혼류', origin: { x: 0, z: 19.5 }, accent: 0xff7a45,
@@ -171,7 +171,7 @@ export const extraCellBoxes = () => EXTRA_ZONES.flatMap((Z) => Object.entries(Z.
   return { x0: x - 2.3, x1: x + 2.3, z0: z - (c.type === 'mill5' || c.type === 'turn' ? 4.3 : 2.3), z1: z + (c.type === 'mill5' || c.type === 'turn' ? 4.3 : 2.3), h, name: `${Z.code} ${c.label}` };
 }));
 
-// 확장 Zone 셀 로봇 · 운반 AMR 고유 ID (정밀조립 RB-셀-번호 · AM-번호와 같은 꼴, Zone 코드 접두) — 3D 화면(zones.js)·DataHub·Odoo가 같은 규칙을 쓴다
+// 확장 Zone 셀 로봇 · 운반 AMR 고유 ID (정밀조립 RB-셀-번호 · AM-번호와 같은 꼴, Zone 코드 접두) — 3D 화면(zones.js)·DataHub·FAC이 같은 규칙을 쓴다
 // 셀 로봇 수는 단계마다 다르다: robot [종류, 대수, 피지컬AI 종류, 피지컬AI 대수] — 레거시는 작업자라 로봇이 없다
 export const zoneCellRobots = (c, modeKey) => (modeKey === 'traditional' ? { kind: null, count: 0 } : modeKey === 'dark' && c.robot[2] ? { kind: c.robot[2], count: c.robot[3] } : { kind: c.robot[0], count: c.robot[0] === 'none' ? 0 : c.robot[1] });
 export const zoneRobotUid = (Z, cellId, i) => `${Z.uidp}-RB-${cellId}-${i + 1}`;   // 설비 고유 ID는 영문 (FLX 유연생산 · ADP 적응가공)

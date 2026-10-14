@@ -12,7 +12,7 @@ import { EXTRA_ZONES, ZONE_FAC, zoneRobotUid, zoneAmrUid } from './zonedefs.js';
 import { BATTERY, moverRadius, moverWidth } from './sim.js';
 export { EXTRA_ZONES };
 
-const { std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, makeRobot, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, buildWeld, buildGate, buildVision } = KIT;
+const { std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, makeRobot, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, buildWeld, buildGate, buildVision } = KIT;
 const PI = Math.PI;
 const PC = { shared: 0x2bb3a6, hood: 0xf0a030, door: 0x9a6bff, hblock: 0xf0a030, rcover: 0x9a6bff, ng: 0xd23b3b };
 const USE_CLS = { hood: 'doortrim', hblock: 'doortrim', door: 'eaxle', rcover: 'eaxle' };   // 셀 라벨 색 (주황·보라)
@@ -366,7 +366,7 @@ class ExtraZone {
       const robotsG = put(new THREE.Group(), 0, 0, 0, g), workersG = put(new THREE.Group(), 0, 0, 0, g);
       const el = document.createElement('div'); el.className = 'st-label xz';
       const no = c.no ?? id;
-      el.innerHTML = `<div class="nm"><b class="no${no.length > 1 ? ' wide' : ''}">${no}</b><span>${c.label}</span></div><div class="use u-${USE_CLS[c.product] ?? 'shared'}">${c.use}</div><div class="row"><span class="chip s-IDLE">대기</span></div><div class="rb"></div>`;
+      el.innerHTML = `<div class="nm"><b class="no${no.length > 1 ? ' wide' : ''}">${no}</b><span>${c.label}</span><i class="uid">${Z.uidp}-${id}</i></div><div class="use u-${USE_CLS[c.product] ?? 'shared'}">${c.use}</div><div class="row"><span class="chip s-IDLE">대기</span></div><div class="rb"></div>`;
       const label = new CSS2DObject(el); label.position.set(0, 4.3, 0); g.add(label);
       const cell = { id, def: c, g, parts, light, robotsG, workersG, robots: [], robotUids: [], iot, sensor, pulse, ringM, sensorMat, phase: Math.random() * 6, el, chip: el.querySelector('.chip'), rb: el.querySelector('.rb'), label, occ: null, state: 'IDLE', progress: 0, item: null, busy: 0, done: 0 };
       this.cells[id] = cell; this.order.push(cell);
@@ -376,7 +376,7 @@ class ExtraZone {
       const g = put(new THREE.Group(), n.def.x, 0, n.def.z, this.G); g.rotation.y = n.def.rot ?? 0; n.port = buildPort(g, Z, kind);
       if (kind === 'src') { n.stockG = put(new THREE.Group(), 0, 0, 0, g); n.heldG = put(new THREE.Group(), 0, 0, 0, n.port.lift); }
       const el = document.createElement('div'); el.className = 'st-label xz';
-      el.innerHTML = `<div class="nm"><span>${kind === 'src' ? '자재 투입 (AS/RS)' : '양품 구분 적재'}</span></div><div class="row"><span class="chip s-IDLE"></span></div>`;
+      el.innerHTML = `<div class="nm"><span>${kind === 'src' ? '자재 투입 (AS/RS)' : '양품 구분 적재'}</span><i class="uid">${Z.uidp}-${kind === 'src' ? 'AS' : 'PL'}-01</i></div><div class="row"><span class="chip s-IDLE"></span></div>`;
       const label = new CSS2DObject(el); label.position.set(0, 4.0, 0); g.add(label);
       Object.assign(n, { g, el, label, chip: el.querySelector('.chip') });
     }
@@ -531,7 +531,7 @@ class ExtraZone {
   buildCrew(modeKey) {
     const legacy = modeKey === 'traditional', dark = modeKey === 'dark';
     for (const c of this.order) {
-      c.robotsG.clear(); c.workersG.clear(); c.robots = []; c.robotUids = [];
+      c.robotsG.clear(); c.workersG.clear(); c.robots = []; c.robotUids = []; c.plates = [];
       const R = c.def.robot, kind = dark && R[2] ? R[2] : R[0], count = dark && R[2] ? R[3] : R[1];
       c.cycle = c.def.cycle * (MODE_MUL[modeKey] ?? 1);
       if (c.parts.manualProps) c.parts.manualProps.forEach((p) => (p.visible = legacy));
@@ -558,6 +558,7 @@ class ExtraZone {
         }
         r.root.traverse((o) => { o.userData.stationId = this.sid(c); o.userData.robotIdx = i; });   // 클릭 → 셀 로봇 텔레메트리 (factory.js pick · DataHub 자산 id와 같은 셀 키)
         r.phase = i * 1.3; c.robots.push(r); c.robotUids.push(zoneRobotUid(this.Z, c.id, i));   // 셀 로봇 고유 ID (zonedefs.js)
+        const sp = idPlate(c.robotUids[i]); sp.position.set(0, kind === 'ammr' ? 2.55 : 2.35, 0); r.root.add(sp); sp.visible = this.labelsOn ?? true; c.plates.push(sp);   // 로봇 위 ID 명판 (정밀조립 셀 로봇과 같은 모양 · 라벨 버튼으로 켜고 끔)
       }
       c.rb.textContent = `🤖 ${ROBOT_SHORT[kind] ?? kind}×${count}`;
     }
@@ -741,6 +742,7 @@ class ExtraZone {
           break;
         }
         if (c.s < c.L - 1e-6) break;
+        this.square(c);   // 셀·투입구·적재장 도착 → 셀 축(동서)에 반듯하게 선다 (대각 진입 방향 그대로 서지 않게)
         if (c.target === 'SRC') { c.state = 'load'; c.timer = Z.load; break; }
         if (c.target === 'SINK') { c.state = 'unload'; c.timer = Z.unload; c.at = 'SINK'; break; }
         const cell = this.cells[c.target]; c.at = c.target;
@@ -776,6 +778,7 @@ class ExtraZone {
     const hx = Math.sin(c.heading), hz = Math.cos(c.heading);
     return (o.x - c.x) * hx + (o.z - c.z) * hz > 0.3;
   }
+  square(c) { c.heading = Math.sin(c.heading) >= 0 ? PI / 2 : -PI / 2; }   // 가까운 쪽 동/서 방향으로 (셀 지그·투입구·적재장이 모두 동서 축)
   face(c, p) { const dx = p.x - c.x, dz = p.z - c.z; if (dx * dx + dz * dz > 1e-8) c.heading = Math.atan2(dx, dz); }
   moveToward(c, q, sp, dt) {
     const dx = q.x - c.x, dz = q.z - c.z, d = Math.hypot(dx, dz); if (d < 1e-3) return;
@@ -918,7 +921,7 @@ class ExtraZone {
     const good = Object.values(this.stats.good).reduce((a, b) => a + b, 0);
     return { good, uph: this.time > 120 ? Math.round((good / this.time) * 3600) : 0, busy: this.order.filter((c) => c.state === 'BUSY').length, moving: this.carriers.filter((c) => c.state === 'move').length };
   }
-  setLabels(on) { for (const c of this.order) c.label.visible = on; this.src.label.visible = on; this.sink.label.visible = on; this.board.visible = on; }
+  setLabels(on) { this.labelsOn = on; for (const c of this.order) { c.label.visible = on; for (const sp of c.plates ?? []) sp.visible = on; } this.src.label.visible = on; this.sink.label.visible = on; this.board.visible = on; }
 }
 
 function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }

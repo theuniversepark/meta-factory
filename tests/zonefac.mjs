@@ -67,10 +67,11 @@ console.log('== 정비 지연 사유 기록 (인시던트 타임라인 · 로그
 console.log('== 선택 Zone 이벤트 주입 → 그 Zone 오케스트레이터 대응 (피지컬AI)');
 { const s = new Simulation('dark', 6, { line: zoneLine(), quiet: true }), ag = new FactoryAgent(s);
   run(s, ag, 120);
-  for (const z of ZK) { s.injectFault(s.zoneCells.find((c) => c.zone === z && c.state === 'OK')); s.injectZoneEvent(z, 'leak'); s.disruptZoneSupply(z, 600); }
+  const inj = {};
+  for (const z of ZK) { const c = s.zoneCells.find((x) => x.zone === z && x.state === 'OK'); s.injectFault(c); inj[z] = { fault: s.orch.find(`fail:${c.id}`), ev: s.injectZoneEvent(z, 'leak'), sup: s.disruptZoneSupply(z, 600) }; }
   run(s, ag, 1200);
   for (const z of ZK) {
-    const L = s.orch.incidents.filter((i) => i.zone === z && ['equipment', 'field', 'supply'].includes(i.type)), lab = z === 'flex' ? '유연생산' : '적응가공';
+    const L = [inj[z].fault, inj[z].ev?.inc, inj[z].sup].filter(Boolean), lab = z === 'flex' ? '유연생산' : '적응가공';   // 주입한 세 건 (그사이 저절로 난 고장은 제외)
     const named = L.every((i) => i.steps.some((x) => x.lane === 'orch' && x.text.includes(`${lab} `)));
     check(`${lab}: 설비 고장 · 현장 이벤트 · 자재 공급 차질 → ${lab} 오케스트레이터가 판단·명령하고 20분 안에 해결`, new Set(L.map((i) => i.type)).size === 3 && named && L.every((i) => i.status === 'resolved'), L.map((i) => `${i.type}:${i.status}`).join(' · '));
   }

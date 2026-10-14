@@ -3,13 +3,13 @@ import { fr, bk, inExtraZone, BUILDING, AMR_LEAD, techAt, techLocal, techHeading
 import { ImpactTracker } from './impact.js';
 import { CommandCenter } from './commands.js';
 import { TruckYard, planForklift, YARD, SHIP } from './shipping.js';
-// 출하 지게차 대기 자리: 오른쪽 벽 두 출하 도크(z −31 · −19) 사이 안쪽 — 오른쪽 세로 통로(x 35)·뒤쪽 시설 통로(z −30)를 비켜 주차
-const SHIP_PARK = { x: SHIP.wallX - 6.5, z: -25 };
+// 출하 지게차 대기 자리: 오른쪽 벽 두 출하 도크(z −31 · −19) 사이 안쪽 — 오른쪽 세로 통로(x 30)·뒤쪽 시설 통로(z −30)를 비켜 주차
+const SHIP_PARK = { x: SHIP.wallX - 7.5, z: -38 };   // 출하 도크(z −38) 앞 줄 왼쪽
 import { InboundYard, planReceiver, WH, INBOUND, LOGI_DZ, XWH, xrackZ } from './receiving.js';
 import { PatrolDrone, MISSION_PRIO } from './drone.js';
 import { planCCTV, CCTVAgent } from './cctv.js';
 import { Private5G } from './net5g.js';
-import { OdooBridge } from './odoo.js';
+import { FacLedger } from './fac.js';
 import { VLAPipeline } from './vla.js';
 import { AIOSPipeline } from './aios.js';
 import { SecurityLayer } from './security.js';
@@ -147,7 +147,7 @@ export const BATTERY = {
   drone: { pack: '6S 리튬폴리머 · 0.2kWh', charge: '이착륙장 무선 충전 (22% 이하 귀환)', low: 25 },
   ammr: { pack: '48V 리튬이온 · 2.4kWh', charge: '셀 작업 위치 도킹 접점 (작업 중 충전)', low: 25, drive: 0.06, work: 0.015, rate: 0.032 },
 };
-const LEFT = -35.5, RIGHT = 35;   // 좌우 끝 세로 통로 — 왼쪽은 투입 스테이션 AMR 진입로(x −30.6)와 충분히 떨어지게
+const LEFT = -35.5, RIGHT = 30;   // 좌우 끝 세로 통로 — 왼쪽은 투입 스테이션 AMR 진입로와 충분히 떨어지게 · 오른쪽은 x 35에서 바닥 격자 5칸 왼쪽(x 30)으로 — 정밀조립 AMR 복귀로(x 26.2)와 3.8m
 export const LOC = {
   // 물류존은 건물 왼쪽 확장동(x −51 ~ −38) 아래쪽, 정비실과 앞쪽 시설 통로(z 31) 사이에 있다 (receiving.js LOGI_DZ). 물류 선반은 왼쪽 벽 입고 지게차 통로와 로봇 통로(x −35.5) 사이에 남북으로 선
   // 통과형 선반(남쪽 절반 원자재 · 북쪽 절반 부품): 입고 지게차는 통로 쪽 서쪽 면에 넣고, AGV·휴머노이드는 동쪽 면에서 꺼낸다.
@@ -262,6 +262,9 @@ export class Mover {
     if (this.blockT > 10 || this.detourPts > 30) {
       this.passT = 4; this.blockT = 0; this.detourPts = 0; this.passes = (this.passes ?? 0) + 1;
       if (this.path?.length) { const keep = this.path.filter((p) => !p.detour); this.path = keep.length ? keep : this.path.slice(-1); }   // 쌓인 우회점만 버리고 원래 길(통로·도크 앞)은 그대로 — 목적지로 대각선 직진하지 않는다
+      // 다음 점까지 곧게 가면 휴머노이드 충전 도크를 지나면 꺾는 점(ㄱ자) 하나를 넣어 도크를 비켜 간다
+      const p0 = this.path?.[0];
+      if (p0 && this.segDock?.(this, p0, this)) for (const c of [{ x: p0.x, z: this.z }, { x: this.x, z: p0.z }]) if (!this.segDock(this, c, this) && !this.segDock(c, p0, this)) { this.path.unshift(c); break; }
       return false;
     }
     const b = this.sense?.(this, dir);
@@ -484,7 +487,7 @@ export class Simulation {
       v.zone = key;
     }
     // 출하 지게차: 구분 적재장 → 뒷벽 출하 도크 → 트럭 야드 화물트럭 (레거시·자동화는 사람이 운전, 피지컬AI만 자율 지게차)
-    this.forklifts = [new Mover(m.key === 'dark' ? '자율 지게차' : '출하 지게차 (유인)', 'forklift', { ...SHIP_PARK, aisle: 'B', name: '출하 지게차 대기 (두 출하 도크 사이)' }, m.key === 'traditional' ? 1.5 : m.key === 'smart' ? 1.9 : 2.1)];
+    this.forklifts = [new Mover(m.key === 'dark' ? '자율 지게차' : '출하 지게차 (유인)', 'forklift', { ...SHIP_PARK, aisle: 'B', name: '출하 지게차 대기 (출하 도크 옆)' }, m.key === 'traditional' ? 1.5 : m.key === 'smart' ? 1.9 : 2.1)];
     this.forklifts[0].shipper = true; this.forklifts[0].auto = m.key === 'dark';
     // 입고 지게차: 입고 도크(왼쪽 벽)에 접안한 공급사 트럭에서 팔레트를 내려 자재창고 랙에 넣는다 (피지컬AI만 자율)
     const rcv = new Mover(m.key === 'dark' ? '입고 자율 지게차' : '입고 지게차 (유인)', 'forklift', { ...INBOUND.park, aisle: 'FF', name: '입고 지게차 대기 (맨 아래)' }, m.key === 'traditional' ? 1.5 : m.key === 'smart' ? 1.9 : 2.1);
@@ -585,6 +588,14 @@ export class Simulation {
       return false;
     };
     for (const m of this.movers) if (m.kind === 'humanoid' || m.kind === 'human') m.dockHit = dockHit;
+    // 선분 a→b가 남의 충전 도크(바닥 판 + 이동체 크기 여유)를 지나는지 — 우선 통행으로 우회점을 버릴 때 도크를 비켜 가는 데 쓴다
+    const segDock = (a, b, m) => this.docks.some((d) => {
+      if (d.owner === m) return false;
+      const H = d.owner.home, c = Math.cos(H.heading), sn = Math.sin(H.heading), r = 0.475 + moverRadius(m) * 0.7 + 0.1;
+      for (let k = 0; k <= 24; k++) { const px = a.x + (b.x - a.x) * k / 24, pz = a.z + (b.z - a.z) * k / 24, rx = px - H.x, rz = pz - H.z, lx = rx * c - rz * sn, lz = rx * sn + rz * c; if (Math.abs(lx) < r && lz < r && lz > -0.52 - r) return true; }
+      return false;
+    });
+    for (const m of this.movers) m.segDock = segDock;
     // 점이 충전 도크(바닥 판·기둥 + 여유 0.45m) 위인지 — 자기 도크 제외
     // 자기 도크는 앞쪽(서는 자리)만 허용 — 뒤(기둥 쪽)로 비켜서다 도크 뒤를 돌아 맴돌지 않게
     const dockAt = (p, m) => this.docks.some((d) => { const H = d.owner.home, c = Math.cos(H.heading), sn = Math.sin(H.heading), rx = p.x - H.x, rz = p.z - H.z, lx = rx * c - rz * sn, lz = rx * sn + rz * c; return d.owner === m ? Math.abs(lx) < 0.93 && lz < 0.1 && lz > -1.6 : Math.abs(lx) < 0.93 && lz < 0.93 && lz > -1.6; });   // 도크 뒤 1.6m까지 금지 — 비켜서다 도크 뒤로 들어가 맴돌지 않게
@@ -598,7 +609,7 @@ export class Simulation {
     new SecurityLayer(this).register();   // 피지컬AI 다중 계층 보안 (총괄4): 에이전트 신원(DID/VC) · 데이터·IP · AI 모델 · OT
     this.cctvAgent = new CCTVAgent(this);   // 피지컬AI: CCTV 에이전트 (영상 감시 · 오케스트레이터 보고 · 이벤트 이력)
     this.net = new Private5G(this);   // Private 5G 특화망: 음영 없는 기지국 배치 · 이동 로봇 5G 모뎀 · 핸드오버 · 무손실 업링크 (자동화·피지컬AI)
-    this.erp = new OdooBridge(this);   // Odoo ERP 연동: 발주·재고·설비보전 (자동화·피지컬AI)
+    this.fac = new FacLedger(this);   // FAC(FACOS 업무 기록): 발주·재고·설비보전 (자동화·피지컬AI)
   }
 
   // 설비·로봇 고유 ID — 현황판·라벨·텔레메트리·데이터 연동에 같은 ID를 쓴다 (사람은 제외)
@@ -631,8 +642,11 @@ export class Simulation {
     let best = null, bd = Infinity;
     const rm = moverRadius(m);
     const segDist = (ax, az, bx, bz, px, pz) => { const vx = bx - ax, vz = bz - az, L = vx * vx + vz * vz || 1; const t = Math.max(0, Math.min(1, ((px - ax) * vx + (pz - az) * vz) / L)); return Math.hypot(px - ax - vx * t, pz - az - vz * t); };
+    // 현장 이벤트 처리 담당은 그 이벤트 때문에 멈춰 기다리는 이동체(지게차 포크 포함)를 비켜 지나간다 — 현장 주변에 선 차량에 막혀 맴돌지 않게
+    const onScene = this.fieldEvents?.length ? this.fieldEvents.find((ev) => !ev.cleared && ev.responder === m.id) : null;
     for (const o of this.senseList ?? this.movers) {
       if (o === m || o.state === 'line') continue;
+      if (onScene && o.hzWait?.ev === onScene) continue;
       if (o.owner === m) { const e = m.path?.[m.path.length - 1]; if (!e || Math.hypot(e.x - m.home.x, e.z - m.home.z) < 1.3) continue; }   // 자기 도크는 들어가고 나올 때만 무시 — 그 밖에는 자기 도크 기둥도 피한다
       // 나란한 도크 앞 줄(도크 앞 1.1m)을 따라 옆 도크 앞을 지나는 것은 정해진 동선 — 옆 도크를 장애물로 보지 않는다
       if (o.kind === 'dock' && m.home?.heading != null && o.heading === m.home.heading && Math.abs(Math.sin(o.heading) * (m.x - o.owner.home.x) + Math.cos(o.heading) * (m.z - o.owner.home.z) - 1.1) < 0.4 && Math.abs(dir.x * Math.sin(o.heading) + dir.z * Math.cos(o.heading)) < 0.3) continue;
@@ -840,7 +854,7 @@ export class Simulation {
         }
       }
       add('자재 담당', '작업자', -41.5, 3.4, -Math.PI / 2);
-      add('출하 담당', '작업자', SHIP.wallX - 3, -37, Math.PI / 2);   // 오른쪽 벽 출하 도크 1 뒤쪽 모서리 (지게차 동선 밖)
+      add('출하 담당', '작업자', SHIP.wallX - 1.6, -41.8, Math.PI / 2);   // 출하 도크와 뒷벽 사이 모서리 (지게차 동선 밖)
       // 순찰 반환점·보행로는 통로 바깥 보행로(z=±11.2, 가까운 차량 차로에서 1.5m) — 엇갈리는 차량을 막지 않는다
       add('작업반장', '반장', -20, 11.2, Math.PI / 2, [
         { x: -20, z: 11.2, aisle: 'F' }, { x: 24, z: 11.2, aisle: 'F' },
@@ -959,10 +973,14 @@ export class Simulation {
       // 길 터 주기: 이벤트 처리 담당이 4m 안으로 다가오면 반경 가장자리에서 기다리던 이동체는 이벤트 반대쪽으로 2.6m 물러나 다시 기다린다 (한 번만)
       // — 가장자리에 여럿이 몰려 서면 담당이 현장에 닿지 못하고 주변을 맴돈다
       const rp = ev.responder && this.movers.find((o) => o.id === ev.responder), dx = m.x - ev.x, dz = m.z - ev.z, dd = Math.hypot(dx, dz) || 1;
-      if (rp && m.hzBack !== ev.id && Math.hypot(rp.x - m.x, rp.z - m.z) < 4 && dd < R(ev) + 2.2) {
-        const back = { x: ev.x + (dx / dd) * (R(ev) + 2.6), z: ev.z + (dz / dd) * (R(ev) + 2.6) };
-        m.hzBack = ev.id;
-        if (okPt(back)) { m.hzEsc = back; m.path = [back, ...(m.path ?? [])]; return false; }
+      // 바로 바깥쪽 자리가 셀·도크 등으로 막혔으면 옆으로 돌린 방향·더 먼 거리도 찾아본다 · 담당이 이 이동체에 3초 넘게 막혀 있으면 한 번 더 비켜 준다 (지게차는 포크까지 6m 안)
+      const stuck = rp && rp.blockedOn === m && rp.blockT > 3;
+      if (rp && (m.hzBack !== ev.id || stuck) && Math.hypot(rp.x - m.x, rp.z - m.z) < (m.kind === 'forklift' ? 6 : 4) && dd < R(ev) + 2.2) {
+        m.hzBack = ev.id; const a0 = Math.atan2(dz, dx);
+        for (const [da, rr] of [[0, 2.6], [0.9, 2.6], [-0.9, 2.6], [0, 4], [1.6, 3], [-1.6, 3], [0.9, 4], [-0.9, 4]]) {
+          const back = { x: ev.x + Math.cos(a0 + da) * (R(ev) + rr), z: ev.z + Math.sin(a0 + da) * (R(ev) + rr) };
+          if (okPt(back) && Math.hypot(back.x - rp.x, back.z - rp.z) > 2) { m.hzEsc = back; m.path = [back, ...(m.path ?? [])]; return false; }
+        }
       }
       return true;
     }
@@ -976,8 +994,10 @@ export class Simulation {
           const before = { x: ev.x - d.x * r + n.x * sg * r, z: ev.z - d.z * r + n.z * sg * r }, after = { x: ev.x + d.x * r + n.x * sg * r, z: ev.z + d.z * r + n.z * sg * r };
           if (!ok(before) || !ok(after)) continue;
           // 이벤트 반경 안에 있던 경유점은 버리고(목적지는 그대로) 우회 두 점을 앞에 넣는다
-          const rest = (m.path ?? []).filter((p, i, arr) => i === arr.length - 1 || Math.hypot(p.x - ev.x, p.z - ev.z) > R(ev) + 0.3);
+          // 이전 비켜서기 점(detour)은 버린다 — 이벤트 너머의 원래 경유점이 하나도 없으면(비켜서던 방향이 이벤트 쪽이었을 때) 우회하지 않고 원래 길로 돌아간다 (목적지로 대각선 직진하지 않게)
+          const rest = (m.path ?? []).filter((p, i, arr) => i === arr.length - 1 || (!p.detour && Math.hypot(p.x - ev.x, p.z - ev.z) > R(ev) + 0.3));
           const ahead = rest.findIndex((p) => (p.x - ev.x) * d.x + (p.z - ev.z) * d.z > 0);
+          if (ahead < 0 && rest.length > 1) { m.path = rest; m.hzTried.delete(ev.id); return false; }
           m.path = [before, after, ...(ahead >= 0 ? rest.slice(ahead) : rest.slice(-1))];
           this.reportHazard(m.id, ev, 'detour');
           return false;
@@ -1049,7 +1069,7 @@ export class Simulation {
       w.update(dt);
     }
     this.net?.update(dt);
-    this.erp?.update();
+    this.fac?.update();
     this.cctvAgent?.update(dt);   // 피지컬AI: CCTV 에이전트 — 영상 감시·오케스트레이터 보고·이벤트 이력
     this.updateFieldEvents();
     this.orch.update();
@@ -1128,7 +1148,7 @@ export class Simulation {
       const { item } = c.items.shift();
       if (item.defect) this.stats.escaped++; else { this.stats.good++; if (item.product) this.stats.goodBy[item.product] = (this.stats.goodBy[item.product] ?? 0) + 1; }
       if (item.product) this.fgBy[item.product]++;
-      this.erp?.produced(item.product ?? 'doortrim');   // Odoo: 생산 입고 (구분 적재장에 들어온 수량 — 유출 불량 포함)
+      this.fac?.produced(item.product ?? 'doortrim');   // FAC: 생산 입고 (구분 적재장에 들어온 수량 — 유출 불량 포함)
       this.releaseCarrier(item, sink.def);
       this.fgStock++;
       sink.c.processed++;
@@ -1327,7 +1347,7 @@ export class Simulation {
     o.step(inc, 'field', 'detect', m.agentActive ? `IoT 알람 — 건강도 ${st.health.toFixed(0)}%, 진동·전류 이상, 가동 정지` : (m.andon ? `설비 정지 — 안돈 알람 자동 호출 (경광등·호출 버저, 반장 확인까지 약 ${m.alarmDelay}초)` : `설비 정지 — 작업자가 이상을 발견하기까지 약 ${m.alarmDelay}초`));
     o.step(inc, 'cell', 'self', m.agentActive ? '셀 자체 조치: 비상 정지 · 작업물 보류 · 자가 진단 → 재가동 불가' : '셀 자체 조치 없음 (수동 설비)');
     const pending = !!st.request;
-    if (pending) { st.request.kind = 'repair'; this.erp?.maintenance(st, 'repair'); }
+    if (pending) { st.request.kind = 'repair'; this.fac?.maintenance(st, 'repair'); }
     else if (!m.agentActive) this.requestTech(st, 'repair', m.alarmDelay + 5);   // 레거시: 발견 지연 → 반장 판단 후 정비반 호출
     o.later(m.agentActive ? 0.5 : m.alarmDelay, () => o.step(inc, 'cell', 'report', `${m.agentActive ? '상위 보고' : m.andon ? '안돈 → 반장 호출' : '작업자 → 반장 보고'}: 고장 · 예상 수리 ${Math.round(st.repairTotal)}초 · 하류 셀 자재대기 예상`));
     o.later(m.agentActive ? o.latency : m.alarmDelay + 5, () => {
@@ -1361,7 +1381,7 @@ export class Simulation {
     if (kind !== 'repair' && this.cmd.stationGate(st)) return false;   // 명령으로 멈춘 셀에는 정비·보정을 새로 걸지 않는다 (수리 요청은 접수)
     st.request = { st, kind, readyAt: this.time + delay, tech: null };
     this.requests.push(st.request);
-    this.erp?.maintenance(st, kind);   // Odoo: 정비요청 (긴급 / 예방)
+    this.fac?.maintenance(st, kind);   // FAC: 정비요청 (긴급 / 예방)
     return true;
   }
 
@@ -1409,7 +1429,7 @@ export class Simulation {
       }
       if (!best) continue;
       if (how) { this.log('act', `${st.name} 긴급수리 배정 조정`, { obs: '빈 정비 인력 없음', dec: '긴급수리(P3) 우선', act: how }); if (inc) this.orch.step(inc, 'orch', 'decide', `정비 배정 조정: ${how}`); }
-      req.tech = best; best.job = { prio: KP[req.kind], st, req }; this.erp?.maintStart(st, best);
+      req.tech = best; best.job = { prio: KP[req.kind], st, req }; this.fac?.maintStart(st, best);
       if (req.kind === 'repair') this.orch.step(inc, 'exec', 'act', `${best.id} 배정 · 출동${req.waitFrom != null && this.time - req.waitFrom > 1 ? ` (배정 대기 ${Math.round(this.time - req.waitFrom)}초)` : ''}`);
       const kindLabel = { repair: '긴급수리', pm: '예지정비', cal: '재보정' }[req.kind];
       const T = toolSteps(this, best, req.kind, inc);
@@ -1479,7 +1499,7 @@ export class Simulation {
     st.state = st.zone ? 'OK' : st.item ? (st.done ? 'BLOCKED' : 'BUSY') : 'STARVED';
     st.techOnSite = false; st.maintKind = null;
     this.requests = this.requests.filter((r) => r !== st.request);
-    if (!st.request?.self) this.erp?.maintDone(st);   // Odoo: 정비 완료 (셀 자율 보정은 정비요청 없음)
+    if (!st.request?.self) this.fac?.maintDone(st);   // FAC: 정비 완료 (셀 자율 보정은 정비요청 없음)
     st.request = null;
     this.emit('repaired', { st, kind });
     const label = { repair: '수리 완료', pm: '예지정비 완료', cal: '재보정 완료' }[kind];
@@ -1503,7 +1523,7 @@ export class Simulation {
         // 대기존에서 바로 옆 진출입 줄(AGV 상차 자리를 비킨 x −41.2)로 나가 부품 칸 앞으로 옆걸음, 나올 때도 같은 줄로
         { go: h.pick, via: [{ x: LOC.WH_LANE_IN, z: h.home.z - 1.1 }, { x: LOC.WH_LANE_IN, z: h.pick.z }] },   // 충전 도크 앞(북쪽 1.1m)으로 나와 서쪽(들어가는) 줄로
         { until: () => !this.partsTracked || this.whParts > 0, task: '부품 랙 재고 대기 (입고 트럭 대기)' },
-        { wait: 4, done: () => { const n = this.partsTracked ? Math.min(this.mode.partsCap - (st.parts ?? 0), this.whParts) : this.mode.partsCap; this.whParts -= this.partsTracked ? n : 0; h.carry = n; if (this.partsTracked) this.erp?.consume('parts', n, st.name); } },
+        { wait: 4, done: () => { const n = this.partsTracked ? Math.min(this.mode.partsCap - (st.parts ?? 0), this.whParts) : this.mode.partsCap; this.whParts -= this.partsTracked ? n : 0; h.carry = n; if (this.partsTracked) this.fac?.consume('parts', n, st.name); } },
         { go: { x: LOC.WH_LANE_OUT, z: LOC.WH_TOP_Z, aisle: 'F', name: '물류존 진출' }, via: [{ x: LOC.WH_LANE_OUT, z: h.pick.z }] },   // 나오는 줄(동쪽)로 A-1·A-2 도크 묶음 서쪽을 지나 북쪽 끝까지, 거기서 앞 통로(z 9)로 나간다
         { go: st.ammr ? this.rackServiceLoc(st) : localLoc(st.def, -1.0, SVC_Z, st.name) },   // AMMR 셀은 부품 선반 옆
         { wait: 5, done: () => {
@@ -1772,7 +1792,7 @@ export class Simulation {
     const K = this.zoneKits, R = this.zoneRaw, ok = R[key] >= 1 && (K ? K[key] >= 1 : w.parts >= 1);
     if (ok) {
       R[key]--;
-      if (K) K[key]--; else { w.parts--; this.erp?.consume(`${key}:parts`, 1, `${XWH[key].code} 투입구`); }
+      if (K) K[key]--; else { w.parts--; this.fac?.consume(`${key}:parts`, 1, `${XWH[key].code} 투입구`); }
     }
     if (!ok && !this.zoneStarved[key]) this.log('warn', `${XWH[key].name} 자재 대기`, { obs: `투입구 원재료 ${R[key]} · ${K ? `투입구 부품 키트 ${K[key]}` : `확장 선반 부품 ${w.parts}`} · 확장 선반 원재료 ${w.raw}`, act: R[key] < 1 ? `${XWH[key].code} 전용 ${this.mode.vehicleKind === 'agv' ? 'AGV' : '지게차'} 원재료 도착까지 투입 대기` : K && K[key] < 1 ? '물류 휴머노이드 부품 키트 도착까지 투입 대기' : '입고 트럭 도착까지 투입 대기' });
     this.zoneStarved[key] = !ok;
@@ -1832,7 +1852,7 @@ export class Simulation {
       const pick = { x: -43.0, z: Math.min(xrackZ(`${key}:raw`), 13.0), aisle: 'F', name: `확장 선반 ${code} 원재료 출고` };
       v.setTask(`${code} 원재료 운반`, [
         { go: pick },
-        { wait: 4, done: () => { const n = Math.min(ZONE_SRC.load, safety ? ZONE_SRC.load : w.raw, ZONE_SRC.cap - this.zoneRaw[key] - this.zoneRawIn[key]); if (!safety) { w.raw -= n; if (n) this.erp?.consume(`${key}:raw`, n, `${code} 투입구`); } this.zoneRawIn[key] += n; v.load = { type: 'raw', n, safety }; } },
+        { wait: 4, done: () => { const n = Math.min(ZONE_SRC.load, safety ? ZONE_SRC.load : w.raw, ZONE_SRC.cap - this.zoneRaw[key] - this.zoneRawIn[key]); if (!safety) { w.raw -= n; if (n) this.fac?.consume(`${key}:raw`, n, `${code} 투입구`); } this.zoneRawIn[key] += n; v.load = { type: 'raw', n, safety }; } },
         { go: F.agvDrop },
         { wait: 4, done: () => { const n = v.load?.n ?? 0, sf = v.load?.safety; this.zoneRaw[key] = Math.min(ZONE_SRC.cap, this.zoneRaw[key] + n); this.zoneRawIn[key] -= n; v.load = null; this.stats.zoneTrips = (this.stats.zoneTrips ?? 0) + 1; if (sf) this.orch.step(this.orch.find(`supply:${key}`), 'exec', 'act', `${v.id} 안전재고 ${n}개 ${ZONE_LABEL[key]} 투입구 도착 (재고 ${this.zoneRaw[key]}개)`); } },
         { go: v.home },   // 내려놓은 자리(Zone AMR 투입 경로 옆)에 서 있지 않고 충전 자리로 — 다음 운반도 바로 옆 확장 선반에서 시작한다
@@ -1849,7 +1869,7 @@ export class Simulation {
       h.kitRun = true;
       h.setTask(`${code} 부품 키트 보충 → ${code} 투입구`, [
         { go: { ...KIT_PICK, name: '확장 선반 출고 자리' }, via: [{ x: LOC.WH_LANE_OUT, z: h.home.z - 1.1 }, { x: LOC.WH_LANE_OUT, z: LOC.WH_TOP_Z }] },   // 도크 앞 → 서쪽 진출입 줄로 위쪽 도크 묶음을 비켜 북쪽 → 확장 선반 동쪽 면 출고 자리
-        { wait: 4, done: () => { const n = Math.min(ZONE_KIT.carry, ZONE_KIT.cap - this.zoneKits[key], this.whZone[key].parts); this.whZone[key].parts -= n; h.carry = n; if (n) this.erp?.consume(`${key}:parts`, n, `${code} 투입구`); } },
+        { wait: 4, done: () => { const n = Math.min(ZONE_KIT.carry, ZONE_KIT.cap - this.zoneKits[key], this.whZone[key].parts); this.whZone[key].parts -= n; h.carry = n; if (n) this.fac?.consume(`${key}:parts`, n, `${code} 투입구`); } },
         { go: F.kitSpot },
         { wait: 3, done: () => { this.zoneKits[key] = Math.min(ZONE_KIT.cap, this.zoneKits[key] + (h.carry || 0)); h.carry = false; this.stats.kitRuns = (this.stats.kitRuns ?? 0) + 1; } },
         { go: h.home },
@@ -1928,7 +1948,7 @@ export class Simulation {
       { go: LOC.WH },
       { until: () => this.time >= this.supplyDisruptedUntil, task: '출고 대기 (공급 차질)' },
       { until: () => this.whRaw > 0, task: '창고 재고 대기 (입고 트럭 대기)' },
-      { wait: 4, done: () => { const n = Math.min(PALLET_RAW, this.whRaw); this.whRaw -= n; v.load = { type: 'raw', n }; this.erp?.consume('raw', n, '투입구 (AS/RS)'); } },
+      { wait: 4, done: () => { const n = Math.min(PALLET_RAW, this.whRaw); this.whRaw -= n; v.load = { type: 'raw', n }; this.fac?.consume('raw', n, '투입구 (AS/RS)'); } },
       { go: this.loc.SRC },
       { wait: 4, done: () => {
         const n = v.load?.n ?? PALLET_RAW;

@@ -84,7 +84,7 @@ export class InboundYard {
       if (!items.some((x) => x.n)) items[0].n = 1;
       const pallets = items.flatMap((x) => Array(x.n).fill(x.I.key));
       this.orders.push({ t: s.time, due: s.time + WH.lead, pallets });
-      s.erp?.purchase(this.orders.at(-1));   // Odoo: 구매오더 확정 + 입고 예정
+      s.fac?.purchase(this.orders.at(-1));   // FAC: 구매오더 확정 + 입고 예정
       const low = items.filter((x) => x.pos < x.I.reorder).map((x) => `${x.I.label} ${stockOf(s, x.I.key)}${x.I.unit ?? '개'}`).join(' · ');
       s.log('plan', 'WMS 자재 발주', { obs: `창고 ${low} (발주 포함 재주문점 미달)`, act: `공급사 트럭 1대 — ${items.filter((x) => x.n).map((x) => `${x.I.label} ${x.n}팔레트`).join(' · ')}` });
     }
@@ -95,7 +95,7 @@ export class InboundYard {
       const t = new Truck(`입고트럭-${++this.seq}`, -111, INBOUND.roadZ + 1.5, Math.PI / 2);   // 진입로 남쪽 차로로 동쪽으로 와서 북쪽으로 꺾는다
       t.pallets = [...o.pallets]; t.load = t.pallets.length; t.inbound = true;
       t.go([{ x: NB - 4, z: INBOUND.roadZ + 1.5 }, { x: NB, z: INBOUND.roadZ - 3 }, { x: NB, z: INBOUND.waitZ }], 'arrive');
-      this.trucks.push(t); s.erp?.dispatched(o, t);
+      this.trucks.push(t); s.fac?.dispatched(o, t);
     }
     this.orders = this.orders.filter((o) => !o.sent);
     for (const t of this.trucks) {
@@ -116,7 +116,7 @@ export class InboundYard {
     // 다 내린 트럭은 출차 (남행 차로 → 건물 앞쪽 진입로 → 서쪽)
     const d = this.docked;
     if (d && !d.pallets.length && !(d.reserved > 0)) {
-      s.erp?.receiptDone(d);   // Odoo: 입고 확정 (검수 완료)
+      s.fac?.receiptDone(d);   // FAC: 입고 확정 (검수 완료)
       d.go([{ x: SB + 3, z: INBOUND.dockZ }, { x: SB, z: INBOUND.dockZ + 5 }, { x: SB, z: INBOUND.roadZ - 1.5 }, { x: SB - 5, z: INBOUND.roadZ - 1.5 }, { x: -113, z: INBOUND.roadZ - 1.5 }], 'depart');
       this.stats.trucks++;
       s.log('ok', `${d.id} 하차 완료 · 출차`, { obs: `창고 원자재 ${s.whRaw}개${s.partsTracked ? ` · 부품 ${s.whParts}개` : ''}`, act: '입고 도크 비움' });
@@ -145,7 +145,7 @@ export function planReceiver(sim, f) {
     { go: put, via: [{ x: put.x, z: INBOUND.dockZ + Math.sign(put.z - INBOUND.dockZ) * 2 }] },   // 지게차 통로를 따라 선반 쪽(북쪽)으로 곧게 올라가 선반 서쪽 면에 넣는다
     { wait: legacy ? 6 : 4, done: () => {
       addStock(sim, type, I.pallet); sim.inbound.stats[type] = (sim.inbound.stats[type] ?? 0) + I.pallet;
-      sim.erp?.received(t, type, I.pallet);
+      sim.fac?.received(t, type, I.pallet);
       f.load = null;
     } },
     // 대기 주차: 통로 남쪽 끝(건물 맨 아래) 주차 칸 — 칸 북쪽 앞(칸 중심선)으로 갔다가 남쪽으로 곧게 들어가 반듯이 선다

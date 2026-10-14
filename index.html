@@ -110,7 +110,7 @@
 
   <div class="panel detail hidden" id="detail"></div>
   <div class="cmd-banner" id="cmdBanner" role="status" aria-live="assertive" hidden></div>
-  <section class="panel orch hidden" id="orchPanel" aria-label="오케스트레이터 인시던트 흐름"></section>
+  <section class="panel orch hidden" id="orchPanel" aria-label="오케스트레이터 인시던트 흐름 · 제어 흐름 · 명령 콘솔"></section>
 
   <section class="panel dock" id="lineDock">
     <button id="dockToggle" class="dock-title" type="button">
@@ -147,11 +147,11 @@
     <button id="btnSupply" title="자재 창고 출고를 10분간 중단합니다">⛔ 자재 공급 차질</button>
     <button id="btnEvent" class="dark-only" title="누유·이물질·무단 진입·연기 의심 중 하나를 로봇 카메라 앞에 발생시킵니다 — 로봇 영상 AI 추론으로 감지해 자율 대응합니다">⚠ 현장 이벤트</button>
     <button id="btnLabels" class="on">🏷 라벨</button>
-    <button id="btnOrch" title="설비 고장·공급 차질·현장 이벤트의 처리 흐름과, 셀 현장으로 보내는 긴급·제어 명령 콘솔">🛰 오케스트레이터 <b class="badge" id="orchBadge" hidden></b></button>
+    <button id="btnOrch" title="설비 고장·공급 차질·현장 이벤트의 처리 흐름, 공정·운영 제어·이벤트 흐름 분석, 셀 현장으로 보내는 긴급·제어 명령 콘솔">🛰 오케스트레이터 <b class="badge" id="orchBadge" hidden></b></button>
     <button id="btnNet5g" title="Private 5G 특화망 — 음영지역 없는 기지국(PCI) 배치, RSRP 커버리지 지도, 로봇 ↔ 서빙 셀 연결선·핸드오버">📶 5G</button>
     <button id="btnCctv" title="사각지대 없는 CCTV 배치 — 커버리지 지도(빨강 사각지대 · 연두 1대 · 초록 2대 이상)와 감시 반경">📹 CCTV</button>
     <button id="btnData" title="AAS · OPC UA PubSub over MQTT 데이터 연동과 파일 저장">📡 데이터 연동</button>
-    <button id="btnOdoo" title="Odoo ERP 연동 — 발주(구매오더·입고) · 재고(로케이션·이동) · 설비보전(정비요청)">🏢 Odoo</button>
+    <button id="btnFac" title="FAC — FACOS 업무 기록: 발주(구매오더·입고) · 재고(로케이션·이동) · 설비보전(정비요청) · FAC API">🏢 FAC</button>
     <button id="btnFleet" title="AMR·AGV — 공통 설정·상태, 상황별 속도 변화, 전체 속도 조절·정지·시작, 설정 변경 효과 예측">🚚 AMR·AGV</button>
     <button id="btnConcept">🧭 진화 컨셉</button>
     <button id="btnCompare" class="primary">📊 3단계 8시간 비교</button>
@@ -185,10 +185,10 @@
       <div id="fleetBody"></div>
     </div>
   </div>
-  <div class="modal hidden" id="odooModal">
+  <div class="modal hidden" id="facModal">
     <div class="modal-card wide">
-      <div class="modal-h"><h2>🏢 Odoo ERP 연동 <small>ISA-95 레벨 4 — 발주(Purchase) · 재고(Inventory) · 설비보전(Maintenance) · 공장 운영(FACOS)은 실시간 판단, ERP는 기록·계획</small></h2><button id="closeOdoo">✕</button></div>
-      <div id="odooBody"></div>
+      <div class="modal-h"><h2>🏢 FAC 업무 기록 <small>FACOS 계층 — 발주 · 재고 · 설비보전 · 오케스트레이터가 판단·실행한 결과를 FAC이 같은 자리에서 전표로 기록 · FAC API로 외부 조회</small></h2><button id="closeFac">✕</button></div>
+      <div id="facBody"></div>
     </div>
   </div>
 

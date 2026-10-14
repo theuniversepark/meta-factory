@@ -335,8 +335,12 @@ function makeForkliftBlender() {
   put(box(1.0, 0.12, 1.1, MAT.pallet), 0, 0.06, 0, load);
   const crates = [];
   for (let k = 0; k < 6; k++) crates.push(put(box(0.42, 0.3, 0.34, MAT.raw), -0.24 + (k % 2) * 0.48, 0.28, -0.36 + Math.floor(k / 2) * 0.36, load));
+  // 2단 적재(출하 2팔레트 동시 운반): 첫 팔레트 상자 위에 둘째 팔레트
+  const tier2 = put(new THREE.Group(), 0, 0.43, 0, load); put(box(1.0, 0.12, 1.1, MAT.pallet), 0, 0.06, 0, tier2);
+  for (let k = 0; k < 6; k++) crates.push(put(box(0.42, 0.3, 0.34, MAT.raw), -0.24 + (k % 2) * 0.48, 0.28, -0.36 + Math.floor(k / 2) * 0.36, tier2));
+  tier2.visible = false;
   load.visible = false;
-  g.userData = { led: null, load, crates, roof: A.find('Guard'), driver, beacon, fork, blender: true };
+  g.userData = { led: null, load, crates, tier2, roof: A.find('Guard'), driver, beacon, fork, blender: true };
   return g;
 }
 function makeDroneBlender() {
@@ -405,8 +409,12 @@ function makeForklift() {
   put(box(1.0, 0.12, 1.1, MAT.pallet), 0, 0.06, 0, load);
   const crates = [];
   for (let k = 0; k < 6; k++) crates.push(put(box(0.42, 0.3, 0.34, MAT.raw), -0.24 + (k % 2) * 0.48, 0.28, -0.36 + Math.floor(k / 2) * 0.36, load));
+  // 2단 적재(출하 2팔레트 동시 운반): 첫 팔레트 상자 위에 둘째 팔레트
+  const tier2 = put(new THREE.Group(), 0, 0.43, 0, load); put(box(1.0, 0.12, 1.1, MAT.pallet), 0, 0.06, 0, tier2);
+  for (let k = 0; k < 6; k++) crates.push(put(box(0.42, 0.3, 0.34, MAT.raw), -0.24 + (k % 2) * 0.48, 0.28, -0.36 + Math.floor(k / 2) * 0.36, tier2));
+  tier2.visible = false;
   load.visible = false;
-  g.userData = { led: null, load, crates, roof, driver, beacon, fork };
+  g.userData = { led: null, load, crates, tier2, roof, driver, beacon, fork };
   return g;
 }
 
@@ -672,14 +680,15 @@ export function makeSignSprite(text, hex, width = 6) {
 }
 // 로봇 고유 ID 명판 (작은 스프라이트)
 function idPlate(text) {
-  const c = document.createElement('canvas'); c.width = 256; c.height = 72;
-  const x = c.getContext('2d');
-  x.fillStyle = 'rgba(10,12,16,0.88)'; x.beginPath(); x.roundRect(2, 2, 252, 68, 14); x.fill();
+  const F = '800 40px Menlo, "SF Mono", Consolas, monospace', c = document.createElement('canvas'), m = c.getContext('2d');
+  m.font = F; c.width = Math.max(256, Math.ceil(m.measureText(text).width) + 36); c.height = 72;   // 긴 ID(확장 Zone FLX-RB-C01-1 등)는 명판을 옆으로 늘린다
+  const x = c.getContext('2d'), W = c.width;
+  x.fillStyle = 'rgba(10,12,16,0.88)'; x.beginPath(); x.roundRect(2, 2, W - 4, 68, 14); x.fill();
   x.lineWidth = 4; x.strokeStyle = '#ffb020'; x.stroke();
-  x.fillStyle = '#ffb020'; x.font = '800 40px Menlo, "SF Mono", Consolas, monospace'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(text, 128, 38);
+  x.fillStyle = '#ffb020'; x.font = F; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(text, W / 2, 38);
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, toneMapped: false }));
-  sp.scale.set(0.78, 0.22, 1); return sp;
+  sp.scale.set(0.78 * W / 256, 0.22, 1); return sp;
 }
 export const ALARM_COLOR = { fault: 0xff3030, supply: 0xff8a1f, event: 0xffc21f };
 
@@ -1470,9 +1479,9 @@ export class FactoryView {
     // 앞쪽 통로(z 9)는 확장동 AGV 충전 패드 앞까지, 앞쪽 시설 통로(z 31)는 확장동 물류존(AGV 원자재 상차·부품 피킹) 앞까지 이어지고, 왼쪽 세로 통로는 동선 계산의 교차 통로(x −35.5)와 같은 자리
     // 정밀조립Zone 앞뒤 통로(z ±9) · 확장 Zone 바깥 시설 통로(앞 FF · 뒤 BB) · 좌우 끝 세로 통로(시설 ↔ 정밀조립Zone 연결)
 const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
-    // 앞뒤 통로는 넓힌 오른쪽(x 48 벽 앞)까지 이어 그린다 — 출하 지게차가 오른쪽 세로 통로(x 35)에서 벽 쪽 도크로 간다
+    // 앞뒤 통로는 넓힌 오른쪽(x 48 벽 앞)까지 이어 그린다 — 출하 지게차가 오른쪽 세로 통로(x 30)에서 벽 쪽 도크로 간다
     const LX1 = BUILDING.x1 - 1.3, lane = (x0, z) => [(x0 + LX1) / 2, z, LX1 - x0, 2.6];
-    const lanes = [lane(-49, 9), lane(-37, -9), lane(-45.2, fr(9)), lane(-42, bk(-9)), [-35.5, VZ, 2.6, VL], [35, VZ, 2.6, VL], [(-39.6 - 36.8) / 2, AISLE.T, 2.8, 2.6]];   // 마지막: 정비실 앞 짧은 통로 (정비실 출입구 → 왼쪽 세로 통로)   // 입고 지게차 운행 구간은 바닥 초록 전용 표시로만 구분
+    const lanes = [lane(-49, 9), lane(-37, -9), lane(-45.2, fr(9)), lane(-42, bk(-9)), [-35.5, VZ, 2.6, VL], [30, VZ, 2.6, VL], [(-39.6 - 36.8) / 2, AISLE.T, 2.8, 2.6]];   // 마지막: 정비실 앞 짧은 통로 (정비실 출입구 → 왼쪽 세로 통로)   // 입고 지게차 운행 구간은 바닥 초록 전용 표시로만 구분
     for (const [x, z, w, d] of lanes) {
       const l = put(new THREE.Mesh(laneGeo(w, d), MAT.lane), x, 0.005, z, r); l.rotation.x = -Math.PI / 2; l.receiveShadow = true;
       for (const s of [-1, 1]) {
@@ -1501,7 +1510,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       for (const sd of [-1, 1]) put(box(0.25, 0.5, 0.35, MAT.rubber), W - 0.3, 1.0, INBOUND.dockZ + sd * 1.15, lw);
       put(makeSignSprite('입고 도크', '#3ddc84', 3.2), W + 0.4, 5.6, INBOUND.dockZ, lw);
       lw.traverse((o) => (o.castShadow = false)); }
-    // 오른쪽 벽(x 38): 위쪽(뒤)에 출하 도크 문 2개(폭 4.6m · 높이 4.9m)만 트럭 상차용으로 연다 — 야드 로컬 좌표를 shipToWorld로 돌려 둔다
+    // 오른쪽 벽: 위쪽(뒤) 모서리에 출하 도크 문 1개(폭 4.6m · 높이 4.9m)만 트럭 상차용으로 연다 — 야드 로컬 좌표를 shipToWorld로 돌려 둔다
     { const doorW = 4.6, dz = YARD.bays.map((bx) => shipToWorld(bx, YARD.wallZ).z).sort((a, b) => a - b), W = SHIP.wallX;
       const cuts = [BUILDING.z0, ...dz.flatMap((z) => [z - doorW / 2, z + doorW / 2]), BUILDING.z1];
       for (let i = 0; i < cuts.length; i += 2) put(box(0.3, 8, cuts[i + 1] - cuts[i], MAT.wall), W, 4, (cuts[i] + cuts[i + 1]) / 2, r);
@@ -1766,10 +1775,9 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     const sy = put(new THREE.Group(), SHIP_FRAME.x, 0, SHIP_FRAME.z, r); sy.rotation.y = SHIP_FRAME.rot;
     const flatY = (w, d, mat, x, z, y = 0.01) => { const m = put(new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat), x, y, z, sy); m.rotation.x = -Math.PI / 2; m.receiveShadow = true; return m; };
     flatY(38, 28, std(0x2b3036, { roughness: 0.95 }), 33, -34.2, -0.01);
-    flatY(100, 7, std(0x24282d, { roughness: 0.95 }), 60, YARD.roadZ, 0.0);
-    for (let x = 12; x < 110; x += 4) flatY(2, 0.15, white, x, YARD.roadZ, 0.02);
+    flatY(112, 7, std(0x24282d, { roughness: 0.95 }), 54, YARD.roadZ, 0.0);   // 북쪽 끝 x −2 (트럭 진입) ~ 남쪽 110
+    for (let x = 0; x < 110; x += 4) flatY(2, 0.15, white, x, YARD.roadZ, 0.02);
     for (const bx of YARD.bays) for (const sd of [-1, 1]) flatY(0.15, 12, line, bx + sd * 1.7, -26.4, 0.02);
-    for (const sd of [-1, 1]) for (let z = -21; z > -33; z -= 1.6) flatY(0.12, 0.8, white, YARD.waitX + sd * 1.6, z, 0.02);
     // 입고 트럭 야드 (왼쪽 벽 바깥 · 건물 앞쪽): 바닥, 남북 도로(북행 입차·남행 출차), 건물 앞쪽 진입로, 도크 앞 정차선, 표시
     const DZ = INBOUND.dockZ, RZ = INBOUND.roadZ;
     flat(42, RZ + 4 - (DZ - 21), std(0x2b3036, { roughness: 0.95 }), -72, (DZ - 21 + RZ + 4) / 2, -0.01);   // 서쪽으로 돌아 도크 중심선에 서는 공간까지
@@ -1785,9 +1793,9 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       const m2 = flat(14, 1.75, new THREE.MeshBasicMaterial({ map: t2, transparent: true, depthWrite: false }), -60, DZ - 7, 0.03); m2.rotation.z = 0; }
     const tx = document.createElement('canvas'); tx.width = 1024; tx.height = 128;
     const c = tx.getContext('2d'); c.fillStyle = 'rgba(242,194,48,0.95)'; c.font = '700 64px "Apple SD Gothic Neo", "Noto Sans KR", sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
-    c.fillText('출하 트럭 야드 · 도크 1 · 대기 · 도크 2', 512, 64);
+    c.fillText('출하 트럭 야드 · 출하 도크', 512, 64);
     const tex = new THREE.CanvasTexture(tx); tex.colorSpace = THREE.SRGBColorSpace;
-    flatY(16, 2, new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }), YARD.waitX, -35.2, 0.03).rotation.z = Math.PI / 2;   // 글자는 화면 앞에서 바로 읽히게
+    flatY(16, 2, new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }), YARD.bays[0] + 7, -30, 0.03).rotation.z = Math.PI / 2;   // 글자는 화면 앞에서 바로 읽히게
   }
 
   // 물류 선반 칸 내용 (제품별 실물 모델 · 부품 토트) — Blender 모델은 앱 시작 후 불러오므로 화면을 만들 때마다(setup) 다시 채운다
@@ -2507,7 +2515,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       vv.g.position.set(v.x, 0, v.z);
       vv.yaw = lerpAngle(vv.yaw, v.heading, Math.min(1, rdt * 8));
       vv.g.rotation.y = vv.yaw;
-      const { load, crates, led, fork } = vv.g.userData;
+      const { load, crates, tier2, led, fork } = vv.g.userData;
       load.visible = !!v.load;
       if (fork) {   // 지게차 포크 높이: 도크에 선 트럭 뒤쪽에 포크 끝이 다가가면 적재함 바닥(1.27m) 위까지 올려 싣고 내린다 · 그 밖에는 주행 높이
         const fx = v.x + Math.sin(v.heading) * 1.9, fz = v.z + Math.cos(v.heading) * 1.9;
@@ -2521,7 +2529,8 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
         fork.position.y += (want - fork.position.y) * Math.min(1, rdt * 5);
       }
       if (v.load) {
-        const n = v.shipper || v.receiver ? crates.length : Math.ceil((v.load.n / (v.load.type === 'raw' ? 20 : sim.mode.vehicleCap)) * crates.length);
+        const two = !!tier2 && v.shipper && v.load.n > YARD.pallet; if (tier2) tier2.visible = two;   // 출하 2팔레트 → 2단
+        const n = v.shipper ? (two ? 12 : 6) : v.receiver ? 6 : Math.ceil((v.load.n / (v.load.type === 'raw' ? 20 : sim.mode.vehicleCap)) * 6);
         crates.forEach((c, i) => { c.visible = i < n; c.material = v.load.type === 'raw' ? MAT.raw : v.load.type === 'parts' ? MAT.partsBin : v.load.product === 'eaxle' ? MAT.crate : MAT.carton; });
       }
       if (led) {

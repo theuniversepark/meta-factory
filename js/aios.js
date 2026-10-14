@@ -32,7 +32,7 @@ export const FEATURES = [
   ['amr', '-', 'AMR 상태별 대수 {park,toSrc,atSrc,line,return}'], ['agv_battery', '%', 'AGV 평균 배터리'], ['agv_idle', '대', '유휴 AGV'],
   ['cells', '-', '셀별 [상태, 이용률, 건강도, 대기열, 자재대기 비율]'], ['incidents_open', '건', '열린 인시던트'], ['supply_disrupted', 'bool', '자재 공급 차질'],
   ['amr_battery_min', '%', '운반 AMR 최저 배터리'], ['net_ho', '회', '5G 누적 핸드오버'], ['net_lost', '건', '5G 업링크 유실'], ['cctv_open', '건', 'CCTV 에이전트 진행 중 이벤트'],
-  ['erp_po_open', '건', 'ERP 진행 중 구매오더'], ['erp_mr_open', '건', 'ERP 진행 중 정비요청'],
+  ['fac_po_open', '건', 'FAC 진행 중 구매오더'], ['fac_mr_open', '건', 'FAC 진행 중 정비요청'],
   ['policy', '-', '적용 중인 운영 정책'], ['model', '-', 'AIOS 모델 버전'],
 ];
 const r1 = (v) => Math.round(v * 10) / 10, r3 = (v) => Math.round(v * 1000) / 1000;
@@ -79,7 +79,7 @@ export class AIOSPipeline {
       cells, incidents_open: s.orch.openCount(), supply_disrupted: !!s.supplyDisrupted,
       amr_battery_min: s.carriers.length ? Math.round(Math.min(...s.carriers.map((c) => c.battery))) : null,
       net_ho: s.net?.on ? s.net.stats.ho : null, net_lost: s.net?.on ? s.net.summary().lost : null, cctv_open: s.cctvAgent ? s.cctvAgent.history.filter((h) => h.status === 'open').length : null,
-      erp_po_open: s.erp?.on ? s.erp.stats().poOpen : null, erp_mr_open: s.erp?.on ? s.erp.stats().mrOpen : null,
+      fac_po_open: s.fac?.on ? s.fac.stats().poOpen : null, fac_mr_open: s.fac?.on ? s.fac.stats().mrOpen : null,
       policy: { ...this.policy }, model: this.version,
     };
     this.prev = cur;

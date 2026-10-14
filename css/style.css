@@ -415,8 +415,8 @@ table.rb-j .tq i { display: block; height: 100%; }
 .panel.orch { top: 70px; left: var(--lx); width: min(1000px, calc(100vw - var(--lx) - var(--rx) - 2px)); max-height: calc(100vh - 150px); z-index: 9; padding: 10px 12px; display: flex; flex-direction: column; }
 .panel.orch.hidden { display: none; }
 .orch-h { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.orch-h b { font-size: 14px; }
-.orch-h small { color: var(--muted); margin-right: auto; }
+.orch-h b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; }
+.orch-h small { color: var(--muted); margin-right: auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .orch-h button { border: 0; background: none; color: var(--ink2); font-size: 15px; }
 .orch-b { display: grid; grid-template-columns: 230px 1fr; gap: 10px; min-height: 0; flex: 1; overflow: hidden; }
 .orch-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; padding-right: 2px; }
@@ -458,6 +458,91 @@ table.rb-j .tq i { display: block; height: 100%; }
 @keyframes orch-pulse { 50% { stroke-width: 3.2; } }
 @media (prefers-reduced-motion: reduce) { .sw .cur .bx { animation: none; stroke-width: 2.6; } }
 .badge[hidden] { display: none; }
+/* 제어 흐름 탭: 계층 흐름도 · 공정 흐름도 · 단계 지연 · 흐름 기록 */
+.ctl-b { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 12px; min-height: 0; flex: 1; overflow: hidden; }
+.ctl-main, .ctl-side { display: flex; flex-direction: column; gap: 6px; min-height: 0; overflow-y: auto; }
+.ctl-b h4 { margin: 2px 0 0; font-size: 11.5px; color: var(--ink2); letter-spacing: 0.04em; }
+.ctl-b h4 small { color: var(--muted); font-weight: 400; margin-left: 6px; letter-spacing: 0; }
+.ctl-svg { border-radius: 8px; background: rgba(0, 0, 0, 0.18); padding: 4px; overflow-x: auto; flex-shrink: 0; }
+.ctl-svg .cs-flags { padding: 2px 2px 4px; }
+.sw.ctl { display: block; }
+.sw .cn rect { fill: rgba(16, 22, 30, 0.95); stroke: rgba(255, 255, 255, 0.22); stroke-width: 1.2; }
+.sw .cn.l-orch rect { stroke: var(--o-decide); fill: rgba(184, 155, 255, 0.08); }
+.sw .cn.l-erp rect { stroke-dasharray: 4 3; }
+.sw .cnn { fill: var(--ink2); font-size: 9.5px; font-variant-numeric: tabular-nums; }
+.sw .ce.dim { opacity: 0.12; }
+.sw .ce.zero { opacity: 0.35; }
+.sw .al.ce { font-size: 10px; font-variant-numeric: tabular-nums; }
+.sw .pq circle { fill: rgba(61, 220, 132, 0.9); }
+.sw .pq text { fill: #05220f; font-size: 9px; font-weight: 800; }
+.sw.proc .ar.busy { stroke: var(--good); stroke-width: 2; }
+.sw .pn rect { fill: rgba(16, 22, 30, 0.95); stroke: rgba(255, 255, 255, 0.2); stroke-width: 1.3; }
+.sw .pn.t-good rect { stroke: var(--good); fill: rgba(61, 220, 132, 0.08); }
+.sw .pn.t-warn rect { stroke: var(--warn); fill: rgba(245, 184, 46, 0.08); }
+.sw .pn.t-info rect { stroke: #5aa9ff; fill: rgba(90, 169, 255, 0.08); }
+.sw .pn.t-bad rect { stroke: #ff5a5a; fill: rgba(255, 90, 90, 0.12); stroke-width: 2; }
+.sw .pn.inc { cursor: pointer; }
+.sw .pn.inc rect { animation: orch-pulse 1.1s ease-in-out infinite; }
+.sw .pt { fill: var(--ink); font-size: 10.5px; font-weight: 700; }
+.sw .ps { fill: var(--ink2); font-size: 9.5px; }
+.sw .pc { fill: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; }
+.ctl-st { width: 100%; border-collapse: collapse; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.ctl-st th, .ctl-st td { padding: 3px 3px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.ctl-st th:first-child { text-align: left; font-weight: 600; }
+.ctl-st thead th { color: var(--muted); font-weight: 400; }
+.ctl-st small { color: var(--muted); }
+.ctl-jr { display: flex; flex-direction: column; gap: 3px; min-height: 120px; overflow-y: auto; flex: 1; }
+.jr { display: flex; flex-direction: column; gap: 1px; text-align: left; border: 1px solid var(--line); border-left: 3px solid var(--o-decide); background: rgba(255, 255, 255, 0.03); border-radius: 7px; padding: 4px 7px; }
+.jr.c-control { border-left-color: var(--o-command); } .jr.c-event { border-left-color: var(--o-report); }
+.jr:hover { background: rgba(255, 255, 255, 0.07); }
+.jr-m { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.jr-m em { font-style: normal; font-weight: 700; }
+.jr-m .oi-p { font-size: 9.5px; }
+.jr-t { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 공정별 제어 흐름도 (적응가공존 Cell 시나리오 [부록] 플로우 차트 표현) */
+:root { --sf-head: #1d3b57; --sf-seq: #2f8f95; }
+.sf-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.sf-bar small { color: var(--muted); font-size: 10.5px; }
+.sf-bar small i { font-style: normal; }
+.sf-bar .k-control { color: var(--o-command); } .sf-bar .k-event { color: var(--o-report); } .sf-bar .k-exc { color: #ff7070; }
+.sf-jump { display: flex; gap: 4px; flex-wrap: wrap; }
+.sf-jump button { border: 1px solid var(--line); background: rgba(255, 255, 255, 0.04); border-radius: 7px; padding: 3px 8px; font-size: 11px; color: var(--ink2); display: flex; align-items: center; gap: 5px; }
+.sf-jump button:hover { color: var(--ink); background: rgba(255, 255, 255, 0.09); }
+.sf-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.sf-dot.t-good { background: var(--good); } .sf-dot.t-warn { background: var(--warn); } .sf-dot.t-bad { background: #ff5a5a; } .sf-dot.t-info { background: #5aa9ff; }
+.sf-body { overflow-y: auto; min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; }
+.sf-step { border: 1px solid var(--line); border-radius: 8px; background: rgba(0, 0, 0, 0.16); padding: 6px; }
+.sf-step h4 { margin: 0 0 6px; font-size: 12.5px; text-align: center; display: flex; justify-content: center; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sf-step h4 span { display: inline-flex; gap: 4px; flex-wrap: wrap; font-weight: 400; }
+.tg.sf-c.t-good { background: rgba(61, 220, 132, 0.18); color: var(--good); }
+.tg.sf-c.t-warn { background: rgba(var(--cmd-warn), 0.2); color: var(--warn); }
+.tg.sf-c.t-bad { background: rgba(var(--cmd-bad), 0.22); color: #ff9a9a; }
+.tg.sf-c.t-info { background: rgba(var(--cmd-info), 0.2); color: #9fd0ff; }
+.sf { display: block; }
+.sf .sf-lane { fill: rgba(255, 255, 255, 0.025); stroke: rgba(255, 255, 255, 0.07); }
+.sf .sf-lh { fill: var(--sf-head); }
+.sf .sf-lh.lock { fill: rgba(var(--cmd-bad), 0.85); }
+.sf .sf-lt { fill: #fff; font-size: 11.5px; font-weight: 600; }
+.sf .sf-note { fill: var(--muted); font-size: 10px; }
+.sf .sf-b rect { fill: rgba(16, 22, 30, 0.96); stroke: #9fb3c6; stroke-width: 1.1; }
+.sf .sf-b .sf-t1 { fill: var(--ink); font-size: 11px; }
+.sf .sf-b .sf-t2 { fill: var(--ink2); font-size: 10.5px; }
+.sf .sf-b.exc rect { stroke: #ff7070; stroke-dasharray: 4 2; }
+.sf .sf-b.on rect { stroke: var(--good); stroke-width: 2.2; fill: rgba(61, 220, 132, 0.14); animation: orch-pulse 1.1s ease-in-out infinite; }
+.sf .sf-b.exc.on rect { stroke: #ff5a5a; fill: rgba(255, 90, 90, 0.18); stroke-dasharray: none; }
+.sf .sf-n { fill: var(--warn); font-size: 9.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sf .sf-ln { fill: none; stroke-width: 1.3; }
+.sf .sf-ln.k-seq { stroke: var(--sf-seq); }
+.sf .sf-ln.k-control { stroke: var(--o-command); stroke-dasharray: 5 3; }
+.sf .sf-ln.k-event { stroke: var(--o-report); stroke-dasharray: 5 3; }
+.sf .sf-ln.k-exc { stroke: #ff7070; stroke-dasharray: 5 3; }
+.sf .sf-ln.dim, .sf .sf-ll.dim { opacity: 0.15; }
+.sf .sfm-seq { fill: var(--sf-seq); } .sf .sfm-control { fill: var(--o-command); } .sf .sfm-event { fill: var(--o-report); } .sf .sfm-exc { fill: #ff7070; }
+.sf .sf-ll { font-size: 10px; font-weight: 700; paint-order: stroke; stroke: rgba(10, 14, 20, 0.95); stroke-width: 3px; }
+.sf .sf-ll.k-exc { fill: #ff8080; } .sf .sf-ll.k-control { fill: var(--o-command); } .sf .sf-ll.k-event { fill: var(--o-report); }
+@media (prefers-reduced-motion: reduce) { .sf .sf-b.on rect { animation: none; } }
+@media (max-width: 1100px) { .ctl-b { grid-template-columns: 1fr; overflow-y: auto; } }
+@media (prefers-reduced-motion: reduce) { .sw .pn.inc rect { animation: none; stroke-width: 2.6; } }
 
 /* 경보: 진행 중인 고장·공급 차질·현장 이벤트 — 하단 버튼과 현장 라벨이 깜빡인다 (해결되면 원래대로) */
 :root { --al-fault: 255, 70, 70; --al-supply: 255, 138, 31; --al-event: 255, 194, 31; }
@@ -485,6 +570,7 @@ table.rb-j .tq i { display: block; height: 100%; }
 .cmd-banner.info { background: rgba(var(--cmd-info), 0.9); }
 @keyframes cmd-pulse { 50% { background: rgba(var(--cmd-bad), 0.62); } }
 .orch-tabs { margin-left: 4px; }
+.orch-h .seg, .orch-h .chk { flex-shrink: 0; }
 .cmd-b { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 12px; min-height: 0; flex: 1; overflow: hidden; }
 .cmd-ctl, .cmd-side { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow-y: auto; }
 .cmd-b h4 { margin: 2px 0 0; font-size: 11.5px; color: var(--ink2); letter-spacing: 0.04em; }

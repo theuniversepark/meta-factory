@@ -19,7 +19,7 @@ import { renderConcept } from './concept.js';
 import { DataHub, PUBLISHER_ID, WRITER_GROUP } from './datahub.js';
 import { PacketCapture } from './pcap.js';
 import { RENDER, loadBlenderAssets, applyRenderEnv, resetRenderEnv, primKey, blenderize } from './blender.js';
-import { ODOO_PRODUCTS, ODOO_LOCS } from './odoo.js';
+import { FAC_PRODUCTS, FAC_LOCS } from './fac.js';
 import { RobotCamWall, ZoneCamWall, COLS as CAM_COLS } from './robotcam.js';
 import { GateView } from './gateview.js';
 import { EpisodeRecorder, buildEpisodesZip, EP_HZ, SAMPLE } from './vla.js';
@@ -335,9 +335,13 @@ document.addEventListener('click', (e) => { if (!e.target.closest('.zc-dd')) zon
 xzCard?.addEventListener('click', (e) => { const b = e.target.closest('button[data-view]'); if (b) flyTo(b.dataset.view); });
 function updateXzCard() {
   if (!xzCard) return;
-  const rows = xzones.summary().map((z) => `<div class="xz-row"><div class="xz-h"><b>${z.name}</b><button type="button" class="xz-go" data-view="${z.key}">보기 ▸</button></div>`
-    + `<div class="xz-s">${Object.entries(z.products).map(([k, v]) => `${v.label} <b>${z.byProduct[k] ?? 0}</b>`).join(' · ')} · UPH <b>${z.uph}</b> · 가동 셀 <b>${z.busy}/${z.cells}</b>${z.key === 'flex' ? ` · NG <b>${z.ng}</b>` : ` · 리워크 <b>${z.rework}</b>`}</div></div>`).join('');
-  const html = `<div class="zc-h"><b>메타팩토리 3 Zone</b><small>서버실 ↔ AMR 스테이션 사이 · 위 유연생산 · 가운데 정밀조립 · 아래 적응가공</small></div>`
+  const row = (key, name, prods, s) => `<div class="xz-row"><div class="xz-h"><b>${name}</b><button type="button" class="xz-go" data-view="${key}">보기 ▸</button></div><div class="xz-s">${prods} · ${s}</div></div>`;
+  const zrow = (z) => row(z.key, z.name, Object.entries(z.products).map(([k, v]) => `${v.label} <b>${z.byProduct[k] ?? 0}</b>`).join(' · '), `UPH <b>${z.uph}</b> · 가동 셀 <b>${z.busy}/${z.cells}</b>${z.key === 'flex' ? ` · NG <b>${z.ng}</b>` : ` · 리워크 <b>${z.rework}</b>`}`);
+  // 정밀조립Zone (메인 시뮬레이션): 제품별 양품 · UPH · 가동 셀 · 불량 배출 — 확장 Zone 행과 같은 꼴
+  const P = sim.processing.filter((st) => !st.standby), pg = sim.stats.goodBy ?? {};
+  const prow = row('precision', '정밀조립Zone', `도어트림 <b>${pg.doortrim ?? 0}</b> · e-axle <b>${pg.eaxle ?? 0}</b>`, `UPH <b>${Math.round(sim.kpi().uphRecent || 0)}</b> · 가동 셀 <b>${P.filter((st) => st.state === 'BUSY').length}/${P.length}</b> · 불량 <b>${sim.stats.rejected ?? 0}</b>`);
+  const zs = xzones.summary(), rows = [...zs.filter((z) => z.key === 'flex').map(zrow), prow, ...zs.filter((z) => z.key !== 'flex').map(zrow)].join('');   // 위 유연생산 · 가운데 정밀조립 · 아래 적응가공
+  const html = `<div class="zc-h"><b>메타팩토리 3 Zone</b></div>`
     + `<div class="seg small xz-views"><button type="button" data-view="all">전체</button><button type="button" data-view="flex">유연생산</button><button type="button" data-view="precision">정밀조립</button><button type="button" data-view="adapt">적응가공</button></div>${rows}`;
   if (xzCard.dataset.h !== html) { xzCard.dataset.h = html; xzCard.innerHTML = html; }
 }
@@ -556,74 +560,70 @@ const FORMATS = [
   ['csv', 'CSV', '시계열·이벤트 긴 형식 (타임스탬프·자산·항목·값·단위)'],
   ['aml', 'AutomationML', 'CAEX 3.0 공장 계층 + AAS id + 최신 값, CSV 시계열 참조'],
 ];
-// ── Odoo ERP 연동 창: 발주 · 재고 · 설비보전 + 실시간 Odoo 연결 ─────────────────
-const odooModal = document.getElementById('odooModal'), odooBody = document.getElementById('odooBody');
-let odooTab = 'po', odooTimer = null, odooSrv = null, odooNote = '', odooSyncT = 0, odooBusy = false;
+// ── FAC 창 (FACOS 업무 기록): 발주 · 재고 · 설비보전 + FAC API ─────────────────
+const facModal = document.getElementById('facModal'), facBody = document.getElementById('facBody');
+let facTab = 'po', facTimer = null, facSrv = null, facNote = '', facPushT = 0, facBusy = false;
 const won = (v) => `${Math.round(v).toLocaleString('ko-KR')}원`;
 const fclk = (tt) => tt == null ? '-' : [3600, 60, 1].map((d, i) => String(Math.floor((Math.floor(tt) + 8 * 3600) / d) % (i ? 60 : 24)).padStart(2, '0')).join(':');
-const pcode = (k) => ODOO_PRODUCTS[k]?.code ?? k, lname = (k) => ODOO_LOCS[k]?.name ?? k;
-async function odooStatus() { if (hub.noServer) { odooSrv = null; return; } try { odooSrv = await (await fetch('/api/odoo/status')).json(); } catch { odooSrv = null; } }
-function renderOdoo() {
-  const E = sim.erp;
-  if (!E?.on) { setHTML(odooBody, '<div class="dh-note">레거시 공장은 ERP 연동이 없습니다 (수기 발주·장부). 자동화·피지컬AI 단계에서 Odoo와 연동합니다.</div>'); return; }
+const pcode = (k) => FAC_PRODUCTS[k]?.code ?? k, lname = (k) => FAC_LOCS[k]?.name ?? k;
+async function facStatus() { if (hub.noServer) { facSrv = null; return; } try { facSrv = await (await fetch('/api/fac/status')).json(); } catch { facSrv = null; } }
+function renderFac() {
+  const E = sim.fac;
+  if (!E?.on) { setHTML(facBody, '<div class="dh-note">레거시 공장은 FAC 기록이 없습니다 (수기 발주·장부). 자동화·피지컬AI 단계에서 FAC이 발주·재고·설비보전을 기록합니다.</div>'); return; }
   const S = E.stats(), Q = E.quant, n = (v) => Math.round(v).toLocaleString('ko-KR');
   const st = (x) => `<span class="od-st ${x === 'done' || x === 'purchase' ? 'done' : x === 'new' ? 'new' : 'wait'}">${{ done: '완료', assigned: '준비됨', purchase: '구매오더', progress: '진행 중', new: '신규' }[x] ?? x}</span>`;
-  const tabs = { po: `🧾 발주 (구매오더 ${S.po})`, stock: `📦 재고 (전표 ${E.db.picking.length})`, mr: `🔧 설비보전 (정비요청 ${S.mr})`, live: '🔗 실시간 Odoo 연결', log: '📜 연동 로그' };
+  const tabs = { po: `🧾 발주 (구매오더 ${S.po})`, stock: `📦 재고 (전표 ${E.db.picking.length})`, mr: `🔧 설비보전 (정비요청 ${S.mr})`, api: '🔌 FAC API', log: '📜 기록 로그' };
   let body = '';
-  if (odooTab === 'po') body = `<table class="od-tbl"><tr><th>구매오더</th><th>공급사</th><th>주문 시각</th><th>품목 (주문 / 입고)</th><th>금액</th><th>입고 전표</th><th>트럭</th><th>상태</th></tr>
+  if (facTab === 'po') body = `<table class="od-tbl"><tr><th>구매오더</th><th>공급사</th><th>주문 시각</th><th>품목 (주문 / 입고)</th><th>금액</th><th>입고 전표</th><th>트럭</th><th>상태</th></tr>
     ${E.db.po.slice(0, 40).map((p) => `<tr><td>${p.name}</td><td>${escH(p.partner)}</td><td>${fclk(p.date_order)}</td><td>${p.lines.map((l) => `${pcode(l.product)} ${n(l.qty)} / ${n(l.received)}`).join('<br>')}</td><td>${won(p.amount)}</td><td>${p.receipt}</td><td>${p.truck ?? '발주됨'}</td><td>${p.received ? st('done') : st('purchase')}</td></tr>`).join('') || '<tr><td colspan="8">아직 구매오더가 없습니다 — 물류 선반 재고가 재주문점 아래로 내려가면 WMS가 발주합니다</td></tr>'}</table>
-    <div class="cmp-note">재주문 규칙(stock.warehouse.orderpoint): ${E.orderpoints.map((o) => `${pcode(o.product)} @ ${lname(o.location)} 최소 ${n(o.min)} · 최대 ${n(o.max)}`).join(' / ')} — 재고 + 발주분이 최소 아래면 최대까지 발주 (트럭 4팔레트 한도)</div>`;
-  else if (odooTab === 'stock') body = `<table class="od-tbl"><tr><th>로케이션</th>${Object.keys(ODOO_PRODUCTS).map((k) => `<th>${pcode(k)}</th>`).join('')}</tr>
-    ${['rackRaw', 'rackParts', 'feeder', 'cells', 'output', 'customer'].map((k) => `<tr><td>${lname(k)}</td>${Object.keys(ODOO_PRODUCTS).map((p) => `<td>${Q[k][p] ? n(Q[k][p]) : '·'}</td>`).join('')}</tr>`).join('')}</table>
+    <div class="cmp-note">재주문 규칙(fac.orderpoint): ${E.orderpoints.map((o) => `${pcode(o.product)} @ ${lname(o.location)} 최소 ${n(o.min)} · 최대 ${n(o.max)}`).join(' / ')} — 재고 + 발주분이 최소 아래면 최대까지 발주 (트럭 4팔레트 한도)</div>`;
+  else if (facTab === 'stock') body = `<table class="od-tbl"><tr><th>로케이션</th>${Object.keys(FAC_PRODUCTS).map((k) => `<th>${pcode(k)}</th>`).join('')}</tr>
+    ${['rackRaw', 'rackParts', 'rackX', 'feeder', 'feederA1', 'feederA2', 'cells', 'output', 'customer'].map((k) => `<tr><td>${lname(k)}</td>${Object.keys(FAC_PRODUCTS).map((p) => `<td>${Q[k][p] ? n(Q[k][p]) : '·'}</td>`).join('')}</tr>`).join('')}</table>
     <table class="od-tbl" style="margin-top:8px"><tr><th>전표</th><th>유형</th><th>근거</th><th>품목</th><th>출발 → 도착</th><th>시각</th><th>상태</th></tr>
     ${E.db.picking.slice(0, 40).map((p) => `<tr><td>${p.name}</td><td>${{ incoming: '입고', internal: '내부 이동', production: '생산 입고', outgoing: '출고' }[p.type]}</td><td>${escH(p.origin ?? '')}</td><td>${p.lines.map((l) => `${pcode(l.product)} ${n(l.done)}${l.qty !== l.done ? ` / ${n(l.qty)}` : ''}${l.trips ? ` (${l.trips}회)` : ''}`).join('<br>')}</td><td>${lname(p.lines[0]?.from ?? p.from)} → ${lname(p.lines[0]?.to ?? p.to)}</td><td>${fclk(p.done ?? p.created)}</td><td>${st(p.state)}</td></tr>`).join('')}</table>`;
-  else if (odooTab === 'mr') body = `<table class="od-tbl"><tr><th>정비요청</th><th>설비 (일련번호)</th><th>유형</th><th>요청</th><th>담당</th><th>소요</th><th>단계</th><th>내용</th></tr>
+  else if (facTab === 'mr') body = `<table class="od-tbl"><tr><th>정비요청</th><th>설비 (일련번호)</th><th>유형</th><th>요청</th><th>담당</th><th>소요</th><th>단계</th><th>내용</th></tr>
     ${E.db.mr.slice(0, 40).map((m) => `<tr><td>${m.ref}</td><td>${escH(m.equipmentName)} (${m.equipment})</td><td>${m.type === 'corrective' ? '긴급 (고장)' : '예방'}</td><td>${fclk(m.request_date)}</td><td>${m.tech ?? '-'}</td><td>${m.stage === 'done' ? `${Math.round(m.duration * 60)}분` : '-'}</td><td>${st(m.stage)}</td><td>${escH(m.description)}</td></tr>`).join('') || '<tr><td colspan="8">정비요청이 없습니다</td></tr>'}</table>
     <div class="cmp-note">설비 ${S.equipment}대 등록 (셀·셀 로봇·운반 AMR·AGV·지게차·휴머노이드·사족보행·드론, 일련번호 = 설비 고유 ID). 정비요청이 많은 설비: ${E.db.equipment.filter((e) => e.requests).sort((a, b) => b.requests - a.requests).slice(0, 4).map((e) => `${e.name} ${e.requests}건 (${Math.round(e.downtime * 60)}분)`).join(' · ') || '-'}</div>`;
-  else if (odooTab === 'live') {
-    const v = odooSrv;
-    body = hub.noServer ? '<div class="dh-note">웹·공유 페이지에서는 서버가 없어 실시간 Odoo 연동을 쓸 수 없습니다 — 시뮬레이션 Odoo로 기록합니다. 맥 앱이나 npm start로 실행하세요.</div>'
-      : `<div class="od-live"><div><b>서버 게이트웨이</b> (server/odoo-gateway.mjs → Odoo 외부 API JSON-RPC <code>/jsonrpc</code>) · ${v ? (v.configured ? `설정됨 — ${escH(v.url)} · DB ${escH(v.db)} · ${escH(v.user)}${v.connected ? ` · <b class="ok">연결됨</b> (Odoo ${escH(v.version ?? '')}, uid ${v.uid})` : ' · 미연결'}` : '<b class="bad">설정 없음</b>') : '확인 중…'}</div>
-        <div class="row"><input id="odUrl" placeholder="https://mycompany.odoo.com" value="${escH(v?.url ?? '')}"/><input id="odDb" placeholder="데이터베이스" value="${escH(v?.db ?? '')}"/><input id="odUser" placeholder="로그인 (이메일)" value="${escH(v?.user ?? '')}"/><input id="odKey" type="password" placeholder="${v?.hasKey ? 'API 키 (저장됨 — 바꿀 때만 입력)' : 'API 키'}"/><button data-od="config">설정</button></div>
-        <div class="row"><label class="chk"><input type="checkbox" id="odLive" ${E.live ? 'checked' : ''}/> 실시간 Odoo로 보내기 (2초마다 묶음 전송)</label> · 보낸 이벤트 ${n(E.sent)} · 대기 ${n(E.outbox.length)}${v ? ` · Odoo 적용 ${n(v.sent)} · 실패 ${n(v.failed)}` : ''}</div>
-        ${v?.lastError ? `<div class="bad">최근 오류: ${escH(v.lastError)}</div>` : ''}${odooNote ? `<div>${escH(odooNote)}</div>` : ''}
-        ${v?.created && Object.keys(v.created).length ? `<div>Odoo에 생성: ${Object.entries(v.created).map(([k, c]) => `${k} ${n(c)}`).join(' · ')}</div>` : ''}</div>
-      <div class="cmp-note">• 필요한 Odoo 앱: 구매 · 재고 · 설비보전 (Community 무료판에 포함, Odoo 16~18). API 키: Odoo 사용자 설정 → 계정 보안 → API 키. 키는 서버 메모리(또는 .env의 ODOO_API_KEY)에만 두고 화면으로 돌려보내지 않습니다.<br>
-      • 처음 보낼 때 마스터 데이터(제품 4종 · 로케이션 · 공급사/고객사 · 재주문 규칙 · 설비 ${S.equipment}대 · 기초 재고)를 만들고, 이후 구매오더 확정 → 입고 검증, 내부 이동·생산 입고·출고 검증, 정비요청 생성·단계 변경을 순서대로 적용합니다. 체크하는 순간까지 쌓인 이벤트부터 보냅니다.</div>`;
+  else if (facTab === 'api') {
+    const v = facSrv, base = escH(location.origin);
+    body = hub.noServer ? '<div class="dh-note">웹·공유 페이지에서는 서버가 없어 FAC API를 열 수 없습니다 — 화면 안에서만 기록합니다. 맥 앱이나 npm start로 실행하세요.</div>'
+      : `<div class="od-live"><div><b>FAC API</b> (server/fac-api.mjs, 읽기 전용) · ${v ? (v.active && v.run === E.run ? `<b class="ok">게시 중</b> — 운전 ${escH(v.run)} · 이벤트 ${n(v.events)}건 (seq ${n(v.seq)}) · 마지막 업로드 ${escH((v.lastPush ?? '').slice(11, 19))}` : '대기 — 첫 업로드 전') : '확인 중…'}</div>
+        <div class="row">화면 → 서버 업로드: 2초마다 · 올린 이벤트 ${n(E.sent)} · 대기 ${n(E.outbox.length)}${facNote ? ` · ${escH(facNote)}` : ''}</div></div>
+      <table class="od-tbl" style="margin-top:8px"><tr><th>구분</th><th>엔드포인트</th><th>내용</th></tr>
+        <tr><td style="white-space:nowrap">① 조회</td><td><code>GET /api/fac/status</code></td><td>운전 ID · 공장 시계 · 이벤트 수 · 요약 지표(구매오더·전표·정비요청)</td></tr>
+        <tr><td style="white-space:nowrap">① 조회</td><td><code>GET /api/fac/po</code></td><td>구매오더(fac.po) — 품목별 주문/입고 수량 · 금액 · 입고 전표 · 트럭 · 상태 (최근 500건)</td></tr>
+        <tr><td style="white-space:nowrap">① 조회</td><td><code>GET /api/fac/moves</code></td><td>재고 전표(fac.move) — 입고 · 내부 이동 · 생산 입고 · 출고 (최근 500건)</td></tr>
+        <tr><td style="white-space:nowrap">① 조회</td><td><code>GET /api/fac/stock</code></td><td>로케이션별 현재고(fac.stock) · 제품 · 로케이션</td></tr>
+        <tr><td style="white-space:nowrap">① 조회</td><td><code>GET /api/fac/mr</code> · <code>/equipment</code> · <code>/orderpoints</code></td><td>정비요청(fac.mr) · 설비 대장 ${S.equipment}대 · 재주문 규칙</td></tr>
+        <tr><td style="white-space:nowrap">② 이벤트</td><td><code>GET /api/fac/events?since=0&amp;limit=500&amp;type=po.create,mr.stage</code></td><td>이벤트 이력 — 응답의 <code>next</code>를 다음 <code>since</code>로 넘기면 이어 받기 (master · po.create · receipt.done · internal.done · production.done · delivery.done · mr.create · mr.update · mr.stage)</td></tr></table>
+      <div class="cmp-note">• 예: <code>curl ${base}/api/fac/events?since=0</code> — 서버는 이 Mac(127.0.0.1)에서만 열립니다. 단계·라인을 바꾸면 새 운전 ID로 기록을 다시 시작합니다.<br>
+      • 외부에서 발주·정비요청을 넣는 쓰기 API는 아직 없습니다 (지시 게이트·보안 계층 검증과 함께 2차로 추가 예정).</div>`;
   } else body = `<table class="od-tbl"><tr><th>시각</th><th>내용</th></tr>${E.log.map((l) => `<tr><td>${fclk(l.t)}</td><td>${escH(l.text)}</td></tr>`).join('')}</table>`;
-  setHTML(odooBody, `<div class="od-grid">
+  setHTML(facBody, `<div class="od-grid">
       <div class="od-kpi"><span>구매오더</span><b>${n(S.po)}건</b><small>진행 중 ${S.poOpen} · ${won(S.amount)}</small></div>
       <div class="od-kpi"><span>재고 전표</span><b>${n(S.receipts + S.internals + S.productions + S.deliveries)}건</b><small>입고 ${S.receipts} · 내부 ${S.internals} · 생산 ${S.productions} · 출고 ${S.deliveries}</small></div>
       <div class="od-kpi"><span>물류 선반 재고</span><b>${n(Q.rackRaw.raw)} · ${n(Q.rackParts.parts)}</b><small>RM-BOX · PT-KIT (확정 기준)</small></div>
       <div class="od-kpi"><span>정비요청</span><b>${n(S.mr)}건</b><small>긴급 ${S.corrective} · 예방 ${S.preventive} · 진행 ${S.mrOpen}</small></div></div>
-    <div class="od-tabs">${Object.entries(tabs).map(([k, v]) => `<button data-odtab="${k}" class="${odooTab === k ? 'on' : ''}">${v}</button>`).join('')}</div>${body}
-    <div class="cmp-note">${E.live ? '🔗 실시간 Odoo에도 보내는 중' : '시뮬레이션 Odoo (내장) — 같은 모델(purchase.order · stock.picking · stock.quant · maintenance.request)·전표 번호로 기록'} · 내부 이동·생산 입고는 10분(공장 시계)마다 한 전표</div>`);
+    <div class="od-tabs">${Object.entries(tabs).map(([k, v]) => `<button data-factab="${k}" class="${facTab === k ? 'on' : ''}">${v}</button>`).join('')}</div>${body}
+    <div class="cmp-note">FACOS 업무 기록 — 구매오더(fac.po) · 재고 전표(fac.move) · 현재고(fac.stock) · 정비요청(fac.mr)${hub.noServer ? '' : ' · FAC API 게시'} · 내부 이동·생산 입고는 10분(공장 시계)마다 한 전표</div>`);
 }
-document.getElementById('btnOdoo').addEventListener('click', () => {
-  odooModal.classList.remove('hidden'); odooStatus().then(renderOdoo); renderOdoo();
-  clearInterval(odooTimer); odooTimer = setInterval(() => { if (!odooModal.classList.contains('hidden') && !odooBody.contains(document.activeElement)) odooStatus().then(renderOdoo); }, 1500);
+document.getElementById('btnFac').addEventListener('click', () => {
+  facModal.classList.remove('hidden'); facStatus().then(renderFac); renderFac();
+  clearInterval(facTimer); facTimer = setInterval(() => { if (!facModal.classList.contains('hidden') && !facBody.contains(document.activeElement)) facStatus().then(renderFac); }, 1500);
 });
-document.getElementById('closeOdoo').addEventListener('click', () => { odooModal.classList.add('hidden'); clearInterval(odooTimer); });
-odooBody.addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-odtab]'); if (t) { odooTab = t.dataset.odtab; return renderOdoo(); }
-  if (e.target.closest('[data-od="config"]')) {
-    const body = { url: document.getElementById('odUrl').value, db: document.getElementById('odDb').value, user: document.getElementById('odUser').value, key: document.getElementById('odKey').value };
-    try { odooSrv = await (await fetch('/api/odoo/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json(); odooNote = '설정을 서버에 저장했습니다 (API 키는 서버 메모리에만)'; } catch (err) { odooNote = `설정 실패: ${err.message}`; }
-    renderOdoo();
-  }
-});
-odooBody.addEventListener('change', (e) => { if (e.target.id === 'odLive') { sim.erp.live = e.target.checked; odooNote = e.target.checked ? '실시간 전송 시작' : '실시간 전송 중지 (이벤트는 쌓아 둠)'; e.target.blur(); renderOdoo(); } });
-// 실시간 전송: 2초마다 쌓인 이벤트를 서버 게이트웨이로 (실패하면 그대로 두고 다음에 다시)
-async function odooSyncTick(rdt) {
-  const E = sim.erp; if (!E?.live || hub.noServer || odooBusy) return;
-  odooSyncT += rdt; if (odooSyncT < 2 || (E.masterSent && !E.outbox.length)) return; odooSyncT = 0; odooBusy = true;
-  const withMaster = !E.masterSent, batch = [...(withMaster ? [E.master] : []), ...E.outbox.slice(0, 300)];
+document.getElementById('closeFac').addEventListener('click', () => { facModal.classList.add('hidden'); clearInterval(facTimer); });
+facBody.addEventListener('click', (e) => { const t = e.target.closest('[data-factab]'); if (t) { facTab = t.dataset.factab; renderFac(); } });
+// FAC API 업로드: 2초마다 쌓인 이벤트 + 현황을 서버로 (실패하면 그대로 두고 다음에 다시)
+async function facPushTick(rdt) {
+  const E = sim.fac; if (!E?.on || hub.noServer || facBusy) return;
+  facPushT += rdt; if (facPushT < 2) return; facPushT = 0; facBusy = true;
+  const withMaster = !E.masterSent, batch = [...(withMaster ? [E.master] : []), ...E.outbox.slice(0, 500)];
   try {
-    const r = await fetch('/api/odoo/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ events: batch }) });
-    const out = await r.json(); odooSrv = out.status ?? odooSrv;
-    if (r.ok) { E.outbox.splice(0, batch.length - (withMaster ? 1 : 0)); E.masterSent = true; E.sent += batch.length; odooNote = `${out.applied}건 적용`; } else odooNote = `전송 실패: ${out.error}`;
-  } catch (err) { odooNote = `전송 실패: ${err.message}`; }
-  finally { odooBusy = false; }
+    const r = await fetch('/api/fac/push', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ run: E.run, events: batch, snapshot: E.snapshot() }) });
+    const out = await r.json();
+    if (r.ok && sim.fac === E) { E.outbox.splice(0, batch.length - (withMaster ? 1 : 0)); E.masterSent = true; E.sent += batch.length; facNote = ''; } else if (!r.ok) facNote = `업로드 실패: ${out.error}`;
+  } catch (err) { facNote = `업로드 실패: ${err.message}`; }
+  finally { facBusy = false; }
 }
 
 // ── 패킷 덤프: 캡처 상태·통계·버튼 (데이터 연동 창) ─────────────────
@@ -845,7 +845,7 @@ document.addEventListener('pointerdown', (e) => {
   // FACOS 칩·5G 카드 등에서 다른 창을 여는 경우: 정보 창 안의 버튼은 그 창을 남긴다
   closePopups(keep);
 }, true);
-// 가운데 창(진화 컨셉 · 3단계 비교 · 데이터 연동 · Odoo · VLA · AIOS · FACOS 상세 · 지시 게이트 · 설정): 창 바깥 어두운 바탕을 누르면 닫는다
+// 가운데 창(진화 컨셉 · 3단계 비교 · 데이터 연동 · FAC · VLA · AIOS · FACOS 상세 · 지시 게이트 · 설정): 창 바깥 어두운 바탕을 누르면 닫는다
 // 바탕에서 누르고 뗐을 때만 (창 안에서 끌다가 바탕에서 놓은 경우는 닫지 않음) — 각 창의 ✕ 버튼을 눌러 정리 동작(갱신 타이머 해제 등)을 그대로 쓴다
 let modalDown = null;
 document.addEventListener('pointerdown', (e) => { modalDown = e.target instanceof Element && e.target.classList.contains('modal') ? e.target : null; }, true);
@@ -1229,7 +1229,7 @@ function frame() {
   hub.tick(rdt);
   bzT += rdt; if (bzT > 1.5) { bzT = 0; blenderize(scene); }   // Blender 옵션: 운영 중에 새로 생긴 모델(대상물·트럭 등)도 바꿔 끼운다
   pcapVideoTick(rdt);
-  odooSyncTick(rdt);
+  facPushTick(rdt);
   view.update(rdt, running, speed);
   xzones.update(rdt, running && !llm.holdSim, speed);
   keyPan(rdt, shiftHeld);
@@ -1610,7 +1610,7 @@ function renderFacos() {
     ['👁', '현장 감지', evs ? `이벤트 ${evs}건` : `CCTV ${s.cctv.cams.length} · 드론 ${s.drones.length} · 사족 ${s.quads.length}`, evs ? 'warn' : 'ok', 'facos:sense', '사각지대 없는 CCTV AI 영상 분석 · 로봇 비전 AI 이벤트 감지 · 순찰 드론 · 사족보행 열화상·진동 점검 (js/cctv.js · js/robotcam.js · js/drone.js)'],
     ['🗄', 'DataHub', mq.available ? `MQTT ${mq.sent.toLocaleString('ko-KR')}건` : `AAS · 수집 ${hub.samples.length}`, mq.available && mq.failed ? 'warn' : 'ok', 'btnData', '기준 시계(UTC) · AAS · OPC UA PubSub over MQTT · AASX 저장 · 패킷 덤프(pcap) (js/datahub.js · js/pcap.js)'],
     ...(s.net?.on ? [(() => { const Q = s.net.summary(); return ['📶', '5G', `gNB ${s.net.plan.cells.length} · 단말 ${Q.ues} · 유실 ${Q.lost}`, Q.lost || Q.rlf ? 'bad' : 'ok', 'btnNet5g', 'Private 5G 특화망 — 음영 없는 기지국(PCI) · 이동 로봇 5G 모뎀 · A3 핸드오버 · PDCP 포워딩 무손실 업링크 (js/net5g.js)']; })()] : []),
-    ...(s.erp?.on ? [(() => { const E = s.erp.stats(); return ['🏢', 'ERP', `구매 ${E.poOpen}/${E.po} · 정비 ${E.mrOpen}`, E.mrOpen ? 'act' : 'ok', 'btnOdoo', `Odoo ERP — 발주·재고·설비보전 ${s.erp.live ? '(실시간 Odoo 전송 중)' : '(시뮬레이션 Odoo)'} (js/odoo.js)`]; })()] : []),
+    ...(s.fac?.on ? [(() => { const E = s.fac.stats(); return ['🏢', 'FAC', `구매 ${E.poOpen}/${E.po} · 정비 ${E.mrOpen}`, E.mrOpen ? 'act' : 'ok', 'btnFac', `FAC — FACOS 업무 기록: 발주·재고·설비보전${hub.noServer ? '' : ' · FAC API 게시'} (js/fac.js)`]; })()] : []),
   ];
   const html = `<button type="button" class="fc-brand" title="FACOS — 피지컬AI 공장 운영 SW (누르면 접기/펴기)"><b>FACOS</b><small>공장 운영 SW</small></button>` + L.map(([ic, nm, val, cls, open, tip], i) =>
     `${i ? '<i class="fc-arw">›</i>' : ''}<button type="button" class="fc-l ${cls}" ${open ? `data-open="${open}"` : 'disabled'} title="${escV(tip)}"><span class="fc-n"><i class="fc-ic">${ic}</i>${nm}</span><span class="fc-v">${escV(val)}</span></button>`).join('');

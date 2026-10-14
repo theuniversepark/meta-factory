@@ -1,21 +1,21 @@
-// Odoo ERP 연동 (ISA-95 레벨 4) — 1순위: 발주(Purchase) · 재고(Inventory) · 설비보전(Maintenance)
-// 공장 운영(FACOS, 레벨 3)은 실시간 판단·제어를 그대로 하고, ERP 기록은 Odoo 데이터 모델로 남긴다.
-//  · 발주: WMS가 재주문점 아래에서 트럭 1대분을 발주하면 구매오더(purchase.order, P0000n)를 만들고 확정 → 입고(WH/IN) 예정
+// FAC — FACOS 업무 기록 계층: 발주 · 재고 · 설비보전
+// 공장 운영(FACOS)이 실시간으로 판단·실행한 결과를 FAC이 같은 자리에서 전표로 남긴다 (외부 ERP로 보내지 않고 FACOS 안에서 기록).
+//  · 발주: WMS가 재주문점 아래에서 트럭 1대분을 발주하면 구매오더(fac.po, P0000n)를 확정 → 입고(WH/IN) 예정
 //          트럭 하차 팔레트마다 입고 수량, 트럭이 떠나면 입고 확정(검수 완료) → 물류 선반 재고 증가
-//  · 재고: 제품(product.product) 4종 · 로케이션(stock.location) — 물류 선반 원자재·부품, 라인 투입구·셀, 구분 적재장
-//          AGV 출고(선반 → 투입구) · 휴머노이드 부품 출고(선반 → 셀)는 내부 이동(WH/INT), 생산 완료는 생산 입고(가상 → 구분 적재장),
+//  · 재고: 제품(fac.product) 8종(정밀조립 4 · 확장 Zone 자재 4) · 로케이션(fac.location) — 물류 선반 원자재·부품, 라인 투입구·셀, 구분 적재장, 로케이션별 현재고(fac.stock)
+//          AGV 출고(선반 → 투입구) · 휴머노이드 부품 출고(선반 → 셀)는 내부 이동(fac.move, WH/INT), 생산 완료는 생산 입고(가상 → 구분 적재장),
 //          출하 지게차 상차는 출고(WH/OUT, 트럭이 떠나면 확정). 내부 이동·생산은 10분(공장 시계)마다 한 전표로 묶는다
-//          재주문 규칙(stock.warehouse.orderpoint)은 WMS 재주문점·목표와 같은 값
-//  · 설비보전: 셀·셀 로봇·이동 로봇을 설비(maintenance.equipment, 일련번호 = 설비 고유 ID)로 등록하고,
-//          설비 고장 → 긴급 정비요청(corrective), 예지·예방 정비 지시 → 예방 정비요청(preventive),
+//          재주문 규칙(fac.orderpoint)은 WMS 재주문점·목표와 같은 값
+//  · 설비보전: 셀·셀 로봇·이동 로봇을 설비(fac.equipment, 일련번호 = 설비 고유 ID)로 등록하고,
+//          설비 고장 → 긴급 정비요청(fac.mr, corrective), 예지·예방 정비 지시 → 예방 정비요청(preventive),
 //          정비 인력 배정 → 진행 중, 수리·정비 완료 → 완료(소요 시간 기록)
-// 두 가지 모드: ① 시뮬레이션 Odoo(내장 — 같은 모델·전표 번호·상태로 기록, 서버 없이 동작)
-//              ② 실시간 Odoo(서버 /api/odoo/sync → server/odoo-gateway.mjs가 JSON-RPC로 실제 Odoo에 생성·확정)
-// 렌더링과 분리되어 헤드리스 시뮬레이션에서도 같은 흐름으로 동작한다 (tests/odoo.mjs).
+// FAC API: 서버가 있으면(맥 앱·npm start) 2초마다 이벤트·현황을 /api/fac/push로 올리고, server/fac-api.mjs가 REST로 제공한다
+//          (조회 /api/fac/po · moves · stock · mr · equipment, 이벤트 /api/fac/events?since=)
+// 렌더링과 분리되어 헤드리스 시뮬레이션에서도 같은 흐름으로 동작한다 (tests/fac.mjs).
 import { WH, WH_ITEMS } from './receiving.js';
 import { EXTRA_ZONES, zoneCellRobots, zoneRobotUid, zoneAmrUid } from './zonedefs.js';
 
-export const ODOO_PRODUCTS = {
+export const FAC_PRODUCTS = {
   raw: { code: 'RM-BOX', name: '원자재 박스 (도어트림·e-axle 공용)', price: 12000 },
   parts: { code: 'PT-KIT', name: '조립 부품 (클립·볼트·스피커그릴 키트)', price: 800 },
   doortrim: { code: 'FG-DT', name: '도어트림 (완제품)', price: 185000 },
@@ -26,10 +26,10 @@ export const ODOO_PRODUCTS = {
   'adapt:raw': { code: 'ADP-RM', name: '적응가공 원재료 (유압블록·리어커버 소재)', price: 28000 },
   'adapt:parts': { code: 'ADP-PT', name: '적응가공 부품 키트 (플러그·실·볼트)', price: 3500 },
 };
-export const ODOO_LOCS = {
-  vendor: { name: 'Partners/Vendors', usage: 'supplier' },
-  customer: { name: 'Partners/Customers', usage: 'customer' },
-  production: { name: 'Virtual Locations/Production', usage: 'production' },
+export const FAC_LOCS = {
+  vendor: { name: '거래처/공급사', usage: 'supplier' },
+  customer: { name: '거래처/고객사', usage: 'customer' },
+  production: { name: '가상/생산', usage: 'production' },
   rackRaw: { name: 'WH/Stock/물류선반-원자재', usage: 'internal' },
   rackParts: { name: 'WH/Stock/물류선반-부품', usage: 'internal' },
   rackX: { name: 'WH/Stock/확장선반-유연생산·적응가공', usage: 'internal' },
@@ -45,14 +45,14 @@ const useOf = (p) => (p === 'raw' ? 'feeder' : p === 'parts' ? 'cells' : p.start
 export const SUPPLIER = '공급사 (원자재·부품)', CUSTOMER = '완성차 고객사 (서연인테크 · 쉐플러코리아)';
 const WINDOW = 600;   // 내부 이동·생산 입고 묶음 (공장 시계 초)
 
-export class OdooBridge {
+export class FacLedger {
   constructor(sim) {
     this.sim = sim; this.on = sim.mode.key !== 'traditional' && !sim.twin;
-    this.live = false;                       // 실시간 Odoo로도 보내기 (서버 연결 시 화면에서 켬)
-    this.outbox = []; this.sent = 0;         // 실시간 Odoo로 보낼 이벤트
+    this.run = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;   // 운전 ID — 서버 FAC API가 새 운전이면 기록을 비운다
+    this.outbox = []; this.sent = 0;         // FAC API로 올릴 이벤트
     this.seq = { po: 0, in: 0, int: 0, out: 0, mrp: 0, mr: 0 };
     this.db = { po: [], picking: [], mr: [], equipment: [] };
-    this.quant = Object.fromEntries(Object.keys(ODOO_LOCS).map((k) => [k, Object.fromEntries(Object.keys(ODOO_PRODUCTS).map((p) => [p, 0]))]));
+    this.quant = Object.fromEntries(Object.keys(FAC_LOCS).map((k) => [k, Object.fromEntries(Object.keys(FAC_PRODUCTS).map((p) => [p, 0]))]));
     this.byOrder = new Map(); this.byTruck = new Map(); this.byShip = new Map(); this.byStation = new Map();
     this.win = null; this.good = { doortrim: 0, eaxle: 0 }; this.log = [];
     if (!this.on) return;
@@ -75,7 +75,7 @@ export class OdooBridge {
     // 기초 재고 (재고 조정): 시작 시 물류 선반 재고
     this.quant.rackRaw.raw = sim.whRaw ?? 0; this.quant.rackParts.parts = sim.partsTracked ? sim.whParts : 0;
     for (const [z, w] of Object.entries(sim.whZone ?? {})) for (const k of ['raw', 'parts']) this.quant.rackX[`${z}:${k}`] = w[k];
-    this.emit({ type: 'master', products: ODOO_PRODUCTS, locations: ODOO_LOCS, supplier: SUPPLIER, customer: CUSTOMER, orderpoints: this.orderpoints, equipment: this.db.equipment.map((e) => ({ ...e })), inventory: [
+    this.emit({ type: 'master', products: FAC_PRODUCTS, locations: FAC_LOCS, supplier: SUPPLIER, customer: CUSTOMER, orderpoints: this.orderpoints, equipment: this.db.equipment.map((e) => ({ ...e })), inventory: [
       { product: 'raw', location: 'rackRaw', qty: this.quant.rackRaw.raw }, { product: 'parts', location: 'rackParts', qty: this.quant.rackParts.parts },
       ...Object.entries(this.quant.rackX).filter(([, q]) => q > 0).map(([product, qty]) => ({ product, location: 'rackX', qty }))] });
   }
@@ -101,14 +101,14 @@ export class OdooBridge {
   // WMS 발주 (receiving.js) → 구매오더 확정 + 입고 예정 전표
   purchase(order) {
     if (!this.on) return;
-    const lines = WH_ITEMS.map((I) => ({ I, n: order.pallets.filter((p) => p === I.key).length })).filter((x) => x.n).map(({ I, n }) => ({ product: I.key, qty: n * I.pallet, price: ODOO_PRODUCTS[I.key].price }));
+    const lines = WH_ITEMS.map((I) => ({ I, n: order.pallets.filter((p) => p === I.key).length })).filter((x) => x.n).map(({ I, n }) => ({ product: I.key, qty: n * I.pallet, price: FAC_PRODUCTS[I.key].price }));
     const po = { id: this.db.po.length + 1, name: this.name('po'), partner: SUPPLIER, date_order: this.now(), date_planned: order.due, state: 'purchase', lines: lines.map((l) => ({ ...l, received: 0 })), amount: lines.reduce((a, l) => a + l.qty * l.price, 0), receipt: null, truck: null };
     const pk = { id: this.db.picking.length + 1, name: this.name('in'), type: 'incoming', origin: po.name, partner: SUPPLIER, from: 'vendor', to: null, state: 'assigned', created: this.now(), done: null, lines: lines.map((l) => ({ product: l.product, qty: l.qty, done: 0, to: rackOf(l.product) })) };
     po.receipt = pk.name; this.db.po.unshift(po); this.db.picking.unshift(pk); this.byOrder.set(order, { po, pk });
     // 자재 공급 차질 인시던트가 열려 있으면 타임라인에 발주 번호를 남긴다
-    const sup = this.sim.orch?.find('supply'); if (sup) this.sim.orch.step(sup, 'exec', 'act', `ERP(Odoo) 구매오더 ${po.name} 확정 (${lines.map((l) => `${ODOO_PRODUCTS[l.product].code} ${l.qty}`).join(' · ')}) — 납품 재개 시 입고`);
+    const sup = this.sim.orch?.find('supply'); if (sup) this.sim.orch.step(sup, 'exec', 'act', `FAC 구매오더 ${po.name} 확정 (${lines.map((l) => `${FAC_PRODUCTS[l.product].code} ${l.qty}`).join(' · ')}) — 납품 재개 시 입고`);
     this.emit({ type: 'po.create', key: po.name, partner: SUPPLIER, lines: lines.map(({ product, qty, price }) => ({ product, qty, price })), receipt: pk.name });
-    this.note('po', `${po.name} 구매오더 확정 — ${lines.map((l) => `${ODOO_PRODUCTS[l.product].code} ${l.qty}`).join(' · ')} → 입고 예정 ${pk.name}`);
+    this.note('po', `${po.name} 구매오더 확정 — ${lines.map((l) => `${FAC_PRODUCTS[l.product].code} ${l.qty}`).join(' · ')} → 입고 예정 ${pk.name}`);
   }
   // 발주한 트럭이 출발 → 그 구매오더의 입고 전표에 트럭 연결
   dispatched(order, truck) { const r = this.byOrder.get(order); if (!r) return; r.po.truck = truck.id; r.pk.truck = truck.id; this.byTruck.set(truck, r); this.note('in', `${r.pk.name} 입고 트럭 ${truck.id} 출발 (${r.po.name})`); }
@@ -127,7 +127,7 @@ export class OdooBridge {
     for (const l of r.pk.lines) this.quant[l.to][l.product] += l.done;
     r.po.received = true;
     this.emit({ type: 'receipt.done', key: r.pk.name, po: r.po.name, lines: r.pk.lines.map((l) => ({ product: l.product, qty: l.done, to: l.to })) });
-    this.note('in', `${r.pk.name} 입고 확정 (검수 완료) — ${r.pk.lines.map((l) => `${ODOO_PRODUCTS[l.product].code} ${l.done}`).join(' · ')} → 물류 선반`);
+    this.note('in', `${r.pk.name} 입고 확정 (검수 완료) — ${r.pk.lines.map((l) => `${FAC_PRODUCTS[l.product].code} ${l.done}`).join(' · ')} → 물류 선반`);
   }
 
   // ── 내부 이동 · 생산 입고 (10분 묶음) ─────────────────
@@ -149,7 +149,7 @@ export class OdooBridge {
       for (const l of lines) { this.quant[l.from][l.product] -= l.qty; this.quant[l.to][l.product] += l.qty; }
       this.db.picking.unshift(pk);
       this.emit({ type: 'internal.done', key: pk.name, origin: pk.origin, lines: pk.lines.map(({ product, qty, from, to }) => ({ product, qty, from, to })) });
-      this.note('int', `${pk.name} 내부 이동 확정 — ${lines.map((l) => `${ODOO_PRODUCTS[l.product].code} ${l.qty} (${l.n}회)`).join(' · ')}`);
+      this.note('int', `${pk.name} 내부 이동 확정 — ${lines.map((l) => `${FAC_PRODUCTS[l.product].code} ${l.qty} (${l.n}회)`).join(' · ')}`);
     }
     const prod = Object.entries(w.prod).filter(([, v]) => v > 0);
     if (prod.length) {
@@ -157,7 +157,7 @@ export class OdooBridge {
       for (const [p, q] of prod) this.quant.output[p] += q;
       this.db.picking.unshift(pk);
       this.emit({ type: 'production.done', key: pk.name, lines: pk.lines.map(({ product, qty }) => ({ product, qty, from: 'production', to: 'output' })) });
-      this.note('mrp', `${pk.name} 생산 입고 — ${prod.map(([p, q]) => `${ODOO_PRODUCTS[p].code} ${q}`).join(' · ')}`);
+      this.note('mrp', `${pk.name} 생산 입고 — ${prod.map(([p, q]) => `${FAC_PRODUCTS[p].code} ${q}`).join(' · ')}`);
     }
   }
 
@@ -175,7 +175,7 @@ export class OdooBridge {
     pk.state = 'done'; pk.done = this.now();
     for (const l of pk.lines) { this.quant.output[l.product] -= l.done; this.quant.customer[l.product] += l.done; }
     this.emit({ type: 'delivery.done', key: pk.name, partner: CUSTOMER, origin: pk.origin, lines: pk.lines.map(({ product, done }) => ({ product, qty: done, from: 'output', to: 'customer' })) });
-    this.note('out', `${pk.name} 출고 확정 — ${pk.lines.map((l) => `${ODOO_PRODUCTS[l.product].code} ${l.done}`).join(' · ')} → ${truck.id}`);
+    this.note('out', `${pk.name} 출고 확정 — ${pk.lines.map((l) => `${FAC_PRODUCTS[l.product].code} ${l.done}`).join(' · ')} → ${truck.id}`);
   }
 
   // ── 설비보전 ─────────────────
@@ -186,16 +186,16 @@ export class OdooBridge {
     if (open && open.stage !== 'done') {   // 진행 중 요청이 있으면 유형만 갱신 (예방 → 긴급)
       if (kind === 'repair' && open.type !== 'corrective') {
         open.type = 'corrective'; open.name = `${st.name} 설비 고장 (예방정비 중 전환)`; this.emit({ type: 'mr.update', key: open.ref, mtype: 'corrective', name: open.name });
-        const inc = this.sim.orch?.find(`fail:${st.id}`); if (inc) { open.incident = inc.id; inc.erp = open.ref; this.sim.orch.step(inc, 'orch', 'act', `ERP(Odoo) 정비요청 ${open.ref} 긴급으로 전환`); }
+        const inc = this.sim.orch?.find(`fail:${st.id}`); if (inc) { open.incident = inc.id; inc.fac = open.ref; this.sim.orch.step(inc, 'orch', 'act', `FAC 정비요청 ${open.ref} 긴급으로 전환`); }
       }
       return;
     }
     const type = kind === 'repair' ? 'corrective' : 'preventive';
     const mr = { id: this.db.mr.length + 1, ref: this.name('mr'), name: kind === 'repair' ? `${st.name} 설비 고장` : `${st.name} ${kind === 'pm' ? '예지·예방 정비' : kind === 'cal' ? '재보정' : '정비'}`, equipment: e.serial_no, equipmentName: e.name, type, stage: 'new', request_date: this.now(), start: null, close: null, duration: 0, tech: null, description: reason || (kind === 'repair' ? `건강도 ${st.health.toFixed(0)}% · 가동 정지` : `건강도 ${st.health.toFixed(0)}% · RUL 기반 정비 지시`) };
     this.db.mr.unshift(mr); this.byStation.set(st.id, mr); e.requests++; e.open++;
-    // 오케스트레이터 인시던트와 연결: 고장 인시던트 타임라인에 ERP 정비요청 번호를 남긴다
+    // 오케스트레이터 인시던트와 연결: 고장 인시던트 타임라인에 FAC 정비요청 번호를 남긴다
     const inc = this.sim.orch?.find(`fail:${st.id}`);
-    if (inc && type === 'corrective') { mr.incident = inc.id; inc.erp = mr.ref; this.sim.orch.step(inc, 'orch', 'act', `ERP(Odoo) 긴급 정비요청 ${mr.ref} 생성 — 설비 ${e.serial_no}`); }
+    if (inc && type === 'corrective') { mr.incident = inc.id; inc.fac = mr.ref; this.sim.orch.step(inc, 'orch', 'act', `FAC 긴급 정비요청 ${mr.ref} 생성 — 설비 ${e.serial_no}`); }
     this.emit({ type: 'mr.create', key: mr.ref, name: mr.name, equipment: e.serial_no, mtype: type, description: mr.description });
     this.note('mr', `${mr.ref} ${type === 'corrective' ? '긴급' : '예방'} 정비요청 — ${mr.name}`);
   }
@@ -210,7 +210,7 @@ export class OdooBridge {
     const e = this.equipmentOf(mr.equipment); if (e) { e.open = Math.max(0, e.open - 1); e.downtime += mr.duration; }
     this.emit({ type: 'mr.stage', key: mr.ref, stage: 'done', duration: Math.round(mr.duration * 1000) / 1000 });
     const inc = mr.incident ? this.sim.orch?.incidents.find((i) => i.id === mr.incident) : null;
-    if (inc && inc.status === 'open') this.sim.orch.step(inc, 'exec', 'act', `ERP(Odoo) 정비요청 ${mr.ref} 완료 (${Math.round(mr.duration * 60)}분)`);
+    if (inc && inc.status === 'open') this.sim.orch.step(inc, 'exec', 'act', `FAC 정비요청 ${mr.ref} 완료 (${Math.round(mr.duration * 60)}분)`);
     this.note('mr', `${mr.ref} 정비 완료 — ${mr.name} (${Math.round(mr.duration * 60)}분)`);
   }
 
@@ -222,5 +222,14 @@ export class OdooBridge {
       deliveries: P.filter((p) => p.type === 'outgoing' && p.state === 'done').length, productions: P.filter((p) => p.type === 'production').length,
       mr: this.db.mr.length, mrOpen: this.db.mr.filter((m) => m.stage !== 'done').length, corrective: this.db.mr.filter((m) => m.type === 'corrective').length, preventive: this.db.mr.filter((m) => m.type === 'preventive').length,
       equipment: this.db.equipment.length, events: this.sent + this.outbox.length };
+  }
+  // FAC API 조회용 현황 (최근 500건씩) — 서버 /api/fac/po · moves · stock · mr · equipment가 이 값을 그대로 돌려준다
+  snapshot() {
+    const N = 500, cut = (a) => a.slice(0, N).map((x) => ({ ...x, lines: x.lines?.map((l) => ({ ...l })) }));
+    return { run: this.run, mode: this.sim.mode.key, t: Math.round(this.now() * 10) / 10, stats: this.stats(),
+      products: FAC_PRODUCTS, locations: FAC_LOCS, orderpoints: this.orderpoints.map((o) => ({ ...o })),
+      po: cut(this.db.po), moves: cut(this.db.picking), mr: this.db.mr.slice(0, N).map((m) => ({ ...m })),
+      stock: Object.fromEntries(Object.entries(this.quant).map(([k, q]) => [k, { ...q }])),
+      equipment: this.db.equipment.map((e) => ({ ...e })) };
   }
 }
