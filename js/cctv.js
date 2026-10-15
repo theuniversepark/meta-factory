@@ -51,6 +51,7 @@ export function blocked(c, p, ob) {
 // region.area가 있으면 Zone별로 나눠 덮는다: Zone(정밀검사·유연생산·적응가공·정밀조립) 바닥은 그 Zone 천장 카메라로만 — 카메라 하나가 한 Zone에만 속해 Zone 전광판에 그대로 건다
 // 공용 시설 바닥은 Zone 카메라가 이미 보는 곳을 빼고 공용 자리 카메라로 채운다. 마지막에 빼도 사각지대가 안 생기는 카메라를 덜어 낸다(중복 정리)
 const AREA_ORDER = ['insp', 'flex', 'adapt', 'main', 'shared'];
+const SPACE = 40;   // 자리 다듬기: 이웃 카메라와 6m 안 거리 1m당 겹침 점수 40 (점 하나 겹침 ≈ 3~5)
 function coverRegion(region, ob) {
   const pts = [];
   for (let x = region.x0; x <= region.x1 + 1e-9; x += STEP) for (let z = region.z0; z <= region.z1 + 1e-9; z += STEP) {
@@ -97,6 +98,40 @@ function coverRegion(region, ob) {
     const want = new Set(pts.flatMap((p, i) => (p.area === 'shared' ? [i] : []))), base = new Uint8Array(pts.length);   // 공용 바닥: Zone 카메라가 보는 곳은 빼고
     for (const k of chosen) for (const i of sees[k]) base[i] = 1;
     cover(want, (c) => c.area === 'shared', base); cover(want, () => true, base);
+  }
+  // 자리 다듬기: 탐욕적 선택은 고른 카메라를 옮기지 않아, 끝자락 몇 점 때문에 고른 카메라가 이웃과 붙어 있을 수 있다(거의 같은 바닥을 함께 봄)
+  // 카메라마다 같은 구역의 가까운 후보(8m 안)로 옮겨 보아 사각지대가 생기지 않고(Zone 바닥은 그 Zone 카메라로) 겹침(점마다 대수²의 합) + 이웃 근접(6m 안)이 줄면 옮긴다 — 두 번 돈다
+  {
+    const cnt = new Uint8Array(pts.length), zc = new Uint8Array(pts.length), mark = new Uint8Array(pts.length);
+    const own = (k, i) => !region.area || pts[i].area === 'shared' || cands[k].area === pts[i].area;
+    for (const k of chosen) for (const i of sees[k]) { cnt[i]++; if (own(k, i)) zc[i]++; }
+    const used = new Set(chosen);
+    for (let round = 0; round < 2; round++) for (let n = 0; n < chosen.length; n++) {
+      const k = chosen[n], c = cands[k]; let best = -1, bd = -1;
+      for (const i of sees[k]) mark[i] = 1;
+      cands.forEach((d, j) => {
+        if (used.has(j) || (region.area && d.area !== c.area) || Math.hypot(d.x - c.x, d.z - c.z) > 8) return;
+        let delta = 0, ok = true;
+        for (const i of sees[j]) mark[i] |= 2;
+        for (const i of sees[k]) if (!(mark[i] & 2)) { if (cnt[i] <= 1 || (own(k, i) && region.area && pts[i].area !== 'shared' && zc[i] <= 1)) { ok = false; break; } delta += (cnt[i] - 1) ** 2 - cnt[i] ** 2; }
+        if (ok) for (const i of sees[j]) if (!(mark[i] & 1)) delta += (cnt[i] + 1) ** 2 - cnt[i] ** 2;
+        if (ok) for (const o of chosen) if (o !== k) delta += SPACE * (Math.max(0, 6 - Math.hypot(cands[o].x - d.x, cands[o].z - d.z)) - Math.max(0, 6 - Math.hypot(cands[o].x - c.x, cands[o].z - c.z)));   // 이웃과 6m 안으로 붙지 않게
+        for (const i of sees[j]) mark[i] &= 1;
+        if (ok && delta < bd) { bd = delta; best = j; }
+      });
+      for (const i of sees[k]) mark[i] = 0;
+      if (best < 0) continue;
+      for (const i of sees[k]) { cnt[i]--; if (own(k, i)) zc[i]--; }
+      for (const i of sees[best]) { cnt[i]++; if (own(best, i)) zc[i]++; }
+      used.delete(k); used.add(best); chosen[n] = best;
+    }
+    // 마지막 정리 (구역을 가로질러): 단계별 덜어 내기는 그 단계 안에서만 보므로, 다른 단계 카메라가 이미 다 보는 카메라가 남을 수 있다
+    // 빼도 모든 점이 다른 카메라에 보이고 Zone 바닥은 그 Zone 카메라가 계속 보면 덜어 낸다 — 맡은 점이 적은 카메라부터
+    for (const k of [...chosen].sort((a, b) => sees[a].length - sees[b].length)) {
+      if (sees[k].every((i) => cnt[i] > 1 && (!own(k, i) || !region.area || pts[i].area === 'shared' || zc[i] > 1))) {
+        chosen.splice(chosen.indexOf(k), 1); for (const i of sees[k]) { cnt[i]--; if (own(k, i)) zc[i]--; }
+      }
+    }
   }
   const count = new Uint8Array(pts.length);
   for (const k of chosen) for (const i of sees[k]) count[i]++;

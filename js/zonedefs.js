@@ -84,9 +84,9 @@ export const zoneAt = (x, z, pad = 2) => (inInsp({ x, z }) ? 'insp' : null) ?? E
 // Zone 관할 구역 (CCTV 전광판 분할 — cctvview.js): Zone 셀 영역(바깥 벽까지) + 그 Zone 시설(정비실 · 사족보행·드론 스테이션 · Zone AMR 스테이션 · 전광판·데이터 서버 벽 앞)
 // 그 밖(정밀조립 셀 · 물류존 · 정밀조립 정비실·AMR 스테이션 · 입고·출하 야드 등 공용 시설)은 정밀조립Zone(main)
 const box = (pts, pad) => ({ x0: Math.min(...pts.map((p) => p.x)) - pad, x1: Math.max(...pts.map((p) => p.x)) + pad, z0: Math.min(...pts.map((p) => p.z)) - pad, z1: Math.max(...pts.map((p) => p.z)) + pad });
-export const zoneAreas = (key) => {
+export const zoneAreas = (key, { cams = true } = {}) => {   // cams: 로봇 비전 관제 디스플레이 벽 앞도 포함 (CCTV 관할은 빼고 — 디스플레이 앞 바닥은 공용 시설 바닥)
   const Z = EXTRA_ZONES.find((z) => z.key === key), F = ZONE_FAC[key], R = TECH_ROOMS[key], W = F.wall;
-  const wallPts = [W.board, W.cams].flatMap((b) => [-1, 1].map((k) => ({ x: b.x + Math.cos(b.rot) * k * b.w / 2, z: b.z - Math.sin(b.rot) * k * b.w / 2 })));
+  const wallPts = (cams ? [W.board, W.cams] : [W.board]).flatMap((b) => [-1, 1].map((k) => ({ x: b.x + Math.cos(b.rot) * k * b.w / 2, z: b.z - Math.sin(b.rot) * k * b.w / 2 })));
   const inward = { x: Math.sin(W.board.rot) * 3.5, z: Math.cos(W.board.rot) * 3.5 };   // 벽에서 건물 안쪽으로 3.5m
   // Zone 셀 영역을 그 Zone 폭 그대로 바깥 벽까지 (A-1: 뒤쪽 시설 통로·Zone AMR 스테이션·뒷벽 · A-2: 앞쪽 시설 통로·스테이션·건물 앞면)
   const r = zoneRect(Z, 1), ext = key === 'flex' ? { ...r, z0: BUILDING.z0 } : { ...r, z1: BUILDING.z1 };
@@ -96,7 +96,7 @@ export const zoneAreas = (key) => {
 // CCTV 관할 구역 (cctv.js Zone별 배치 · cctvview.js Zone별 전광판): 정밀검사 → 유연생산 → 적응가공 → 정밀조립 → 그 밖은 공용 시설(shared — 물류존·입고·출하 도크·관제실·공용 통로)
 //  · 정밀검사: 검사 셀 영역 · 로봇 스테이션 · 정비실(뒷벽 앞) · 유연생산·적응가공: zoneAreas (셀 영역~바깥 벽 · Zone 시설)
 //  · 정밀조립: 셀 영역과 앞뒤 통로(오른쪽 세로 통로까지) · 왼쪽 확장동의 정밀조립 시설(AMR 대기열·출동/복귀 차로 · 정비실 · 사족보행·드론 스테이션 · 왼쪽 벽 화면·서버)
-export const MAIN_AREAS = [{ x0: -36.8, x1: 31.6, z0: -13.2, z1: 11.2 }, { x0: BUILDING.x0, x1: -36.8, z0: -38.5, z1: 2.5 }];
+export const MAIN_AREAS = [{ x0: -36.8, x1: 31.6, z0: -13.2, z1: 11.2 }, { x0: BUILDING.x0, x1: -36.8, z0: -34.4, z1: 2.5 }];   // 왼쪽 확장동 정밀조립 시설은 유연생산 로봇 스테이션(z −34.4) 남쪽부터 — 그 북쪽 유연생산 정비실 앞 틈은 공용 바닥
 const inR = (p, r) => p.x > r.x0 && p.x < r.x1 && p.z > r.z0 && p.z < r.z1;
 const inspAreas = () => [{ ...INSP_AREA, x1: BUILDING.x1 }, box([-2.6, 5.2].flatMap((lx) => [-3.6, 0.4].map((lz) => techAt(lx, lz, TECH_ROOMS.insp))), 0.3)];
 // 적응가공Zone 동쪽 ~ 오른쪽 벽 (앞뒤 통로 사이): 적응가공 전광판·데이터 서버·로봇 비전 디스플레이가 걸린 벽 앞까지 적응가공 관할
