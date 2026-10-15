@@ -1520,11 +1520,12 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     put(box(BW, 0.5, 0.35, MAT.accent), BX, 7.7, BUILDING.z0 + 0.2, r);
     // 천장 형광등 기구는 두지 않는다 — 공장 밝기는 환경광·주광·보조광(main.js LOOK)으로 단계별로 유지
     // 과학기술정보통신부·정보통신산업진흥원 로고는 정밀조립 데이터 서버 랙 양옆(아래 관제/서버, 왼쪽 벽 앞)과 앞쪽 바닥 표시에 둔다
-    // 바닥 표시(12×5.4m) — 앞쪽 AGV 충전소(오른쪽 끝 x −2.8)와 정비실(왼쪽 끝 x 10.3) 사이 가운데 (x 3.75), 앞쪽 통로(지게차 z ≤ 10.7)와 AMR 복귀 전용로(z ≥ 18.3) 사이 가운데 (z 14.5)
+    // 바닥 표시(18×8.1m) — 앞쪽 AGV 충전소(오른쪽 끝 x −2.8)와 정비실(왼쪽 끝 x 10.3) 사이 가운데 (x 3.75), 앞쪽 통로(지게차 z ≤ 10.7)와 AMR 복귀 전용로(z ≥ 18.3) 사이 가운데 (z 14.5)
     // 두 줄로 각 기관 CI 가로형 시그니처(상징 + 로고타입, 상징은 공식 색) — 멀리서도 선명하게 로고타입은 진한 회색(#3a3a3a)으로 굵게. 바탕 판 없이 바닥색 위에 그린다 (투명 배경 이미지)
     const logoTex = new THREE.TextureLoader().load('assets/msit_nipa_ci_v2.png');
     logoTex.colorSpace = THREE.SRGBColorSpace; logoTex.anisotropy = 8;
-    const sign = put(new THREE.Mesh(new THREE.PlaneGeometry(12, 12 * 720 / 1600), new THREE.MeshBasicMaterial({ map: logoTex, transparent: true, depthWrite: false, toneMapped: false })), 3.75, 0.012, fr(14.5), r);   // 톤 매핑으로 글자가 옅어지지 않게
+    // 1.5배 (18 × 8.1m) — 앞쪽 시설 통로(z 32) 남쪽 ~ 건물 앞면(z 42) 사이 가운데(z 37), 서쪽은 적응가공 정비실(x −9)과 띄운다
+    const sign = put(new THREE.Mesh(new THREE.PlaneGeometry(18, 18 * 720 / 1600), new THREE.MeshBasicMaterial({ map: logoTex, transparent: true, depthWrite: false, toneMapped: false })), 3.75, 0.012, fr(15), r);   // 톤 매핑으로 글자가 옅어지지 않게
     sign.rotation.x = -Math.PI / 2;
     // 출하 도크: 말아 올린 셔터·문틀·도크 레벨러·범퍼 — 야드 로컬 좌표(도크 벽 z −20)로 만들고 그룹째 오른쪽 벽으로 돌린다
     const dk = put(new THREE.Group(), SHIP_FRAME.x, 0, SHIP_FRAME.z, r); dk.rotation.y = SHIP_FRAME.rot; this.shipFrame = dk;
