@@ -11,6 +11,7 @@ const fmtMin = (sec) => (sec >= 60 ? `${(sec / 60).toFixed(1)}분` : `${Math.rou
 export class FactoryAgent {
   constructor(sim) {
     this.sim = sim;
+    sim.zoneAgent = this;   // Factory OS 계층 표시 (정밀조립 존 에이전트 등록부)
     this.m = sim.mode;
     this.t = 0;
     this.cool = new Map();

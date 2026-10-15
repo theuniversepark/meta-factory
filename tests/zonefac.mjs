@@ -44,7 +44,7 @@ console.log('== 정비 배정이 막히지 않음 (긴급수리 우선 전환 ·
   const r2 = cells[4].request; let t = 0; run(s, ag, 60, () => { t += 0.1; return !!r2?.tech; });
   check('긴급수리: 자기 Zone 인력이 모두 작업 중이면 20초 뒤 다른 Zone 인력 지원', !!r2.tech && r2.tech.zone !== 'flex' && t >= 19, `${r2.tech?.id ?? '미배정'} · ${t.toFixed(1)}초`);
   const inc4 = s.orch.find(`fail:${cells[4].id}`), steps = inc4?.steps.map((x) => x.text) ?? [];
-  check('Zone 오케스트레이터 간 지원 요청 → 승인 → 파견 (타임라인)', steps.some((x) => /오케스트레이터 → .*오케스트레이터: 정비 지원 요청/.test(x)) && steps.some((x) => /지원 승인/.test(x)) && /지원\]/.test(r2.tech?.task ?? ''), steps.filter((x) => /지원/.test(x)).slice(0, 2).join(' / ').slice(0, 120));
+  check('Zone 오케스트레이터 간 지원 요청 → 승인 → 파견 (타임라인)', steps.some((x) => /오케스트레이터 → 공장 오케스트레이터: 정비 지원 요청/.test(x)) && steps.some((x) => /지원 승인/.test(x)) && /지원\]/.test(r2.tech?.task ?? ''), steps.filter((x) => /지원/.test(x)).slice(0, 2).join(' / ').slice(0, 120));
   // 화재 의심(P1) 보류는 같은 Zone 정비만 — 다른 Zone 예지정비는 그대로 배정
   const ev = s.injectFieldEvent('smoke', 0, 8.2); s.detectFieldEvent(ev, '시험', 0.9);
   const a2 = s.zoneCells.find((c) => c.zone === 'adapt' && c.state === 'OK' && !c.request); s.requestTech(a2, 'pm'); run(s, ag, 1);

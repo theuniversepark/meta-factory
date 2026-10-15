@@ -259,7 +259,7 @@ export class UI {
   renderDetail() {
     const st = this.detailSt, sim = this.sim;
     if (st.insp || st.zone === 'insp') return this.renderInspCell(st);   // 정밀검사Zone 셀 (inspzone.js)
-    if (st.cellId != null) return this.renderZoneCell(st);   // 확장 Zone 셀 (sim.js zoneCells — 정밀조립 셀도 st.zone을 갖고 있어 cellId로 가른다)
+    if (st.cellId != null) return this.renderZoneCell(st);   // 확장 Zone 셀 (sim.js zoneCells — cellId로 가른다)
     const el = $('detail');
     if (st.standby) {
       const u = st.def.usedBy;

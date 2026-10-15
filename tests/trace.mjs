@@ -17,7 +17,7 @@ run(s, ag, 7200);
   const done = T.recent.filter((r) => r.status === 'ok' || r.status === 'escaped');
   const route = { doortrim: ['SORT', 'DT_ASSY', 'DT_FAST', 'PACK'], eaxle: ['SORT', 'EA_ASSY', 'EA_FAST', 'PACK'] };
   check('완료 제품 계보 = 제품별 경로 셀 전부 (셀·로봇·AMR·건강도·환경)', done.length > 300 && done.every((r) => r.steps.map((p) => p.id).join() === route[r.product].join() && r.steps.every((p) => p.tOut != null && p.robots.length && p.amr && ENV_KEYS.every((k) => p.env[k] != null))), `${done.length}개`);
-  check('양품 수 = 시뮬레이션 양품 수', T.stats.ok === s.stats.good && T.stats.ng === s.stats.rejected, `추적 ${T.stats.ok}·${T.stats.ng} / 시뮬레이션 ${s.stats.good}·${s.stats.rejected}`);
+  check('양품 수 = 시뮬레이션 양품 수', T.stats.ok === s.stats.good && T.stats.ng - (T.stats.recovered ?? 0) === s.stats.rejected, `추적 ${T.stats.ok}·${T.stats.ng} / 시뮬레이션 ${s.stats.good}·${s.stats.rejected}`);
 }
 console.log('== 불량 사례 · AI 원인 분석');
 { const C = T.cases;

@@ -733,6 +733,7 @@ class ExtraZone {
   // 혼류 비율 변경 — 다음 투입부터 새 비율로 평준화 (진행 중인 작업물·실적은 그대로)
   setMix(w) { this.mix = { ...w }; this.mixAcc = {}; }
   nextProduct() {
+    const bp = this.Z.key === 'flex' ? this.sim?.fos?.flex.productFor() : null; if (bp) return bp;   // 유연생산 전환 오더 (공장 → 전환·흐름 오케스트레이터): 품목 배치 순서
     const w = this.mix, keys = Object.keys(w).filter((k) => w[k] > 0), tot = keys.reduce((a, k) => a + w[k], 0);
     for (const k of keys) this.mixAcc[k] = (this.mixAcc[k] ?? 0) + w[k] / tot;
     const k = keys.reduce((a, b) => (this.mixAcc[b] > this.mixAcc[a] ? b : a)); this.mixAcc[k] -= 1; return k;
@@ -759,14 +760,20 @@ class ExtraZone {
       if (zc) zc.busy = c.state === 'BUSY';
       if (c.fault) continue;
       if (c.state !== 'BUSY') continue;
+      // 셀 OCS HOLD: 품목 전환(유연생산 CHANGEOVER) · 공구 교환(적응가공) 동안은 작업이 진행되지 않는다
+      if (c.holdT > 0) { c.holdT -= dt; c.busy += dt; if (c.holdT <= 0) c.hold = null; continue; }
       c.busy += dt; c.progress = Math.min(1, c.progress + dt / c.cur);
       if (c.progress >= 1) {
         const it = c.item; it.done.add(c.id); c.done++;
         if (Z.ng && c.id === Z.ng.at && !it.ng && this.rng() < Z.ng.rate) { it.ng = true; it.ngNext = true; this.stats.ng++; }
         else it.ngNext = false;
+        const O = this.sim?.fos?.[Z.key];
+        if (O && Z.key === 'flex' && c.id === Z.ng?.at) O.onFirstArticle(it, !it.ngNext);   // 첫물 판정 (치수·외관검사)
+        if (O && Z.key === 'adapt') { O.afterCell(c, it, this.rng); if (c.id === Z.rework?.at) O.onBranch(it.rework || it.toolBreak ? 'rework' : this.rng() < 0.02 ? 'hold' : 'ok'); }   // 공구 감시·조건 조정 · CMM 제품 분기
         c.state = 'BLOCKED';   // 다음 셀이 비기를 기다림 (비면 곧바로 출발)
       }
     }
+    if (Z.key === 'adapt') this.sim?.fos?.adapt.tick(dt);   // 공구 교환 진행
     this.dispatchParked();
     for (const c of this.carriers) this.stepCarrier(c, dt);
   }
@@ -853,6 +860,10 @@ class ExtraZone {
         const rw = Z.rework && cell.id === Z.rework.at && this.rng() < Z.rework.rate;
         if (rw) { c.item.rework = true; this.stats.rework++; }
         Object.assign(cell, { state: 'BUSY', progress: 0, item: c.item, cur: cell.cycle * (rw ? 1.6 : 1) * (0.92 + this.rng() * 0.16) });
+        // Zone 오케스트레이터 (factoryos.js): 유연생산 = 새 품목 지그면 CHANGEOVER (전환 오더 중) · 적응가공 = 공구 교환 중이면 대기 · 절삭 조건 조정 사이클 배율
+        const O = this.sim?.fos?.[Z.key];
+        if (O && Z.key === 'flex') { const co = O.onCellStart(cell, c.item); if (co > 0) { cell.holdT = co; cell.hold = '품목 전환 (CHANGEOVER)'; } }
+        if (O && Z.key === 'adapt') { const b = O.beforeCell(cell); cell.cur *= b.mul; if (b.hold > 0) { cell.holdT = b.hold; cell.hold = '공구 교환'; } }
         c.state = 'work';
         break;
       }
@@ -1061,7 +1072,7 @@ export class ExtraZones {
     for (const z of this.zones) { const o = z.Z.origin; z.carriers.forEach((c) => { c.zoneMoving = () => c.state === 'move' || c.state === 'return' || c.state === 'toSrc' || c.state === 'toQ'; sim.net?.bindUE(c.id, c.uid, 'carrier', () => ({ x: c.x + o.x, y: 0.9, z: c.z + o.z, m: c }), c); }); }
     this.setLabels(labelsOn);
   }
-  step(dt, sim) { const K = sim.cmd, halted = !!(K?.estopAll || K?.pstopAll); this.halted = halted; sim.zonesLive = true; for (const z of this.zones) { z.sim = sim; z.fz = sim.fleet?.[`z${z.Z.key}`]; z.step(dt, halted); } }   // 투입 자재는 정밀조립Zone 시뮬레이션의 물류존 재고에서 꺼낸다
+  step(dt, sim) { const K = sim.cmd, halted = !!(K?.estopAll || K?.pstopAll); this.halted = halted; sim.zonesLive = true; sim.xzones = this; for (const z of this.zones) { z.sim = sim; z.fz = sim.fleet?.[`z${z.Z.key}`]; z.step(dt, halted); } }   // 투입 자재는 정밀조립Zone 시뮬레이션의 물류존 재고에서 꺼낸다
   update(rdt, running, speed) {
     this.t += rdt; const dts = running ? rdt * speed : 0;
     for (const z of this.zones) z.sync(rdt, this.t, dts);

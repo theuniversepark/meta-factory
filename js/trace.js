@@ -156,6 +156,7 @@ export class ProductTrace {
     item.serial = serial;
     const s = this.sim, r = { serial, epc, item: item.id, product: item.product, t0: s.time, tEnd: null, status: 'wip', amr: car?.uid ?? null, lot: `RM-${this.ymd}-${String(this.rawLot).padStart(3, '0')}`, mode: s.mode.key, steps: [], inspection: null, truth: null };
     this.byId.set(serial, r); this.recent.push(r); this.stats.released++;
+    s.fos?.orderFor(r);   // 공장 오케스트레이터 오더 (불량 보충 투입은 같은 오더)
     if (this.recent.length > 3000) { const old = this.recent.shift(); if (!this.cases.some((c) => c.serial === old.serial)) this.byId.delete(old.serial); }
     return r;
   }
@@ -210,18 +211,24 @@ export class ProductTrace {
   }
 
   // ── 불량 사례 ─────────────────
-  openCase(r, st) {
+  // 정밀검사Zone 샘플 NG (품질 알림 수신 → 정밀조립 Manufacturing Agent) — 계보로 원인 분석 · 8D (AI 적중 통계에서는 뺀다: 정답 라벨 없음)
+  openSampleCase(r, it) {
+    const zc = this.sim.processing.find((x) => x.def.inspect) ?? this.sim.processing.at(-1);
+    r.inspection2 = { by: '정밀검사Zone', sample: it.id, result: 'NG', t: this.sim.time };
+    return this.openCase(r, { uid: 'QIS-JUDGE', id: 'QIS', name: `정밀검사 샘플 ${it.id}` }, 'sample');
+  }
+  openCase(r, st, kind = 'inline') {
     const s = this.sim, id = `NG-${this.ymd}-${String(++this.caseSeq).padStart(4, '0')}`;
     const t0 = r.t0 - 120, t1 = s.time + 60;
     const c = {
-      id, serial: r.serial, product: r.product, t: s.time, detectedAt: st.uid ?? st.id, detectedName: st.name, mode: s.mode.key, inspection: r.inspection,
+      id, kind, serial: r.serial, product: r.product, order: r.order ?? null, t: s.time, detectedAt: st.uid ?? st.id, detectedName: st.name, mode: s.mode.key, inspection: kind === 'sample' ? { ...r.inspection, result: 'NG', mode: '정밀검사 샘플 NG (Quality & Recovery Agent)', sample: r.inspection2 } : r.inspection,
       equipment: s.processing.map((x) => ({ st: x.uid ?? x.id, id: x.id, name: x.name, state: x.state, health: r2(x.health, 1), drift: r2(x.drift, 3), cpk: r2(s.assess(x).cpk, 2), processed: x.c.processed, defects: x.c.defects, fails: x.c.fails })),
       envWindow: { t0, t1 }, excursions: this.env.excLog.filter((e) => e.t0 <= t1 && (e.ended ?? s.time) >= t0).map((e) => ({ id: e.id, kind: e.kind, label: e.label, node: ENV_NODES[e.node].id, t0: e.t0, t1: e.t1 })),
       suspects: this.suspects(r), rca: null, capa: null,
     };
     c.rca = analyze(this, r);
     const top = c.rca.causes[0];
-    this.stats.cases++; if (top?.station === r.truth) this.stats.top1++; if (c.rca.causes.slice(0, 3).some((x) => x.station === r.truth)) this.stats.top3++;
+    if (kind === 'inline') { this.stats.cases++; if (top?.station === r.truth) this.stats.top1++; if (c.rca.causes.slice(0, 3).some((x) => x.station === r.truth)) this.stats.top3++; } else this.stats.sampleNg = (this.stats.sampleNg ?? 0) + 1;
     this.cases.unshift(c); if (this.cases.length > 200) this.cases.pop();
     s.capa?.onDefect(c, r);
     return c;

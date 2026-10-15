@@ -313,6 +313,7 @@ export class InspZone {
   }
   setup(sim, xzones, labelsOn = this.labelsOn) {
     this.sim = sim; this.xzones = xzones; this.reset(sim.mode.key, sim.seed ?? 1);
+    sim.inspZone = this;   // 정밀검사 Orchestrator (factoryos.js) 기능 에이전트 집계
     sim.inspAmr = this.carriers; this.wallG.visible = sim.mode.key !== 'traditional';   // 레거시는 전광판 없음
     sim.inspCells = this.order.map((c) => ({ x: c.def.x, z: c.def.z, label: c.def.label }));   // CCTV 위치 이름 (cctvview.js place)
     sim.setExternalMovers?.([...(sim.extMovers ?? []).filter((m) => m.zone !== 'insp'), ...this.carriers.map((c) => this.tele(c))]);
@@ -367,7 +368,9 @@ export class InspZone {
         if (this.counts[zk] >= INSP.sample[zk]) {   // 이번 샘플 제품 = 그 Zone에서 마지막 샘플 뒤로 가장 많이 만든 제품 (혼류 비율대로 고르게)
           this.counts[zk] -= INSP.sample[zk];
           const U = this.unsampled[zk], q = Object.keys(U).reduce((a, b) => (U[b] > U[a] ? b : a)); U[q] = 0;
-          this.queue.push({ id: `QS-${String(++this.seq).padStart(4, '0')}`, zone: zk, product: q, t0: this.time }); this.stats.samples++;
+          const req = { id: `QS-${String(++this.seq).padStart(4, '0')}`, zone: zk, product: q, t0: this.time }; this.queue.push(req); this.stats.samples++;
+          this.sim.fos?.sampleRequest(req);   // A2A: 생산 Zone → 정밀검사 서비스 요청 (정밀조립은 샘플 시리얼 HOLD)
+          if (this.sim.fos) this.queue = this.sim.fos.inspPriority(this.queue);   // 여러 Zone 요청이 함께면 공장 오케스트레이터가 순서 결정
         }
       }
     }
@@ -398,6 +401,7 @@ export class InspZone {
       if (c) {
         const req = this.queue.shift(), P = INSP.pickup[req.zone];
         c.item = { ...req, done: new Set(), redo: false }; c.load = false;
+        this.sim.fos?.sampleAccept(req, c.id);
         const from = { x: c.x, z: INSP.station.exitZ, aisle: 'F' };
         this.go(c, [{ x: c.x, z: c.z }, ...route(from, P)], 'out');
         this.sim.log('info', `정밀검사 샘플 수거 배차 — ${zl(req.zone)} ${INSP.products[req.product][1]}`, { obs: `${zl(req.zone)} 양품 ${INSP.sample[req.zone]}개마다 1개 샘플링 (${req.id})`, act: `${c.id} → ${zl(req.zone)} 적재장` });
@@ -427,6 +431,7 @@ export class InspZone {
         c.timer -= dt;
         if (c.timer <= 0) {
           this.attach(c);
+          this.sim.fos?.sampleHandover(c.item);   // 인계 준비 → 인수 확인 (시리얼 대조)
           this.go(c, [{ x: c.x, z: c.z }, ...route(S.pickup[c.item.zone], { x: this.entryX(c.i), z: S.entryZ, aisle: 'BB' })], 'in');
         }
         break;
@@ -479,6 +484,7 @@ export class InspZone {
       return;
     }
     s.done++; s[res]++; by[res]++; this.push(it, res);
+    this.sim.fos?.sampleResult(it, res);   // 결과 → 생산 Zone · NG면 품질 알림 → 정밀조립 8D
     cell.flash = { col: res === 'ok' ? 0x3ddc84 : 0xff4d4d, t: 2 };
     const sh = cell.parts.shelves[res === 'ok' ? 'ok' : 'ng'], n = res === 'ok' ? s.ok : s.ng; sh.forEach((b, i) => (b.visible = i < Math.min(6, n)));
     if (res === 'ng' && this.mode !== 'traditional') this.spawnPacket(cell.sensor.getWorldPosition(new THREE.Vector3()), 0xff4d4d);   // NG 판정 → 서버 (QMS 저장 · 오케스트레이터 알림)

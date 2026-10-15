@@ -8,6 +8,7 @@ import { ZONE_LABEL } from './zonedefs.js';
 import { COMMANDS, CMD_STATE } from './commands.js';
 import { ST_LABEL } from './sim.js';
 import { STEP_FLOWS, stepFlowSvg, stepCells } from './stepflow.js';
+import { fosHTML, a2aHTML, fosClick } from './fosview.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const clock = (t) => { const s = Math.floor(t) + 8 * 3600; return `${String(Math.floor(s / 3600) % 24).padStart(2, '0')}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
@@ -17,7 +18,7 @@ const KIND = {
   notify: { label: '결과 통보', color: 'var(--o-notify)' }, done: { label: '완료', color: 'var(--o-done)' },
 };
 // 레인 사이 화살표 이름 (이전 단계 → 이번 단계)
-const TABS = { flow: ['인시던트 흐름', '인시던트 보고 · 판단 · 명령 · 조치 흐름'], ctl: ['제어 흐름', '공정·운영 제어 흐름 · 이벤트 흐름 분석'], cmd: ['명령 콘솔', '상위 계층 → 셀 현장 긴급·제어 명령'] };
+const TABS = { flow: ['인시던트 흐름', '인시던트 보고 · 판단 · 명령 · 조치 흐름'], ctl: ['제어 흐름', '공정·운영 제어 흐름 · 이벤트 흐름 분석'], cmd: ['명령 콘솔', '상위 계층 → 셀 현장 긴급·제어 명령'], fos: ['Factory OS 계층', '공장 · 존 · 셀 · 엣지 오케스트레이터·에이전트 (1단계 정밀조립Zone)'], a2a: ['존 간 메시지', 'A2A 핸드셰이크 · 품질 알림 · 결정 요청 · Agent Gateway 가드레일'] };
 const FILTERS = { all: '전체', control: '제어', event: '이벤트' };
 const CLS_COLOR = { control: 'var(--o-command)', event: 'var(--o-report)', decision: 'var(--o-decide)' };
 const laneLabel = (k) => (k === 'fac' ? 'FAC' : LANES.find((l) => l.key === k)?.label ?? k);
@@ -34,6 +35,7 @@ export class OrchView {
     this.tab = 'flow'; this.built = null; this.target = 'all'; this.flt = 'all'; this.ctlView = 'steps';
     el.addEventListener('click', (e) => {
       const tb = e.target.closest('[data-tab]'); if (tb) { this.tab = tb.dataset.tab; this.render(); return; }
+      if ((this.tab === 'fos' || this.tab === 'a2a') && fosClick(this.sim, e)) { this.render(true); return; }
       const fb = e.target.closest('[data-flt]'); if (fb) { this.flt = fb.dataset.flt; this.render(); return; }
       const vb = e.target.closest('[data-cview]'); if (vb) { this.ctlView = vb.dataset.cview; this.render(); return; }
       const jb = e.target.closest('[data-step]'); if (jb) { this.el.querySelector(`[data-stepbox="${jb.dataset.step}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }); return; }
@@ -75,12 +77,14 @@ export class OrchView {
   build() {
     const o = this.sim.orch;
     this.built = this.builtKey();
+    this.el.classList.toggle('fos-wide', this.tab === 'fos' || this.tab === 'a2a');   // Factory OS 계층 · 존 간 메시지는 넓게
     const tabs = `<div class="seg small orch-tabs">${Object.entries(TABS).map(([k, [t]]) => `<button type="button" data-tab="${k}" class="${this.tab === k ? 'on' : ''}">${t}</button>`).join('')}</div>`;
     const flts = `<div class="seg small orch-flt" title="제어: 위 계층 → 아래 계층 명령 · 자체 조치 · 조치 / 이벤트: 아래 계층 → 위 계층 감지 · 보고 · 결과 통보">${Object.entries(FILTERS).map(([k, t]) => `<button type="button" data-flt="${k}" class="${this.flt === k ? 'on' : ''}">${t}</button>`).join('')}</div>`;
     const head = `<div class="orch-h"><b>🛰 ${esc(o.name)} <small>· Zone별 (정밀조립 · 유연생산 · 적응가공)</small></b>${tabs}<small>${TABS[this.tab][1]}</small>
       ${this.tab === 'flow' ? `<label class="chk"><input type="checkbox" id="orchShowCell" ${this.showCell ? 'checked' : ''}/> 셀 자체 해결 포함</label>` : ''}${this.tab === 'ctl' ? flts : ''}
       <button type="button" data-close title="닫기">✕</button></div>`;
     if (this.tab === 'flow') { this.el.innerHTML = head + '<div class="orch-b" data-body></div>'; return; }
+    if (this.tab === 'fos' || this.tab === 'a2a') { this.el.innerHTML = head + '<div class="fos-b" data-fos></div>'; return; }
     const views = `<div class="seg small ctl-views">${[['steps', '공정별 제어 흐름도'], ['analysis', '흐름 분석']].map(([k, t]) => `<button type="button" data-cview="${k}" class="${this.ctlView === k ? 'on' : ''}">${t}</button>`).join('')}</div>`;
     if (this.tab === 'ctl' && this.ctlView === 'steps') {
       // 셀 단위 공정별 플로우 차트 (적응가공존 Cell 시나리오 [부록] 표현 방식): STEP마다 4레인 흐름도, 셀 상태와 연결
@@ -128,11 +132,12 @@ export class OrchView {
     el.innerHTML = html; el.dataset.h = html;
     for (const [q, top, left] of keep) { const n = q === ':self' ? el : el.querySelector(q); if (n) { n.scrollTop = top; n.scrollLeft = left; } }
   }
-  render() {
+  render(force = false) {
     if (!this.sim || !this.open) return;
     if (this.built !== this.builtKey()) this.build();
     if (this.tab === 'cmd') return this.renderCmd();
     if (this.tab === 'ctl') return this.renderCtl();
+    if (this.tab === 'fos' || this.tab === 'a2a') { const b = this.el.querySelector('[data-fos]'); if (!force && b?.querySelector('button:hover, .a2a-row:hover')) return; return this.put(b, this.tab === 'fos' ? fosHTML(this.sim) : a2aHTML(this.sim), [':self', '.a2a-list']); }
     const o = this.sim.orch;
     // 진행 중 인시던트는 문제 해결 우선순위 순(화재·인명 → 시설 안전 → 생산 정지 → 생산 차질 → 효율·품질), 끝난 것은 최근 순
     const list = o.incidents.filter((i) => this.showCell || !i.cellResolved).sort((a, b) => ((a.status === 'open') ? 0 : 1) - ((b.status === 'open') ? 0 : 1) || (a.status === 'open' && b.status === 'open' ? prioOf(a) - prioOf(b) : 0) || b.t0 - a.t0);

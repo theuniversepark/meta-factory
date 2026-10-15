@@ -11,6 +11,7 @@ import { planCCTV, CCTVAgent } from './cctv.js';
 import { Private5G } from './net5g.js';
 import { ProductTrace } from './trace.js';
 import { CapaManager } from './capa.js';
+import { FactoryOS } from './factoryos.js';
 import { FacLedger } from './fac.js';
 import { VLAPipeline } from './vla.js';
 import { AIOSPipeline } from './aios.js';
@@ -625,6 +626,7 @@ export class Simulation {
     this.fac = new FacLedger(this);   // FAC(FACOS 업무 기록): 발주·재고·설비보전 (자동화·피지컬AI)
     new ProductTrace(this, seed);   // 제품 추적 관리: 시리얼·계보 · 공장 환경 센서 · 불량 사례·AI 원인 분석 (js/trace.js)
     new CapaManager(this);   // 품질 불량 → Zone·총괄 오케스트레이터 8D CAPA → 운영 정책 반영 (js/capa.js)
+    new FactoryOS(this);   // Factory OS 계층: 공장 오케스트레이터(FacOS) · 정밀조립 Manufacturing Agent · 셀 OCS · A2A 메시지 (js/factoryos.js)
   }
 
   // 설비·로봇 고유 ID — 현황판·라벨·텔레메트리·데이터 연동에 같은 ID를 쓴다 (사람은 제외)
@@ -1088,6 +1090,7 @@ export class Simulation {
     this.cctvAgent?.update(dt);   // 피지컬AI: CCTV 에이전트 — 영상 감시·오케스트레이터 보고·이벤트 이력
     this.updateFieldEvents();
     this.trace?.update(dt);
+    this.fos?.update(dt);
     this.orch.update();
     // 자재 공급이 재개되면 공급 차질 인시던트를 닫는다
     const sup = this.orch.find('supply');
@@ -1400,8 +1403,9 @@ export class Simulation {
   }
 
   requestTech(st, kind, delay = 0) {
-    if (st.request) return false;
-    if (kind !== 'repair' && this.cmd.stationGate(st)) return false;   // 명령으로 멈춘 셀에는 정비·보정을 새로 걸지 않는다 (수리 요청은 접수)
+    if (st.request) { if (st.request.kind !== kind) this.fos?.validate(st, kind, false, `거부 — ${({ repair: '긴급수리', pm: '예지정비', cal: '재보정' })[st.request.kind] ?? '정비'} 진행·대기 중`); return false; }
+    if (kind !== 'repair' && this.cmd.stationGate(st)) { this.fos?.validate(st, kind, false, '거부 — 현장 명령으로 정지 중 (인터록)'); return false; }   // 명령으로 멈춘 셀에는 정비·보정을 새로 걸지 않는다 (수리 요청은 접수)
+    this.fos?.validate(st, kind, true);   // 셀 OCS 명령 검증 (정밀조립 셀)
     st.request = { st, kind, readyAt: this.time + delay, tech: null };
     this.requests.push(st.request);
     this.fac?.maintenance(st, kind);   // FAC: 정비요청 (긴급 / 예방)
@@ -1409,7 +1413,8 @@ export class Simulation {
   }
 
   selfCalibrate(st) {
-    if (st.request || st.state === 'DOWN' || st.state === 'MAINT' || this.cmd.stationGate(st)) return false;
+    if (st.request || st.state === 'DOWN' || st.state === 'MAINT' || this.cmd.stationGate(st)) { this.fos?.validate(st, 'selfcal', false, st.request ? '거부 — 정비·보정 진행·대기 중' : this.cmd.stationGate(st) ? '거부 — 현장 명령으로 정지 중 (인터록)' : '거부 — 복구(RECOVER) 중'); return false; }
+    this.fos?.validate(st, 'selfcal', true);
     st.request = { st, kind: 'cal', self: true };
     const o = this.orch, inc = o.open('quality', `cal:${st.id}`, `${st.name} 공정 편차`, st.name, { cellResolved: true });
     o.step(inc, 'field', 'detect', `SPC 공정능력 Cpk 저하 감지 (드리프트 ${(st.drift * 100).toFixed(0)}%)`);
@@ -1482,18 +1487,23 @@ export class Simulation {
     for (const z of zones) {
       if (asked[z] != null && this.time - asked[z] < 30) continue;
       asked[z] = this.time;
-      const msg = `${ZONE_LABEL[zk]} 오케스트레이터 → ${ZONE_LABEL[z]} 오케스트레이터: 정비 지원 요청 (${st.name} ${kindLabel} · ${ZONE_LABEL[zk]} 정비 인력 모두 작업 중 · ${Math.round(this.time - req.waitFrom)}초 대기)`;
+      // 같은 계층(존 ↔ 존)은 명령하지 않는다: 요청 존 → 공장 오케스트레이터(결정 요청) → 빌려줄 존 가용 확인 → 공장 결정 (js/factoryos.js)
+      const msg = `${ZONE_LABEL[zk]} 오케스트레이터 → 공장 오케스트레이터: 정비 지원 요청 (${st.name} ${kindLabel} · ${ZONE_LABEL[zk]} 정비 인력 모두 작업 중 · ${Math.round(this.time - req.waitFrom)}초 대기) → ${ZONE_LABEL[z]} 가용 확인`;
       if (inc) this.orch.step(inc, 'orch', 'report', msg);
+      const fm = this.fos?.supportRequest(zk, st, kindLabel, this.time - req.waitFrom);
       const own = this.requests.filter((r) => !r.tech && (r.st.zone ?? 'main') === z && this.time >= r.readyAt);
       const pool = this.techs.filter((t) => (t.zone ?? 'main') === z && free(t)), t = near(pool, st);
       const why = !t ? `${ZONE_LABEL[z]} 정비 인력도 모두 작업 중` : own.some((r) => r.kind === 'repair') ? `${ZONE_LABEL[z]}에 배정 대기 중인 긴급수리 있음` : req.kind !== 'repair' && own.length ? `${ZONE_LABEL[z]}에 배정 대기 중인 정비 있음` : null;
       this.stats.supportReq = (this.stats.supportReq ?? 0) + 1;
+      this.fos?.supportCheck(z, why);
       if (why) {
-        if (inc) this.orch.step(inc, 'orch', 'decide', `${ZONE_LABEL[z]} 오케스트레이터: 지원 불가 — ${why}`);
+        if (fm) this.fos.supportDecide(fm, false, `${ZONE_LABEL[z]} 지원 불가 — ${why}`, z);
+        if (inc) this.orch.step(inc, 'orch', 'decide', `공장 오케스트레이터: ${ZONE_LABEL[z]} 지원 불가 — ${why}`);
         this.log('info', `${ZONE_LABEL[z]} 오케스트레이터 정비 지원 거절`, { obs: msg, dec: why });
         continue;
       }
-      if (inc) this.orch.step(inc, 'orch', 'decide', `${ZONE_LABEL[z]} 오케스트레이터: 지원 승인 — ${t.id} 파견 (${ZONE_LABEL[z]} 대기 작업 없음)`);
+      if (fm) this.fos.supportDecide(fm, true, `${ZONE_LABEL[z]} ${t.id} 파견 (${ZONE_LABEL[z]} 대기 작업 없음)`, z, t.id);
+      if (inc) this.orch.step(inc, 'orch', 'decide', `공장 오케스트레이터: 지원 승인 — ${ZONE_LABEL[z]} ${t.id} 파견 (${ZONE_LABEL[z]} 대기 작업 없음)`);
       this.log('act', `${ZONE_LABEL[z]} 오케스트레이터 정비 지원 승인`, { obs: msg, act: `${t.id} → ${st.name} ${kindLabel}` });
       this.stats.techBorrow = (this.stats.techBorrow ?? 0) + 1;
       return { tech: t, from: z };

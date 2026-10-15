@@ -14,12 +14,13 @@ export const D8 = [
 ];
 export const CAPA_LANES = [
   { key: 'field', label: '검사셀 · 현장', sub: '체결 토크·각도 전수 검사' },
-  { key: 'zone', label: '정밀조립 Zone 오케스트레이터', sub: '8D 수행 · 봉쇄 · 원인 분석' },
-  { key: 'hq', label: '총괄 오케스트레이터', sub: 'Quality Alert · 승인 · 수평 전개' },
+  { key: 'zone', label: 'Manufacturing Agent', sub: '정밀조립 로컬 오케스트레이터 · 8D 수행 · 봉쇄 · 원인 분석' },
+  { key: 'hq', label: '공장 오케스트레이터 (FacOS)', sub: '총괄 · Quality Alert · 승인 · 수평 전개' },
   { key: 'policy', label: '운영 정책', sub: '정책 반영 · FMEA · 표준화' },
 ];
 const GAP = { traditional: 45, smart: 8, dark: 2.5 };      // 8D 단계 사이 판단 간격 (초)
-export const VERIFY_S = 1200;                              // D6 효과 검증 구간 (시뮬레이션 20분)
+export const VERIFY_S = 1200;
+export const RECHECK_S = 240;                              // 봉쇄 제품 재검 시간 (시뮬레이션 4분)                              // D6 효과 검증 구간 (시뮬레이션 20분)
 const WHO = { traditional: '품질 반장 · 정비원', smart: 'MES 품질 모듈 · 정비원', dark: '품질·정비·흐름 에이전트 · 정비 휴머노이드' };
 
 // 원인 요인 → 운영 정책 변경안
@@ -92,6 +93,9 @@ export class CapaManager {
       if (st && top.factor === 'health' && s.mode.pmEnabled) { const ok = s.requestTech(st, 'pm'); act += ok ? ` · ${st.name} 예지정비 요청` : ` · ${st.name} 정비 (이미 요청됨)`; }
       if (ENV_SPEC[top.factor]) act += ` · 환경 이상 구간 ${ENV_SPEC[top.factor].label} 감시 강화`;
       k.actions.push({ t: s.time, d: 'D3', text: act, hold: hold.map((x) => x.serial) });
+      for (const x of hold) { const r = T.byId.get(x.serial); if (r && !r.hold) { r.hold = `containment:${k.id}`; } }   // 봉쇄 — 수량 정산의 HOLD
+      // 봉쇄 제품 재검 (RECHECK_S 뒤): 정상은 HOLD 해제, 검사에서 빠져나간 불량(유출)은 회수해 폐기로 — 결과가 올 때까지 해제하지 않는다
+      this.later(RECHECK_S, () => { const R = this.recheck(k); this.step(k, 'zone', 'D3', `봉쇄 제품 재검 완료 — ${R.ok}개 HOLD 해제${R.caught ? ` · 유출 불량 ${R.caught}개 회수 (${R.serials.join(', ')})` : ' · 유출 불량 없음'}`); });
       this.step(k, 'zone', 'D3', act);
       o.step(inc, 'exec', 'act', act); o.close(inc, `임시 조치 완료 — 8D ${k.id}로 이관`);
     });
@@ -107,6 +111,7 @@ export class CapaManager {
       this.step(k, 'hq', 'D5', this.auto ? '정책 변경 승인 검토 (자동 반영)' : '정책 변경 승인 요청 — 정책 반영 / 보류 결정 대기');
       k.status = 'approval';
       k.horizontal = this.horizontal(top);
+      s.fos?.policyRequest(k);   // Manufacturing Agent → 공장 오케스트레이터 결정 요청 (사람 결정 HITL)
       if (this.auto) this.later(G, () => this.approve(k.id, '총괄 오케스트레이터 (자동 반영)'));
     });
     return k;
@@ -126,6 +131,7 @@ export class CapaManager {
     // 같은 정책이 이미 적용 중이면(다른 8D가 먼저 반영) 새로 바꾸지 않고 그 정책에 연결한다
     const same = this.policies.find((x) => x.status === 'applied' && x.lever === p.lever && (p.lever === 'text' ? x.title === p.title : x.to === p.to || (p.lever === 'pmThreshold' || p.lever === 'cpkMin') && x.to >= p.to));
     const pol = same ?? this.apply(p, k, by);
+    s.fos?.policyDecision(k, 'approve', by);
     if (same) { (same.capas ??= [same.capa]).push(k.id); }
     this.step(k, 'hq', 'D6', `승인 (${by}) · 수평 전개 지시: ${k.horizontal.length ? k.horizontal.join(', ') : '해당 공정 없음'}`);
     this.step(k, 'policy', 'D6', same ? `이미 적용 중인 ${same.id} (${same.title})에 연결 — 추가 변경 없음` : pol.applied ? `정책 반영: ${p.title}` : `기준 개정: ${p.title} (시뮬레이션 값 변화 없음)`, { policy: pol.id });
@@ -137,6 +143,7 @@ export class CapaManager {
   hold(id, by = '사용자 결정') {
     const k = this.list.find((x) => x.id === id); if (!k || k.status !== 'approval') return false;
     k.status = 'held'; k.stage = 'D8'; k.tEnd = this.sim.time;
+    this.sim.fos?.policyDecision(k, 'hold', by); this.release(k);
     this.step(k, 'hq', 'D8', `보류 (${by}) — 정책 미반영 · 봉쇄 조치만 유지하고 종결`);
     return true;
   }
@@ -149,8 +156,19 @@ export class CapaManager {
     k.fmea = { failureMode: s.trace.cases.find((c) => c.id === k.cases[0])?.inspection?.mode ?? '규격 이탈', cause: k.cause.label, S, O: [O0, O1], D, AP: [AP(S, O0, D), AP(S, O1, D)], control: k.proposal.title };
     k.stage = 'D7';
     this.step(k, 'policy', 'D7', `재발 방지 표준화: FMEA 발생도 ${O0} → ${O1} · AP ${k.fmea.AP[0]} → ${k.fmea.AP[1]} · 관리계획에 "${k.proposal.title}" 등록`);
-    this.later(this.gap, () => { k.stage = 'D8'; k.status = 'closed'; k.tEnd = s.time; this.step(k, 'hq', 'D8', `종결 — ${k.cases.length}건 · 정책 이력 ${pol?.id ?? '-'} · 수평 전개 ${k.horizontal.length}곳 확인`); });
+    this.later(this.gap, () => { k.stage = 'D8'; k.status = 'closed'; k.tEnd = s.time; this.release(k); this.step(k, 'hq', 'D8', `종결 — ${k.cases.length}건 · 정책 이력 ${pol?.id ?? '-'} · 수평 전개 ${k.horizontal.length}곳 확인`); });
   }
+  recheck(k) {
+    const T = this.sim.trace, out = { ok: 0, caught: 0, serials: [] };
+    for (const r of T?.recent ?? []) {
+      if (r.hold !== `containment:${k.id}`) continue;
+      if (r.status === 'escaped') { r.status = 'ng'; r.recovered = k.id; r.hold = null; T.stats.escaped--; T.stats.ng++; T.stats.recovered = (T.stats.recovered ?? 0) + 1; out.caught++; out.serials.push(r.serial); }
+      else if (r.status !== 'wip') { r.hold = null; out.ok++; }
+    }
+    return out;
+  }
+  // 봉쇄 해제 (남은 것) — 8D 종결·보류 때
+  release(k) { const T = this.sim.trace; let n = 0; for (const r of T?.recent ?? []) if (r.hold === `containment:${k.id}`) { r.hold = null; n++; } return n; }
   // 정책 적용 · 이력
   apply(p, k, by) {
     const s = this.sim, m = s.mode;

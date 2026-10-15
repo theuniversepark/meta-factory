@@ -992,7 +992,7 @@ function placeRobots(g, st) {
   // 피지컬AI VLA: 6축 로봇은 대상물에 손이 닿도록 통로 쪽으로 조금 더 다가선다 (AMR 통과 폭은 유지)
   const vla = st.vla && (kind === 'cobot' || kind === 'articulated');
   const zz = vla ? 1.4 : 1.75;
-  const slots = st.zone ? [[-0.75, -zz, 0], [-0.75, zz, Math.PI], [0.95, -zz, 0], [0.95, zz, Math.PI]]
+  const slots = st.zoneLine ? [[-0.75, -zz, 0], [-0.75, zz, Math.PI], [0.95, -zz, 0], [0.95, zz, Math.PI]]
     : [[-0.6, -zr, 0], [0.6, zr, Math.PI], [1.3, -zr, 0], [-1.3, zr, Math.PI]];
   // 갠트리는 대수만큼 셀 길이를 나눠 X축 주행 범위를 정한다 (1대: ±1.0m)
   const gx = count === 1 ? 1.0 : Math.max(0.3, 1.2 / (count - 1) - 0.25);
@@ -2078,7 +2078,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     for (const st of [...sim.stations, ...sim.standby]) {
       const g = new THREE.Group(); g.position.set(st.x, 0, st.z); g.rotation.y = st.rot;
       g.scale.z = st.def.side ?? 1;
-      st.zone = sim.zone;
+      st.zoneLine = sim.zone;   // 정밀조립Zone 배치 표시 (st.zone은 시뮬레이션의 Zone 키라 덮어쓰지 않는다 — 덮어쓰면 정밀조립 셀이 자기 정비 인력을 못 받는다)
       st.vla = mode === 'dark';   // 피지컬AI: 카메라 기반 VLA로 선반에서 부품을 집어 조립·체결
       if (sim.useAMR) cellBase(g, st.type === 'source' || st.type === 'sink' ? 3.6 : 4.6);
       else this.conveyorTex.push(stationBase(g, st.type === 'source' || st.type === 'sink' ? 3.6 : 4.2).map);
