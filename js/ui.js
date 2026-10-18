@@ -17,6 +17,17 @@ const MODE_DESC = {
   dark: ['3단계 · 피지컬AI 자율공장', 'AI가 판단하고 로봇의 몸으로 실행합니다. 휴머노이드가 정비·부품 보충을, 사족보행 로봇이 열화상·진동 순찰 점검을 맡고, 고효율 LED 조명 아래 24시간 무인 가동합니다. 사람은 원격 관제만 합니다.'],
 };
 
+// 공장 운영 로그의 존 구분 (FACOS 관점 필터) — 로그에 zone이 있으면 그 값, 없으면 제목 → 본문 순으로 존 이름·셀 코드를 찾는다 (없으면 정밀조립: 정밀조립 존 에이전트 판단·셀 이벤트)
+export const LOG_ZONES = { all: '전체', main: '정밀조립', flex: '유연생산', adapt: '적응가공', insp: '정밀검사', fac: '공장 공용' };
+const LZ_RE = [['flex', /유연생산|FLX-|A-1/], ['adapt', /적응가공|ADP-|A-2/], ['insp', /정밀검사|QIS-|시료|샘플 /], ['fac', /입고|출하|트럭|지게차|창고|도크|AS\/RS|수배전|압축기|화물|야드|센서망|공장 오케스트레이터|FacOS|존 간|Zone 간/]];
+export function logZone(l) {
+  if (l.zone && LOG_ZONES[l.zone]) return l.zone;
+  for (const [k, re] of LZ_RE) if (re.test(l.title)) return k;
+  const txt = `${l.obs ?? ''} ${l.dec ?? ''} ${l.act ?? ''}`;
+  for (const [k, re] of LZ_RE) if (re.test(txt)) return k;
+  return 'main';
+}
+
 function fmtClock(t) {
   const s = Math.floor(t) + 8 * 3600;
   const d = Math.floor(s / 86400), h = Math.floor(s / 3600) % 24, m = Math.floor(s / 60) % 60, sec = s % 60;
@@ -39,6 +50,11 @@ export class UI {
       c.addEventListener('pointermove', (e) => { c._hx = e.offsetX / c.clientWidth; });
       c.addEventListener('pointerleave', () => { c._hx = null; });
     }
+    // FACOS 요약 칩 · 로그 필터: 누르면 공장 운영 로그를 그 존으로 거른다 (수동으로 고르면 왼쪽 Zone 연동은 끈다)
+    // 정밀조립 존 에이전트 블록: 접고 펼친 상태 기억 (기본 접힘 — 공장 운영 로그 공간)
+    const za = $('zoneAgentBox'); try { za.open = localStorage.getItem('metafactory.zoneAgentOpen') === '1'; } catch { /* 기본 접힘 */ }
+    za.addEventListener('toggle', () => { try { localStorage.setItem('metafactory.zoneAgentOpen', za.open ? '1' : '0'); } catch { /* 이번 실행만 */ } });
+    for (const id of ['logFilter', 'facosSum']) $(id).addEventListener('click', (e) => { const b = e.target.closest('[data-lf]'); if (!b) return; $('logFollow').checked = false; this.setLogFilter(b.dataset.lf); this.renderFacos(); });
     $('detail').addEventListener('click', (e) => {
       const b = e.target.closest('button[data-act]');
       if (b && this.onDetailAction) this.onDetailAction(b.dataset.act, this.detailSt);
@@ -49,6 +65,7 @@ export class UI {
     this.sim = sim; this.agent = agent;
     this.lastLogId = 0;
     $('log').innerHTML = '';
+    this.renderLogFilter();
     const [t, d] = MODE_DESC[sim.mode.key];
     $('modeDesc').innerHTML = `<b>${t}</b>${d}`;
     $('agentName').textContent = agent.name;
@@ -87,6 +104,7 @@ export class UI {
     this.drawSpark($('chartOee'), sim.history.map((h) => [h.t, h.oee * 100]), (v) => v.toFixed(1) + '%', 0, 100);
 
     $('agentCount').textContent = this.agent.decisions;
+    this.renderFacos();
     this.renderEngine();
     $('thought').innerHTML = this.llm?.enabled
       ? `<b>운영</b> · ${this.agent.arch === 'hybrid' ? (() => { const H = this.agent.status(); return `혼합형 다중 에이전트 — 정비·품질·흐름 에이전트 제안 ${H.proposed} · 메인 승인 ${H.approved} · 보류 ${H.deferred} · 충돌 ${H.conflicts} · 평균 지연 ${H.avgLat.toFixed(1)}초`; })() : '추론 기반 에이전트가 정비·품질·흐름·물류를 계속 판단합니다'} — ${this.agent.lastThought}<br><b>대화</b> · 입력창 지시를 해석해 공정에 반영합니다 (예: 포장셀 속도 75% · 도어트림 2:1 · e-axle 조립셀 예방정비)`
@@ -104,15 +122,48 @@ export class UI {
     for (const l of fresh) {
       const d = document.createElement('div');
       d.className = 'entry ' + l.level + (l.dlg ? ' dlg' : '');
+      const zk = logZone(l); d.dataset.zone = zk;
       if (l.dlg) { d.dataset.dlg = l.dlg; d.title = '누르면 지시 게이트(판정·수행/거절 과정) 도식'; }
       const row = (tag, txt) => (txt ? `<div class="r"><em>${tag}</em>${esc(txt)}</div>` : '');
       const tags = l.level === 'llm' ? ['지시', 'Agent', '결과'] : l.level === 'chat' ? ['운영자'] : l.level === 'dialog' ? ['지시', '해석', '반영'] : ['관찰', '판단', '실행'];
       const tg = l.level === 'dialog' ? ['지시', '게이트', '판정'] : tags;
-      d.innerHTML = `<div class="h"><span>${esc(l.title)}</span><time>${fmtClock(l.t)}</time></div>${row(tg[0], l.obs)}${row(tg[1] ?? '판단', l.dec)}${row(tg[2] ?? '실행', l.act)}${l.dlg && l.level === 'dialog' ? '<div class="g-hint">▸ 게이트 도식 보기</div>' : ''}`;
+      d.innerHTML = `<div class="h"><span><i class="lz lz-${zk}">${LOG_ZONES[zk]}</i>${esc(l.title)}</span><time>${fmtClock(l.t)}</time></div>${row(tg[0], l.obs)}${row(tg[1] ?? '판단', l.dec)}${row(tg[2] ?? '실행', l.act)}${l.dlg && l.level === 'dialog' ? '<div class="g-hint">▸ 게이트 도식 보기</div>' : ''}`;
       box.prepend(d);
     }
     this.lastLogId = this.sim.logs[0].id;
     while (box.children.length > 80) box.lastChild.remove();
+  }
+
+  // 로그 필터 (전체 · 존별 · 공장 공용) — 목록은 그대로 두고 CSS로 거른다 (#log[data-filter])
+  setLogFilter(k) { if (!LOG_ZONES[k]) return; this.logFilter = k; $('log').dataset.filter = k; this.renderLogFilter(); }
+  renderLogFilter() {
+    const f = this.logFilter ?? 'all', cnt = {};
+    for (const l of this.sim?.logs ?? []) { const z = logZone(l); cnt[z] = (cnt[z] ?? 0) + 1; }
+    $('logFilter').innerHTML = Object.entries(LOG_ZONES).map(([k, v]) => `<button type="button" data-lf="${k}" class="${k === f ? 'on' : ''}">${v}${k !== 'all' && cnt[k] ? ` <small>${cnt[k]}</small>` : ''}</button>`).join('');
+  }
+  // FACOS 요약: 존별 상태 · 결정 대기(사람 결정) · 진행 중 오더 · 최근 공장 오케스트레이터 결정
+  renderFacos() {
+    const s = this.sim; if (!s) return;
+    const k = s.kpi(), xz = s.xzones, I = s.inspZone, F = s.fos, zc = (key) => (s.zoneCells ?? []).filter((c) => c.zone === key);
+    const down = (cs) => cs.filter((c) => c.state === 'DOWN' || c.state === 'MAINT').length;
+    const xs = (key) => xz?.summary?.().find((z) => z.key === key);
+    const chip = (key, name, main, sub, bad) => `<button type="button" class="fz ${bad ? 'bad' : ''} ${this.logFilter === key ? 'on' : ''}" data-lf="${key}"><b>${name}</b><span>${main}</span><small>${sub}</small></button>`;
+    const mDown = s.processing.filter((x) => x.state === 'DOWN' || x.state === 'MAINT').length, mBusy = s.processing.filter((x) => x.state === 'BUSY').length;
+    const fz = xs('flex'), az = xs('adapt');
+    const cells = [
+      chip('main', '정밀조립', `UPH ${num(k.uphRecent)}`, `가동 ${mBusy}/${s.processing.length} · 정지 ${mDown}`, mDown > 0),
+      chip('flex', '유연생산', fz ? `UPH ${num(fz.uph)}` : '-', fz ? `가동 ${fz.busy}/${fz.cells} · 정지 ${down(zc('flex'))}` : '화면 시뮬레이션', down(zc('flex')) > 0),
+      chip('adapt', '적응가공', az ? `UPH ${num(az.uph)}` : '-', az ? `가동 ${az.busy}/${az.cells} · 정지 ${down(zc('adapt'))}` : '화면 시뮬레이션', down(zc('adapt')) > 0),
+      chip('insp', '정밀검사', I?.summary ? `판정 ${num(I.summary().done ?? 0)}` : '-', I?.summary ? `대기 ${I.summary().queue} · 검사 중 ${I.summary().active} · 정지 ${down(zc('insp'))}` : '화면 시뮬레이션', down(zc('insp')) > 0),
+      chip('fac', '공장 공용', `출하 ${num(s.stats.shipped ?? 0)}`, `트럭 ${s.stats.trucks ?? 0}대 · 자재 ${k.raw}/${RAW_CAP}${s.supplyDisrupted ? ' · 공급 차질' : ''}`, !!s.supplyDisrupted),
+    ].join('');
+    const capaWait = s.capa?.pending?.length ?? 0, impWait = s.impact?.advisor?.pending?.length ?? 0;
+    const open = (F?.orders ?? []).filter((o) => o.status === 'open'), risk = open.filter((o) => o.risk).length, lastD = F?.decisions?.[0];
+    $('facosSub').innerHTML = `공장 오케스트레이터 (FacOS) · 오더 진행 <b>${open.length}</b>${risk ? ` <em class="dn">(납기 위험 ${risk})</em>` : ''} · 결정 대기 <b class="${capaWait + impWait ? 'warn' : ''}">${capaWait + impWait}</b>`;
+    $('facosSum').innerHTML = `<div class="fz-grid">${cells}</div>
+      <div class="fz-line">${open.length ? `📋 ${open.slice(0, 2).map((o) => `${o.id} 납기 ${fmtClock(o.due).slice(-8, -3)}${o.risk ? ' ⚠' : ''}`).join(' · ')}` : '📋 진행 중 오더 없음'}${capaWait ? ` · 🧭 8D 정책 결정 ${capaWait}` : ''}${impWait ? ` · 💡 개선안 결정 ${impWait}` : ''}</div>
+      ${lastD ? `<div class="fz-line muted">🏛 최근 FacOS 결정 ${fmtClock(lastD.t).slice(-8)} · ${esc(lastD.verdict)} — ${esc(String(lastD.text).slice(0, 70))}</div>` : ''}`;
+    if ((this._lfT = (this._lfT ?? 0) + 1) % 4 === 0) this.renderLogFilter();   // 존별 로그 건수 (가끔)
   }
 
   renderEngine() {

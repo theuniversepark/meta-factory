@@ -291,6 +291,7 @@ function zoneDropdown() {
 }
 function renderZoneCard() {
   designer?.setTarget(zonePick.view === 'precision' ? 'precision' : zonePick.view);   // 오른쪽 아래 공정 설계도 고른 Zone으로
+  if (document.getElementById('logFollow')?.checked) ui?.setLogFilter?.(zonePick.view === 'precision' ? 'main' : zonePick.view);   // 오른쪽 공장 운영 로그도 그 존으로 (왼쪽 Zone 연동)
   if (zonePick.view === 'insp') return renderInspZoneCard();
   if (zonePick.view !== 'precision') return renderXzZoneCard();
   const zone = isZone(currentLine);

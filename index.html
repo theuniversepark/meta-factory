@@ -79,12 +79,16 @@
 
   <aside class="panel right" id="agentPanel">
     <div class="agent-h">
-      <div class="agent-avatar" id="agentAvatar">AI</div>
+      <div class="agent-avatar facos">OS</div>
       <div>
-        <div class="agent-name" id="agentName">AI 운영 에이전트</div>
-        <div class="agent-sub"><span class="pill" id="agentPill">활성</span> 의사결정 <b id="agentCount">0</b>건</div>
+        <div class="agent-name">FACOS · 공장 운영</div>
+        <div class="agent-sub" id="facosSub">공장 오케스트레이터 (FacOS)</div>
       </div>
     </div>
+    <div class="facos-sum" id="facosSum" title="존별 상태 — 누르면 아래 공장 운영 로그를 그 존으로 거릅니다"></div>
+    <details class="zone-agent" id="zoneAgentBox">
+      <summary class="za-h"><div class="agent-avatar small" id="agentAvatar">AI</div><div><small>정밀조립Zone 존 에이전트 <i class="za-more">설정·현재 판단 ▾</i></small><div class="agent-name" id="agentName">AI 운영 에이전트</div>
+        <div class="agent-sub"><span class="pill" id="agentPill">활성</span> 의사결정 <b id="agentCount">0</b>건</div></div></summary>
     <div class="engine">
       <div class="seg small" id="engineSeg">
         <button data-engine="rule" class="on">추론 기반</button>
@@ -101,10 +105,13 @@
     </div>
     <div class="llm-status" id="llmStatus"></div>
     <div class="thought" id="thought"></div>
+    </details>
+    <div class="log-h"><b>공장 운영 로그</b><label class="chk" title="왼쪽 Zone 카드에서 고른 Zone으로 로그를 거릅니다"><input type="checkbox" id="logFollow" checked /> 왼쪽 Zone 연동</label></div>
+    <div class="seg small log-filter" id="logFilter"></div>
     <div class="loop"><span>관찰</span>→<span>판단</span>→<span>실행</span></div>
-    <div class="log" id="log"></div>
+    <div class="log" id="log" data-filter="all"></div>
     <form class="chatbox" id="chatForm" autocomplete="off">
-      <input id="chatInput" placeholder="공정 지시 (예: 포장셀 속도 75%, 도어트림 2:1, e-axle 조립셀 예방정비)" disabled />
+      <input id="chatInput" placeholder="정밀조립Zone 공정 지시 (예: 포장셀 속도 75%, 도어트림 2:1, e-axle 조립셀 예방정비)" disabled />
       <button type="submit" id="chatSend" disabled>전송</button>
     </form>
   </aside>
