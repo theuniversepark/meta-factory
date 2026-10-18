@@ -3,7 +3,7 @@
 import { zoneLine } from '../js/line.js';
 import { Simulation } from '../js/sim.js';
 import { FactoryAgent } from '../js/agent.js';
-import { LEVERS, impactMarkdown } from '../js/impact.js';
+import { CAUSES, LEVERS, impactMarkdown } from '../js/impact.js';
 let pass = 0, fail = 0;
 const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  — ' + info : ''}`); };
 const run = (mode, seed, T, events) => {
@@ -34,7 +34,7 @@ const B = run('smart', 3, 3600, false).s, A = B.impact.advisor;
 check('손실이 큰 원인에 개선 제안', A.items.length > 0 && A.items.every((p) => p.why && p.expect && p.kpi.length), A.items.map((p) => p.title).join(' · '));
 const p = A.items.find((x) => x.lever === 'amrStage') ?? A.items.find((x) => x.lever);
 A.verify(p.id); A.work();
-check('트윈 검증 원인 — 원인별 손실 변화 · 작동 원리', p.twin.causes?.length === 10 && p.twin.why?.length >= 2 && p.twin.why.some((w) => w.startsWith('작동 원리')), p.twin.why[1] ?? '');
+check('트윈 검증 원인 — 원인별 손실 변화 · 작동 원리', p.twin.causes?.length === Object.keys(CAUSES).length && p.twin.why?.length >= 2 && p.twin.why.some((w) => w.startsWith('작동 원리')), p.twin.why[1] ?? '');
 check('디지털트윈 검증 (현재 vs 제안)', p.status === 'verified' && p.twin && p.twin.uphCur > 0 && ['apply', 'neutral', 'hold'].includes(p.twin.recommend), `${p.title}: UPH ${Math.round(p.twin.uphCur)} → ${Math.round(p.twin.uphCand)} · ${p.twin.recommend}`);
 const from = LEVERS[p.lever].get(B);
 A.apply(p.id);

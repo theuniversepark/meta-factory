@@ -10,6 +10,7 @@ import { designLine } from './line-designer.mjs';
 import { startMqtt, mqttStatus, mqttPublish } from './mqtt-gateway.mjs';
 import { ffmpegInfo, queueConvert, convertClip, readStoredZip, framesToMp4 } from './video-convert.mjs';
 import { facRoute } from './fac-api.mjs';
+import { makeRcaApi } from './rca-api.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
@@ -292,6 +293,7 @@ function sendApiError(res, err) {
 export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
   if (!client) setApiKey(null);
   await startMqtt();
+  const rca = makeRcaApi({ publish: mqttPublish });   // 분석 결과는 내장 MQTT 브로커로도 발행
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname === '/api/status') return send(res, 200, { llm: hasApiKey(), model: MODEL, episodes: true, aios: true, cctv: true, robotcam: true, dataDir: DATA_DIR(), ffmpeg: ffmpegInfo() });
@@ -322,6 +324,14 @@ export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
     if (url.pathname === '/api/fac' || url.pathname.startsWith('/api/fac/')) {
       try {
         const r = facRoute(req.method, url.pathname, url.searchParams, req.method === 'POST' ? await readBody(req, 8 * 1024 * 1024) : '');
+        if (r) return send(res, r.code, r.body);
+      } catch (e) { return send(res, 400, { error: e.message }); }
+    }
+
+    // RCA 전담 서버 (더미) — 메인 서버(화면 FACOS 품질 모듈)가 불량 판정 리포트를 올리고 분석 결과·종결을 주고받는다 (server/rca-api.mjs)
+    if (url.pathname.startsWith('/api/rca/v1')) {
+      try {
+        const r = rca.route(req.method, url.pathname, url.searchParams, req.method === 'POST' ? await readBody(req, 16 * 1024 * 1024) : '');
         if (r) return send(res, r.code, r.body);
       } catch (e) { return send(res, 400, { error: e.message }); }
     }

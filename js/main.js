@@ -219,6 +219,7 @@ function start(key) {
   xzones.setup(sim, labelsOn); insp.setup(sim, xzones, labelsOn);
   view.selected = null;
   hub.reset(sim, view, xzones);
+  if (sim.qcomm) { sim.qcomm.setEpoch(hub.epochMs); sim.qcomm.mirror = () => hub.pcap; sim.qcomm.live = !hub.noServer; }   // 품질 통신: 기준 시계 · 전체 캡처에 함께 기록 · 실제 RCA 서버(앱 서버)에도 전송
   camWall.setup(sim, view); for (const w of zoneWalls) w.setup(sim, view);
   cctvView.setup(sim, view); for (const b of cctvBoards) b.setup(sim);
   epRec.attach(sim);
@@ -1471,6 +1472,14 @@ traceBody.addEventListener('click', (e) => {
   if (r.dl) {
     const T = sim.trace, c = T.cases.find((x) => x.id === r.caseId), iso = (t) => hub.iso(t);
     if (r.dl === 'case' && !c) return;
+    if (r.dl.startsWith('q')) {   // 품질 통신 (js/qcomm.js): 사례 pcap · 전체 pcap · 리포트·RCA 결과 JSON
+      const Q = sim.qcomm, cm = Q?.cases.get(traceState.caseId) ?? Q?.cases.get(Q.order.at(-1)); if (!Q || (r.dl !== 'qpcapall' && !cm)) return;
+      const data = r.dl === 'qjson' ? JSON.stringify({ caseId: cm.id, ticket: cm.ticket, status: cm.status, messages: cm.msgs.map((m) => ({ ...m, time: Q.iso(m.t) })), report: cm.report, rcaResult: cm.result, live: cm.live }, null, 2) : Q.pcap(r.dl === 'qpcap' ? cm.id : null);
+      const name = r.dl === 'qjson' ? `QualityReport_${cm.id}.json` : r.dl === 'qpcap' ? `QualityComm_${cm.id}.pcap` : `QualityComm_all_${Q.stats.reports}cases.pcap`;
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data], { type: r.dl === 'qjson' ? 'application/json' : 'application/vnd.tcpdump.pcap' })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      sim.sec?.onExport(r.dl === 'qjson' ? '불량 판정 리포트·RCA 결과' : '품질 통신 패킷 (pcap)', name, data.byteLength ?? data.length);
+      return;
+    }
     const zip = zipStore(r.dl === 'case' ? caseFiles(T, c, iso) : allFiles(T, iso));
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([zip], { type: 'application/zip' }));
     a.download = r.dl === 'case' ? `RCA_${c.id}_${c.serial}.zip` : `RCA_dataset_${T.stats.released}products_${T.cases.length}cases_${epRec.runId}.zip`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);

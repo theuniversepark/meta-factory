@@ -10,6 +10,9 @@
 //    "적용하시겠습니까?"를 묻는다. 적용하면 운영값을 바꾸고 10분 동안 실측 효과(적용 전 10분 대비)를 확인하며, 되돌리기를 지원한다.
 import { Simulation, FIELD_EVENTS } from './sim.js';
 import { FactoryAgent } from './agent.js';
+import { FG_ZONE_CAP } from './line.js';
+import { ZONE_FG_CAP, ZONE_LABEL } from './zonedefs.js';
+import { YARD, FG_LABEL } from './shipping.js';
 
 export const CAUSES = {
   failure: { label: '설비 고장', icon: '⚠️' },
@@ -20,6 +23,7 @@ export const CAUSES = {
   hazard:  { label: '진로 현장 이벤트', icon: '🛢️' },
   command: { label: '정지·감속 명령', icon: '🛑' },
   flow:    { label: '흐름·밸런스 대기', icon: '⏳' },
+  ship:    { label: '출하·적재 공간 대기', icon: '🚛' },
   speed:   { label: '사이클 속도 손실', icon: '🐢' },
   quality: { label: '품질 불량', icon: '❌' },
 };
@@ -50,6 +54,8 @@ export class ImpactTracker {
     this.open = new Map();            // 셀별 진행 중 정지 이벤트
     this.evRows = new Map();          // 현장 이벤트 id → 영향 행
     this.hzMoverSec = 0;              // 진로 이벤트로 멈춰 기다린 로봇 시간(대·초)
+    this.cb = {}; this.cbSeen = new Set();   // 존 간 협력: 누적값 (키 '항목.존' — 정비 배정 대기 · 정비 인력 유휴 · 지원 보냄/받음 · 유휴 AMR · 결품 · 검사 대기)
+    this.ob = { fk: 0, hi: 0, nt: 0 }; this.obPeak = { r: 0, k: null };   // 출하 여유: 출하 지게차 가동(대·초 ÷ 대수) · 적재 80% 이상 시간 · 실을 트럭 없는 시간 · 구간 최대 적재율
     this.snaps = []; this.nextSnap = 0;
     this.advisor = new Advisor(sim, this);
   }
@@ -68,6 +74,8 @@ export class ImpactTracker {
     const hzUniq = [...new Set(hzEvs)];
     this.hzMoverSec += hzMovers * dt;
     const stopped = cells.filter((st) => stopCause(st));
+    const sinkFull = s.stations?.at(-1)?.state === 'FULL';
+    this.outbound(dt); this.collab(dt);
     const credit = (c, w, by, ev) => {
       this.w[c] += w;
       if (by && this.open.get(by)) this.open.get(by).w += w;
@@ -88,7 +96,7 @@ export class ImpactTracker {
       }
       if (!c) {
         if (halt) c = 'command';
-        else if (st.state === 'BLOCKED') { by = stopped.find((o) => o.idx > st.idx) ?? null; c = by ? stopCause(by) : hzItems ? 'hazard' : 'flow'; }
+        else if (st.state === 'BLOCKED') { by = stopped.find((o) => o.idx > st.idx) ?? null; c = by ? stopCause(by) : sinkFull ? 'ship' : hzItems ? 'hazard' : 'flow'; }   // 하류 정지가 없고 구분 적재장이 가득 차 있으면 출하(지게차·트럭)가 막은 것
         else if (s.supplyAlarm) c = 'supply';
         else if (hzItems) c = 'hazard';
         else { by = stopped.find((o) => o.idx < st.idx) ?? null; c = by ? stopCause(by) : 'flow'; }
@@ -105,6 +113,43 @@ export class ImpactTracker {
     if (s.time >= this.nextSnap) { this.nextSnap = s.time + SNAP_S; this.snapshot(); }
     if (!s.twin) this.advisor.tick(dt);
   }
+  // 출하 여유 측정: 구분 적재장(정밀조립 제품별 한도 FG_ZONE_CAP)·확장 Zone 포장 팔레트(ZONE_FG_CAP)가 얼마나 찼는지, 출하 지게차가 얼마나 바쁜지, 실을 트럭이 도크에 없는 시간
+  stockRatio() {
+    const s = this.sim; let r = 0, k = null;
+    for (const [p, v] of Object.entries(s.fgBy ?? {})) if (v / FG_ZONE_CAP > r) { r = v / FG_ZONE_CAP; k = p; }
+    for (const [p, v] of Object.entries(s.zoneFg ?? {})) if (v / ZONE_FG_CAP > r) { r = v / ZONE_FG_CAP; k = p; }
+    return { r, k };
+  }
+  outbound(dt) {
+    const s = this.sim, fk = (s.forklifts ?? []).filter((f) => !f.receiver); if (!s.yard || !fk.length) return;
+    this.ob.fk += (fk.filter((f) => !f.idle).length / fk.length) * dt;
+    const q = this.stockRatio(); if (q.r >= 0.8) this.ob.hi += dt;
+    if (q.r * FG_ZONE_CAP >= YARD.pallet && !s.yard.loadable()) this.ob.nt += dt;   // 실을 팔레트가 있는데 도크에 자리 남은 트럭이 없다 (트럭 교대 중)
+    if (q.r > this.obPeak.r) this.obPeak = { ...q };
+  }
+  // 존 간 협력 측정 — 존마다 자원(정비 인력 · 운반 AMR · 자재 · 정밀검사)이 모자란 시간과 남는 시간을 같이 쌓아, 한쪽이 기다릴 때 다른 쪽이 놀고 있는지 본다
+  collab(dt) {
+    const s = this.sim, C = this.cb, add = (k, v) => { C[k] = (C[k] ?? 0) + v; };
+    // 정비: 배정을 기다리는 요청(준비 시각이 지난 것) × 시간 · 존별 정비 인력 유휴 비율 · 지원으로 다른 존에 가 있는 시간
+    for (const r of s.requests ?? []) if (!r.tech && s.time >= r.readyAt) add(`tw.${r.st.zone ?? 'main'}`, dt);
+    const by = {};
+    for (const t of s.techs ?? []) { const z = t.zone ?? 'main'; (by[z] ??= [0, 0])[0]++; if (t.idle && !t.job) by[z][1]++; if (t.support) { add(`lend.${t.support.from}`, dt); add(`borrow.${t.support.to}`, dt); } }
+    for (const [z, [n, i]] of Object.entries(by)) { add(`tidle.${z}`, (i / n) * dt); add(`tn.${z}`, dt); }
+    // 운반 AMR: 정밀조립 투입구에 빈 AMR이 없어 기다린 시간 · 확장 Zone·정밀검사 대기 주차 중인 AMR 대수 × 시간
+    if (s.stations?.[0]?.state === 'NOAMR') add('noamr.main', dt);
+    for (const z of s.xzones?.zones ?? []) { add(`apark.${z.Z.key}`, z.carriers.filter((c) => c.state === 'park').length * dt); add(`an.${z.Z.key}`, z.carriers.length * dt); }
+    const I = s.inspZone;
+    if (I?.carriers) { add('apark.insp', I.carriers.filter((c) => c.state === 'park' || c.state === 'home').length * dt); add('an.insp', I.carriers.length * dt); }
+    // 자재: 정밀조립 투입구 결품 · 확장 Zone 투입 자재 대기
+    // 결품 원인: 창고(자재창고 · 확장 선반)가 비었으면 입고(트럭·입고 지게차 공유) 문제, 창고엔 있는데 투입구가 비었으면 창고 → 투입구 운반 문제
+    if (s.stations?.[0]?.state === 'STARVED') { add('starve.main', dt); if ((s.whRaw ?? 1) <= 0) add('whEmpty.main', dt); }
+    for (const [k, v] of Object.entries(s.zoneStarved ?? {})) if (v) { add(`starve.${k}`, dt); if ((s.whZone?.[k]?.raw ?? 1) <= 0) add(`whEmpty.${k}`, dt); }
+    // 물류 차량: 정밀조립 물류(창고 → 투입구) 차량과 확장 Zone 전용 자재 차량(AGV 모드는 물류 AGV 중 2대를 돌려 씀)의 유휴
+    for (const v of s.vehicles ?? []) { const z = v.zone ?? 'main'; add(`vn.${z}`, dt); if (v.idle) add(`vidle.${z}`, dt); }
+    // 정밀검사: 정밀조립 샘플이 검사 대기열에 있는 시간(합격 판정 전 HOLD를 늘린다) · 새로 들어온 샘플 수
+    if (I?.queue) for (const q of I.queue) { add(`iq.${q.zone}`, dt); if (!this.cbSeen.has(q.id)) { this.cbSeen.add(q.id); add(`in.${q.zone}`, 1); } }
+    C.supportReq = s.stats.supportReq ?? 0; C.techBorrow = s.stats.techBorrow ?? 0;
+  }
   evRow(ev) {
     if (!ev) return null;
     let row = this.evRows.get(ev.id);
@@ -115,19 +160,21 @@ export class ImpactTracker {
   closeStop(st) { const e = this.open.get(st); if (e) e.t1 = this.sim.time; this.open.delete(st); }
   snapshot() {
     const s = this.sim;
-    this.snaps.push({ t: s.time, w: { ...this.w }, wipInt: { ...this.wipInt }, kwh: { ...this.kwh }, good: s.stats.good, bad: s.stats.rejected + s.stats.escaped, energy: s.stats.energy, wipTot: s.stats.wipInt, hz: this.hzMoverSec, n: { ...this.n } });
+    this.snaps.push({ t: s.time, cb: { ...this.cb }, ob: { ...this.ob }, peak: this.obPeak, w: { ...this.w }, wipInt: { ...this.wipInt }, kwh: { ...this.kwh }, good: s.stats.good, bad: s.stats.rejected + s.stats.escaped, energy: s.stats.energy, wipTot: s.stats.wipInt, hz: this.hzMoverSec, n: { ...this.n } });
     if (this.snaps.length > SNAP_KEEP) this.snaps.shift();
+    this.obPeak = this.stockRatio();   // 다음 스냅샷 구간 최대는 지금 값부터
   }
   // 구간 [t0, now] 누적값 (window 초 · 0이면 처음부터)
-  now() { const s = this.sim; return { t: s.time, w: this.w, wipInt: this.wipInt, kwh: this.kwh, good: s.stats.good, bad: s.stats.rejected + s.stats.escaped, energy: s.stats.energy, wipTot: s.stats.wipInt, hz: this.hzMoverSec, n: this.n }; }
+  now() { const s = this.sim; return { t: s.time, cb: this.cb, ob: this.ob, peak: this.obPeak, w: this.w, wipInt: this.wipInt, kwh: this.kwh, good: s.stats.good, bad: s.stats.rejected + s.stats.escaped, energy: s.stats.energy, wipTot: s.stats.wipInt, hz: this.hzMoverSec, n: this.n }; }
   at(t) { return [...this.snaps].reverse().find((x) => x.t <= t) ?? this.snaps[0]; }
   diff(base, now) {
     const d = (a, b) => Object.fromEntries(KEYS.map((k) => [k, a[k] - (b?.[k] ?? 0)]));
-    return { t0: base.t, t: now.t, w: d(now.w, base.w), wipInt: d(now.wipInt, base.wipInt), kwh: d(now.kwh, base.kwh), good: now.good - base.good, bad: now.bad - base.bad, energy: now.energy - base.energy, wipTot: now.wipTot - base.wipTot, hz: now.hz - base.hz, n: d(now.n, base.n) };
+    const peak = [...this.snaps.filter((x) => x.t > base.t), now].reduce((a, x) => (x.peak && x.peak.r > a.r ? x.peak : a), { r: 0, k: null });
+    return { t0: base.t, t: now.t, cb: Object.fromEntries(Object.keys(now.cb ?? {}).map((k) => [k, now.cb[k] - (base.cb?.[k] ?? 0)])), ob: Object.fromEntries(['fk', 'hi', 'nt'].map((k) => [k, (now.ob?.[k] ?? 0) - (base.ob?.[k] ?? 0)])), peak, w: d(now.w, base.w), wipInt: d(now.wipInt, base.wipInt), kwh: d(now.kwh, base.kwh), good: now.good - base.good, bad: now.bad - base.bad, energy: now.energy - base.energy, wipTot: now.wipTot - base.wipTot, hz: now.hz - base.hz, n: d(now.n, base.n) };
   }
   span(window = 0) {
     const now = this.now(), base = window > 0 ? this.at(now.t - window) : null;
-    return base ? this.diff(base, now) : { ...now, t0: 0 };
+    return base ? this.diff(base, now) : { ...this.diff({ t: 0, cb: {}, ob: {}, w: {}, wipInt: {}, kwh: {}, n: {}, good: 0, bad: 0, energy: 0, wipTot: 0, hz: 0 }, now), t0: 0 };
   }
   // 구간 [a, b] 원인별 손실 (적용 전/후 실측 해석용)
   rangeRows(a, b) {
@@ -153,6 +200,8 @@ export class ImpactTracker {
       T, ideal, loss, good: sp.good, rows, unitPerW: rem / sumW,
       kpi: { uph, uphIdeal: 3600 / ic, oee, avgWip, avgKW, kwhPerUnit, energy: E, wasteKwh: KEYS.reduce((a, k) => a + sp.kwh[k], 0) },
       hazardMoverSec: sp.hz,
+      collab: sp.cb && collabRows(sp.cb, T),
+      outbound: sp.ob && { forklifts: (s.forklifts ?? []).filter((f) => !f.receiver).length, fkUtil: sp.ob.fk / T, hiShare: sp.ob.hi / T, noTruckShare: sp.ob.nt / T, peak: sp.peak?.r ?? 0, peakKey: sp.peak?.k ?? null },
       events: this.events.filter((e) => (e.t1 ?? s.time) >= sp.t0).slice(0, 25).map((e) => ({ ...e, units: e.w * (rem / sumW), dur: (e.t1 ?? (e.ev ? (e.ev.cleared ? e.ev.tClear : s.time) : s.time)) - e.t0, open: e.ev ? !e.ev.cleared : e.t1 == null, affected: e.ev?.affected?.size ?? 0 })),
     };
   }
@@ -263,7 +312,7 @@ function explainActual(p, verdict, sc, causes, ctxB, ctxA, s) {
     : (verdict === 'good' ? '트윈은 효과가 작다고 봤지만 실측은 좋아졌습니다' : verdict === 'bad' ? '트윈은 효과가 작다고 봤지만 실측은 나빠졌습니다' : '트윈 예측대로 실측 변화가 작습니다');
   L.push(`실측 판정을 가른 KPI: ${[...sc.parts].sort((a, b) => (verdict === 'bad' ? a.v - b.v : b.v - a.v))[0].txt} (종합 점수 ${sgn(sc.score * 100, 2)})`);
   // ① 실측에서 실제로 움직인 손실 원인 (레버 효과 / 외란 구분)
-  const EXT = ['failure', 'supply', 'hazard', 'command', 'parts', 'pm', 'cal'];
+  const EXT = ['failure', 'supply', 'hazard', 'command', 'parts', 'pm', 'cal', 'ship'];
   const tag = (c) => `${causeTxt(c, who)}${lk.includes(c.key) ? ' [레버 효과]' : EXT.includes(c.key) ? ' [외란]' : ' [라인 변동]'}`;
   if (verdict !== 'bad' && better.length) L.push(`실측에서 줄어든 손실: ${better.slice(0, 3).map(tag).join(' · ')}`);
   if (verdict !== 'good' && worse.length) L.push(`실측에서 늘어난 손실: ${worse.slice(0, 3).map(tag).join(' · ')}`);
@@ -337,11 +386,101 @@ function rules(s, R) {
   const idleWaste = by.flow.kwh + by.supply.kwh + by.hazard.kwh + by.parts.kwh;
   if (R.kpi.energy > 0 && idleWaste / R.kpi.energy > 0.02 && (s.mode.ecoWait ?? 25) > 8) add('ecoWait', Math.max(8, Math.round((s.mode.ecoWait ?? 25) * 0.5)), { kpi: ['POWER'], title: '셀 절전 진입 앞당김', est: `대기 낭비 약 −${r1(idleWaste * 0.35)}kWh · kWh/개 −${(idleWaste * 0.35 / Math.max(1, R.good)).toFixed(4)}`, why: `대기 셀 전력 낭비 ${r1(idleWaste)}kWh (전체의 ${r1((idleWaste / R.kpi.energy) * 100)}%)`, expect: '자재대기가 짧게 이어져도 대기전력 70% 절감 → kWh/개 감소', trade: '절전 해제 시 재기동 (생산 영향 없음)' });
   if (q >= 0.4) add('cpkMin', Math.min(1.3, r2((s.mode.cpkMin ?? 1.15) + 0.08)), { kpi: ['OEE'], title: '재보정 기준 강화 (Cpk)', est: `OEE 최대 +${r1(q * 0.3)}%p (불량 감소)`, why: `품질 불량으로 OEE −${r1(q)}%p (검출·유출 ${Math.round(by.quality.units)}개)`, expect: '공정 편차를 더 일찍 보정해 불량 감소', trade: '재보정 횟수 증가' });
+  // 출하(구분 적재장 → 출하 지게차 → 트럭): 적재 한도에 닿으면 그 제품 AMR이 적재장 앞에서 서고 포장셀 → 앞 셀로 막힘이 거슬러 올라간다
+  for (const p of outboundAdvice(s, R, P('ship'))) out.push(p);
+  for (const p of collabAdvice(s, R)) out.push(p);
   if (cmdP >= 1) out.push({ lever: null, kpi: ['UPH', 'OEE'], title: '정지·감속 명령 해제 검토', why: `정지·감속 명령으로 OEE −${r1(cmdP)}%p`, expect: '안전 확인 후 정상 속도 복귀', trade: '안전 확인 필요 (자동 적용 안 함)' });
   // 같은 레버는 하나로 (근거를 합친다)
   const m = new Map();
   for (const p of out) { const k = p.lever ?? p.title; if (!m.has(k)) m.set(k, p); else { const a = m.get(k); a.why += ` · ${p.why}`; a.kpi = [...new Set([...a.kpi, ...p.kpi])]; } }
   return [...m.values()];
+}
+
+// 존 간 협력 지표 (구간 누적 → 존별 비율·시간당 값)
+const ZK = ['main', 'flex', 'adapt', 'insp'];
+function collabRows(C, T) {
+  const g = (k) => C[k] ?? 0, H = T / 3600;
+  const rows = ZK.map((z) => ({
+    zone: z, label: ZONE_LABEL[z],
+    techWaitPerH: g(`tw.${z}`) / H,                                      // 정비 배정 대기 (초/시간)
+    techIdle: g(`tn.${z}`) ? g(`tidle.${z}`) / g(`tn.${z}`) : null,      // 정비 인력 유휴 비율
+    lendPerH: g(`lend.${z}`) / H, borrowPerH: g(`borrow.${z}`) / H,      // 지원 보냄 · 받음 (인력·초/시간)
+    amrIdle: g(`an.${z}`) ? g(`apark.${z}`) / T : null, amrN: g(`an.${z}`) ? g(`an.${z}`) / T : null,   // 대기 주차 AMR 평균 대수
+    noAmr: z === 'main' ? g('noamr.main') / T : null,                    // 투입구 빈 AMR 없음 (시간 비율)
+    starve: z === 'insp' ? null : g(`starve.${z}`) / T,                  // 자재 결품·투입 대기 (시간 비율)
+    whEmpty: z === 'insp' ? null : g(`whEmpty.${z}`) / T,                // 그중 창고도 빈 시간 (입고 문제)
+    vehIdle: g(`vn.${z}`) ? g(`vidle.${z}`) / g(`vn.${z}`) : null,       // 물류 차량 유휴 비율
+    inspWait: g(`in.${z}`) ? g(`iq.${z}`) / g(`in.${z}`) : null,          // 정밀검사 대기열 평균 대기 (초/샘플)
+  }));
+  return { rows, supportReq: g('supportReq'), techBorrow: g('techBorrow') };
+}
+// 존 간 협력 의견 — 한 존이 자원을 기다리는 동안 다른 존의 같은 자원이 놀고 있으면 서로 나눠 쓰는 방안 (운영자 판단: 인력·AMR 운용 정책)
+export function collabAdvice(s, R) {
+  const C = R.collab; if (!C) return [];
+  const out = [], rs = C.rows, L = (r) => r.label, pc = (v) => `${Math.round(v * 100)}%`;
+  // ① 정비 인력: 배정 대기가 긴 존 ↔ 유휴 비율이 높은 존
+  const waitZ = rs.filter((r) => r.techWaitPerH >= 60).sort((a, b) => b.techWaitPerH - a.techWaitPerH), idleZ = rs.filter((r) => (r.techIdle ?? 0) >= 0.6).sort((a, b) => b.techIdle - a.techIdle);
+  const donors = (w) => idleZ.filter((r) => r.zone !== w.zone);
+  if (waitZ.length && waitZ.some((w) => donors(w).length)) {
+    const w = waitZ[0], d = donors(w);
+    out.push({ lever: null, kpi: ['OEE', 'UPH'], title: '정비 인력 존 간 즉시 지원 (공동 풀)',
+      why: `${waitZ.map((r) => `${L(r)} 정비 배정 대기 ${Math.round(r.techWaitPerH)}초/시간`).join(' · ')} — 같은 시간 ${d.map((r) => `${L(r)} 정비 인력 유휴 ${pc(r.techIdle)}`).join(' · ')} · 지원 요청 ${C.supportReq}건 · 지원 파견 ${C.techBorrow}건`,
+      expect: `지금은 자기 존 인력이 모두 바쁘고 긴급수리 20초(정비·보정 60초)를 기다린 뒤에야 다른 존에 지원을 요청 — 가까운 존의 유휴 인력을 바로 배정(공동 풀)하면 ${L(w)} 설비 정지 시간 단축`,
+      trade: '지원 나간 동안 보낸 존의 대응 여력 감소 (보낸 존 미배정 긴급수리가 없을 때만 파견하는 지금 규칙은 유지)' });
+  }
+  // ② 운반 AMR: 정밀조립 투입구 빈 AMR 부족 ↔ 확장 Zone 대기 주차 AMR
+  const main = rs.find((r) => r.zone === 'main'), spare = rs.filter((r) => r.zone !== 'main' && (r.amrIdle ?? 0) >= 3);
+  if ((main.noAmr ?? 0) >= 0.02 && spare.length) out.push({ lever: null, kpi: ['UPH'], title: '운반 AMR 존 간 대여',
+    why: `정밀조립 투입구에 빈 AMR이 없어 기다린 시간 ${pc(main.noAmr)} — ${spare.map((r) => `${L(r)} 대기 주차 평균 ${r.amrIdle.toFixed(1)}/${Math.round(r.amrN)}대`).join(' · ')}`,
+    expect: '확장 Zone 유휴 AMR 1~2대를 피크 때 정밀조립 투입 운반에 빌려 투입 대기 감소 (관제에서 존 지정 변경)',
+    trade: '대여한 존 투입 피크와 겹치면 그 존 대기 증가 — 존별 최소 대수 유지 필요' });
+  else if (spare.some((r) => r.amrIdle >= r.amrN * 0.4)) { const r = spare.sort((a, b) => b.amrIdle - a.amrIdle)[0];
+    out.push({ lever: null, kpi: ['POWER'], title: `${L(r)} 유휴 AMR 재배치`,
+      why: `${L(r)} AMR ${Math.round(r.amrN)}대 중 평균 ${r.amrIdle.toFixed(1)}대가 대기 주차 (${pc(r.amrIdle / r.amrN)}) · 정밀조립 투입 AMR 부족 ${pc(main.noAmr ?? 0)}`,
+      expect: '남는 AMR을 공용 예비(충전·대기)로 묶어 필요한 존이 불러 쓰게 하면 운용 대수·충전 전력 절감',
+      trade: '존 간 이동 시간 · 관제 규칙 추가' }); }
+  // ③ 자재: 존별 결품·투입 대기
+  // ③-a 창고까지 빈 결품: 입고 트럭(동시 2대)·입고 지게차를 존들이 함께 쓴다 → 입고 순서·재주문 존 간 조정
+  const wh = rs.filter((r) => (r.whEmpty ?? 0) >= 0.01);
+  if (wh.length) out.push({ lever: null, kpi: ['UPH', 'OEE'], title: '입고 순서·재주문 존 간 조정',
+    why: `창고까지 비어 생긴 결품 ${wh.map((r) => `${L(r)} ${pc(r.whEmpty)}`).join(' · ')} — 입고 트럭(동시 2대)·입고 지게차를 정밀조립·확장 Zone이 함께 씀`,
+    expect: '결품이 잦은 존의 재주문을 앞당기고 입고 순서를 그 존 먼저로 — 재고가 남는 존은 재주문점을 낮춰 균형',
+    trade: '다른 존 재고 여유 감소' });
+  // ③-b 창고엔 있는데 투입구가 빈 결품 + 자기 존 물류 차량이 70% 넘게 바쁨: 운반 차량 부족 — 다른 존 전용 물류 차량이 놀고 있으면 같이 쓴다
+  //      (자기 차량이 놀고 있으면 운반 능력이 아니라 배차 시점·재주문점 문제라 존 간 협력 대상이 아님)
+  const tr = rs.filter((r) => (r.starve ?? 0) - (r.whEmpty ?? 0) >= 0.01 && (r.vehIdle ?? 0) < 0.3), vSpare = rs.filter((r) => (r.vehIdle ?? 0) >= 0.7);
+  for (const r of tr) { const d = vSpare.filter((x) => x.zone !== r.zone);
+    out.push({ lever: null, kpi: ['UPH', 'OEE'], title: `${L(r)} 투입 자재 운반 보강${d.length ? ' — 다른 존 물류 차량 공유' : ''}`,
+      why: `창고에 재고가 있는데 ${L(r)} 투입구가 빈 시간 ${pc(r.starve - (r.whEmpty ?? 0))} (${L(r)} 물류 차량 유휴 ${pc(r.vehIdle ?? 0)})${d.length ? ` — ${d.map((x) => `${L(x)} 전용 차량 유휴 ${pc(x.vehIdle)}`).join(' · ')}` : ''}`,
+      expect: d.length ? `유휴 존 전용 차량이 ${L(r)} 창고 → 투입구 운반을 함께 맡으면(공용 배차) 투입 대기 감소` : `${L(r)} 창고 → 투입구 운반 주기·적재량(1회 운반 수량) 확대`,
+      trade: d.length ? '전용 차량을 빌려준 존의 자재 보충이 늦어질 수 있음 — 그 존 투입구 재고 하한 유지' : '운반 차량·인력 추가' }); }
+  // ④ 정밀검사: 정밀조립 샘플 검사 대기 (HOLD → 오더 종료 지연)
+  const iw = main.inspWait;
+  if (iw != null && iw >= 300) out.push({ lever: null, kpi: ['WIP'], title: '정밀검사 우선순위·검사 AMR 조정',
+    why: `정밀조립 샘플이 정밀검사 대기열에서 평균 ${Math.round(iw)}초 대기 (판정 전까지 해당 제품 HOLD → 오더 종료 지연)${rs.filter((r) => r.zone !== 'main' && r.inspWait != null).map((r) => ` · ${L(r)} ${Math.round(r.inspWait)}초`).join('')}`,
+    expect: '납기 위험 오더가 없어도 정밀조립 샘플을 먼저 검사하거나 정밀검사 AMR(3대) 증차 — HOLD 시간 단축',
+    trade: '확장 Zone 샘플 판정 지연' });
+  return out;
+}
+
+// 출하 의견 (운영자 판단 — 지게차 증차·적재 한도·트럭 대기는 설비·인력·공간 결정이라 자동 적용하지 않는다)
+export function outboundAdvice(s, R, shipPts) {
+  const O = R.outbound; if (!O) return [];
+  const out = [], fk = Math.round(O.fkUtil * 100), pk = `${FG_LABEL[O.peakKey] ?? O.peakKey ?? '-'} ${Math.round(O.peak * FG_ZONE_CAP)}/${FG_ZONE_CAP}`;
+  const state = `출하 지게차 ${O.forklifts}대 가동률 ${fk}% · 최대 적재 ${pk}(${Math.round(O.peak * 100)}%) · 적재 80% 이상 ${Math.round(O.hiShare * 100)}% 시간`;
+  if (shipPts >= 0.1) out.push({ lever: null, kpi: ['UPH', 'OEE', 'WIP'], title: '출하 병목 해소 — 구분 적재장 가득 참',
+    why: `구분 적재장이 가득 차 라인이 막힘 OEE −${r2(shipPts)}%p · ${state}`,
+    expect: `출하 지게차 증차(${O.forklifts} → ${O.forklifts + 1}대 — 가동률 약 ${Math.round(fk * O.forklifts / (O.forklifts + 1))}%) 또는 제품별 적재 한도 24 → 32(트럭 1대분) — 적재장이 비면 포장셀·앞 셀 막힘 해소`,
+    trade: '지게차·운전 인력(또는 무인 지게차) 비용 · 적재 공간 확대' });
+  else if (O.fkUtil >= 0.75 || O.peak >= 0.8) out.push({ lever: null, kpi: ['UPH', 'WIP'], title: '출하 여유 확보 (예방)',
+    why: `아직 출하로 인한 생산 손실은 없음 · ${state}`,
+    expect: `지게차 이동·트럭 도착이 조금만 늦어도 적재 한도(24)에 닿아 포장셀부터 막힘이 전파될 수 있음 — 지게차 ${O.forklifts + 1}대면 가동률 약 ${Math.round(fk * O.forklifts / (O.forklifts + 1))}%, 적재 한도 32면 버퍼 +8개`,
+    trade: '지금 손실이 없어 투자 대비 효과는 생산 계획(증산·혼류 변경)에 따라 판단' });
+  if (O.noTruckShare >= 0.15 && O.fkUtil >= 0.5) out.push({ lever: null, kpi: ['UPH'], title: '트럭 교대 공백 축소',
+    why: `실을 팔레트가 있는데 도크에 실을 트럭이 없는 시간 ${Math.round(O.noTruckShare * 100)}% — 만재 트럭이 도로로 빠진 뒤에야 다음 트럭이 들어와 후진 접안`,
+    expect: '다음 트럭을 도크 옆 대기 자리에 미리 세워 두면 교대 공백이 줄어 지게차 대기·적재장 적재량 감소',
+    trade: '출하 야드 대기 공간 필요 (배치 변경)' });
+  return out;
 }
 
 // ── 의사결정 지원: 제안 → 트윈 검증 → "적용하시겠습니까?" → 적용 · 보류 → 실측 효과 → 되돌리기 ─────────────────
@@ -488,6 +627,25 @@ export function impactMarkdown(sim, window = 0) {
   L.push('## 2. 원인별 영향 (UPH · OEE · WIP · POWER)', '', '| 원인 | 건수 | 손실 대수 | UPH 손실 | OEE 손실 | WIP 증가 | 전력 낭비 | kWh/개 영향 |', '|---|---:|---:|---:|---:|---:|---:|---:|');
   for (const r of R.rows) if (r.units > 0.05 || r.kwh > 0.01) L.push(`| ${r.icon} ${r.label} | ${r.count || '-'} | ${n1(r.units)} | −${n1(r.uph)} | −${(r.oeePts * 100).toFixed(2)}%p | +${r.wip.toFixed(2)} | ${r.kwh.toFixed(2)}kWh | −${r.kwhUnitGain.toFixed(3)} |`);
   L.push('', `> 손실 대수 = 이론 생산 − 양품. 품질 불량(검출·유출)을 먼저 떼고, 나머지를 원인별 병목 가중 손실시간 비례로 나눴습니다. OEE 손실 합 + OEE = 100%. 진로 이벤트 로봇 정지 대기 ${Math.round(R.hazardMoverSec)}대·초.`, '');
+  const O = R.outbound;
+  if (O) {
+    L.push('## 출하·물류 여유 (구분 적재장 → 출하 지게차 → 트럭)', '', '| 지표 | 값 | 의미 |', '|---|---|---|',
+      `| 출하 지게차 가동률 | ${pct(O.fkUtil)} (${O.forklifts}대) | 75% 넘으면 출하 지연이 적재장 누적으로 이어지기 쉬움 |`,
+      `| 최대 적재율 | ${pct(O.peak)} (${FG_LABEL[O.peakKey] ?? O.peakKey ?? '-'}) | 100%(24개)면 그 제품 AMR이 적재장 앞에서 대기 → 포장·앞 셀 막힘 |`,
+      `| 적재 80% 이상 시간 | ${pct(O.hiShare)} | 한도 근처에 머문 비율 |`,
+      `| 트럭 교대 공백 | ${pct(O.noTruckShare)} | 실을 팔레트가 있는데 도크에 실을 트럭이 없는 시간 |`,
+      `| 출하로 인한 OEE 손실 | −${((R.rows.find((r) => r.key === 'ship')?.oeePts ?? 0) * 100).toFixed(2)}%p | 적재장 가득 참으로 라인이 막힌 손실 |`, '');
+    const adv = outboundAdvice(sim, R, (R.rows.find((r) => r.key === 'ship')?.oeePts ?? 0) * 100);
+    L.push(`> 의견: ${adv.length ? adv.map((p) => `**${p.title}** — ${p.expect}`).join(' / ') : '출하 여유 충분 — 생산 영향 없음'}`, '');
+  }
+  const C = R.collab;
+  if (C) {
+    const f = (x, g) => (x == null ? '-' : g(x));
+    L.push('## 존 간 협력 (정비 인력 · 운반 AMR · 자재 공급 · 정밀검사)', '', '| Zone | 정비 배정 대기 | 정비 인력 유휴 | 지원 보냄·받음 | 대기 주차 AMR / 투입 AMR 부족 | 자재 결품 (창고 빔) | 물류 차량 유휴 | 정밀검사 대기 |', '|---|---:|---:|---:|---:|---:|---:|---:|');
+    for (const r of C.rows) L.push(`| ${r.label} | ${Math.round(r.techWaitPerH)}초/시간 | ${f(r.techIdle, pct)} | ${Math.round(r.lendPerH)} · ${Math.round(r.borrowPerH)}초/시간 | ${r.zone === 'main' ? `부족 ${f(r.noAmr, pct)}` : f(r.amrIdle, (x) => `${n1(x)}/${Math.round(r.amrN)}대`)} | ${f(r.starve, (x) => `${pct(x)} (${pct(r.whEmpty ?? 0)})`)} | ${f(r.vehIdle, pct)} | ${f(r.inspWait, (x) => `${Math.round(x)}초/샘플`)} |`);
+    const adv = collabAdvice(sim, R);
+    L.push('', `- 존 간 정비 지원 요청 ${C.supportReq}건 · 파견 ${C.techBorrow}건`, `> 의견: ${adv.length ? adv.map((p) => `**${p.title}** — ${p.expect}`).join(' / ') : '존 간 협력으로 더 얻을 여지가 작음 (기준 이하)'}`, '');
+  }
   L.push('## 3. 이벤트별 영향 (최근)', '', '| 시각 | 원인 | 위치 | 지속 | 손실 대수 | 영향 로봇 |', '|---|---|---|---:|---:|---:|');
   for (const e of R.events.slice(0, 15)) L.push(`| ${hm(e.t0)} | ${CAUSES[e.cause].label} | ${e.where} | ${Math.round(e.dur)}초${e.open ? ' (진행 중)' : ''} | ${n1(e.units)} | ${e.affected || '-'} |`);
   L.push('', '## 4. 개선 방법 · 제안', '');

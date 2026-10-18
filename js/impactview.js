@@ -1,7 +1,8 @@
 // KPI 영향 분석 · 개선 제안 · 의사결정 지원 창 (impact.js 결과를 그린다)
-import { CAUSES, LEVERS, VERIFY_S, TWIN_S, TWIN_SEEDS, fmtV, impactMarkdown } from './impact.js';
+import { CAUSES, LEVERS, VERIFY_S, TWIN_S, TWIN_SEEDS, fmtV, impactMarkdown, outboundAdvice, collabAdvice } from './impact.js';
+import { FG_LABEL } from './shipping.js';
 
-const COLORS = { failure: '#ff5a5a', pm: '#f5b82e', cal: '#e0c341', parts: '#d58cff', supply: '#ff9152', hazard: '#ff6fae', command: '#9aa6b2', flow: '#5aa9e6', speed: '#59c9b9', quality: '#c77dff' };
+const COLORS = { failure: '#ff5a5a', pm: '#f5b82e', cal: '#e0c341', parts: '#d58cff', supply: '#ff9152', hazard: '#ff6fae', command: '#9aa6b2', flow: '#5aa9e6', ship: '#8fb34a', speed: '#59c9b9', quality: '#c77dff' };
 const pct = (v, d = 1) => `${(v * 100).toFixed(d)}%`, n0 = (v) => Math.round(v).toLocaleString('ko-KR'), n1 = (v) => v.toFixed(1);
 const hm = (t0) => { const t = t0 + 8 * 3600; return `${String(Math.floor(t / 3600) % 24).padStart(2, '0')}:${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}`; };   // 화면 시계와 같은 시각 (08:00 시작)
 const STATUS = { new: '결정 대기', verifying: '트윈 검증 중', verified: '검증 완료 · 결정 대기', applied: '적용됨', held: '보류', reverted: '되돌림' };
@@ -27,6 +28,28 @@ export function impactHTML(sim) {
   const table = `<table class="imp-t"><thead><tr><th>원인</th><th>건수</th><th>손실 대수</th><th>UPH</th><th>OEE</th><th>WIP</th><th>전력 낭비</th><th>kWh/개</th></tr></thead><tbody>
     ${lossRows.map((r) => `<tr><td><b class="dot" style="background:${COLORS[r.key]}"></b>${r.icon} ${r.label}</td><td>${r.count || '-'}</td><td>${n1(r.units)}</td><td>−${n1(r.uph)}</td><td>−${(r.oeePts * 100).toFixed(2)}%p</td><td>+${r.wip.toFixed(2)}</td><td>${r.kwh.toFixed(2)}kWh</td><td>−${r.kwhUnitGain.toFixed(4)}</td></tr>`).join('') || '<tr><td colspan="8">손실 없음</td></tr>'}
     </tbody></table><p class="imp-note">손실 대수 = 이론 생산(구간 ÷ 기준 사이클 ${sim.idealCycle.toFixed(2)}초) − 양품. 품질 불량을 먼저 떼고 나머지를 원인별 병목 가중 손실시간 비례로 배분 — OEE 손실 합 + OEE = 100%. 자재대기·막힘은 그 원인을 만든 셀 정지·이벤트로 넘겨 셉니다. 진로 이벤트 로봇 정지 대기 ${n0(R.hazardMoverSec)}대·초.</p>`;
+  // 출하·물류 여유: 구분 적재장 → 출하 지게차 → 트럭이 생산을 막는지 (손실이 없어도 여유가 얇으면 의견)
+  const O = R.outbound, shipPts = (R.rows.find((r) => r.key === 'ship')?.oeePts ?? 0) * 100;
+  const lvl = (v, warn, bad) => (v >= bad ? 'dn' : v >= warn ? 'mid' : 'up');
+  const obHTML = O ? `<div class="imp-tiles">
+      ${tile('출하 지게차 가동률', `<em class="${lvl(O.fkUtil, 0.6, 0.75)}">${pct(O.fkUtil, 0)}</em>`, `${O.forklifts}대 · 75% 넘으면 여유 부족`)}
+      ${tile('최대 적재율', `<em class="${lvl(O.peak, 0.67, 0.8)}">${pct(O.peak, 0)}</em>`, `${FG_LABEL[O.peakKey] ?? O.peakKey ?? '-'} · 80% 이상 ${pct(O.hiShare, 0)} 시간`)}
+      ${tile('트럭 교대 공백', `<em class="${lvl(O.noTruckShare, 0.1, 0.15)}">${pct(O.noTruckShare, 0)}</em>`, '실을 팔레트 있는데 도크에 트럭 없음')}
+      ${tile('출하로 인한 손실', `<em class="${shipPts >= 0.1 ? 'dn' : 'up'}">${shipPts >= 0.005 ? '−' : ''}${shipPts.toFixed(2)}%p</em>`, '적재장 가득 참 → 라인 막힘 (OEE)')}</div>
+    <p class="imp-note">💬 의견: ${(() => { const a = outboundAdvice(sim, R, shipPts); return a.length ? a.map((p) => `<b>${p.title}</b> — ${p.expect}`).join('<br>') : '출하 여유 충분 — 적재장·지게차·트럭이 생산을 막지 않습니다.'; })()}</p>` : '';
+  // 존 간 협력: 존마다 자원이 모자란 시간(대기)과 남는 시간(유휴)을 나란히 — 한쪽이 기다릴 때 다른 쪽이 놀고 있으면 나눠 쓸 여지
+  const C = R.collab, v = (x, f) => (x == null ? '<span class="muted">-</span>' : f(x));
+  const cbHTML = C ? `<table class="imp-t"><thead><tr><th>Zone</th><th>정비 배정 대기</th><th>정비 인력 유휴</th><th>지원 보냄 · 받음</th><th>대기 주차 AMR</th><th>자재 결품 (창고 빔)</th><th>물류 차량 유휴</th><th>정밀검사 대기</th></tr></thead><tbody>
+    ${C.rows.map((r) => `<tr><td>${r.label}</td>
+      <td>${v(r.techWaitPerH, (x) => `<em class="${lvl(x, 30, 60)}">${n0(x)}초/시간</em>`)}</td>
+      <td>${v(r.techIdle, (x) => pct(x, 0))}</td>
+      <td>${n0(r.lendPerH)} · ${n0(r.borrowPerH)}초/시간</td>
+      <td>${r.zone === 'main' ? v(r.noAmr, (x) => `투입 AMR 부족 <em class="${lvl(x, 0.01, 0.02)}">${pct(x, 1)}</em>`) : v(r.amrIdle, (x) => `${n1(x)} / ${n0(r.amrN)}대`)}</td>
+      <td>${v(r.starve, (x) => `<em class="${lvl(x, 0.005, 0.01)}">${pct(x, 1)}</em> (${pct(r.whEmpty ?? 0, 1)})`)}</td>
+      <td>${v(r.vehIdle, (x) => pct(x, 0))}</td>
+      <td>${v(r.inspWait, (x) => `<em class="${lvl(x, 180, 300)}">${n0(x)}초/샘플</em>`)}</td></tr>`).join('')}</tbody></table>
+    <p class="imp-note">존 간 정비 지원 요청 ${C.supportReq}건 · 파견 ${C.techBorrow}건 (자기 존 인력이 모두 바쁘면 긴급수리 20초 · 정비·보정 60초 뒤 가까운 존에 요청). 대기 주차 AMR·정밀검사 대기는 확장 Zone·정밀검사 화면이 돌 때 집계됩니다.<br>
+    💬 의견: ${(() => { const a = collabAdvice(sim, R); return a.length ? a.map((p) => `<b>${p.title}</b> — ${p.expect}`).join('<br>') : '지금은 한 존이 자원을 기다리는 동안 다른 존이 같은 자원을 놀리는 구간이 기준(정비 대기 60초/시간 · 투입 AMR 부족 2% · 결품 1% · 검사 대기 300초)을 넘지 않습니다 — 존 간 협력으로 더 얻을 여지는 작습니다.'; })()}</p>` : '';
   const evs = R.events.slice(0, 10);
   const evT = `<table class="imp-t ev"><thead><tr><th>시각</th><th>원인</th><th>위치</th><th>지속</th><th>손실 대수</th><th>영향 로봇</th></tr></thead><tbody>
     ${evs.map((e) => `<tr><td>${hm(e.t0)}</td><td><b class="dot" style="background:${COLORS[e.cause]}"></b>${CAUSES[e.cause].label}</td><td>${e.where}</td><td>${Math.round(e.dur)}초${e.open ? ' <em class="dn">진행 중</em>' : ''}</td><td>${n1(e.units)}</td><td>${e.affected || '-'}</td></tr>`).join('') || '<tr><td colspan="6">이 구간에 이벤트 없음</td></tr>'}</tbody></table>`;
@@ -39,6 +62,8 @@ export function impactHTML(sim) {
   return `<div class="imp-head"><div class="seg imp-win">${win}</div><button data-imp-md class="imp-md">📄 리포트 저장 (.md)</button></div>
     ${tiles}
     <h3>OEE 손실 분해 — 이벤트·문제가 UPH · OEE · WIP · POWER에 미친 영향</h3>${bar}${table}
+    ${obHTML ? `<h3>출하·물류 여유 — 구분 적재장 → 출하 지게차 → 트럭 <small>적재 한도(제품별 24개)에 닿으면 그 제품 AMR이 적재장 앞에서 서고 포장셀 → 앞 셀로 막힘이 전파됩니다</small></h3>${obHTML}` : ''}
+    ${cbHTML ? `<h3>존 간 협력 — 정비 인력 · 운반 AMR · 자재 공급 · 정밀검사 <small>한 존이 기다리는 동안 다른 존의 같은 자원이 놀고 있으면 나눠 쓰는 방안을 제안합니다</small></h3>${cbHTML}` : ''}
     <h3>이벤트별 영향</h3>${evT}
     <h3>개선 방법 · 제안 <small>제안마다 디지털트윈(현재 vs 제안, ${TWIN_S / 60}분 × 시드 ${TWIN_SEEDS.length}, 실제 현장 이벤트 재연)으로 검증한 뒤 적용 여부를 묻습니다</small></h3>${cards}
     ${logs ? `<h3>의사결정 이력</h3><ul class="imp-log">${logs}</ul>` : ''}`;

@@ -6,6 +6,8 @@
 // 주소 계획: 브로커 10.20.0.10 · FACOS(오케스트레이터·DataHub 구독) 10.20.0.20 · 설비·셀(유선 LAN) 10.20.1.x
 //  · CCTV 10.20.2.x · 이동 로봇(Private 5G, UPF가 준 UE 주소) 10.45.x.x — 5G 단말 패킷은 UPF(N6)를 거쳐 오므로 출발 MAC이 UPF
 // 시각: 공장 기준 시계(시뮬레이션 시각) 마이크로초. 5G 단말은 무선 지연(약 8ms, 핸드오버 중이면 버퍼 대기만큼 더)을 더한다.
+// HTTP/1.1 (TCP 8080 등): 불량 판정 리포트처럼 큰 문서를 서버에 올리는 REST 요청 — 요청마다 새 TCP 연결(3-way → 요청 → 응답 → FIN)
+// 태그: 기록마다 tag(예: 불량 사례 id)를 붙여 build(tag)로 그 사례 패킷만 뽑는다.
 // 렌더링과 분리되어 있어 헤드리스 시험(tests/pcap.mjs)에서도 같은 바이트를 만든다.
 
 const MSS = 1460, BROKER = { ip: [10, 20, 0, 10], port: 1883 }, UPF_MAC = [0x02, 0x00, 0x0a, 0x2d, 0x00, 0x01];
@@ -53,7 +55,8 @@ export class PacketCapture {
     this.on = false; this.recs = []; this.bytes = 24; this.clients = new Map(); this.ipId = 1; this.t0 = null; this.tEnd = null;
     this.n = { lan: 0, g5: 0, cam: 0 };
     this.stats = { packets: 0, up: 0, down: 0, publishUp: 0, publishDown: 0, puback: 0, connect: 0, subscribe: 0, ping: 0, video: 0, msgs: 0, segs: 0 };
-    this.limit = 200e6; this.full = false;
+    this.limit = 200e6; this.full = false; this.tag = null; this.httpN = 0;
+    this.stats.http = 0;
   }
   // opts.only = { key, kind, subs, label }: 개별 캡처 — 그 자산 한 대의 MQTT 연결(발행·PUBACK·내려받는 명령·영상·keep-alive)만 기록
   start(nowMs, opts = {}) {
@@ -133,8 +136,8 @@ export class PacketCapture {
   }
   // Ethernet + IPv4 + TCP 한 프레임
   seg(c, dir, flags, payload, tMs, syn = false) {
-    const up = dir === 'up', src = up ? c.ip : BROKER.ip, dst = up ? BROKER.ip : c.ip, sp = up ? c.port : BROKER.port, dp = up ? BROKER.port : c.port;
-    const smac = up ? c.mac : macOf(BROKER.ip), dmac = up ? macOf(BROKER.ip) : c.mac;
+    const S = c.srv ?? BROKER, up = dir === 'up', src = up ? c.ip : S.ip, dst = up ? S.ip : c.ip, sp = up ? c.port : S.port, dp = up ? S.port : c.port;   // 서버: MQTT 브로커(기본) 또는 HTTP 서버
+    const smac = up ? c.mac : macOf(S.ip), dmac = up ? macOf(S.ip) : c.mac;
     const opt = syn ? [0x02, 0x04, ...u16(MSS)] : [], plen = payload ? payload.length : 0, tlen = 20 + opt.length, total = 20 + tlen + plen;
     const f = new Uint8Array(14 + total);
     f.set([...dmac, ...smac, 0x08, 0x00], 0);
@@ -148,12 +151,12 @@ export class PacketCapture {
     if (up) c.cseq = (c.cseq + plen) >>> 0; else c.sseq = (c.sseq + plen) >>> 0;
     // 같은 연결·방향에서는 시각이 거꾸로 가지 않게 (5G 지연 8ms · LAN 0.3ms가 섞여도 TCP 순서번호와 시각 순서가 같도록)
     const lk = up ? 'lu' : 'ld'; let us = Math.round(tMs * 1000); if (c[lk] != null && us <= c[lk]) us = c[lk] + 1; c[lk] = us;
-    this.recs.push({ us, f }); this.bytes += 16 + f.length; this.stats.packets++; this.stats[up ? 'up' : 'down']++; if (plen) this.stats.segs++;
+    this.recs.push({ us, f, tag: this.tag }); this.bytes += 16 + f.length; this.stats.packets++; this.stats[up ? 'up' : 'down']++; if (plen) this.stats.segs++;
     this.tEnd = Math.max(this.tEnd ?? tMs, us / 1000);
   }
   // libpcap 파일 (마이크로초, Ethernet) — 시각 순 정렬
-  build() {
-    const recs = [...this.recs].sort((a, b) => a.us - b.us);
+  build(tag = null) {
+    const recs = (tag == null ? [...this.recs] : this.recs.filter((r) => r.tag === tag)).sort((a, b) => a.us - b.us);
     const out = new Uint8Array(24 + recs.reduce((a, r) => a + 16 + r.f.length, 0)), dv = new DataView(out.buffer);
     dv.setUint32(0, 0xa1b2c3d4, true); dv.setUint16(4, 2, true); dv.setUint16(6, 4, true); dv.setInt32(8, 0, true); dv.setUint32(12, 0, true); dv.setUint32(16, 65535, true); dv.setUint32(20, 1, true);
     let o = 24;
@@ -162,6 +165,30 @@ export class PacketCapture {
       out.set(r.f, o + 16); o += 16 + r.f.length;
     }
     return out;
+  }
+  // HTTP 요청 한 건 (새 TCP 연결): 3-way 핸드셰이크 → 요청(분할) → 서버 ACK → 응답(분할) → 클라이언트 FIN → 서버 FIN/ACK → ACK
+  // { key, ip, server: { ip, port }, method, path, host, headers, body, status, reason, resBody, tMs, srvMs(서버 처리 시간) }
+  http({ key, ip, server, method = 'POST', path, host, headers = {}, body = '', status = 200, reason = 'OK', resBody = '', tMs, srvMs = 5, lat = 0.3 }) {
+    if (!this.on || this.full) return;
+    const b = enc.encode(body), rb = enc.encode(resBody), n = ++this.httpN;
+    const c = { key, kind: 'http', ip, mac: macOf(ip), port: 50000 + (n % 15000), cseq: 3000000 + n * 7919, sseq: 7000000 + n * 104729, srv: { ip: server.ip, port: server.port, mac: macOf(server.ip) } };
+    const req = enc.encode(`${method} ${path} HTTP/1.1\r\nHost: ${host ?? `${ipStr(server.ip)}:${server.port}`}\r\n${Object.entries({ 'Content-Type': 'application/json', 'Content-Length': b.length, ...headers }).map(([k, v]) => `${k}: ${v}\r\n`).join('')}\r\n`);
+    const res = enc.encode(`HTTP/1.1 ${status} ${reason}\r\nContent-Type: application/json\r\nContent-Length: ${rb.length}\r\nConnection: close\r\n\r\n`);
+    let t = tMs;
+    this.seg(c, 'up', 0x02, null, t, true); c.cseq++;
+    this.seg(c, 'down', 0x12, null, t += lat, true); c.sseq++;
+    this.seg(c, 'up', 0x10, null, t += lat);
+    this.data(c, 'up', concat([req, b]), t += 0.05);
+    t += Math.ceil((req.length + b.length) / MSS) * 0.012 + lat;
+    this.seg(c, 'down', 0x10, null, t);
+    this.data(c, 'down', concat([res, rb]), t += srvMs);
+    t += Math.ceil((res.length + rb.length) / MSS) * 0.012 + lat;
+    this.seg(c, 'up', 0x11, null, t); c.cseq++;                     // FIN/ACK (클라이언트가 닫음)
+    this.seg(c, 'down', 0x11, null, t += lat); c.sseq++;
+    this.seg(c, 'up', 0x10, null, t += lat);
+    this.stats.http++; this.stats.msgs++;
+    if (this.bytes > this.limit) { this.full = true; this.on = false; }
+    return t;
   }
   hosts() {
     const k = { facos: 0, lan: 0, '5g': 0, cam: 0 }; for (const c of this.clients.values()) k[c.kind]++;

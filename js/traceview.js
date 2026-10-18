@@ -1,6 +1,7 @@
 // 품질 추적 창 — 제품 추적(시리얼·계보) · 불량 분석(AI 원인 분석 · 데이터 내려받기) · 8D 흐름(Zone·총괄 오케스트레이터 스윔레인) · 운영 정책 · 표준·솔루션
 import { ENV_SPEC, ENV_KEYS, ENV_NODES, FACTOR, PARAM_SPEC } from './trace.js';
 import { D8, CAPA_LANES, VERIFY_S } from './capa.js';
+import { QHOST, QTOPIC } from './qcomm.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const clk = (t) => { if (t == null) return '-'; const s = Math.floor(t) + 8 * 3600; return `${String(Math.floor(s / 3600) % 24).padStart(2, '0')}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
@@ -8,7 +9,7 @@ const pct = (v, d = 1) => `${((v ?? 0) * 100).toFixed(d)}%`;
 const PRODUCT = { doortrim: '도어트림', eaxle: 'e-axle' };
 const STATUS = { wip: ['생산 중', 'info'], ok: ['양품', 'good'], ng: ['NG 격리', 'bad'], escaped: ['양품 판정(유출)', 'good'] };
 const CAPA_ST = { open: ['진행 중', 'info'], approval: ['정책 결정 대기', 'warn'], verify: ['효과 검증 중', 'info'], closed: ['종결', 'good'], held: ['보류 종결', 'muted'] };
-const TABS = { trace: '🔖 제품 추적', ng: '✖ 불량 분석', capa: '🧭 8D 흐름', policy: '📜 운영 정책', std: '📚 표준·솔루션' };
+const TABS = { trace: '🔖 제품 추적', ng: '✖ 불량 분석', comm: '📡 보고·통신', capa: '🧭 8D 흐름', policy: '📜 운영 정책', std: '📚 표준·솔루션' };
 export const traceState = { tab: 'ng', serial: null, caseId: null, capaId: null, q: '' };
 
 const chip = (t, tone = '') => `<b class="qt-chip ${tone}">${t}</b>`;
@@ -24,7 +25,7 @@ export function traceHTML(sim) {
     ${tile('8D CAPA', C?.open.length ?? 0, `정책 결정 대기 ${C?.pending.length ?? 0} · 종결 ${C?.list.filter((k) => k.status === 'closed').length ?? 0}`)}
     ${tile('정밀조립 환경 (평균)', `${A.temp}°C · ${A.rh}%`, E ? `<em class="dn">⚠ ${esc(E.label)} (${E.id})</em>` : `진동 ${A.vib}mm/s · PM2.5 ${A.pm} · ${A.lux}lx`)}</div>`;
   const tabs = `<div class="seg qt-tabs">${Object.entries(TABS).map(([k, l]) => `<button data-qt-tab="${k}" class="${st.tab === k ? 'on' : ''}">${l}${k === 'capa' && C?.pending.length ? ` <i class="qt-badge">${C.pending.length}</i>` : ''}</button>`).join('')}</div>`;
-  const body = st.tab === 'trace' ? traceTab(sim) : st.tab === 'ng' ? ngTab(sim) : st.tab === 'capa' ? capaTab(sim) : st.tab === 'policy' ? policyTab(sim) : stdTab();
+  const body = st.tab === 'trace' ? traceTab(sim) : st.tab === 'ng' ? ngTab(sim) : st.tab === 'comm' ? commTab(sim) : st.tab === 'capa' ? capaTab(sim) : st.tab === 'policy' ? policyTab(sim) : stdTab();
   return `${tiles}${tabs}${body}`;
 }
 const tile = (k, v, sub) => `<div class="imp-tile"><span>${k}</span><b>${v}</b><small>${sub}</small></div>`;
@@ -53,6 +54,36 @@ function genealogyHTML(sim, r) {
     ${ins ? `<p class="qt-ins">체결 전수 검사 <b>${ins.result}</b> — 토크 ${ins.torque} N·m (규격 ${ins.spec.torque.join('~')}) · 각도 ${ins.angle}° (규격 ${ins.spec.angle.join('~')})${ins.mode ? ` · <em class="dn">${esc(ins.mode)}</em>` : ''}</p>` : ''}
     <ol class="qt-steps">${steps || '<li>아직 셀에 들어가지 않음</li>'}</ol>
     <p class="vla-note">계보 = ISA-95 Equipment · Personnel · Material Actual. 단계마다 그 순간 설비·로봇·운반 AMR·환경(가장 가까운 환경 센서)을 남깁니다. 전체 이벤트는 불량 분석 탭에서 EPCIS 2.0 JSON-LD로 내려받습니다.</p></div>`;
+}
+
+// ── 보고·통신 (불량 판정 리포트 → 메인 서버 → RCA 서버 · pcap) ─────────────────
+const QST = { sent: ['메인 서버 전송', 'info'], received: ['RCA 접수', 'info'], analyzed: ['분석 완료', 'warn'], actioned: ['조치 지시·확인', 'good'], closed: ['8D 종결 보고', 'muted'] };
+const ipS = (ip) => ip.join('.');
+const kst = (iso) => new Date(Date.parse(iso) + 9 * 3600e3).toISOString().slice(5, 16).replace('T', ' ');   // 화면 시계와 같은 한국 시각 (MM-DD HH:MM)
+function commTab(sim) {
+  const Q = sim.qcomm, T = sim.trace, st = traceState, shared = !!globalThis.window?.METAFACTORY_SHARED; if (!Q) return '<p class="vla-note">품질 통신이 없습니다.</p>';
+  const S = Q.stats, list = Q.order.slice().reverse().map((id) => Q.cases.get(id)).filter(Boolean);
+  const cm = Q.cases.get(st.caseId) ?? list[0];
+  const live = Q.live ? `<b class="qt-chip good">실서버 연결</b> 앱 서버 <code>/api/rca/v1</code>에 같은 리포트 전송 · 성공 ${S.liveOk} · 실패 ${S.liveFail}` : '<b class="qt-chip muted">시뮬레이션</b> 서버가 없는 화면(웹·공유 페이지)이라 RCA 서버 처리를 화면 안에서 같은 코드(js/rcacore.js)로 재현';
+  const arch = `<div class="qt-arch">
+    <span><b>① 검사셀 엣지</b><small>10.20.1.41 · .42 (체결셀) · .60 (정밀검사)</small></span><i>MQTT 3.1.1 QoS 1<br>CloudEvents JSON</i>
+    <span><b>MQTT 브로커</b><small>${ipS(QHOST.broker.ip)}:${QHOST.broker.port}</small></span><i>구독 전달</i>
+    <span><b>② 메인 서버</b><small>FACOS 품질 모듈 ${ipS(QHOST.main.ip)}</small></span><i>HTTP/1.1 REST<br>POST /api/rca/v1/reports</i>
+    <span><b>③ RCA 서버 (더미)</b><small>${ipS(QHOST.rca.ip)}:${QHOST.rca.port}</small></span></div>
+    <p class="vla-note">③ 분석 결과는 MQTT <code>${QTOPIC.result('{사례}')}</code>로 메인 서버에 · ④ 봉쇄 조치 지시 <code>${QTOPIC.action('{셀}')}</code> → 셀 수신 확인 <code>${QTOPIC.ack('{사례}')}</code> · ⑤ 8D 종결 보고 HTTP <code>POST …/{티켓}/close</code>. ${live}</p>`;
+  const tiles = `<div class="imp-tiles">${tile('리포트 전송', S.reports, `MQTT ${S.mqtt}건 · HTTP ${S.http}건`)}${tile('RCA 분석 완료', S.results, `조치 지시 ${S.actions} · 종결 보고 ${S.closed}`)}${tile('품질 통신 데이터', `${(S.bytes / 1024).toFixed(1)}KB`, `패킷 ${Q.cap.stats.packets.toLocaleString('ko-KR')}개 (TCP 세그먼트·ACK 포함)`)}${tile('RCA 서버 티켓', Q.core.reports.size, Object.entries(Q.core.stats().byPriority).map(([k, v]) => `${k} ${v}`).join(' · ') || '-')}</div>`;
+  const dl = `<div class="qt-dl"><button data-qt-dl="qpcap" ${!cm || shared ? 'disabled' : ''}>⬇ 이 사례 통신 (.pcap)</button><button data-qt-dl="qpcapall" ${!list.length || shared ? 'disabled' : ''}>⬇ 전체 품질 통신 (.pcap)</button><button data-qt-dl="qjson" ${!cm || shared ? 'disabled' : ''}>⬇ 이 사례 리포트·RCA 결과 (.json)</button><span class="vla-note">${shared ? '공유 페이지에서는 내려받을 수 없습니다. ' : ''}Wireshark 필터: <code>mqtt.topic contains "quality"</code> · <code>http.request.uri contains "/api/rca"</code> · <code>ip.addr == 10.20.0.30</code></span></div>`;
+  if (!cm) return `${tiles}${arch}${dl}<p class="vla-note">아직 불량 판정이 없습니다. NG가 나오면 검사셀 엣지가 리포트를 메인 서버로 보내고, 메인 서버가 RCA 서버로 넘겨 분석·조치·종결까지 주고받습니다.</p>`;
+  const rows = list.slice(0, 40).map((x) => { const [l, tone] = QST[x.status]; return `<tr data-qt-case="${x.id}" class="${x === cm ? 'sel' : ''}"><td><b>${x.id}</b></td><td class="uidc">${x.serial}</td><td>${x.ticket ?? '-'}</td><td>${chip(l, tone)}</td><td>${x.result?.priority ?? '-'}</td><td>${x.msgs.length}</td></tr>`; }).join('');
+  const seq = cm.msgs.map((m, i) => `<tr><td>${i + 1}</td><td>${clk(m.t)}</td><td>${esc(m.from)} → ${esc(m.to)}</td><td>${chip(m.proto, m.proto === 'HTTP' ? 'warn' : 'info')}</td><td><code>${esc(m.ref)}</code></td><td>${m.bytes.toLocaleString('ko-KR')}B</td><td>${esc(m.note)}</td></tr>`).join('');
+  const R = cm.result, L = cm.live;
+  const res = R ? `<div class="qt-case"><h4>RCA 서버 결과 · ${R.ticket} <small>${esc(R.engine)}</small></h4>
+      <p class="qt-ins">우선순위 <b>${R.priority}</b> · 근본 원인 <b>${esc(R.rootCause?.label ?? '-')}</b> (${R.rootCause?.status ?? '-'} · 신뢰도 ${pct(R.rootCause?.confidence ?? 0, 0)})${R.alternative ? ` · 대안 ${esc(R.alternative.label)}` : ''} · 같은 원인 ${R.recurrence}건째${R.related.length ? ` (${R.related.join(', ')})` : ''}</p>
+      <p class="qt-ins">봉쇄: ${R.containment.map(esc).join(' · ')}</p>
+      <p class="qt-ins">대책: ${R.actions.map((a) => `${a.d} ${esc(a.text)} — ${esc(a.owner)} · 기한 ${kst(a.due)}`).join(' / ')}</p>
+      ${L ? `<p class="qt-ins">실서버: ${L.error ? `<em class="dn">${esc(L.error)}</em>` : `${L.ticket} · ${L.status}${L.result ? ` · ${L.result.priority} · ${esc(L.result.rootCause?.label ?? '')}` : ''}`}</p>` : ''}</div>` : '<p class="vla-note">RCA 서버 분석 중…</p>';
+  return `${tiles}${arch}${dl}<div class="qt-commlist"><table class="vla-t qt-list"><thead><tr><th>사례</th><th>시리얼</th><th>RCA 티켓</th><th>상태</th><th>우선</th><th>메시지</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <h4 class="qt-h">${cm.id} 메시지 흐름</h4><table class="vla-t"><thead><tr><th>#</th><th>시각</th><th>보낸 곳 → 받는 곳</th><th>방식</th><th>토픽 · 경로</th><th>크기</th><th>내용</th></tr></thead><tbody>${seq}</tbody></table>${res}`;
 }
 
 // ── 불량 분석 ─────────────────

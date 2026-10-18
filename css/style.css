@@ -844,7 +844,7 @@ body.hide-left #tglLeft { left: 12px; } body.hide-right #tglRight { right: 12px;
 .imp-twin { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 12px; background: rgba(55, 160, 255, 0.07); border-radius: 8px; padding: 6px 9px; font-variant-numeric: tabular-nums; }
 .imp-twin small { color: var(--muted); }
 .imp-twin em, .imp-t em { font-style: normal; font-size: 11px; }
-em.up { color: var(--good); } em.dn { color: var(--bad); }
+em.up { color: var(--good); } em.dn { color: var(--bad); } em.mid { color: var(--warn); }
 .imp-twin strong { margin-left: auto; font-size: 11px; padding: 1px 8px; border-radius: 6px; }
 .imp-twin strong.good { background: rgba(61, 220, 132, 0.18); color: var(--good); }
 .imp-twin strong.mid { background: rgba(245, 184, 46, 0.18); color: var(--warn); }
@@ -968,6 +968,11 @@ em.up { color: var(--good); } em.dn { color: var(--bad); }
 .qt-par span.bad b, .qt-par span.bad { color: var(--bad); }
 .qt-envs { margin-top: 4px; font-size: 11px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .qt-env { background: rgba(255, 255, 255, 0.05); border-radius: 5px; padding: 1px 6px; color: var(--ink2); } .qt-env b { color: var(--ink); } .qt-env.bad { background: rgba(255, 90, 90, 0.15); color: #ffb3b3; }
+.qt-commlist { max-height: 180px; overflow: auto; margin-bottom: 8px; } .qt-h { margin: 10px 0 6px; }
+.qt-arch { display: flex; align-items: stretch; gap: 6px; flex-wrap: wrap; margin: 8px 0 4px; }
+.qt-arch span { border: 1px solid var(--line); background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 6px 10px; display: flex; flex-direction: column; min-width: 120px; }
+.qt-arch span small { color: var(--muted); font-size: 11px; } .qt-arch i { font-style: normal; font-size: 11px; color: var(--muted); align-self: center; text-align: center; }
+.qt-arch i::after { content: ' →'; color: var(--accent, #58c4ff); }
 .qt-dl { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
 .qt-dl button, .qt-decide button, .qt-link, [data-qt-revert] { border: 1px solid var(--line); background: rgba(255, 255, 255, 0.07); border-radius: 7px; padding: 5px 10px; font-weight: 600; }
 .qt-dl button:disabled { opacity: 0.4; } .qt-link { padding: 2px 8px; font-size: 11px; margin-left: 6px; }

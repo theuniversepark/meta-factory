@@ -59,6 +59,7 @@ export class CapaManager {
   // 불량 사례 하나 (trace.js openCase)
   onDefect(c, r) {
     const s = this.sim, top = c.rca?.causes[0]; if (!top) return;
+    s.qcomm?.report(c);   // 불량 판정 리포트 → 메인 서버 → RCA 서버 (js/qcomm.js)
     const key = `${top.station ?? top.factor}:${top.factor}`;
     const o = s.orch, inc = o.open('defect', `ng:${c.id}`, `${c.detectedName} 품질 불량 ${c.serial}`, c.detectedName, { where: s.stations.find((x) => (x.uid ?? x.id) === c.detectedAt) ?? null, zone: 'main' });
     o.step(inc, 'field', 'detect', `전수 검사 NG — ${c.inspection?.mode ?? '규격 이탈'} (토크 ${c.inspection?.torque} N·m · 각도 ${c.inspection?.angle}°)`);
@@ -145,6 +146,7 @@ export class CapaManager {
     k.status = 'held'; k.stage = 'D8'; k.tEnd = this.sim.time;
     this.sim.fos?.policyDecision(k, 'hold', by); this.release(k);
     this.step(k, 'hq', 'D8', `보류 (${by}) — 정책 미반영 · 봉쇄 조치만 유지하고 종결`);
+    this.sim.qcomm?.close(k);   // RCA 서버에 종결 보고
     return true;
   }
   verify(k, pol) {
@@ -156,7 +158,7 @@ export class CapaManager {
     k.fmea = { failureMode: s.trace.cases.find((c) => c.id === k.cases[0])?.inspection?.mode ?? '규격 이탈', cause: k.cause.label, S, O: [O0, O1], D, AP: [AP(S, O0, D), AP(S, O1, D)], control: k.proposal.title };
     k.stage = 'D7';
     this.step(k, 'policy', 'D7', `재발 방지 표준화: FMEA 발생도 ${O0} → ${O1} · AP ${k.fmea.AP[0]} → ${k.fmea.AP[1]} · 관리계획에 "${k.proposal.title}" 등록`);
-    this.later(this.gap, () => { k.stage = 'D8'; k.status = 'closed'; k.tEnd = s.time; this.release(k); this.step(k, 'hq', 'D8', `종결 — ${k.cases.length}건 · 정책 이력 ${pol?.id ?? '-'} · 수평 전개 ${k.horizontal.length}곳 확인`); });
+    this.later(this.gap, () => { k.stage = 'D8'; k.status = 'closed'; k.tEnd = s.time; this.release(k); this.step(k, 'hq', 'D8', `종결 — ${k.cases.length}건 · 정책 이력 ${pol?.id ?? '-'} · 수평 전개 ${k.horizontal.length}곳 확인`); s.qcomm?.close(k); });
   }
   recheck(k) {
     const T = this.sim.trace, out = { ok: 0, caught: 0, serials: [] };
