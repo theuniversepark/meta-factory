@@ -340,7 +340,7 @@ export class InspZone {
     const c = this.cells[id]; if (!c) return null;
     const S = INSP, it = c.item, util = this.time > 0 ? c.busy / this.time : 0;
     const uses = Object.entries(S.routes).filter(([, r]) => r.includes(id) || id === 'DOCK' || id === 'JUDGE').map(([p]) => `${zl(S.products[p][0])} ${S.products[p][1]}`);
-    return { c, def: c.def, state: this.halted ? 'ESTOP' : c.state, item: it ? `${zl(it.zone)} ${S.products[it.product][1]} ${it.id}${it.rechecked ? ' (재측정)' : ''}` : '-', progress: c.progress, cycle: c.def.cycle * this.mul, util, done: c.done,
+    return { c, def: c.def, state: this.halted ? 'ESTOP' : c.state, item: it ? `${zl(it.zone)} ${S.products[it.product][1]} ${it.id}${it.rechecked ? ' (재측정)' : ''}` : '-', progress: c.progress, cycle: c.def.cycle * (c.def.cycleK ?? 1) * this.mul, util, done: c.done,
       products: uses, robots: c.robotUids, amr: c.occ?.id ?? '-', stats: this.stats, queue: this.queue.length, recent: this.recent, mode: this.mode };
   }
   tele(c) {
@@ -425,7 +425,7 @@ export class InspZone {
         // move: 셀 도착 → 검사 시작
         c.heading = Math.sin(c.heading) >= 0 ? PI / 2 : -PI / 2;
         const cell = this.cells[c.target]; c.at = c.target;
-        Object.assign(cell, { state: 'BUSY', progress: 0, item: c.item, cur: cell.def.cycle * this.mul * (0.9 + this.rng() * 0.2) });
+        Object.assign(cell, { state: 'BUSY', progress: 0, item: c.item, cur: cell.def.cycle * (cell.def.cycleK ?? 1) * this.mul * (0.9 + this.rng() * 0.2) });
         c.state = 'work';
         break;
       }

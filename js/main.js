@@ -27,6 +27,7 @@ import { EpisodeRecorder, buildEpisodesZip, EP_HZ, SAMPLE } from './vla.js';
 import { impactHTML, impactClick } from './impactview.js';
 import { traceHTML, traceClick, traceState } from './traceview.js';
 import { sensorHTML, sensorClick, sensorState } from './sensorview.js';
+import { RECIPE_ZONES, applyRecipe, recipePatch, recipeFromPatch } from './zonerecipe.js';
 import { caseFiles, allFiles } from './trace.js';
 import { CCTVRecorder, CameraClip, saveSnapshot, REC as CCTV_REC } from './cctvrec.js';
 import { RobotVideoRecorder, downloadVideos } from './robotrec.js';
@@ -278,6 +279,10 @@ const zonePick = (() => {
   return d;
 })();
 for (const Z of EXTRA_ZONES) xzones.byKey(Z.key).setMix(Z.mixes[zonePick.mix[Z.key]].w);
+// Zone 셀 레시피 (공정 설계 도크에서 적용한 유연생산·적응가공·정밀검사 셀 구성) — 다음 실행에도 유지 (바뀐 셀만 저장)
+const ZONE_RECIPE_KEY = 'metafactory.zoneRecipes.v1';
+try { const saved = JSON.parse(localStorage.getItem(ZONE_RECIPE_KEY) ?? '{}'); for (const k of RECIPE_ZONES) if (saved[k]?.length) applyRecipe(recipeFromPatch(k, saved[k])); } catch { /* 저장소 사용 불가 — 기본 레시피 */ }
+function saveZoneRecipe(r) { try { const all = JSON.parse(localStorage.getItem(ZONE_RECIPE_KEY) ?? '{}'); all[r.zone] = recipePatch(r); localStorage.setItem(ZONE_RECIPE_KEY, JSON.stringify(all)); } catch { /* 이번 실행에만 */ } }
 function saveZonePick() { try { localStorage.setItem(ZONE_PICK_KEY, JSON.stringify(zonePick)); } catch { /* 이번 실행에만 적용 */ } }
 function zoneDropdown() {
   const cur = ZONE_PICKS.find((z) => z.key === zonePick.view);
@@ -285,6 +290,7 @@ function zoneDropdown() {
   return `<div class="zc-dd"><button type="button" class="zc-dd-btn" data-dd aria-haspopup="listbox" title="Zone 선택">${escH(cur.name)} <i>▾</i></button><div class="zc-dd-menu" role="listbox">${items}</div></div>`;
 }
 function renderZoneCard() {
+  designer?.setTarget(zonePick.view === 'precision' ? 'precision' : zonePick.view);   // 오른쪽 아래 공정 설계도 고른 Zone으로
   if (zonePick.view === 'insp') return renderInspZoneCard();
   if (zonePick.view !== 'precision') return renderXzZoneCard();
   const zone = isZone(currentLine);
@@ -1364,7 +1370,18 @@ designer = new LineDesigner({
     });
     setTimeout(() => { changedIds = null; view.stationViews.forEach((sv) => sv.el.classList.remove('changed')); }, 30000);
   },
+  // Zone 셀 레시피 적용: 셀 정의(zonedefs) 변경 → 설비 관리(sim.zoneCells) 사이클·이름 → 그 Zone만 다시 구성 (정밀조립·다른 Zone 흐름은 그대로)
+  onApplyZone(key, recipe, diff, { warnings, request }) {
+    applyRecipe(recipe); saveZoneRecipe(recipe);
+    const R = Object.fromEntries(recipe.cells.map((c) => [c.id, c])), prefix = key === 'insp' ? '정밀검사' : EXTRA_ZONES.find((Z) => Z.key === key)?.code;
+    for (const c of sim.zoneCells ?? []) if (c.zone === key && R[c.cellId]) { c.def.cycle = R[c.cellId].cycle; c.name = `${prefix} ${R[c.cellId].name}`; }
+    if (key === 'insp') insp.setup(sim, xzones, labelsOn); else xzones.setup(sim, labelsOn, key);
+    renderZoneCard();
+    sim.log('act', `셀 레시피 적용 · ${recipe.name}`, { obs: request ? `요청: ${request}` : '직접 편집', dec: diff.map((d) => d.text).join(' / '), act: warnings.length ? `주의: ${warnings.join(' / ')}` : `${recipe.name}만 새 셀 레시피로 다시 시작` });
+  },
+  getMix: (key) => xzones.byKey?.(key)?.mix ?? null,
 });
+designer.setTarget(zonePick.view === 'precision' ? 'precision' : zonePick.view);
 llm.probe();
 // 에피소드 서버 저장이 가능한지 (맥 앱·npm start) — 정적 호스팅·공유 페이지는 브라우저 보관만
 if (!window.METAFACTORY_SHARED && !window.METAFACTORY_NO_SERVER) fetch('/api/status').then((r) => r.json()).then((j) => { epRec.server = !!j.episodes; cctvRec.server = !!j.cctv; robotRec.server = !!j.robotcam; robotRec.ffmpeg = cctvRec.ffmpeg = !!j.ffmpeg?.available; epRec.video = epRec.server && !!j.ffmpeg?.available; ffmpegVer = j.ffmpeg?.version ?? null; if (j.dataDir) { cctvRec.dir = `${j.dataDir}/cctv`; robotRec.dir = `${j.dataDir}/robotcam`; } }).catch(() => {});

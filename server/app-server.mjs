@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
 import { runAgentTurn, MODEL } from './llm-agent.mjs';
-import { designLine } from './line-designer.mjs';
+import { designLine, designZone } from './line-designer.mjs';
 import { startMqtt, mqttStatus, mqttPublish } from './mqtt-gateway.mjs';
 import { ffmpegInfo, queueConvert, convertClip, readStoredZip, framesToMp4 } from './video-convert.mjs';
 import { facRoute } from './fac-api.mjs';
@@ -280,6 +280,21 @@ async function handleLine(req, res) {
   }
 }
 
+// Zone 셀 레시피 설계 (유연생산 · 적응가공 · 정밀검사 — 공정 설계 도크가 왼쪽에서 고른 Zone)
+async function handleZoneDesign(req, res) {
+  if (!client) return send(res, 503, { error: 'Claude API 키가 설정되어 있지 않습니다.' });
+  let payload;
+  try { payload = JSON.parse(await readBody(req, 60 * 1024 * 1024)); } catch { return send(res, 400, { error: '요청 본문이 잘못되었거나 첨부 파일이 너무 큽니다 (합계 약 40MB 이하)' }); }
+  const request = String(payload?.request ?? '').trim().slice(0, 2000), attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+  if (!request || !payload?.recipe?.zone || !Array.isArray(payload.recipe.cells)) return send(res, 400, { error: '요청 또는 현재 셀 레시피 누락' });
+  const t0 = Date.now();
+  try {
+    const out = await designZone(client, { recipe: payload.recipe, mix: payload.mix ?? null, mode: payload.mode ?? 'smart', request, attachments });
+    console.log(`[zone] ${payload.recipe.zone} "${request.slice(0, 40)}" → 변경 ${out.diff.length}건, ${((Date.now() - t0) / 1000).toFixed(1)}s, $${out.costUSD.toFixed(4)}`);
+    send(res, 200, { ...out, latencyMs: Date.now() - t0 });
+  } catch (err) { sendApiError(res, err); }
+}
+
 function sendApiError(res, err) {
   let status = 502, msg = err.message;
   if (err instanceof Anthropic.AuthenticationError) { status = 401; msg = 'API 키 인증 실패 — 키를 확인하세요'; }
@@ -323,6 +338,7 @@ export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
     if (url.pathname === '/api/aios') return listAios(res);
     if (url.pathname === '/api/agent' && req.method === 'POST') return handleAgent(req, res);
     if (url.pathname === '/api/line' && req.method === 'POST') return handleLine(req, res);
+    if (url.pathname === '/api/zone-design' && req.method === 'POST') return handleZoneDesign(req, res);
     // OPC UA PubSub(JSON) over MQTT — 내장 브로커로 발행
     if (url.pathname === '/api/mqtt/status') return send(res, 200, mqttStatus());
     if (url.pathname === '/api/mqtt/publish' && req.method === 'POST') {

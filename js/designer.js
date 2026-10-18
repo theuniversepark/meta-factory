@@ -2,15 +2,18 @@
 // 변경 내역·예상 지표를 확인한 뒤 적용한다.
 import { STATION_TYPES, ROBOT_KINDS, LAYOUTS, MAX_STATIONS, MAX_ROBOTS, cloneLine, normalizeLine, diffLines, lineMetrics, effCycle, defaultLineFor, isZone, layoutLabel, ZONE_CELLS, ZONE_NAME, ammrAllowed, robotForMode } from './line.js';
 import { prepareFile, ACCEPT } from './attachments.js';
+import { RECIPE_ZONES, ZR_KINDS, recipeOf, defaultRecipe, normalizeRecipe, diffRecipe, recipeMetrics, recipeEff } from './zonerecipe.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const opts = (obj, sel) => Object.entries(obj).map(([k, v]) => `<option value="${k}"${k === sel ? ' selected' : ''}>${esc(v.label)}</option>`).join('');
 
 export class LineDesigner {
-  constructor({ llm, getLine, getMode, onApply }) {
+  // 대상: 왼쪽 Zone 카드에서 고른 Zone — precision(정밀조립 라인) · flex · adapt · insp(셀 레시피 · js/zonerecipe.js)
+  constructor({ llm, getLine, getMode, onApply, onApplyZone, getMix }) {
     this.getMode = getMode ?? (() => 'smart');
-    this.llm = llm; this.getLine = getLine; this.onApply = onApply;
+    this.llm = llm; this.getLine = getLine; this.onApply = onApply; this.onApplyZone = onApplyZone; this.getMix = getMix ?? (() => null);
+    this.target = 'precision'; this.zdraft = null;
     this.open = false; this.busy = false;
     this.note = null;   // { summary, warnings, errors, source }
     this.draft = cloneLine(getLine());
@@ -37,17 +40,18 @@ export class LineDesigner {
     $('dockForm').addEventListener('submit', (e) => { e.preventDefault(); this.ask($('dockInput').value.trim()); });
     $('stAdd').addEventListener('click', () => this.addStation());
     $('dockDefault').addEventListener('click', () => {
+      if (this.isZoneTarget()) { this.zdraft = defaultRecipe(this.target); this.note = { summary: `${this.zdraft.name} 기본 셀 레시피를 불러왔습니다. 적용을 눌러야 반영됩니다.` }; return this.render(); }
       this.draft = defaultLineFor(this.getLine());
       this.note = { summary: `${isZone(this.draft) ? `${ZONE_NAME} 기본 셀 레시피` : '기본 라인'} 초안을 불러왔습니다. 적용을 눌러야 반영됩니다.` };
       this.render();
     });
-    $('dockRevert').addEventListener('click', () => { this.draft = cloneLine(this.getLine()); this.note = null; this.render(); });
+    $('dockRevert').addEventListener('click', () => { if (this.isZoneTarget()) this.zdraft = recipeOf(this.target); else this.draft = cloneLine(this.getLine()); this.note = null; this.render(); });
     $('dockApply').addEventListener('click', () => this.apply());
     const list = $('stList');
-    list.addEventListener('input', (e) => this.onField(e));
-    list.addEventListener('change', (e) => this.onField(e, true));
+    list.addEventListener('input', (e) => (this.isZoneTarget() ? this.onZoneField(e) : this.onField(e)));
+    list.addEventListener('change', (e) => (this.isZoneTarget() ? this.onZoneField(e, true) : this.onField(e, true)));
     list.addEventListener('click', (e) => {
-      const b = e.target.closest('button[data-op]'); if (!b) return;
+      const b = e.target.closest('button[data-op]'); if (!b || this.isZoneTarget()) return;
       const i = +b.closest('.st-card').dataset.i, st = this.draft.stations;
       if (b.dataset.op === 'up' && i > 0) [st[i - 1], st[i]] = [st[i], st[i - 1]];
       if (b.dataset.op === 'down' && i < st.length - 1) [st[i + 1], st[i]] = [st[i], st[i + 1]];
@@ -66,7 +70,22 @@ export class LineDesigner {
   }
 
   // 외부에서 라인이 바뀌었을 때(적용 직후·시작 시)
-  sync() { this.draft = cloneLine(this.getLine()); this.note = null; this.render(); }
+  sync() { this.draft = cloneLine(this.getLine()); if (this.isZoneTarget()) this.zdraft = recipeOf(this.target); this.note = null; this.render(); }
+  isZoneTarget() { return RECIPE_ZONES.includes(this.target); }
+  // 왼쪽 Zone 카드에서 Zone을 바꿨을 때 — 그 Zone의 설계로 바꾼다 (편집 중이던 초안은 버린다)
+  setTarget(key) {
+    const t = RECIPE_ZONES.includes(key) ? key : 'precision'; if (t === this.target) return;
+    this.target = t; this.zdraft = this.isZoneTarget() ? recipeOf(t) : null; this.note = null; this.files = []; this.renderFiles(); this.render();
+  }
+  onZoneField(e, rerender = false) {
+    const el = e.target, card = el.closest('.st-card'); if (!card || !el.dataset.f) return;
+    const c = this.zdraft.cells[+card.dataset.i], f = el.dataset.f;
+    if (f === 'name' || f === 'task') c[f] = el.value;
+    else if (f === 'cycle') c.cycle = +el.value;
+    else if (f === 'kind') c.robot.kind = el.value;
+    else if (f === 'count') c.robot.count = Math.max(c.lim.min, Math.min(c.lim.max, Math.round(+el.value || 0)));
+    if (rerender || f === 'kind' || f === 'count') this.render(); else this.renderPreview();
+  }
 
   setOpen(on) {
     this.open = on;
@@ -127,6 +146,7 @@ export class LineDesigner {
 
   async ask(text) {
     if (this.busy) return;
+    if (this.isZoneTarget()) return this.askZone(text);
     const files = this.files.filter((f) => !f.loading);
     if (!text && !files.length) return;
     if (!this.llm.available) { this.note = this.needKeyNote(); this.setOpen(true); return; }
@@ -158,7 +178,37 @@ export class LineDesigner {
     }
   }
 
+  // Zone 셀 레시피: Agent가 셀 이름·하는 일·사이클·로봇 구성만 바꾼 초안을 만든다 (셀 배치·흐름은 고정)
+  async askZone(text) {
+    const files = this.files.filter((f) => !f.loading);
+    if (!text && !files.length) return;
+    if (!this.llm.available) { this.note = this.needKeyNote(); this.setOpen(true); return; }
+    if (!text) text = '첨부 파일의 공정 내용을 바탕으로 셀 레시피(사이클·로봇 구성)를 조정해 줘.';
+    this.busy = true; this.setOpen(true);
+    $('dockStatus').innerHTML = `<span class="spin"></span>${esc(this.zdraft.name)} 셀 레시피를 Agent가 설계하는 중… “${esc(text)}”`;
+    try {
+      const attachments = files.map(({ name, kind, media_type, data, text: t, note }) => ({ name, kind, media_type, data, text: t, note }));
+      const res = await fetch('/api/zone-design', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ recipe: this.zdraft, mix: this.getMix(this.target), mode: this.getMode(), request: text, attachments }) });
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.error || `HTTP ${res.status}`);
+      this.cost += out.costUSD; if (out.feasible) this.zdraft = out.recipe;
+      this.note = { summary: out.summary, extracted: out.extracted, warnings: out.warnings, source: 'claude', request: text, files: files.map((f) => f.name), errors: out.feasible ? out.errors : [...(out.errors ?? []), '요청을 그대로 반영할 수 없어 초안을 바꾸지 않았습니다.'] };
+      $('dockInput').value = ''; this.files = []; this.renderFiles();
+    } catch (e) { this.note = { errors: [`Agent 요청 실패: ${e.message}`] }; }
+    finally { this.busy = false; this.render(); }
+  }
+  applyZone() {
+    const { recipe, errors, warnings } = normalizeRecipe(this.zdraft);
+    if (errors.length) { this.note = { ...this.note, errors }; return this.render(); }
+    const diff = diffRecipe(recipeOf(this.target), recipe);
+    if (!diff.length) { this.note = { summary: '바뀐 내용이 없습니다.' }; return this.render(); }
+    this.onApplyZone?.(this.target, recipe, diff, { warnings, request: this.note?.request });
+    this.note = { summary: `적용 완료 — ${diff.length}건 변경. ${recipe.name}이(가) 새 셀 레시피로 다시 시작되었습니다 (다른 Zone은 그대로).`, applied: true };
+    this.zdraft = recipeOf(this.target); this.render();
+  }
+
   apply() {
+    if (this.isZoneTarget()) return this.applyZone();
     const { line, errors, warnings } = normalizeLine(this.draft);
     if (errors.length) { this.note = { ...this.note, errors }; this.render(); return; }
     const diff = diffLines(this.getLine(), line);
@@ -171,13 +221,16 @@ export class LineDesigner {
 
   render() {
     const cur = this.getLine();
-    $('dockLineName').textContent = cur.name;
+    $('dockLineName').textContent = this.isZoneTarget() ? `${this.zdraft.name} · 셀 레시피` : cur.name;
     $('dockArrow').textContent = this.open ? '▼' : '▲';
     $('lineDock').classList.toggle('open', this.open);
     $('dockInput').placeholder = this.llm.available ? '요청 입력 또는 📎 공정도·레이아웃 파일 첨부' : 'Agent 미연결 — 펼쳐서 직접 편집하거나 API 키 설정';
     $('dockSend').disabled = this.busy;
     if (!this.open) return;
     if (!this.busy) $('dockStatus').innerHTML = '';
+    $('dockDefault').textContent = this.isZoneTarget() ? '기본 레시피' : '기본 라인';
+    if (this.isZoneTarget()) return this.renderZone();
+    $('lineName').disabled = false;
     $('lineName').value = this.draft.name ?? '';
     // 정밀조립Zone은 셀이 바닥에 고정되어 있어 레이아웃·셀 구성·순서·유형은 잠그고 레시피만 편집한다
     const zone = isZone(this.draft);
@@ -212,7 +265,36 @@ export class LineDesigner {
     this.renderPreview();
   }
 
+  // Zone 셀 레시피 편집: 셀은 고정(번호·유형·흐름) — 이름 · 하는 일 · 기준 사이클 · 로봇 종류·대수 (셀 종류별 제약)
+  renderZone() {
+    const R = this.zdraft, mode = this.getMode(), applied = recipeOf(this.target);
+    $('lineName').value = R.name; $('lineName').disabled = true;
+    $('lineLayout').innerHTML = '<option selected>Zone 고정 배치 (셀 위치·흐름 고정)</option>'; $('lineLayout').disabled = true;
+    const changed = new Set(diffRecipe(applied, normalizeRecipe(R).recipe).map((d) => d.id));
+    $('stList').innerHTML = R.cells.map((c, i) => {
+      const L = c.lim, kinds = L.kinds.map((k) => `<option value="${k}"${k === c.robot.kind ? ' selected' : ''}>${esc(ZR_KINDS[k])}</option>`).join('');
+      return `<div class="st-card ${changed.has(c.id) ? 'mod' : ''}" data-i="${i}">
+        <div class="r"><b class="no">${esc(c.no)}</b>
+          <input data-f="name" value="${esc(c.name)}" maxlength="24" title="셀 이름" />
+          <span class="ops cell-use" title="셀 유형 (고정)">${esc(c.type)}</span>
+          ${changed.has(c.id) ? '<em class="tag">변경</em>' : ''}
+        </div>
+        <div class="r">
+          <select data-f="kind" ${L.lockKind ? 'disabled' : ''} title="${esc(L.why ?? '로봇 종류')}">${kinds}</select>
+          <label>대수<input data-f="count" type="number" min="${L.min}" max="${L.max}" value="${c.robot.count}" ${L.max === L.min ? 'disabled' : ''} /></label>
+          <label>기준<input data-f="cycle" type="number" min="2" max="300" step="0.5" value="${c.cycle}" />초</label>
+          <span class="eff" data-eff="${i}"></span>
+        </div>
+        ${c.alt ? `<div class="r"><small class="muted">피지컬AI 단계: ${esc(c.alt.label)}×${c.alt.count}로 운영 (고정)</small></div>` : ''}
+        <div class="r"><input class="task" data-f="task" value="${esc(c.task)}" maxlength="60" placeholder="이 셀이 하는 일" /></div>
+      </div>`;
+    }).join('');
+    $('stAdd').disabled = true; $('stAdd').title = `${R.name}은 셀 배치가 바닥에 고정입니다 — 셀 레시피(이름·하는 일·사이클·로봇)만 편집합니다.`;
+    this.renderPreview();
+  }
+
   renderPreview() {
+    if (this.isZoneTarget()) return this.renderZonePreview();
     const cur = this.getLine();
     const { line, errors, warnings } = normalizeLine(this.draft);
     const diff = diffLines(cur, line);
@@ -240,6 +322,28 @@ export class LineDesigner {
       n.needKey ? '<button type="button" class="key-link" data-open-key>⚙ Agent API 키 설정 열기 (⌘,)</button>' : '',
     ].join('');
     $('dockApply').disabled = !diff.length || errors.length > 0 || this.busy;
+    $('dockApply').textContent = diff.length ? `적용 (${diff.length}건)` : '적용';
+    $('dockCost').textContent = this.cost ? `설계 호출 비용 약 $${this.cost.toFixed(3)}` : '';
+  }
+  renderZonePreview() {
+    const mode = this.getMode(), mix = this.getMix(this.target), cur = recipeOf(this.target);
+    const { recipe, errors, warnings } = normalizeRecipe(this.zdraft), diff = diffRecipe(cur, recipe);
+    const a = recipeMetrics(cur, mode, mix), b = recipeMetrics(recipe, mode, mix), bn = b.bottleneck?.id;
+    recipe.cells.forEach((c, i) => { const el = document.querySelector(`[data-eff="${i}"]`); if (el) { el.textContent = `실효 ${recipeEff(c, mode).toFixed(1)}초${c.id === bn ? ' · 병목' : ''}`; el.classList.toggle('bn', c.id === bn); } });
+    const arrow = (x, y, f = (v) => v) => (f(x) === f(y) ? `<b>${f(y)}</b>` : `${f(x)} → <b>${f(y)}</b>`);
+    $('dockMetrics').innerHTML = `<div><span>셀</span><b>${b.cells}</b></div><div><span>로봇</span>${arrow(a.robots, b.robots)}</div>
+      <div><span>병목</span>${arrow(a.bottleneck?.name ?? '-', b.bottleneck?.name ?? '-')}</div><div><span>이론 UPH</span>${arrow(a.uph, b.uph, (v) => Math.round(v))}</div>`;
+    const n = this.note ?? {}, allErr = [...(n.errors ?? []), ...errors], allWarn = [...new Set([...(n.warnings ?? []), ...warnings])];
+    $('dockSummary').innerHTML = [
+      `<div class="muted">대상: <b>${esc(recipe.name)}</b> — 왼쪽 Zone 카드에서 고른 Zone. 셀 배치·흐름은 고정, 로봇 대수는 기본 대수 대비 병렬 이득(+70%/대)으로 사이클에 반영됩니다.</div>`,
+      n.summary ? `<div class="sum ${n.applied ? 'ok' : ''}">${n.source === 'claude' ? '<b>Agent</b> · ' : ''}${esc(n.summary)}</div>` : '',
+      n.extracted?.length ? `<details class="ext" open><summary>📄 파일에서 읽은 내용</summary><ul>${n.extracted.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></details>` : '',
+      diff.length ? `<ul class="diff">${diff.map((d) => `<li class="mod">${esc(d.text)}</li>`).join('')}</ul>` : (n.applied ? '' : '<div class="muted">적용된 셀 레시피와 같습니다. 요청을 입력하거나 아래 셀을 편집하세요.</div>'),
+      allWarn.length ? `<ul class="warn">${allWarn.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : '',
+      allErr.length ? `<ul class="err">${allErr.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : '',
+      n.needKey ? '<button type="button" class="key-link" data-open-key>⚙ Agent API 키 설정 열기 (⌘,)</button>' : '',
+    ].join('');
+    $('dockApply').disabled = !diff.length || allErr.length > 0 || this.busy;
     $('dockApply').textContent = diff.length ? `적용 (${diff.length}건)` : '적용';
     $('dockCost').textContent = this.cost ? `설계 호출 비용 약 $${this.cost.toFixed(3)}` : '';
   }

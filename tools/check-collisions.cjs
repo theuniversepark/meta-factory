@@ -84,6 +84,7 @@ app.whenReady().then(async () => {
     const report = [];
     for (const mode of ['traditional', 'smart', 'dark']) {
       await js(`document.querySelector('[data-mode=${mode}]').click()`); await wait(1500);
+      if (process.env.COLLIDE_PRE) { await js(fs.readFileSync(path.resolve(process.env.COLLIDE_PRE), 'utf8')); await wait(500); }   // 점검 전 설정 (예: Zone 셀 레시피 적용) — 페이지에서 실행할 JS 파일
       const r = await js(AUDIT(SECS)); const bad = r.res.filter((h) => h.max >= PEN);
       report.push({ ...r, violations: bad.length });
       console.log(`== ${mode} (${r.samples} 샘플)  간섭 ${bad.length}건${bad.length ? '' : ' — 없음'}`);

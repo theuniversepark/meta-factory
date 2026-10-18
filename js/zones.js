@@ -664,7 +664,7 @@ class ExtraZone {
     for (const c of this.order) {
       c.robotsG.clear(); c.workersG.clear(); c.robots = []; c.robotUids = []; c.plates = [];
       const R = c.def.robot, kind = dark && R[2] ? R[2] : R[0], count = dark && R[2] ? R[3] : R[1];
-      c.cycle = c.def.cycle * (MODE_MUL[modeKey] ?? 1);
+      c.cycle = c.def.cycle * (MODE_MUL[modeKey] ?? 1) * (c.def.cycleK ?? 1);   // cycleK: 공정 설계에서 바꾼 로봇 대수 효과 (js/zonerecipe.js · 기본 구성 = 1)
       if (c.parts.manualProps) c.parts.manualProps.forEach((p) => (p.visible = legacy));
       if (c.parts.auto) c.parts.auto.visible = !legacy;
       if (c.parts.manual) c.parts.manual.visible = legacy;
@@ -1137,8 +1137,9 @@ export class ExtraZones {
     this.t = 0; this.labelsOn = true;
   }
   // 새 실행(정밀조립Zone 시뮬레이션 시작)마다 — Blender 모델이 늦게 들어왔으면 운반체·제품도 새 모델로
-  setup(sim, labelsOn = this.labelsOn) {
-    this.zones.forEach((z) => { z.refreshEquipment(); z.reset(sim.mode.key, sim.seed ?? 1); });
+  // only: 그 Zone만 다시 구성 (공정 설계에서 그 Zone 레시피를 적용했을 때 — 다른 Zone 흐름은 그대로)
+  setup(sim, labelsOn = this.labelsOn, only = null) {
+    this.zones.forEach((z) => { if (only && z.Z.key !== only) return; z.refreshEquipment(); z.reset(sim.mode.key, sim.seed ?? 1); });
     sim.zoneAmr = Object.fromEntries(this.zones.map((z) => [z.Z.key, z.carriers]));   // AMR·AGV 관제 창(fleet.js zflex·zadapt)이 Zone AMR을 보고 조작한다
     // 운반 AMR = Private 5G 단말 (정밀조립 운반 AMR과 같음): 위치는 Zone 원점 기준 → 공장 좌표
     sim.setExternalMovers?.(this.zones.flatMap((z) => z.carriers.map((c) => z.teleCarrier(c))));   // 시뮬레이션 이동체가 Zone AMR을 보고 양보·우회
