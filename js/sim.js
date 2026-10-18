@@ -18,7 +18,7 @@ import { AIOSPipeline } from './aios.js';
 import { SecurityLayer } from './security.js';
 import { FleetControl } from './fleet.js';
 import { Orchestrator, PRIORITY, prioOf } from './orchestrator.js';
-import { AMMR, AMMR_FETCH, PARALLEL_GAIN, DEFAULT_LINE, buildStationDefs, linkPath, lineEdges, pathLength, pointAt, toWorld, isZone, ZONE_AMR, ZONE_MIXES, ZONE_PRODUCTS, FG_ZONE_CAP, amrPark, amrEntrySlot, AMR_DOCK, amrDockVia, amrReturnVia } from './line.js';
+import { AMMR, AMMR_FETCH, PARALLEL_GAIN, DEFAULT_LINE, buildStationDefs, linkPath, lineEdges, pathLength, pointAt, toWorld, isZone, ZONE_AMR, ZONE_MIXES, ZONE_PRODUCTS, FG_ZONE_CAP, fastenT, ZONE_WAIT, amrPark, amrEntrySlot, AMR_DOCK, amrDockVia, amrReturnVia } from './line.js';
 
 export function mulberry32(a) {
   return function () {
@@ -909,6 +909,9 @@ export class Simulation {
   // 셀 진입 진행률 (0 → 1): 입구(들어온 경로 끝)에서 셀 중앙까지 — 2m보다 먼 입구(포장셀 합류 대기 자리 4m)는 그만큼 오래 걸려 라인 속도로 들어간다
   entryK(st) { const f = st.itemFrom, d = f ? Math.hypot(st.x - f.x, st.z - f.z) : 2; return Math.min(1, (st.itemT ?? 0) / (this.entryTime * Math.max(1, d / 2))); }
   hasSpace(c) { return !c.items.length || c.items[c.items.length - 1].s >= c.spacing; }
+  // 셀로 보내도 되는가: AMR 운반이면 셀마다 들어오는 AMR은 한 대만 — 셀이 작업 중이면 그 한 대가 셀 앞(입구 대기 자리)에서 기다리고,
+  // 다음 AMR은 앞 셀 안에서 작업을 마친 채 기다린다 (경로에 줄 세우지 않음 · 합류 셀(포장)은 두 차로를 합쳐 한 대)
+  canSend(c) { return this.hasSpace(c) && (!this.useAMR || c.to.type === 'sink' || c.to.ins.every((x) => !x.items.length)); }
   frontReady(c) { return c.items.length && c.items[0].s >= c.len - 1e-6; }
   updateConveyor(c, dt) {
     const it = c.items, hz = this.useAMR && this.openHazards().length;
@@ -1132,7 +1135,7 @@ export class Simulation {
     if (this.releaseTimer >= this.releaseInterval) {
       const car = this.useAMR ? this.carriers.find((c) => c.state === 'atSrc') : null;
       if (this.useAMR && !car) { src.state = 'NOAMR'; src.c.blocked += dt; return; }
-      if (this.hasSpace(src.out)) {
+      if (this.canSend(src.out)) {
         const product = this.mix ? this.nextProduct() : null;
         if (product) this.releasedBy[product]++;
         const item = { id: this.nextItemId++, defect: false, defectBy: null, product, carrier: car };
@@ -1284,7 +1287,8 @@ export class Simulation {
     let inC = null;
     // AMR 운반: 앞서 나간 AMR이 셀 중앙에서 충분히(AMR 간격 이상) 빠져나간 뒤에 다음 AMR을 받는다
     // 컨베이어(레거시): 다음 대상물이 셀 중앙까지 들어오는(entryTime) 동안 나간 대상물이 간격만큼 멀어지도록 — 바로 받으면 셀 출구에서 둘이 겹친다
-    const cleared = Object.values(st.outs).every((c) => !c.items.length || c.items[c.items.length - 1].s >= c.spacing + (this.useAMR ? 0.4 : -c.speed * this.entryTime));
+    // AMR: 셀 앞(ZONE_WAIT) 대기 AMR이 셀 중앙까지 들어오는 동안 나가는 AMR은 그만큼 더 멀어진다 — 나간 AMR이 0.6m 빠지면 들어오기 시작해도 중앙 도착 때 간격(2m + 0.4) 이상
+    const cleared = Object.values(st.outs).every((c) => !c.items.length || c.items[c.items.length - 1].s >= (this.useAMR ? Math.max(0.6, c.spacing + 0.4 - c.speed * this.entryTime * ZONE_WAIT / 2) : c.spacing - c.speed * this.entryTime));
     const cycleStop = st.cmd?.hold === 'cycle';   // 사이클 정지: 하던 작업만 마치고 새 작업은 받지 않는다
     if (!st.item && cleared && !cycleStop) for (const c of st.ins) if (this.frontReady(c) && (!inC || c.items[0].item.id < inC.items[0].item.id)) inC = c;
     if (inC) {
@@ -1297,7 +1301,7 @@ export class Simulation {
       const F = st.def.fasten;
       const seed = Math.abs(Number(String(st.item.id).replace(/\D/g, '')) || 0), R = F ? F.max - F.min + 1 : 1;
       st.fastenPts = F && !st.item.scrap ? Array.from({ length: Math.max(1, st.def.robot?.count ?? 1) }, (_, i) => F.min + (seed * 7 + i * 2) % R) : null;
-      const nominal = st.fastenPts ? F.setup + Math.max(...st.fastenPts) * F.per + F.post : st.def.cycle;
+      const nominal = st.fastenPts ? fastenT(F, st.fastenPts) : st.def.cycle;
       const base = nominal * m.cycleMul * st.speedMul * (this.vla?.cycleFactor(st) ?? 1) * (this.trace?.cycleFactor(st) ?? 1);   // 배포된 VLA 모델 버전만큼 사이클 단축 · 환경 인터록 정책(공정 보상)
       st.cycleTime = st.item.scrap ? 0.5 : Math.max(base * 0.6, base * (1 + m.cycleVar * gauss(this.rand)));
     }
@@ -1315,7 +1319,7 @@ export class Simulation {
       if (st.done && st.item) {
         const out = this.outFor(st, st.item);
         // 분기 셀(부품분류)은 출구 구간을 여러 연결이 함께 쓰므로, 모든 출구 앞이 비었을 때만 내보낸다
-        if (this.hasSpace(out) && Object.values(st.outs).every((c) => this.hasSpace(c))) {
+        if (this.canSend(out) && Object.values(st.outs).every((c) => this.hasSpace(c))) {
           out.items.push({ item: st.item, s: 0 });
           st.item = null; st.done = false; st.state = 'IDLE';
         } else { st.state = 'BLOCKED'; st.c.blocked += dt; }

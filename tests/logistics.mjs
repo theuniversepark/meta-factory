@@ -12,7 +12,7 @@ for (const mode of ['traditional', 'smart', 'dark']) {
   const rcv = s.forklifts.find((f) => f.receiver);
   let intr = 0, who = '', out = 0, minRaw = 1e9, docks = [], seen = new Set();
   let parked = 0, crooked = 0, worst = 0;
-  for (let t = 0; t < 1.5 * 3600; t += 0.1) {
+  for (let t = 0; t < 2 * 3600; t += 0.1) {   // 2시간: 전통 모드는 소비가 느려 1.5시간에 트럭이 2대째 막 들어온다
     s.step(0.1); ag.update(0.1);
     for (const m of s.movers) {
       if (m === rcv) continue;

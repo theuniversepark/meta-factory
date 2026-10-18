@@ -15,7 +15,7 @@ import { makePayloadArm, makePayloadDual } from './payload-robots.js';
 import { ROBOT_SPECS } from './robot-specs.js';
 import { makeProductMachine } from './product-machines.js';
 import { ZONE_SRC, ZONE_SINK } from './line.js';
-import { ROBOT_KINDS, toWorld, pointAt, pathLength, isZone, ZONE_CELLS, ZONE_PRODUCTS, ZONE_MIXES, ZONE_NAME, FG_ZONE_CAP, AMR_LANES, amrPark, ZONE_AMR, AMMR, AMMR_FETCH } from './line.js';
+import { ROBOT_KINDS, toWorld, pointAt, pathLength, isZone, ZONE_CELLS, ZONE_PRODUCTS, ZONE_MIXES, ZONE_NAME, FG_ZONE_CAP, fastenT, FASTEN_RETRACT, AMR_LANES, amrPark, ZONE_AMR, AMMR, AMMR_FETCH } from './line.js';
 
 // ── 헬퍼 ─────────────────────────────
 const std = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.1, ...o });
@@ -770,45 +770,74 @@ function ammrContact(r, o) {
   });
   return true;
 }
+// 체결 셀 오버헤드 헤드(너트러너)가 내려와도 되는 진행률: 로봇 마지막 점 → 대기 자세 복귀(animFasten 'ret' — max(0.5, per×0.4)초)가 끝나고 0.3초 뒤 — 팔이 아직 점 위(0.3m)에 있을 때 헤드가 내려오면 손목과 부딪힌다
+function headAfter(st, dflt) {
+  const F = st.def.fasten; if (!F || !st.fastenPts) return dflt;
+  return Math.min(0.97, (F.setup + Math.max(...st.fastenPts) * F.per + Math.max(0.5, F.per * 0.4) + 0.3) / fastenT(F, st.fastenPts));
+}
 // 접촉 작업 접근 방향(로봇 루트 로컬): 위에서 로봇 쪽으로 약 27° 기울여 — 손목(UR 손목1·2는 툴 축에서 0.1~0.17m 비켜 있다)이 셀 가운데·마주 보는 로봇 쪽으로 나가지 않게
 const TILT = { x: 0, y: 1, z: -0.5 };
+// 대상물 모양에 따른 접촉 방식: 얇게 선 판(폭 0.15m 미만 — 후드·도어 패널)은 로봇 쪽 끝면을 옆에서, 높은 대상물(0.25m 넘게 — e-axle 하우징·블록)은 45° 기울여 위에서,
+// 그 밖은 27° 기울여 위에서 — 아래팔이 대상물 위로 넘어가지 않게
+function contactMode(box) {
+  const [x0, y0] = box.min, [x1, y1] = box.max;
+  if (x1 - x0 < 0.15) return { side: true, dir: { x: 0, y: 0.4, z: -1 } };
+  return { side: false, dir: y1 - y0 > 0.25 ? { x: 0, y: 1, z: -1 } : TILT };
+}
 // 셀 로봇마다 대상물 윗면에서 맡을 x 구간 — 같은 쪽 두 대는 왼쪽·오른쪽 반, 그 반을 마주 보는 로봇과 또 나눠(통로 −z 쪽 = 앞, +z 쪽 = 뒤) 어느 두 로봇도 같은 곳에 손목을 넣지 않는다
 // 돌려주는 값: [xa, xb, 앞 여유, 뒤 여유] — 다른 로봇과 맞닿는 경계는 0.15m, 대상물 끝은 0.06m 비운다
 function pointRange(r, robots, x0, x1) {
   const side = Math.sign(r.slot.z), rs = robots.filter((o) => o.slot), same = rs.filter((o) => Math.sign(o.slot.z) === side), mid = (x0 + x1) / 2;
   let [xa, xb] = same.length > 1 ? (r.slot.x < Math.max(...same.map((o) => o.slot.x)) ? [x0, mid] : [mid, x1]) : [x0, x1];
   const inHalf = (o) => same.length < 2 || (o.slot.x < Math.max(...same.map((m) => m.slot.x))) === (r.slot.x < Math.max(...same.map((m) => m.slot.x)));
-  if (rs.some((o) => Math.sign(o.slot.z) === -side && inHalf(o))) { const m = (xa + xb) / 2; [xa, xb] = side < 0 ? [xa, m] : [m, xb]; }
-  return [xa, xb, xa > x0 + 1e-6 ? 0.15 : 0.06, xb < x1 - 1e-6 ? 0.15 : 0.06];
+  let face = null;
+  if (rs.some((o) => Math.sign(o.slot.z) === -side && inHalf(o))) { const m = (xa + xb) / 2; [xa, xb] = side < 0 ? [xa, m] : [m, xb]; face = m; }
+  const gap = (x) => (face != null && Math.abs(x - face) < 1e-6 ? 0.2 : 0.15);   // 마주 보는 로봇과 나눈 경계는 0.2m — 손목이 서로 마주 들어온다
+  return [xa, xb, xa > x0 + 1e-6 ? gap(xa) : 0.06, xb < x1 - 1e-6 ? gap(xb) : 0.06];
+}
+// 접촉·체결 작업 로봇의 대기 자세: 협동로봇 기본 자세는 손끝이 앞으로 1.1m · 루트 위 0.23m라 들어오는 대상물(후드·블록·e-axle) 위로 아래팔이 걸친다 — 손끝을 받침대 앞 0.35m · 0.75m 위로 접어 둔다
+function workHome(r) {
+  const A = r.arm, h = (A.home ?? A.joints()).slice(); A.pose(...h); r.root.updateWorldMatrix(true, true);
+  const t = r.root.worldToLocal(r.tip.getWorldPosition(new THREE.Vector3()));
+  return Math.hypot(t.x, t.z) > 0.6 && t.y < 0.6 ? A.ik(0, 0.75, 0.35, true) : h;
 }
 // 6축·협동로봇 접촉 작업 (확장 Zone 셀): 대상물 윗면의 자기 점 n곳을 차례로 — 툴을 세워 위에서 접근 → 손끝 접촉 → 작업 → 들어 올림 — 처리하고 대기 자세로 돌아간다
 // kind: touch(접촉·정렬·측정) · press(용접 팁·헤밍·압입 1cm 누름) · screw(체결 — 손목 끝 회전) · trace(실링 — 점과 점 사이를 붙은 채 따라 긋기)
 // o: { key(대상물·로봇마다 다름), box(), n, kind, u(작업 구간 진행 0 ~ 1 — 밖이면 대기 자세), robots(셀 로봇 전부) }
 function pointWork(r, o) {
   const A = r.arm; if (!A?.native || !r.slot) return false;
-  const home = r.pwHome ??= (A.home ?? A.joints()).slice(), P = r.root.parent;
+  const home = r.pwHome ??= workHome(r), P = r.root.parent;
   const rest = () => { r.pwCur = r.pwCur ? r.pwCur.map((v, k) => v + (home[k] - v) * 0.15) : home.slice(); A.pose(...r.pwCur); return true; };
   if (!(o.u > 0 && o.u < 1)) return rest();
   if (r.pwKey !== o.key) {
     const box = o.box(); if (!box) return rest();
     const [x0, , z0] = box.min, [x1, y1, z1] = box.max, cz = (z0 + z1) / 2, f = Math.sign(cz - r.slot.z) || 1, hz = (z1 - z0) / 2;
     const [xa, xb, inA, inB] = pointRange(r, o.robots, x0, x1), zP = (f > 0 ? z0 : z1) + f * Math.min(0.08, hz * 0.3);   // 자기 구간 · 로봇 쪽 가장자리 안쪽
-    const ik = (x, y, z) => { const v = r.root.worldToLocal(P.localToWorld(new THREE.Vector3(x, y, z))); return A.ik(v.x, v.y, v.z, TILT); };
+    const cm = contactMode(box), ik = (x, y, z) => { const v = r.root.worldToLocal(P.localToWorld(new THREE.Vector3(x, y, z))); return A.ik(v.x, v.y, v.z, cm.dir); };
     const span = xb - xa - inA - inB, xs = Array.from({ length: o.n }, (_, k) => span > 0 ? xa + inA + span * (o.n === 1 ? 0.5 : k / (o.n - 1)) : (xa + xb) / 2);
-    r.pwPlan = xs.map((x) => { const y = o.obj ? surfaceY(o.obj, P, null, x, zP, y1) : y1; return [ik(x, y + 0.08, zP), ik(x, y + 0.005, zP), ik(x, y - (o.kind === 'press' ? 0.01 : 0.002), zP)]; }); r.pwKey = o.key;
+    const nz = f > 0 ? z0 : z1, cx = (x0 + x1) / 2;
+    // 얇게 선 판: 로봇이 있는 쪽 판면(윗모서리 0.08m 아래)을 옆에서 — 판면 법선 방향 0.1m 앞에서 다가가 손끝을 댄다 (끝면을 대면 아래팔이 판면을 스친다)
+    const sx = Math.sign(r.slot.x - cx) || -1, fx = sx < 0 ? x0 : x1, loc = (x, y, z) => r.root.worldToLocal(P.localToWorld(new THREE.Vector3(x, y, z)));
+    const nd = ((a, b) => b.sub(a))(loc(fx, y1, nz), loc(fx + sx, y1 + 0.3, nz)), ikS = (x, y, z) => { const v = loc(x, y, z); return A.ik(v.x, v.y, v.z, nd); };
+    r.pwPlan = cm.side
+      ? xs.map((_, k) => { const z = nz + f * (0.12 + 0.25 * (o.n === 1 ? 0.5 : k / (o.n - 1))), y = y1 - 0.08; return [ikS(fx + sx * 0.1, y, z), ikS(fx + sx * 0.012, y, z), ikS(fx + sx * (o.kind === 'press' ? 0.002 : 0.008), y, z), ikS(fx + sx * 0.3, y + 0.15, z)]; })
+      : xs.map((x) => { const y = o.obj ? surfaceY(o.obj, P, null, x, zP, y1) : y1; return [ik(x, y + 0.08, zP), ik(x, y + 0.005, zP), ik(x, y - (o.kind === 'press' ? 0.01 : 0.002), zP), ik(x, y + 0.3, zP)]; });
+    r.pwKey = o.key;
   }
   const pl = r.pwPlan, n = pl.length, lerp = (a, b, k) => a.map((v, j) => v + (b[j] - v) * k), ease = (k) => { k = Math.min(1, Math.max(0, k)); return k * k * (3 - 2 * k); };
   const u = o.u; let q, spin = 0;
-  if (u < 0.12) q = lerp(home, pl[0][0], ease(u / 0.12));
-  else if (u > 0.9) q = lerp(pl[n - 1][0], home, ease((u - 0.9) / 0.1));
+  // 대기 자세 ↔ 첫·마지막 점, 점 ↔ 점은 대상물 0.3m 위 경유점(high, pl[k][3])으로 — 관절 보간으로 곧장 가면 아래팔이 대상물 위로 처진다
+  if (u < 0.12) q = u < 0.08 ? lerp(home, pl[0][3], ease(u / 0.08)) : lerp(pl[0][3], pl[0][0], ease((u - 0.08) / 0.04));
+  else if (u > 0.9) q = u < 0.94 ? lerp(pl[n - 1][0], pl[n - 1][3], ease((u - 0.9) / 0.04)) : lerp(pl[n - 1][3], home, ease((u - 0.94) / 0.06));
   else if (o.kind === 'trace') {   // 첫 점에 내려앉아 마지막 점까지 붙은 채 따라 긋고 들어 올린다
     const w = (u - 0.12) / 0.78;
     if (w < 0.12) q = lerp(pl[0][0], pl[0][1], ease(w / 0.12));
     else if (w > 0.88) q = lerp(pl[n - 1][1], pl[n - 1][0], ease((w - 0.88) / 0.12));
     else { const s = (w - 0.12) / 0.76 * (n - 1), k = Math.min(n - 2, Math.floor(s)); q = n > 1 ? lerp(pl[k][1], pl[k + 1][1], s - k) : pl[0][1]; }
   } else {
-    const s = (u - 0.12) / 0.78 * n, k = Math.min(n - 1, Math.floor(s)), f = s - k, [above, touch, work] = pl[k], prev = k ? pl[k - 1][0] : above;
-    q = f < 0.25 ? lerp(prev, above, ease(f / 0.25)) : f < 0.4 ? lerp(above, touch, ease((f - 0.25) / 0.15)) : f < 0.8 ? lerp(touch, work, ease((f - 0.4) / 0.1)) : lerp(work, above, ease((f - 0.8) / 0.2));
+    const s = (u - 0.12) / 0.78 * n, k = Math.min(n - 1, Math.floor(s)), f = s - k, [above, touch, work] = pl[k];
+    const high = pl[k][3], prevHigh = k ? pl[k - 1][3] : high;
+    q = !k && f < 0.3 ? above : f < 0.12 ? lerp(pl[k - 1][0], prevHigh, ease(f / 0.12)) : f < 0.22 ? lerp(prevHigh, high, ease((f - 0.12) / 0.1)) : f < 0.3 ? lerp(high, above, ease((f - 0.22) / 0.08)) : f < 0.4 ? lerp(above, touch, ease((f - 0.3) / 0.1)) : f < 0.8 ? lerp(touch, work, ease((f - 0.4) / 0.1)) : lerp(work, above, ease((f - 0.8) / 0.2));
     if (o.kind === 'screw' && f >= 0.4 && f < 0.8) spin = (f - 0.4) / 0.4 * Math.PI * 8;
   }
   r.pwCur = q.slice(); const out = q.slice(); out[5] += spin; A.pose(...out); return true;
@@ -2938,7 +2967,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
         break;
       }
       case 'screw': {
-        const F = st.def.fasten, T = F && st.fastenPts ? F.setup + Math.max(...st.fastenPts) * F.per + F.post : 1, post = F && st.fastenPts ? 1 - F.post / T : 0;   // 로봇 체결이 끝난 뒤(후공정)만 문형 너트러너가 내려와 전수 토크 판정
+        const post = headAfter(st, 0);   // 로봇 체결이 끝나고 팔이 대기 자세로 돌아온 뒤(후공정)만 문형 너트러너가 내려와 전수 토크 판정
         const down = busy && p > post && Math.sin((p - post) / (1 - post) * Math.PI * 4) > 0;
         parts.head.position.y += ((down ? 1.95 : 2.3) - parts.head.position.y) * Math.min(1, rdt * 8);
         if (down) parts.bit.rotation.y += dts * 30;
@@ -2946,7 +2975,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
         break;
       }
       case 'fasten': {
-        const F = st.def.fasten, T = F && st.fastenPts ? F.setup + Math.max(...st.fastenPts) * F.per + F.post : 1, post = F && st.fastenPts ? 1 - F.post / T : 0.2;
+        const post = headAfter(st, 0.2);
         const down = busy && p > post + 0.01 && p < 0.97;   // 로봇 볼트 체결이 끝난 뒤 다축 너트러너가 내려온다
         // 너트러너가 내려와 있는 동안 로봇은 팔을 접고 기다린다 (헤드와 간섭 방지)
         if ((down || parts.head.position.y < 2.35) && parts.robots) for (const r of parts.robots) r.anim(false, t);   // 헤드가 다 올라갈 때까지도 접은 채 기다린다
@@ -3045,43 +3074,51 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
   animFasten(r, st, busy, p, i) {
     const near0 = (z0, z1, f) => (f > 0 ? z0 : z1);
     const F = st.def.fasten, A = r.arm, n = st.fastenPts?.[i] ?? 0, P = r.root.parent;
-    const home = r.fHome ??= (A.home ?? A.joints()).slice();
+    const home = r.fHome ??= workHome(r);
     if (!busy || !st.item || !n) { r.fCur = r.fCur ? r.fCur.map((v, k) => v + (home[k] - v) * 0.15) : home.slice(); A.pose(...r.fCur); if (r.vla) r.vla.held.visible = false; return; }
     const it = st.item.id, inCell = this.sim.entryK(st) >= 1;   // 체결 점은 대상물이 셀 중앙에 다 들어온 뒤에 잡는다 (들어오는 중이면 상자가 입구 쪽으로 최대 2m 비켜 있다)
     const loc0 = (x, y, z) => r.root.worldToLocal(P.localToWorld(new THREE.Vector3(x, y, z)));
     // 부품 집는 곳: 피지컬AI는 로봇 옆 부품 선반, 자동화는 가장 가까운 셀 피더(랙·볼 피더) 윗면 가운데
     const pk = r.vla ? r.vla.shelf : (r.fFeed ??= (() => { const fs = (this.stationViews.find((v) => v.st === st)?.parts.feeders ?? []).map((o) => contactBox(o, P)).filter((b) => b && Math.sign((b.min[2] + b.max[2]) / 2) === Math.sign(r.slot.z));   // 자기 쪽(통로 같은 편) 피더만 — 마주 보는 로봇과 한 피더를 같이 쓰면 팔이 피더 위에서 만난다
       const b = fs.sort((a, c) => Math.hypot((a.min[0] + a.max[0]) / 2 - r.slot.x, (a.min[2] + a.max[2]) / 2 - r.slot.z) - Math.hypot((c.min[0] + c.max[0]) / 2 - r.slot.x, (c.min[2] + c.max[2]) / 2 - r.slot.z))[0];
-      return b ? { x: (b.min[0] + b.max[0]) / 2, y: b.max[1] - 0.025, z: (b.min[2] + b.max[2]) / 2 } : { x: r.slot.x + (r.slot.x < 0 ? -1.0 : 1.0), y: 1.0, z: r.slot.z * 0.6 }; })());
-    const pick = r.fPick ??= [A.ik(...loc0(pk.x, pk.y + 0.3, pk.z).toArray(), true), A.ik(...loc0(pk.x, pk.y + 0.03, pk.z).toArray(), true)];
+      const near = b && Math.hypot((b.min[0] + b.max[0]) / 2 - r.slot.x, (b.min[2] + b.max[2]) / 2 - r.slot.z) < 1.4;   // 팔이 닿는 피더만 (멀면 옆 로봇 위로 팔을 뻗는다)
+      if (near) return { x: (b.min[0] + b.max[0]) / 2, y: b.max[1] - 0.025, z: (b.min[2] + b.max[2]) / 2 };
+      // 자기 쪽에 닿는 피더가 없으면 로봇 뒤 바깥 대각(셀 끝 쪽 0.6m · 통로 반대쪽 셀 경계 안)에 부품 트레이를 둔다 — 바로 옆(셀 끝)은 경광등 기둥 앞이라 집으러 오가는 팔이 경광등을 친다
+      const tx = r.slot.x + (r.slot.x < 0 ? -0.6 : 0.6), tz = Math.sign(r.slot.z) * Math.min(Math.abs(r.slot.z) + 0.8, 2.05), tray = put(new THREE.Group(), tx, 0, tz, P);
+      put(box(0.4, 0.85, 0.4, MAT.steel), 0, 0.425, 0, tray); put(box(0.36, 0.08, 0.36, std(0x2f6fd6)), 0, 0.89, 0, tray);
+      return { x: tx, y: 0.93 - 0.03 + 0.005, z: tz }; })());
+    const pick = r.fPick ??= [A.ik(...loc0(pk.x, pk.y + 0.3, pk.z).toArray(), true), A.ik(...loc0(pk.x, pk.y + 0.1, pk.z).toArray(), true)];   // 집는 높이: 부품 윗면 + 손끝에 매달린 부품 길이(볼트·스크류 약 8cm) 여유 — 낮으면 집은 부품이 피더 속으로 들어간다
     const plan = (r.fPlan?.item === it) ? r.fPlan : !inCell ? null : (() => {
       const g = this.itemMeshes.get(it), box = g && contactBox(g, P, g.userData.amr); if (!box) return null;
       const [x0, , z0] = box.min, [x1, y1, z1] = box.max, cz = (z0 + z1) / 2, f = Math.sign(cz - r.slot.z) || 1, hz = (z1 - z0) / 2;
       // 점은 자기 x 구간(pointRange — 다른 로봇과 겹치지 않음) · 대상물의 로봇 쪽 가장자리 안쪽(가까운 모서리 + 0.06m 남짓)
       const [xa, xb, inA, inB] = pointRange(r, this.stationViews.find((v) => v.st === st)?.parts.robots ?? [r], x0, x1), zP = near0(z0, z1, f) + f * Math.min(0.08, hz * 0.3);
       const loc = (x, y, z) => r.root.worldToLocal(P.localToWorld(new THREE.Vector3(x, y, z)));
-      const ik = (v) => A.ik(v.x, v.y, v.z, TILT);
+      const ik = (v) => A.ik(v.x, v.y, v.z, contactMode(box).dir);
       const span = xb - xa - inA - inB, pts = Array.from({ length: n }, (_, k) => span > 0 ? xa + inA + span * (n === 1 ? 0.5 : k / (n - 1)) : (xa + xb) / 2);   // 구간이 좁으면 가운데에 모아 이웃 구간을 넘지 않는다
-      return r.fPlan = { item: it, pts: pts.map((x) => { const y = surfaceY(g, P, g.userData.amr, x, zP, y1); return [ik(loc(x, y + 0.1, zP)), ik(loc(x, y + 0.02, zP)), ik(loc(x, y + (F.kind === 'press' ? 0.01 : 0.008), zP))]; }) };   // 그 자리 실제 윗면에 손끝 — 툴이 27° 기울어 손가락 모서리가 TCP보다 약 2cm 낮다: 닿음 +2cm · 압입 +1cm(1cm 누름) · 체결 +0.8cm(비트가 나사 머리에 닿음)
+      return r.fPlan = { item: it, pts: pts.map((x) => { const y = surfaceY(g, P, g.userData.amr, x, zP, y1); return [ik(loc(x, y + 0.1, zP)), ik(loc(x, y + 0.02, zP)), ik(loc(x, y + (F.kind === 'press' ? 0.01 : 0.008), zP)), ik(loc(x, y + 0.3, zP))]; }) };   // 그 자리 실제 윗면에 손끝 — 툴이 27° 기울어 손가락 모서리가 TCP보다 약 2cm 낮다: 닿음 +2cm · 압입 +1cm(1cm 누름) · 체결 +0.8cm(비트가 나사 머리에 닿음)
     })();
     // 진행률 → 시간(명목 사이클 기준): 준비(정렬·선반 위로) → 점마다 [부품 선반으로 → 부품 1개 집기 → 점 위로 → 손끝 접촉 → 체결(비트 회전)/압입 → 들어 올림] → 복귀
     // 부품은 한 번에 1개만 — 점마다 선반을 다녀온다 (line.js fasten.per에 왕복 시간 포함)
-    const T = F.setup + Math.max(...st.fastenPts) * F.per + F.post, tau = p * T, lerp = (a, b, k) => a.map((v, j) => v + (b[j] - v) * k), ease = (k) => { k = Math.min(1, Math.max(0, k)); return k * k * (3 - 2 * k); };
+    const T = fastenT(F, st.fastenPts), tau = p * T, lerp = (a, b, k) => a.map((v, j) => v + (b[j] - v) * k), ease = (k) => { k = Math.min(1, Math.max(0, k)); return k * k * (3 - 2 * k); };
     const [up, grab] = pick, seg = (f, a, b) => (f - a) / (b - a);
     let q, spin = 0, held = false;
     if (tau < F.setup || !plan) q = lerp(home, up, ease(plan ? tau / F.setup : Math.min(1, tau / F.setup)));   // 점이 아직 없으면(대상물 진입 중) 선반 위에서 기다린다
     else if (tau < F.setup + n * F.per) {
-      const u = (tau - F.setup) / F.per, k = Math.floor(u), f = u - k, [above, touch, work] = plan.pts[k], from = k ? plan.pts[k - 1][0] : up;
-      if (f < 0.18) q = lerp(from, up, ease(f / 0.18));                       // 부품 선반 위로 (첫 점은 이미 위에 있다)
-      else if (f < 0.26) q = lerp(up, grab, ease(seg(f, 0.18, 0.26)));        // 내려가 부품 1개 집기
-      else if (f < 0.32) q = grab;
-      else if (f < 0.4) q = lerp(grab, up, ease(seg(f, 0.32, 0.4)));
-      else if (f < 0.58) q = lerp(up, above, ease(seg(f, 0.4, 0.58)));        // 점 위로 가져가
-      else if (f < 0.66) q = lerp(above, touch, ease(seg(f, 0.58, 0.66)));    // 손끝 접촉
-      else if (f < 0.9) { q = lerp(touch, work, ease(seg(f, 0.66, 0.7))); if (F.kind === 'screw') spin = seg(f, 0.66, 0.9) * Math.PI * 8; }   // 런다운 / 압입
-      else q = lerp(work, above, ease(seg(f, 0.9, 1)));
-      held = f >= 0.29 && f < 0.86;   // 집은 부품은 체결이 끝날 때까지 그리퍼에
-    } else { const k = (tau - F.setup - n * F.per) / Math.max(0.5, F.per * 0.4); q = lerp(plan.pts[n - 1][0], home, ease(k)); }
+      // 선반 ↔ 점 이동은 대상물 0.3m 위 경유점(high)으로 — 관절 보간으로 곧장 가면 아래팔이 대상물 위로 처진다 · 점에서는 위에서 곧게 내려가고 올라온다
+      const u = (tau - F.setup) / F.per, k = Math.floor(u), f = u - k, [above, touch, work, high] = plan.pts[k], from = k ? plan.pts[k - 1][3] : up;
+      if (f < 0.15) q = lerp(from, up, ease(f / 0.15));                       // 부품 선반 위로 (첫 점은 이미 위에 있다)
+      else if (f < 0.22) q = lerp(up, grab, ease(seg(f, 0.15, 0.22)));        // 내려가 부품 1개 집기
+      else if (f < 0.28) q = grab;
+      else if (f < 0.35) q = lerp(grab, up, ease(seg(f, 0.28, 0.35)));
+      else if (f < 0.5) q = lerp(up, high, ease(seg(f, 0.35, 0.5)));          // 점 0.3m 위로 가져가
+      else if (f < 0.57) q = lerp(high, above, ease(seg(f, 0.5, 0.57)));
+      else if (f < 0.64) q = lerp(above, touch, ease(seg(f, 0.57, 0.64)));    // 손끝 접촉
+      else if (f < 0.88) { q = lerp(touch, work, ease(seg(f, 0.64, 0.68))); if (F.kind === 'screw') spin = seg(f, 0.64, 0.88) * Math.PI * 8; }   // 런다운 / 압입
+      else if (f < 0.94) q = lerp(work, above, ease(seg(f, 0.88, 0.94)));
+      else q = lerp(above, high, ease(seg(f, 0.94, 1)));
+      held = f >= 0.25 && f < 0.85;   // 집은 부품은 체결이 끝날 때까지 그리퍼에
+    } else { const k = (tau - F.setup - n * F.per) / Math.max(0.5, F.per * 0.4); q = lerp(plan.pts[n - 1][3], home, ease(k)); }   // 마지막 점 위(high)에서 대기 자세로 — 사이클 마무리(FASTEN_RETRACT) 안에 끝난다
     r.fCur = q.slice(); const out = q.slice(); out[5] += spin; A.pose(...out);
     const H = r.vla?.held ?? (r.fHeld ??= (() => {   // 자동화: 그리퍼에 집은 부품 1개 (스크류·볼트·클립·베어링)
       const name = { DT_FAST: 'P_Screw', EA_FAST: 'P_Bolt', DT_ASSY: 'P_Clip', EA_ASSY: 'P_Bearing' }[st.id], o = name && partClone(name);

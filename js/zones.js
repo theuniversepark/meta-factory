@@ -652,7 +652,7 @@ class ExtraZone {
       const inQ = !this.st, q = inQ ? this.qSlots[Math.min(i, this.qSlots.length - 1)] : this.st.slots[i];   // 처음: 모두 자기 대기 자리에서 (스테이션이 없으면 투입 대기열)
       const g = legacy ? makeCart() : makeCarrierAMR(); this.dyn.add(g);
       if (!legacy) g.traverse((o) => { o.userData.moverId = `${this.Z.code}-AMR${String(i + 1).padStart(2, '0')}`; });
-      return { id: `${this.Z.code}-AMR${String(i + 1).padStart(2, '0')}`, uid: zoneAmrUid(this.Z, i), i, x: q.x, z: q.z, heading: this.st?.face ?? 0, state: inQ ? 'queue' : 'park', qAt: i, parkAt: i, wait: 0, path: null, s: 0, item: null, at: null, g, pm: null, timer: 0,
+      return { id: `${this.Z.code}-AMR${String(i + 1).padStart(2, '0')}`, uid: zoneAmrUid(this.Z, i), i, cart: legacy, x: q.x, z: q.z, heading: this.st?.face ?? 0, state: inQ ? 'queue' : 'park', qAt: i, parkAt: i, wait: 0, path: null, s: 0, item: null, at: null, g, pm: null, timer: 0,
         slot: i, battery: 100 - ((i * 7) % 28), dist: 0, moving: false, chgNow: true, outOfService: false, task: null };
     });
     this.buildCrew(modeKey);
@@ -739,6 +739,8 @@ class ExtraZone {
     const S = n.side[next], picked = c && k >= 0.36 ? 1 : 0;
     for (const key of keys) { const v = Math.max(0, cnt[key] - (key === next ? picked : 0)); n.side[key].objs.forEach((o, i) => (o.visible = i < v)); }
     const top = S.slots[Math.max(0, cnt[next] - 1)], pick = { x: top.x, z: top.z, y: top.y + S.h / 2 }, place = { x: 0, z: 0, y: BELT_Y + 0.05 + S.h / 2 }, UP = 2.45;
+    // 판재(후드 1.6m)는 세워 든 채 대차(1.3m)에 내려놓으면 한쪽 끝이 대차 손잡이 가로대(높이 1.15m)를 지난다 — 손잡이 반대쪽으로 0.12m 비켜 내려놓는다
+    if (c?.cart && S.panel) { const hd = P.bridge.parent.worldToLocal(c.g.localToWorld(new THREE.Vector3(0, 1.15, -0.72))); place.x -= Math.sign(hd.x - place.x) * 0.12; }
     const K = [[0, 0, 0, 0], [0.18, 1, 0, 0], [0.3, 1, 1, 0], [0.36, 1, 1, 1], [0.48, 1, 0, 1], [0.7, 0, 0, 1], [0.84, 0, 1, 1], [1, 0, 1, 1]];
     let a = K[0], b = K[0]; for (let i = 1; i < K.length; i++) if (k <= K[i][0]) { a = K[i - 1]; b = K[i]; break; }
     const f = b[0] > a[0] ? (k - a[0]) / (b[0] - a[0]) : 0, pos = c ? a[1] + (b[1] - a[1]) * f : 0, low = c ? a[2] + (b[2] - a[2]) * f : 0, held = c ? (f < 1 ? a[3] : b[3]) : 0;
@@ -1027,7 +1029,11 @@ class ExtraZone {
       if (W && r.arm?.native && !r.machineTargets && !r.body) {
         const seed = Math.abs(Number(String(c.item?.id ?? '').replace(/\D/g, '')) || 0);
         for (const o of c.robots) o.slot ??= { x: o.root.position.x, z: o.root.position.z };
-        pointWork(r, { key: `${c.item?.id}:${i}`, box: () => wcar && contactBox(wcar.pm, r.root.parent), obj: wcar?.pm, n: 2 + (seed * 7 + i * 2) % 3, kind: W.kind, u: wcar ? (p - W.from) / (W.to - W.from) : 0, robots: c.robots });
+        const n = 2 + (seed * 7 + i * 2) % 3, u = wcar ? (p - W.from) / (W.to - W.from) : 0;
+        // 마주 보는 로봇(통로 반대편에 같은 x 대)이 있으면 반 점씩 엇갈려 — 한쪽이 점에 내려가 있을 때 다른 쪽은 위로 옮겨 간다
+        const facing = c.robots.some((o) => o !== r && o.slot && Math.sign(o.slot.z) === -Math.sign(r.slot.z) && Math.abs(o.slot.x - r.slot.x) < 0.5), d = facing ? 0.5 / 4 : 0;
+        const uu = !facing ? u : r.slot.z < 0 ? u / (1 - d) : (u - d) / (1 - d);
+        pointWork(r, { key: `${c.item?.id}:${i}`, box: () => wcar && contactBox(wcar.pm, r.root.parent), obj: wcar?.pm, n, kind: W.kind, u: uu, robots: c.robots });
         return;
       }
       const ap = car && r.slot ? sm(0.03, 0.1, p) * (1 - sm(0.88, 0.95, p)) : 0, box = ap > 0 ? contactBox(car.pm, r.root.parent) : null;

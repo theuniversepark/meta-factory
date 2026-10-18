@@ -116,7 +116,7 @@ export const AMMR_FETCH = { turnOut: 0.06, driveOut: 0.14, pick: 0.24, turnIn: 0
 const ZONE_RECIPES = [
   { id: 'SORT', robot: { kind: 'ammr', count: 2 }, cycle: 7, task: 'AMMR 양팔로 옆 부품 선반에서 부품을 가져와 판별·분류·키팅' },
   { id: 'DT_ASSY', robot: { kind: 'cobot', count: 4 }, cycle: 19.5, fasten: { setup: 6, per: 4.5, post: 0, min: 2, max: 4, kind: 'press' }, task: '양쪽 협동로봇이 패널에 암레스트·스피커그릴·스위치 조립, 클립 압입 (로봇당 2~4점)' },
-  { id: 'DT_FAST', robot: { kind: 'cobot', count: 2 }, cycle: 21.5, fasten: { setup: 2, per: 5.5, post: 3, min: 2, max: 4, kind: 'screw' }, task: '스크류 자동 체결 (로봇당 2~4점), 토크·각도 전수 판정' },
+  { id: 'DT_FAST', robot: { kind: 'cobot', count: 2 }, cycle: 23, fasten: { setup: 2, per: 5.5, post: 4.5, min: 2, max: 4, kind: 'screw' }, task: '스크류 자동 체결 (로봇당 2~4점), 토크·각도 전수 판정' },
   { id: 'EA_ASSY', robot: { kind: 'cobot', count: 4 }, cycle: 22, fasten: { setup: 7, per: 5.0, post: 0, min: 2, max: 4, kind: 'press' }, task: '양쪽 협동로봇이 베어링 압입·로터·감속기어 삽입, 하우징 결합 (로봇당 2~4점)' },
   { id: 'EA_FAST', robot: { kind: 'articulated', count: 1 }, cycle: 26.5, fasten: { setup: 2, per: 5.5, post: 8, min: 2, max: 4, kind: 'screw' }, task: '로봇 볼트 체결(2~4점) 뒤 다축 너트러너 하우징 볼트 체결, 토크·각도 전수 판정' },
   { id: 'PACK', robot: { kind: 'ammr', count: 2 }, cycle: 8, task: 'AMMR 양팔로 옆 선반에서 포장재를 가져와 제품별 포장·라벨' },
@@ -160,8 +160,12 @@ export const AMMR_MODES = ['dark'];
 export const ammrAllowed = (modeKey) => AMMR_MODES.includes(modeKey);
 export const robotForMode = (robot, modeKey) => (ROBOT_KINDS[robot?.kind]?.darkOnly && !ammrAllowed(modeKey) ? { ...robot, kind: 'cobot' } : robot);   // 피지컬AI 전용 로봇(AMMR·휴머노이드)
 const taskForMode = (s, modeKey) => (ROBOT_KINDS[s.robot?.kind]?.darkOnly && !ammrAllowed(modeKey) ? String(s.task ?? '').replace(/AMMR\s*양팔로\s*/, '양쪽 협동로봇이 ').replace(/옆\s*(부품\s*)?선반에서\s*\S+\s*가져와\s*/, '') : s.task);
+// 체결·압입 셀 명목 사이클: 준비 + 가장 많은 점 수 × 점당 시간 + 마무리(후공정과 팔 복귀 중 긴 쪽) — 마지막 점을 마친 로봇이 대기 자세로 돌아온 뒤에야
+// 대상물이 나가고 다음 AMR이 들어온다 (복귀 시간이 없으면 팔이 아직 점 위에 있을 때 다음 AMR이 진입해 팔과 부딪힌다) · sim.js 사이클과 factory.js 동작이 같은 값을 쓴다
+export const FASTEN_RETRACT = 2.5;
+export const fastenT = (F, pts) => F.setup + Math.max(...pts) * F.per + Math.max(F.post, FASTEN_RETRACT);
 export function effCycle(s, modeKey = 'smart') {
-  if (s.fasten) return s.fasten.setup + ((s.fasten.min + s.fasten.max) / 2) * s.fasten.per + s.fasten.post;   // 체결 셀: 로봇마다 자기 점을 동시에 — 평균 점 수 기준 (실제 사이클은 대상물마다 sim.js fastenCycle)
+  if (s.fasten) return fastenT(s.fasten, [(s.fasten.min + s.fasten.max) / 2]);   // 체결 셀: 로봇마다 자기 점을 동시에 — 평균 점 수 기준 (실제 사이클은 대상물마다 sim.js fastenCycle)
   const n = Math.max(1, s.robot?.count ?? 0);
   const kind = robotForMode(s.robot, modeKey)?.kind ?? 'none';
   const kf = modeKey === 'traditional' || kind === 'none' || !(s.robot?.count > 0) ? 1 : ROBOT_KINDS[kind].factor;
@@ -305,10 +309,12 @@ export function conveyorPath(a, b) {
 // 입구 앞에서 좌우로 0.75m 떨어진 별도 대기 차로를 쓴다 — 대기 자리는 셀 중심에서 4m 앞(게이트 x −1.75보다 2.25m 앞):
 // 대기 중인 AMR이 게이트 기둥(z ±1.0) 밑에 서지 않고, 대기 자리 → 셀 중앙으로 비스듬히 들어갈 때도 기둥 안쪽으로 지나며(게이트에서 z ±0.33)
 // 반대쪽 차로에서 기다리는 AMR과도 겹치지 않는다
+export const ZONE_WAIT = 3.3;
 export function zonePath(a, b) {
   const az = a.z ?? 0, bz = b.z ?? 0;
   const merge = Math.abs(az - bz) > 0.01 && Math.abs(bz) < 0.01;
-  const entry = merge ? { x: b.x - 4, z: Math.sign(az - bz) * 0.75 } : { x: b.x - 2, z: bz };
+  // 입구 대기 자리: 셀 게이트(중앙 −2.3m) 밖 — AMR(길이 1.45m) 앞머리가 게이트에서 0.27m 떨어진 곳 (−2m면 게이트 기둥 사이에 걸쳐 선다)
+  const entry = merge ? { x: b.x - 4, z: Math.sign(az - bz) * 0.75 } : { x: b.x - ZONE_WAIT, z: bz };
   if (Math.abs(az - entry.z) < 0.01) return [{ x: a.x, z: az }, entry];
   // 합류 차로는 대기 자리 1m 앞에서 올라탄다 — 3m 앞이면 셀 출구(a.x + 2.3)에서 내려오는 사선이 가팔라 꺾이는 곳에서 줄 선 AMR끼리 모서리가 겹친다
   return [{ x: a.x, z: az }, { x: a.x + 2.3, z: az }, { x: merge ? Math.max(a.x + 2.3, entry.x - 1) : entry.x - 3, z: entry.z }, entry];

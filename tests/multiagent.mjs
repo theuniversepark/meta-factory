@@ -37,7 +37,8 @@ check('같은 조건 비교: 혼합형 생산(UPH)이 단일보다 나빠지지 
 check('비교 지표 (판단 지연 · 충돌 · 되돌림)', R.single.avgLat === 0 && R.hybrid.avgLat > 0 && R.hybrid.conflicts > 0, `혼합형 평균 지연 ${R.hybrid.avgLat.toFixed(2)}초 · 충돌 ${R.hybrid.conflicts.toFixed(1)} · 되돌림 ${R.hybrid.reversals.toFixed(1)}`);
 // 시드 1개는 배치·동선이 조금만 바뀌어도 ±5% 넘게 흔들려 비교가 안 된다 — 시드 3개 평균도 정비실 이동 때 −2.1%(같은 코드로 다른 시드 3개씩은 −0.9 · −0.4 · +0.3%)까지 흔들려 시드 12개 평균으로 본다
 // 정밀검사Zone 시설(정비 인력·사족보행·드론) 추가 뒤 시드 12개 평균이 −1.2%(같은 코드로 다른 시드 24개는 −0.47%, 직전 커밋은 12개 +1.1% · 24개 −0.09%)까지 흔들려 시드 36개 평균으로 본다
-const D = compareArchitectures({ mode: 'dark', line: zoneLine(), T: 1800, seeds: Array.from({ length: 36 }, (_, i) => 7 + i * 12) });
+// 셀마다 대기 AMR 1대로 바꾼 뒤 시드 36개 평균이 −0.98%(같은 코드로 다른 시드 36개씩은 −0.68% · +0.83%)까지 흔들려 시드 72개 평균으로 본다
+const D = compareArchitectures({ mode: 'dark', line: zoneLine(), T: 1800, seeds: Array.from({ length: 72 }, (_, i) => 7 + i * 6) });
 check('피지컬AI: 혼합형이 단일보다 나빠지지 않음 (순찰 보고도 메인 조정)', D.hybrid.uph >= D.single.uph * 0.99, `단일 ${D.single.uph.toFixed(1)} · 혼합형 ${D.hybrid.uph.toFixed(1)}`);
 console.log(`\n결과: ${pass} PASS / ${fail} FAIL`);
 process.exitCode = fail ? 1 : 0;
