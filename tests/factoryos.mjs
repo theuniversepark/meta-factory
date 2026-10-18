@@ -12,9 +12,9 @@ console.log('== 가드레일 (계층 권한표)');
 check('존 ↔ 존: 핸드셰이크·품질 알림 허용 · 명령 금지', allowed('zone:main', 'zone:insp', 'service.request') && allowed('zone:insp', 'zone:main', 'quality.alert') && !allowed('zone:main', 'zone:insp', 'command'));
 check('공장 → 셀 직접 명령 금지 (계층 건너뛰기) · 존 → 자기 셀 명령 허용 · 셀 → 존 상태 보고 허용', !allowed('factory', 'cell:SORT', 'command') && allowed('zone:main', 'cell:SORT', 'command') && allowed('cell:SORT', 'zone:main', 'status'));
 check('존 → 공장 결정 요청 허용 · 존 → 공장 명령 금지', allowed('zone:main', 'factory', 'decision.request') && !allowed('zone:main', 'factory', 'command'));
-console.log('== 자동화 2시간 (정밀조립)');
+console.log('== 자동화 3시간 (정밀조립)');
 const s = new Simulation('smart', 3, { line: zoneLine(), quiet: true }), ag = new FactoryAgent(s), F = s.fos;
-run(s, ag, 7200);
+run(s, ag, 10800);   // 3시간 — 체결 셀 사이클(로봇당 2~4점 실제 작업 시간)로 오더(양품 100) 5건 종료까지 2시간이 모자란다
 { const g = F.bus.send('zone:main', 'zone:insp', 'command', { text: '시험' });
   check('가드레일이 존 → 존 명령을 막고 기록', g.status === 'blocked' && F.bus.stats.blocked >= 1, g.why);
   const C = F.orders.filter((o) => o.status === 'closed');

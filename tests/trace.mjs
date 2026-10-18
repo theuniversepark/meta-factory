@@ -9,9 +9,9 @@ let pass = 0, fail = 0;
 const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  — ' + info : ''}`); };
 const run = (s, ag, sec) => { for (let t = 0; t < sec; t += 0.1) { s.step(0.1); ag.update(0.1); } };
 const iso = (t) => new Date(Date.UTC(2026, 9, 15) + t * 1000).toISOString();
-console.log('== 제품 추적 (자동화 · 2시간)');
+console.log('== 제품 추적 (자동화 · 3시간)');
 const s = new Simulation('smart', 3, { line: zoneLine(), quiet: true }), ag = new FactoryAgent(s), T = s.trace;
-run(s, ag, 7200);
+run(s, ag, 10800);   // 3시간 — 체결 셀 사이클이 실제 작업 시간(로봇당 2~4점)이라 라인 속도가 느려 NG 사례·CAPA가 2시간으로는 모자란다
 { const serials = T.recent.map((r) => r.serial);
   check('투입 제품마다 고유 시리얼 · EPC (DT/EA-YYMMDD-일련번호)', new Set(serials).size === serials.length && T.recent.every((r) => /^(DT|EA)-\d{6}-\d{6}$/.test(r.serial) && r.epc.startsWith('urn:epc:id:sgtin:')), `${serials.length}개`);
   const done = T.recent.filter((r) => r.status === 'ok' || r.status === 'escaped');
@@ -21,7 +21,8 @@ run(s, ag, 7200);
 }
 console.log('== 불량 사례 · AI 원인 분석');
 { const C = T.cases;
-  check('NG마다 사례 (판정 토크·각도 규격 이탈 · 봉쇄 범위 · 판정 순간 설비 상태)', C.length === T.stats.ng && C.length > 3 && C.every((c) => c.inspection.result === 'NG' && (c.inspection.torque < c.inspection.spec.torque[0] || c.inspection.angle > c.inspection.spec.angle[1]) && c.equipment.length === s.processing.length), `${C.length}건`);
+  // 봉쇄로 회수한 유출품(capa.js recovered)은 NG로 세지만 인라인 판정 사례는 만들지 않는다 — 위 양품 수 검사와 같은 기준
+  check('NG마다 사례 (판정 토크·각도 규격 이탈 · 봉쇄 범위 · 판정 순간 설비 상태)', C.length === T.stats.ng - (T.stats.recovered ?? 0) && C.length > 3 && C.every((c) => c.inspection.result === 'NG' && (c.inspection.torque < c.inspection.spec.torque[0] || c.inspection.angle > c.inspection.spec.angle[1]) && c.equipment.length === s.processing.length), `${C.length}건`);
   check('AI 원인 분석: 1순위 셀이 정답(불량이 생긴 셀)과 80% 이상 일치 · 3순위 안 95% 이상', T.stats.top1 / T.stats.cases >= 0.8 && T.stats.top3 / T.stats.cases >= 0.95, `1순위 ${T.stats.top1}/${T.stats.cases} · 3순위 ${T.stats.top3}`);
   check('원인 순위 비중 합 ≈ 1 · 근거 문장 · 5 Why', C.every((c) => Math.abs(c.rca.causes.reduce((a, x) => a + x.score, 0) - 1) < 0.05 || c.rca.causes.length === 8) && C.every((c) => c.rca.causes[0].evidence.length && c.rca.why.length >= 3));
 }
@@ -32,10 +33,11 @@ console.log('== 8D CAPA (Zone · 총괄 오케스트레이터) → 정책 반영
   check('8D: D0~D5 진행 · 총괄 오케스트레이터 Quality Alert · 정책 결정 대기', K.pending.length > 0 && ['D0', 'D1', 'D2', 'D3', 'D4', 'D5'].every((d) => k.steps.some((x) => x.d === d)) && k.steps.some((x) => x.lane === 'hq'), `${K.list.length}건 · 대기 ${K.pending.length}`);
   check('같은 원인 NG는 진행 중 8D에 묶음', K.list.reduce((a, x) => a + x.cases.length, 0) === T.cases.length);
   const pm0 = s.mode.pmThreshold, cpk0 = s.mode.cpkMin ?? 1.15;
+  const approved = new Set(K.pending.map((x) => x.id));   // 승인한 8D만 종결을 본다 — 이후 새로 열린 8D는 아직 승인 대기
   for (const x of [...K.pending]) K.approve(x.id);
-  run(s, ag, 1300);
+  run(s, ag, 2100);
   check('정책 반영 → 운영 값 변경 (예지정비 착수 건강도 · 재보정 Cpk)', K.policies.length > 0 && (s.mode.pmThreshold > pm0 || (s.mode.cpkMin ?? 1.15) > cpk0), `예지정비 ${pm0} → ${s.mode.pmThreshold} · Cpk ${cpk0} → ${s.mode.cpkMin}`);
-  check('효과 검증 · FMEA AP 갱신 · D8 종결', K.list.filter((x) => x.cases.length).every((x) => x.status === 'closed' && x.effect && x.fmea?.AP?.length === 2 && x.steps.some((y) => y.d === 'D8')), K.list.map((x) => `${x.id}:${x.status}`).join(' '));
+  check('효과 검증 · FMEA AP 갱신 · D8 종결', K.list.filter((x) => x.cases.length && approved.has(x.id)).every((x) => x.status === 'closed' && x.effect && x.fmea?.AP?.length === 2 && x.steps.some((y) => y.d === 'D8')), K.list.map((x) => `${x.id}:${x.status}`).join(' '));
   const p = K.policies.find((x) => x.applied && x.status === 'applied'); const v = s.mode[p.lever];
   check('정책 되돌리기', K.revert(p.id) && s.mode[p.lever] === p.from && p.status === 'reverted', `${p.lever} ${v} → ${s.mode[p.lever]}`);
 }

@@ -155,7 +155,8 @@ export const LOC = {
   // 물류존은 건물 왼쪽 확장동(x −51 ~ −38) 아래쪽, 정비실과 앞쪽 시설 통로(z 31) 사이에 있다 (receiving.js LOGI_DZ). 물류 선반은 왼쪽 벽 입고 지게차 통로와 로봇 통로(x −35.5) 사이에 남북으로 선
   // 통과형 선반(남쪽 절반 원자재 · 북쪽 절반 부품): 입고 지게차는 통로 쪽 서쪽 면에 넣고, AGV·휴머노이드는 동쪽 면에서 꺼낸다.
   // AGV는 앞쪽 시설 통로(FF, z 31)를 확장동까지 연장한 차로에서 곧장 북쪽으로 들어와 원자재 칸 앞에 선다 (정비실을 가로지르지 않는다)
-  WH: { x: -43.2, z: 0.9 + LOGI_DZ, aisle: 'FF', name: '자재창고' },
+  // 원자재 칸(e-axle 원자재 열) 가운데 — 선반 기둥(z 23.85 · 26.1) 사이 한가운데라 지게차가 선반을 보고 서도 포크(±0.42m)·마스트가 기둥에 닿지 않는다 (0.9면 기둥 0.2m 옆)
+  WH: { x: -42.9, z: -0.05 + LOGI_DZ, aisle: 'FF', name: '자재창고' },   // 선반 동쪽 면(x −44.2)에서 1.3m — 지게차가 돌아설 때 뒤 카운터웨이트(차체 뒤 1.3m)가 선반 아래 빔에 닿지 않게
   WH_PARTS: { x: -43.5, z: -2.6 + LOGI_DZ, aisle: 'FF', name: '부품 랙' },
   WH_IN: { x: -47.5, z: 0.9 + LOGI_DZ, aisle: 'FF', name: '자재창고 입고' },        // 입고 지게차: 선반 서쪽 면 원자재 칸 (지게차 통로 안)
   WH_PARTS_IN: { x: -47.5, z: -4.1 + LOGI_DZ, aisle: 'FF', name: '부품 입고' },    // 입고 지게차: 선반 서쪽 면 부품 칸
@@ -244,7 +245,7 @@ export const moverRadius = (m) => RADIUS[m.kind] ?? 0.5;
 const WIDTH = { dock: 0.95, agv: 1.1, forklift: 1.2, carrier: 0.95, zoneamr: 0.95, robot: 0.9, quadruped: 0.5, humanoid: 0.6, human: 0.6, worker: 0.6 };
 export const moverWidth = (m) => WIDTH[m.kind] ?? 0.8;
 // 지게차 포크: 차체 중심에서 앞으로 1.9m(포크 끝), 포크 폭 반 0.42m + 여유 — 차체·포크를 선분(뒤 0.8 ~ 앞 1.45m) + 반폭 0.55m로 본다
-export const FORK = { reach: 1.9, half: 0.55, back: 0.8, front: 1.45 };
+export const FORK = { reach: 1.9, half: 0.55, back: 0.8, front: 1.8 };   // front: 다른 이동체가 보는 차체·포크 선분 앞끝 — 포크 끝 모서리(1.9m · ±0.42m)까지 반폭 0.55m 안에 들도록 (1.45면 끝 모서리가 빠져 옆에서 걸어 들어온다)
 
 // 이동체(AGV·지게차·정비 인력/로봇·작업자) — 단계(step) 목록을 순서대로 실행
 export class Mover {
@@ -296,6 +297,9 @@ export class Mover {
         if (onDock(flip)) return true;
         pts = flip;
       }
+      // 비켜선 뒤 원래 길(다음 점)로 돌아가는 직선이 남의 충전 도크를 지나면 꺾는 점(ㄱ자) 하나를 더 넣어 도크를 비켜 간다
+      const last = pts[pts.length - 1], next = this.path[0];
+      if (next && this.segDock?.(last, next, this)) { const c = [{ x: next.x, z: last.z }, { x: last.x, z: next.z }].find((c) => !this.segDock(last, c, this) && !this.segDock(c, next, this)); if (c) pts = [...pts, c]; }
       this.path.unshift(...pts.map((p) => ({ ...p, detour: true }))); this.detourPts += pts.length; this.blockT = 0; return false;
     };
     // 진로 이벤트로 멈춰 기다리는 상대는 비켜서지 않으므로 마주침·교차 양보를 기다리지 않고 아래의 정지 장애물 처리(돌아가기·목적지 옆 정지)로 넘긴다
@@ -481,8 +485,9 @@ export class Simulation {
     this.loc = { ...LOC, SRC: localLoc(this.stations[0].def, 0, 4.2, '투입구'), SINK: localLoc(this.stations[this.stations.length - 1].def, 0, isZone(this.line) ? 5.4 : 4.2, '완제품 적재장') };
     // 출하 지게차 상차 위치: 구분 적재장 앞쪽(도어트림 구역)·뒤쪽(e-axle 구역)
     const sinkDef = this.stations[this.stations.length - 1].def;
-    this.loc.PICK_DT = { ...this.loc.SINK, name: isZone(this.line) ? '도어트림 적재 구역' : '완제품 적재장' };
-    this.loc.PICK_EA = localLoc(sinkDef, 0, -5.4, 'e-axle 적재 구역');
+    // 구분 적재장 팔레트(4열 × 2줄, z ±1.85 ~ ±3.45) 바깥 4.3m에서 포크(앞 0.75 ~ 1.9m)를 팔레트 밑으로 넣는다
+    this.loc.PICK_DT = isZone(this.line) ? localLoc(sinkDef, 0, 4.3, '도어트림 적재 구역') : { ...this.loc.SINK, name: '완제품 적재장' };
+    this.loc.PICK_EA = localLoc(sinkDef, 0, -4.3, 'e-axle 적재 구역');
 
     this.vehicles = [];
     for (let i = 0; i < m.vehicles; i++) {
@@ -817,7 +822,7 @@ export class Simulation {
     });
     for (const st of this.processing) {
       const c = st.item?.carrier; if (!c) continue;
-      const k = Math.min(1, st.itemT / this.entryTime);   // 입구 → 셀 중앙 진입 (화면과 같은 시간)
+      const k = this.entryK(st);   // 입구 → 셀 중앙 진입 (화면과 같은 시간)
       const from = st.itemFrom ?? toWorld(st.def, -2, 0);
       const p = { x: from.x + (st.x - from.x) * k, z: from.z + (st.z - from.z) * k };
       const dir = toWorld(st.def, 1, 0);
@@ -901,12 +906,19 @@ export class Simulation {
   emit(type, data) { if (!this.quiet) this.events.push({ type, ...data }); }
 
   // ── 컨베이어 ─────────────────────────────
+  // 셀 진입 진행률 (0 → 1): 입구(들어온 경로 끝)에서 셀 중앙까지 — 2m보다 먼 입구(포장셀 합류 대기 자리 4m)는 그만큼 오래 걸려 라인 속도로 들어간다
+  entryK(st) { const f = st.itemFrom, d = f ? Math.hypot(st.x - f.x, st.z - f.z) : 2; return Math.min(1, (st.itemT ?? 0) / (this.entryTime * Math.max(1, d / 2))); }
   hasSpace(c) { return !c.items.length || c.items[c.items.length - 1].s >= c.spacing; }
   frontReady(c) { return c.items.length && c.items[0].s >= c.len - 1e-6; }
   updateConveyor(c, dt) {
     const it = c.items, hz = this.useAMR && this.openHazards().length;
     for (let i = 0; i < it.length; i++) {
       let lim = i === 0 ? c.len : it[i - 1].s - c.spacing;
+      // 맨 앞 AMR: 앞 AMR이 셀 안으로 다 들어가기 전(진입 중 정비·고장으로 멈춤 등)에는 그 AMR과 간격을 둔다 — 경로 끝까지 오면 입구에서 겹친다
+      if (i === 0 && this.useAMR && c.to.item && c.to.itemFrom === c.path[c.path.length - 1]) {
+        const st = c.to, d = this.entryK(st) * Math.hypot(st.x - st.itemFrom.x, st.z - st.itemFrom.z);
+        if (d < c.spacing) lim = c.len - (c.spacing - d);
+      }
       // 운반 AMR(라인 위 고정 경로): 앞 2.5m에 현장 이벤트가 있으면 그 앞에서 정지 — 해결되면 이어서 간다 (처음 마주친 AMR이 상위 보고)
       if (hz) {
         const who = it[i].item.carrier?.id ?? `대상물 #${it[i].item.id}`;
@@ -1271,7 +1283,8 @@ export class Simulation {
     if (st.parts === 0 && !st.item) { st.state = 'NOPARTS'; st.c.starved += dt; st.starvedFor += dt; st.ema += (0 - st.ema) * Math.min(1, dt / 90); return; }
     let inC = null;
     // AMR 운반: 앞서 나간 AMR이 셀 중앙에서 충분히(AMR 간격 이상) 빠져나간 뒤에 다음 AMR을 받는다
-    const cleared = !this.useAMR || Object.values(st.outs).every((c) => !c.items.length || c.items[c.items.length - 1].s >= c.spacing + 0.4);
+    // 컨베이어(레거시): 다음 대상물이 셀 중앙까지 들어오는(entryTime) 동안 나간 대상물이 간격만큼 멀어지도록 — 바로 받으면 셀 출구에서 둘이 겹친다
+    const cleared = Object.values(st.outs).every((c) => !c.items.length || c.items[c.items.length - 1].s >= c.spacing + (this.useAMR ? 0.4 : -c.speed * this.entryTime));
     const cycleStop = st.cmd?.hold === 'cycle';   // 사이클 정지: 하던 작업만 마치고 새 작업은 받지 않는다
     if (!st.item && cleared && !cycleStop) for (const c of st.ins) if (this.frontReady(c) && (!inC || c.items[0].item.id < inC.items[0].item.id)) inC = c;
     if (inC) {
@@ -1280,7 +1293,12 @@ export class Simulation {
       st.item = e.item; st.progress = 0; st.done = false; st.itemT = 0;
       this.gateDecide(st);
       this.trace?.enter(st, st.item);   // 제품 계보: 셀 투입 순간 설비·로봇·AMR·환경
-      const base = st.def.cycle * m.cycleMul * st.speedMul * (this.vla?.cycleFactor(st) ?? 1) * (this.trace?.cycleFactor(st) ?? 1);   // 배포된 VLA 모델 버전만큼 사이클 단축 · 환경 인터록 정책(공정 보상)
+      // 체결·압입 셀: 로봇마다 이번 대상물에 체결할 점 수(2~4, 대상물 번호로 정함 — 난수 흐름을 바꾸지 않는다) · 사이클은 가장 많은 로봇 기준
+      const F = st.def.fasten;
+      const seed = Math.abs(Number(String(st.item.id).replace(/\D/g, '')) || 0), R = F ? F.max - F.min + 1 : 1;
+      st.fastenPts = F && !st.item.scrap ? Array.from({ length: Math.max(1, st.def.robot?.count ?? 1) }, (_, i) => F.min + (seed * 7 + i * 2) % R) : null;
+      const nominal = st.fastenPts ? F.setup + Math.max(...st.fastenPts) * F.per + F.post : st.def.cycle;
+      const base = nominal * m.cycleMul * st.speedMul * (this.vla?.cycleFactor(st) ?? 1) * (this.trace?.cycleFactor(st) ?? 1);   // 배포된 VLA 모델 버전만큼 사이클 단축 · 환경 인터록 정책(공정 보상)
       st.cycleTime = st.item.scrap ? 0.5 : Math.max(base * 0.6, base * (1 + m.cycleVar * gauss(this.rand)));
     }
     if (!st.item && cycleStop) { st.state = 'CSTOP'; st.c.stop = (st.c.stop ?? 0) + dt; }

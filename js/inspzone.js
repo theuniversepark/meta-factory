@@ -131,10 +131,11 @@ const OI_PTS = (() => {
 })();
 const OI_SEQ = [[0, 'home'], [0.03, 'over'], [0.05, 'amr'], [0.07, 'over'], [0.1, 'table'], [0.13, 'home'], [0.86, 'home'], [0.89, 'table'], [0.92, 'over'], [0.95, 'amr'], [0.98, 'over'], [1, 'home']];
 function oiPose(r, p) {
-  const J = (r.oiJ ??= Object.fromEntries(Object.entries(OI_PTS).map(([k, [x, y, z]]) => [k, armIK(r.scale ?? 1, x, y, z)])));
+  const J = (r.oiJ ??= Object.fromEntries(Object.entries(OI_PTS).map(([k, [x, y, z]]) => [k, r.arm.native ? r.arm.ik(x, y, z) : armIK(r.scale ?? 1, x, y, z)])));
   let i = 0; while (i < OI_SEQ.length - 2 && p >= OI_SEQ[i + 1][0]) i++;
   const [p0, a] = OI_SEQ[i], [p1, b] = OI_SEQ[i + 1], k0 = Math.min(1, Math.max(0, (p - p0) / Math.max(1e-6, p1 - p0))), k = k0 * k0 * (3 - 2 * k0);
   const A = J[a], B = J[b]; let dy = B[0] - A[0]; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+  if (r.arm.native) { r.arm.pose(...A.map((v, j) => v + (B[j] - v) * k)); return; }
   r.arm.pose(A[0] + dy * k, A[1] + (B[1] - A[1]) * k, A[2] + (B[2] - A[2]) * k, A[3] + (B[3] - A[3]) * k, 0, 0);
 }
 
@@ -285,7 +286,8 @@ export class InspZone {
       const n = c.def.robots ?? 0;
       if (legacy && (n || c.def.type === 'dock' || c.def.type === 'judge')) { const w = makeWorker(); put(w, -0.6, 0, -1.9, c.workersG); c.rb.textContent = '👷 검사원×1'; continue; }
       if (!n) { c.rb.textContent = c.def.type === 'judge' ? '🧠 AI 판정 에이전트' : c.def.type === 'dock' ? '📡 ID 리더·도킹' : ''; continue; }
-      const slots = c.def.type === 'oins' ? [[OINS.robot.x, OINS.robot.z, 0]] : [[-0.6, -1.75, 0], [-0.6, 1.75, PI]];
+      // 마주 보는 두 로봇은 x를 0.7m 엇갈려 둔다 — 같은 x면 대기·작업 자세에서 끝단 센서(스캐너·카메라 헤드)가 셀 가운데에서 서로 맞닿는다
+      const slots = c.def.type === 'oins' ? [[OINS.robot.x, OINS.robot.z, 0]] : [[-0.95, -1.75, 0], [-0.25, 1.75, PI]];
       for (let i = 0; i < n; i++) {
         const r = makeRobot('articulated', MAT.orange), [x, z, yaw] = slots[i];
         put(r.root, x, 0.15, z, c.robotsG); r.root.rotation.y = yaw; r.phase = i * 1.7;
@@ -293,7 +295,7 @@ export class InspZone {
           const head = put(box(0.22, 0.12, 0.16, c.def.type === 'atos' || (c.def.type === 'scan' && i === 0) ? std(0x2b6cb0) : MAT.dark), 0, 0.06, 0, r.tip);
           put(cyl(0.035, 0.035, 0.03, emis(c.def.type === 'atos' ? 0x5aa0ff : 0x37e8ff, 2), 10), 0, 0.075, 0, head);
         }
-        r.wristCam = modeKey === 'dark';   // 피지컬AI: 손목 카메라 (로봇 비전 관제 디스플레이 영상)
+        r.wristCam = !!r.wristCameraAnchor || modeKey === 'dark';   // 피지컬AI: 손목 카메라 (로봇 비전 관제 디스플레이 영상)
         if (c.def.type === 'oins') r.anim = (busy, t, p) => { if (busy) oiPose(r, p); else if (c.state !== 'BUSY') oiPose(r, 0); };
         const uid = `${INSP.uidp}-RB-${c.id}-${i + 1}`, sp = idPlate(uid); sp.position.set(0, 2.35, 0); r.root.add(sp); sp.visible = this.labelsOn; c.plates.push(sp);
         r.root.traverse((o) => { o.userData.stationId = this.sid(c); o.userData.robotIdx = i; });   // 클릭 → 셀 로봇 텔레메트리 (factory.js pick → ExtraZones.cellRobot)

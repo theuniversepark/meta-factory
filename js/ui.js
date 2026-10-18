@@ -2,6 +2,7 @@
 import { Simulation, MODES, ST_LABEL, RAW_CAP, FG_CAP } from './sim.js';
 import { STATION_TYPES, ROBOT_KINDS } from './line.js';
 import { FactoryAgent } from './agent.js';
+import { MACHINE_SPECS, MACHINE_BY_TYPE } from './machine-specs.js';
 import { zoneCellRobots } from './zonedefs.js';
 
 const $ = (id) => document.getElementById(id);
@@ -20,6 +21,12 @@ function fmtClock(t) {
   const s = Math.floor(t) + 8 * 3600;
   const d = Math.floor(s / 86400), h = Math.floor(s / 3600) % 24, m = Math.floor(s / 60) % 60, sec = s % 60;
   return `${d ? `D+${d} ` : ''}${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
+function machineInfo(type) {
+  const s = MACHINE_SPECS[MACHINE_BY_TYPE[type]]; if (!s) return '';
+  const facts = [s.travelMm ? `축 이동 ${s.travelMm.join(' × ')} mm` : '', s.spindleRpm ? `${s.spindleRpm.toLocaleString()} rpm` : '', s.chuckDiameterMm ? `척 Ø${s.chuckDiameterMm} mm` : '', s.platterDiameterMm ? `회전 테이블 Ø${s.platterDiameterMm} mm` : '', s.forceKn ? `${s.forceKn} kN${s.continuousForceKn ? ` (연속 ${s.continuousForceKn} kN)` : ''}` : '', s.strokeMm ? `스트로크 ${s.strokeMm} mm` : ''].filter(Boolean).join(' · ');
+  return `<div class="note"><b>참조 설비: ${s.manufacturer} ${s.model}</b><br>${facts || '모노블록 유압 프레스 · 별도 헤밍 금형 통합 개념'}<br><a href="${s.source}" target="_blank" rel="noopener noreferrer">제조사 제원</a>${type === 'hem' ? ' · 외형·금형·스트로크는 가상 구성' : ''}</div>`;
 }
 
 export class UI {
@@ -284,6 +291,7 @@ export class UI {
     const rb = st.def.robot.count ? `${ROBOT_KINDS[st.def.robot.kind].label} ${st.def.robot.count}대${sim.mode.key === 'traditional' ? ' → 수작업' : ''}` : '로봇 없음';
     el.innerHTML = `<h3>${esc(st.name)}<button data-act="close">✕</button></h3>
       <div class="task">${STATION_TYPES[st.type].label} · ${rb}<br>하는 일: ${esc(st.def.task)}</div>
+      ${machineInfo(st.type)}
       <div class="bar"><i style="width:${st.health}%;background:${col}"></i></div>
       <div class="grid">
         <span>상태</span><b>${ST_LABEL[st.state]}${st.speedMul < 1 ? ' · 고속' : ''}${st.powerSave ? ' · 절전' : ''}</b>
@@ -359,6 +367,7 @@ export class UI {
     const uids = cell?.robotUids?.length ? cell.robotUids.join(' · ') : '-';
     el.innerHTML = `<h3>${esc(st.name)}<button data-act="close">✕</button></h3>
       <div class="task">${esc(Z?.name ?? '')} · ${esc(rb)}<br>하는 일: ${esc(d.use ?? '')}</div>
+      ${machineInfo(d.type)}
       <div class="bar"><i style="width:${st.health}%;background:${col}"></i></div>
       <div class="grid">
         <span>상태</span><b>${ST_LABEL[state] ?? state}</b>

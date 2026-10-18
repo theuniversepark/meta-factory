@@ -111,12 +111,14 @@ export const AMMR = { rackZ: 3.75, pickZ: 2.95, slotZ: 1.9 };
 // AMMR 작업 사이클(진행률) 안의 부품 선반 왕복 구간 끝: 회전 → 주행 → 피킹 → 회전 → 복귀, 이후 작업 (place까지 부품을 들고 있음)
 export const AMMR_FETCH = { turnOut: 0.06, driveOut: 0.14, pick: 0.24, turnIn: 0.3, driveIn: 0.38, place: 0.5 };   // 구분 적재장의 제품별 구역 용량
 
+// fasten: 체결·압입 셀 — AMR이 들어오면 로봇마다 2~4점을 체결(압입)한다. 사이클 = 준비(부품 집기·정렬) + 로봇 중 가장 많은 점 수 × 점당 시간 + 후공정(전수 토크 판정)
+// 점당 시간 = 부품 선반 왕복·집기(부품은 한 번에 1개) + 체결: 스크류·볼트 5.5초(왕복 2.5 + 착좌·런다운·토크 확인 3.0) · 클립 압입 4.5초 · 베어링·로터 압입 5.0초 — 로봇들은 각자 자기 점을 동시에 체결한다
 const ZONE_RECIPES = [
   { id: 'SORT', robot: { kind: 'ammr', count: 2 }, cycle: 7, task: 'AMMR 양팔로 옆 부품 선반에서 부품을 가져와 판별·분류·키팅' },
-  { id: 'DT_ASSY', robot: { kind: 'cobot', count: 4 }, cycle: 14, task: '양쪽 협동로봇이 패널에 암레스트·스피커그릴·스위치 조립, 클립 압입' },
-  { id: 'DT_FAST', robot: { kind: 'cobot', count: 2 }, cycle: 14, task: '스크류 자동 체결, 토크·각도 전수 판정' },
-  { id: 'EA_ASSY', robot: { kind: 'cobot', count: 4 }, cycle: 16, task: '양쪽 협동로봇이 베어링 압입·로터·감속기어 삽입, 하우징 결합' },
-  { id: 'EA_FAST', robot: { kind: 'articulated', count: 1 }, cycle: 12, task: '하우징 볼트 다축 너트러너 체결, 토크·각도 전수 판정' },
+  { id: 'DT_ASSY', robot: { kind: 'cobot', count: 4 }, cycle: 19.5, fasten: { setup: 6, per: 4.5, post: 0, min: 2, max: 4, kind: 'press' }, task: '양쪽 협동로봇이 패널에 암레스트·스피커그릴·스위치 조립, 클립 압입 (로봇당 2~4점)' },
+  { id: 'DT_FAST', robot: { kind: 'cobot', count: 2 }, cycle: 21.5, fasten: { setup: 2, per: 5.5, post: 3, min: 2, max: 4, kind: 'screw' }, task: '스크류 자동 체결 (로봇당 2~4점), 토크·각도 전수 판정' },
+  { id: 'EA_ASSY', robot: { kind: 'cobot', count: 4 }, cycle: 22, fasten: { setup: 7, per: 5.0, post: 0, min: 2, max: 4, kind: 'press' }, task: '양쪽 협동로봇이 베어링 압입·로터·감속기어 삽입, 하우징 결합 (로봇당 2~4점)' },
+  { id: 'EA_FAST', robot: { kind: 'articulated', count: 1 }, cycle: 26.5, fasten: { setup: 2, per: 5.5, post: 8, min: 2, max: 4, kind: 'screw' }, task: '로봇 볼트 체결(2~4점) 뒤 다축 너트러너 하우징 볼트 체결, 토크·각도 전수 판정' },
   { id: 'PACK', robot: { kind: 'ammr', count: 2 }, cycle: 8, task: 'AMMR 양팔로 옆 선반에서 포장재를 가져와 제품별 포장·라벨' },
 ];
 
@@ -159,6 +161,7 @@ export const ammrAllowed = (modeKey) => AMMR_MODES.includes(modeKey);
 export const robotForMode = (robot, modeKey) => (ROBOT_KINDS[robot?.kind]?.darkOnly && !ammrAllowed(modeKey) ? { ...robot, kind: 'cobot' } : robot);   // 피지컬AI 전용 로봇(AMMR·휴머노이드)
 const taskForMode = (s, modeKey) => (ROBOT_KINDS[s.robot?.kind]?.darkOnly && !ammrAllowed(modeKey) ? String(s.task ?? '').replace(/AMMR\s*양팔로\s*/, '양쪽 협동로봇이 ').replace(/옆\s*(부품\s*)?선반에서\s*\S+\s*가져와\s*/, '') : s.task);
 export function effCycle(s, modeKey = 'smart') {
+  if (s.fasten) return s.fasten.setup + ((s.fasten.min + s.fasten.max) / 2) * s.fasten.per + s.fasten.post;   // 체결 셀: 로봇마다 자기 점을 동시에 — 평균 점 수 기준 (실제 사이클은 대상물마다 sim.js fastenCycle)
   const n = Math.max(1, s.robot?.count ?? 0);
   const kind = robotForMode(s.robot, modeKey)?.kind ?? 'none';
   const kf = modeKey === 'traditional' || kind === 'none' || !(s.robot?.count > 0) ? 1 : ROBOT_KINDS[kind].factor;
@@ -299,13 +302,16 @@ export function conveyorPath(a, b) {
   return [{ x: a.x, z: az }, { x: turnX, z: az }, { x: turnX, z: bz }, entry];
 }
 // 정밀조립Zone 경로: 셀 중앙 → 셀 출구 → (대각 이동) → 다음 셀 입구. 포장셀로 합류하는 두 줄은
-// 입구 앞에서 좌우로 0.75m 떨어진 별도 대기 차로를 쓴다
+// 입구 앞에서 좌우로 0.75m 떨어진 별도 대기 차로를 쓴다 — 대기 자리는 셀 중심에서 4m 앞(게이트 x −1.75보다 2.25m 앞):
+// 대기 중인 AMR이 게이트 기둥(z ±1.0) 밑에 서지 않고, 대기 자리 → 셀 중앙으로 비스듬히 들어갈 때도 기둥 안쪽으로 지나며(게이트에서 z ±0.33)
+// 반대쪽 차로에서 기다리는 AMR과도 겹치지 않는다
 export function zonePath(a, b) {
   const az = a.z ?? 0, bz = b.z ?? 0;
   const merge = Math.abs(az - bz) > 0.01 && Math.abs(bz) < 0.01;
-  const entry = { x: b.x - 2, z: merge ? Math.sign(az - bz) * 0.75 : bz };
+  const entry = merge ? { x: b.x - 4, z: Math.sign(az - bz) * 0.75 } : { x: b.x - 2, z: bz };
   if (Math.abs(az - entry.z) < 0.01) return [{ x: a.x, z: az }, entry];
-  return [{ x: a.x, z: az }, { x: a.x + 2.3, z: az }, { x: entry.x - 3, z: entry.z }, entry];
+  // 합류 차로는 대기 자리 1m 앞에서 올라탄다 — 3m 앞이면 셀 출구(a.x + 2.3)에서 내려오는 사선이 가팔라 꺾이는 곳에서 줄 선 AMR끼리 모서리가 겹친다
+  return [{ x: a.x, z: az }, { x: a.x + 2.3, z: az }, { x: merge ? Math.max(a.x + 2.3, entry.x - 1) : entry.x - 3, z: entry.z }, entry];
 }
 export function linkPath(line, a, b) { return isZone(line) ? zonePath(a, b) : conveyorPath(a, b); }
 
@@ -339,7 +345,7 @@ export function buildStationDefs(line, modeKey) {
         : manual ? `${s.name.replace(/^(협동로봇|로봇|AI|자동)\s*/, '')} (수작업)` : s.name,
       robot: { ...robotForMode(s.robot, modeKey) }, task: taskForMode(s, modeKey), baseCycle: s.cycle, cycle: effCycle(s, modeKey),
       wear: T.wear, idleKW: T.idleKW, busyKW: T.busyKW, effect: T.effect, inspect: T.effect === 'inspect' || !!T.verify,
-      defectMul: T.defectMul ?? 1, share: isZone(line) ? zoneShare(line, s.id) : 1, product: ZONE_CELLS[s.id] && isZone(line) ? ZONE_CELLS[s.id].product : null,
+      fasten: s.fasten ?? null, defectMul: T.defectMul ?? 1, share: isZone(line) ? zoneShare(line, s.id) : 1, product: ZONE_CELLS[s.id] && isZone(line) ? ZONE_CELLS[s.id].product : null,
     });
   });
   defs.push({ id: 'SINK', type: 'sink', ...nodes[n + 1], name: isZone(line) ? '구분 적재장 (제품별)' : '완제품 적재' });

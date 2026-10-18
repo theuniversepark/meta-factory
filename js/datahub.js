@@ -5,6 +5,8 @@ import { COMMANDS, CMD_STATE } from './commands.js';
 import { ST_LABEL } from './sim.js';
 import { ROBOT_KINDS, STATION_TYPES, ZONE_MIXES, isZone } from './line.js';
 import { buildEnvironment, buildRobotEnvironment, detailCSV, toXML, toTurtle, toCSV, toAutomationML, aasId, smId, SEM, AAS_RECENT, addVideos, videoLinkFiles } from './aas.js';
+import { machineTech } from './machine-specs.js';
+import { robotSpecTech } from './robot-specs.js';
 import { buildAASX } from './aasx.js';
 
 const DEG = 180 / Math.PI;
@@ -50,7 +52,7 @@ function buildAssets(sim, view, xzones) {
     const d = st.def, T = STATION_TYPES[st.type];
     assets.push({
       id: st.id, kind: 'Station', name: st.name, nameplate: plate(st.id, `${T.label} 셀`),
-      tech: { EquipmentId: st.uid ?? st.id, StationType: T.label, Robot: d.robot.count ? `${ROBOT_KINDS[d.robot.kind].label} ${d.robot.count}대` : '없음', BaseCycleTime: d.baseCycle, Task: d.task, ...(d.product ? { ProductLine: d.product } : {}) },
+      tech: { EquipmentId: st.uid ?? st.id, StationType: T.label, Robot: d.robot.count ? `${ROBOT_KINDS[d.robot.kind].label} ${d.robot.count}대` : '없음', BaseCycleTime: d.baseCycle, ...machineTech(st.type), Task: d.task, ...(d.product ? { ProductLine: d.product } : {}) },
       fields: [
         f('State', '상태', 'string', null, () => st.state),
         f('StateText', '상태(한글)', 'string', null, () => ST_LABEL[st.state] ?? st.state),
@@ -88,7 +90,7 @@ function buildAssets(sim, view, xzones) {
         const tcp2 = () => { const w = r.tip2.getWorldPosition(r.tip2.position.clone()), b = r.root.getWorldPosition(r.root.position.clone()); return { x: (w.x - b.x) * 1000, y: -(w.z - b.z) * 1000, z: (w.y - b.y) * 1000 }; };
         fields.push(f('Tcp2X', '오른팔 TCP X', 'double', 'mm', () => tcp2().x), f('Tcp2Y', '오른팔 TCP Y', 'double', 'mm', () => tcp2().y), f('Tcp2Z', '오른팔 TCP Z', 'double', 'mm', () => tcp2().z));
       }
-      assets.push({ id, kind: 'CellRobot', parent: st.id, name: `${st.name} ${ROBOT_KINDS[r.kind].label} #${i + 1}`, nameplate: plate(id, ROBOT_KINDS[r.kind].label), tech: { EquipmentId: st.robotUids?.[i] ?? id, RobotType: ROBOT_KINDS[r.kind].label, Axes: r.jointDefs.length, Payload: r.payload, Cell: st.id }, fields });
+      assets.push({ id, kind: 'CellRobot', parent: st.id, name: `${st.name} ${ROBOT_KINDS[r.kind].label} #${i + 1}`, nameplate: plate(id, r.spec?.model ?? ROBOT_KINDS[r.kind].label), tech: { EquipmentId: st.robotUids?.[i] ?? id, RobotType: ROBOT_KINDS[r.kind].label, Axes: r.jointDefs.length, Payload: r.payload, ...robotSpecTech(r), Cell: st.id }, fields });
     });
   }
   // 이동 로봇 AAS id: 영문 ID(AMR-01·AGV-1)는 그대로, 한글 이름은 역할 접두어 + 번호 (HUM_MNT_1 등)
@@ -97,7 +99,7 @@ function buildAssets(sim, view, xzones) {
     count[prefix] = (count[prefix] ?? 0) + 1;
     const assetIdStr = /^[A-Za-z0-9-]+$/.test(m.id) ? m.id.replace(/-/g, '_') : `${prefix}_${count[prefix]}`;
     assets.push({
-      id: assetIdStr, kind, mover: m, name: `${m.id} (${label})`, nameplate: plate(assetIdStr, label), tech: { EquipmentId: m.uid ?? m.id, RobotType: label, DisplayName: m.id },
+      id: assetIdStr, kind, mover: m, name: `${m.id} (${label})`, nameplate: plate(assetIdStr, label), tech: { EquipmentId: m.uid ?? m.id, RobotType: label, DisplayName: m.id, ...(kind === 'Quadruped' ? { ReferenceManufacturer: 'Boston Dynamics', ReferenceModel: 'Spot', NominalDimensionsMm: [1100,500,610], MassWithBatteryKg: 33.8, RatedPayloadKg: 14, DegreesOfFreedom: 12, MaximumSpeedMps: 1.6, SpecificationSource: 'https://bostondynamics.com/products/spot/', Representation: '공식 SDK 저해상도 형상·관절 + 추가 검사 카메라' } : {}) },
       fields: [
         f('PositionX', '위치 X', 'double', 'm', () => m.x), f('PositionZ', '위치 Z', 'double', 'm', () => m.z),
         f('Heading', '방위', 'double', 'deg', () => ((m.heading * DEG) % 360 + 360) % 360),
@@ -129,6 +131,17 @@ function buildAssets(sim, view, xzones) {
       fields: [f('ConnectedUEs', '접속 단말', 'int', 'count', () => sim.net.ues.filter((u) => u.serv === i).length), f('UplinkMessages', '업링크 수신', 'int', 'count', () => cs().rx), f('UplinkBytes', '업링크 수신량', 'double', 'byte', () => cs().rxB), f('HandoverIn', '핸드오버 들어옴', 'int', 'count', () => cs().hoIn), f('HandoverOut', '핸드오버 나감', 'int', 'count', () => cs().hoOut)] });
   });
   zoneAssets(assets, sim, xzones, plate);
+  // Palletizer recordings must resolve to the same AAS asset key as cell robots.
+  if (sim.mode.key !== 'traditional') {
+    const robots = [...(view?.stationViews ?? []).flatMap((sv) => Object.values(sv.parts.arms ?? {}).map((a, idx) => ({ ref: { stationId: sv.st.id, idx }, r: a.arm, st: sv.st, robot: sim.sinkRobotUids?.[idx] }))), ...(xzones?.cellRobots() ?? [])];
+    for (const e of robots) {
+      const id = `${e.ref.stationId}_R${e.ref.idx + 1}`, r = e.r;
+      if (assets.some((a) => a.id === id) || !r.spec) continue;
+      const resolve = () => view?.cellRobot(e.ref.stationId, e.ref.idx)?.robot ?? r;
+      const fields = [f('State', '상태', 'string', null, () => e.st.state === 'BUSY' ? 'Operating' : 'Idle'), ...r.jointDefs.map((j, i) => f(`Joint${i + 1}`, j.name, 'double', 'deg', () => resolve().joints()[i] * DEG))];
+      assets.push({ id, kind: 'CellRobot', parent: e.ref.stationId, name: `${e.st.name} ${r.spec.model}`, nameplate: plate(id, r.spec.model), tech: { EquipmentId: e.robot ?? id, RobotType: '6축 다관절 로봇', Axes: r.jointDefs.length, Payload: r.payload, ...robotSpecTech(r) }, fields });
+    }
+  }
   return assets;
 }
 
@@ -160,7 +173,7 @@ function zoneAssets(assets, sim, xzones, plate) {
       const d = cell.def, zc = () => sim.zoneCell(Z.key, cell.id), id = `${pre}_${cell.id}`, R = d.robot;
       assets.push({
         id, kind: 'Station', parent: zid, name: `${code} ${d.label}`, nameplate: plate(id, `${d.label} 셀`),
-        tech: { EquipmentId: zc()?.uid ?? `${code}-${cell.id}`, Zone: code, StationType: d.type, Robot: R[1] ? `${ROBOT_KINDS[R[0]]?.label ?? R[0]} ${R[1]}대${R[2] ? ` (피지컬AI: ${ROBOT_KINDS[R[2]]?.label ?? R[2]} ${R[3]}대)` : ''}` : '없음', BaseCycleTime: d.cycle, Task: d.use, ProductLine: d.product },
+        tech: { EquipmentId: zc()?.uid ?? `${code}-${cell.id}`, Zone: code, StationType: d.type, Robot: R[1] ? `${ROBOT_KINDS[R[0]]?.label ?? R[0]} ${R[1]}대${R[2] ? ` (피지컬AI: ${ROBOT_KINDS[R[2]]?.label ?? R[2]} ${R[3]}대)` : ''}` : '없음', BaseCycleTime: d.cycle, ...machineTech(d.type), Task: d.use, ProductLine: d.product },
         fields: [
           f('State', '상태', 'string', null, () => cell.fault ?? cell.state),
           f('StateText', '상태(한글)', 'string', null, () => ZST[cell.fault ?? cell.state] ?? cell.state),
@@ -183,7 +196,7 @@ function zoneAssets(assets, sim, xzones, plate) {
         const tcp = () => { const r = rb(), w = r.tip.getWorldPosition(r.tip.position.clone()), b = r.root.getWorldPosition(r.root.position.clone()); return { x: (w.x - b.x) * 1000, y: -(w.z - b.z) * 1000, z: (w.y - b.y) * 1000 }; };
         fields.push(f('TcpX', 'TCP X', 'double', 'mm', () => tcp().x), f('TcpY', 'TCP Y', 'double', 'mm', () => tcp().y), f('TcpZ', 'TCP Z', 'double', 'mm', () => tcp().z));
         assets.push({ id: rid, kind: 'CellRobot', parent: id, name: `${code} ${d.label} ${ROBOT_KINDS[r0.kind]?.label ?? r0.kind} #${i + 1}`, nameplate: plate(rid, ROBOT_KINDS[r0.kind]?.label ?? r0.kind),
-          tech: { EquipmentId: cell.robotUids?.[i] ?? rid, RobotType: ROBOT_KINDS[r0.kind]?.label ?? r0.kind, Axes: r0.jointDefs.length, Payload: r0.payload, Cell: `${code}-${cell.id}`, Zone: code }, fields });
+          tech: { EquipmentId: cell.robotUids?.[i] ?? rid, RobotType: ROBOT_KINDS[r0.kind]?.label ?? r0.kind, Axes: r0.jointDefs.length, Payload: r0.payload, ...robotSpecTech(r0), Cell: `${code}-${cell.id}`, Zone: code }, fields });
       });
     }
     // Zone 운반 AMR (위치는 Zone 원점 기준 → 공장 좌표로)
@@ -225,7 +238,7 @@ function inspAssets(assets, sim, I, plate) {
     const d = cell.def, id = `${pre}_${cell.id}`;
     assets.push({
       id, kind: 'Station', parent: zid, name: `${code} ${d.label}`, nameplate: plate(id, d.label),
-      tech: { EquipmentId: `${pre}-${cell.id}`, Zone: code, StationType: d.type, Robot: d.robots ? `6축 다관절 로봇 ${d.robots}대` : '없음', BaseCycleTime: d.cycle, Task: d.use },
+      tech: { EquipmentId: `${pre}-${cell.id}`, Zone: code, StationType: d.type, Robot: d.robots ? `6축 다관절 로봇 ${d.robots}대` : '없음', BaseCycleTime: d.cycle, ...machineTech(d.type), Task: d.use },
       fields: [
         f('State', '상태', 'string', null, () => (I.halted ? 'ESTOP' : cell.fault ?? cell.state)), f('StateText', '상태(한글)', 'string', null, () => ({ DOWN: '고장', MAINT: '정비 중' })[cell.fault] ?? LAB[cell.state] ?? cell.state),
         f('Health', '건강도', 'double', '%', () => sim.zoneCell('insp', cell.id)?.health ?? null),
@@ -245,7 +258,7 @@ function inspAssets(assets, sim, I, plate) {
       const tcp = () => { const r = rb(); if (!r) return { x: null, y: null, z: null }; const w = r.tip.getWorldPosition(r.tip.position.clone()), b = r.root.getWorldPosition(r.root.position.clone()); return { x: (w.x - b.x) * 1000, y: -(w.z - b.z) * 1000, z: (w.y - b.y) * 1000 }; };
       fields.push(f('TcpX', 'TCP X', 'double', 'mm', () => tcp().x), f('TcpY', 'TCP Y', 'double', 'mm', () => tcp().y), f('TcpZ', 'TCP Z', 'double', 'mm', () => tcp().z));
       assets.push({ id: rid, kind: 'CellRobot', parent: id, name: `${code} ${d.label} 6축 다관절 로봇 #${i + 1}`, nameplate: plate(rid, '6축 다관절 로봇'),
-        tech: { EquipmentId: `${pre}-RB-${cell.id}-${i + 1}`, RobotType: '6축 다관절 로봇', Axes: 6, Payload: 20, Cell: `${pre}-${cell.id}`, Zone: code }, fields });
+        tech: { EquipmentId: `${pre}-RB-${cell.id}-${i + 1}`, RobotType: '6축 다관절 로봇', Axes: 6, Payload: cell.robots[i]?.payload ?? 60, ...robotSpecTech(cell.robots[i] ?? {}), Cell: `${pre}-${cell.id}`, Zone: code }, fields });
     });
   }
   I.carriers.forEach((c0, i) => {

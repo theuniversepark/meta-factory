@@ -124,7 +124,7 @@ export function planForklift(sim, f) {
   const pick = zfg ? ZONE_FG[product].pick : product === 'eaxle' ? sim.loc.PICK_EA : sim.loc.PICK_DT;
   // 도크 앞(벽에서 2.6m)에서 트럭 쪽을 보고 서서 포크를 적재함 높이로 올린 뒤 들어가고, 내려놓으면 포크를 넣은 채 반듯이 후진해 나온 뒤 돈다
   const bx = t.bay, dock = { ...shipToWorld(bx, YARD.wallZ + 2.6), aisle: 'BB', name: `출하 도크 ${yard.bayNo(bx)}` };
-  const inside = { ...shipToWorld(bx, YARD.wallZ + 0.7), aisle: 'BB', name: `${t.id} 적재함` };   // 도크 레벨러 끝에서 포크를 적재함에 넣어 내려놓는다
+  const inside = { ...shipToWorld(bx, YARD.wallZ + 0.95), aisle: 'BB', name: `${t.id} 적재함` };   // 마스트(차체 앞 0.81m)·포크 캐리지는 적재함 밖(후방 범퍼 앞)에 두고 포크만 넣는다   // 도크 레벨러 끝에서 포크를 적재함에 넣어 내려놓는다
   const pName = FG_LABEL[product] ?? '완제품';
   f.setTask(`${pName} 출하 → ${t.id}`, [
     { go: pick },

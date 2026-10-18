@@ -281,7 +281,7 @@ def build_drone():
     sphere('Strobe', 0.035, (0, 0.24, 0.13), mat('STROBE', srgb('#ffffff'), 0, 0.3, emit=srgb('#ffffff'), strength=0.5), parent=R, seg=12)
     export(R, 'drone')
 
-# ── 휴머노이드 (키 약 1.98m) — Boston Dynamics 전동식 Atlas의 분위기(회색 외장·짙은 관절·원형 얼굴판 링 조명)를 참고한 독자 디자인
+# ── 휴머노이드 (키 약 1.98m) — Boston Dynamics 전동식 Atlas 시각화 모델 (원형 헤드·회색 외장·검정 액추에이터, 공식 CAD 아님)
 # 관절 = 빈 객체 (코드가 rotation.x로 움직인다): Body(걸음 상하) · Waist(허리) · Head · Shoulder_L/R · Elbow_L/R · Hip_L/R · Knee_L/R
 # 재질 VISOR(얼굴 링 조명 — 코드가 상태색으로 바꿈) · ACC(가슴 상태등 — 역할색)
 def taper(name, r_bot, r_top, depth, loc, m, parent, verts=40, bevel=0.0):
@@ -293,7 +293,7 @@ def build_humanoid():
     panel = mat('AtlasPanel', srgb('#4a5058'), 0.3, 0.45)
     visor = mat('VISOR', srgb('#37e8ff'), 0.0, 0.2, emit=srgb('#37e8ff'), strength=2.5)
     acc = mat('ACC', srgb('#ff8a2a'), 0.0, 0.3, emit=srgb('#ff8a2a'), strength=1.5)
-    R = empty('Humanoid'); B = empty('Body', (0, 0, 0), R)
+    R = empty('Atlas'); R['manufacturer'] = 'Boston Dynamics'; R['model'] = 'Atlas Electric'; R['representation'] = 'Custom visualization, not official CAD'; B = empty('Body', (0, 0, 0), R)
     # 골반 · 고관절 액추에이터
     box('Pelvis', (0.3, 0.18, 0.16), (0, 0, 0.98), joint, bevel=0.045, parent=B)
     box('PelvisCover', (0.24, 0.02, 0.1), (0, -0.095, 0.98), panel, bevel=0.008, parent=B)
@@ -343,9 +343,17 @@ def build_humanoid():
         for f, y in enumerate((-0.03, -0.01, 0.01, 0.03)):
             box(f'Finger_{side}_{f}', (0.022, 0.017, 0.065), (0, y, -0.395), joint, bevel=0.006, parent=E)
         box(f'Thumb_{side}', (0.02, 0.02, 0.05), (-sd * 0.025, -0.045, -0.33), joint, bevel=0.006, parent=E, rot=(0.4, 0, 0))
+    # Atlas: 모듈식 가슴 외장·원형 센서·관절 링·손가락 그리퍼
+    for sd, side in ((-1, 'L'), (1, 'R')):
+        box(f'ChestArmor_{side}', (0.115, 0.035, 0.22), (sd * 0.13, -0.115, 0.37), shell, bevel=0.025, parent=W)
+        cyl(f'FaceSensor_{side}', 0.018, 0.012, (sd * 0.044, -0.074, 0.012), MATS['Glass'], axis='Y', parent=Hd, verts=32)
+        for part in ('Shoulder', 'Elbow', 'Knee'):
+            P = bpy.data.objects[f'{part}_{side}']
+            cyl(f'{part}DriveRing_{side}', 0.052 if part != 'Shoulder' else 0.065, 0.012,
+                (sd * (0.061 if part == 'Shoulder' else 0.07), 0, 0), MATS['Steel'], axis='X', parent=P, verts=40)
     export(R, 'humanoid')
 
-# ── 사족보행 로봇 (몸통 약 0.95m) — Boston Dynamics Spot의 분위기(노란 상판 외장 · 짙은 몸체 · 앞 스테레오 카메라 · 뒤로 꺾인 무릎)를 참고한 독자 디자인
+# ── 사족보행 로봇 (몸통 약 0.95m) — Boston Dynamics Spot 시각화 모델 (노란 외장·스테레오 카메라·굴곡 다리, 점검 센서 탑재, 공식 CAD 아님)
 # 관절 = 빈 객체: Body(높이 0.55m) · Hip_0~3 · Knee_0~3 (코드가 rotation.x로 대각 보행) · Cam(센서 마스트 머리 — 코드가 좌우로 돌림)
 # 다리 순서 = 3D 모델: 0 (−x 앞) · 1 (+x 앞) · 2 (−x 뒤) · 3 (+x 뒤). 정강이는 코드의 기본 무릎 각(0.15rad)에서 발이 바닥에 닿도록 놓았다
 def build_quadruped():
@@ -353,7 +361,7 @@ def build_quadruped():
     dark = mat('SpotDark', srgb('#24282e'), 0.4, 0.42)
     leg = mat('SpotLeg', srgb('#1a1d21'), 0.45, 0.4)
     thermal = mat('THERMAL', srgb('#ff6a3d'), 0.0, 0.3, emit=srgb('#ff6a3d'), strength=2.0)
-    R = empty('Quadruped'); B = empty('Body', (0, 0, 0.55), R)
+    R = empty('Spot'); R['manufacturer'] = 'Boston Dynamics'; R['model'] = 'Spot'; R['representation'] = 'Custom visualization with inspection payload, not official CAD'; B = empty('Body', (0, 0, 0.55), R)
     box('Core', (0.32, 0.86, 0.17), (0, 0, -0.01), dark, bevel=0.04, parent=B)
     box('TopShell', (0.37, 0.8, 0.07), (0, 0, 0.075), yel, bevel=0.03, parent=B)
     for sd in (-1, 1):
@@ -382,6 +390,15 @@ def build_quadruped():
         cyl(f'KneeAct_{i}', 0.04, 0.08, (0, 0, 0), dark, axis='X', parent=K, verts=32, bevel=0.008)
         box(f'Shin_{i}', (0.045, 0.05, 0.26), (0, -0.0865, -0.0915), leg, bevel=0.018, parent=K, rot=(-0.757, 0, 0))
         sphere(f'Foot_{i}', 0.036, (0, -0.173, -0.183), MATS['Rubber'], parent=K, seg=24)
+    # Spot: 분리된 노란 어깨 커버·카메라 렌즈·탈착 배터리·상부 페이로드 레일
+    box('BatteryPack', (0.255, 0.37, 0.035), (0, 0.085, 0.122), yel, bevel=0.018, parent=B)
+    box('BatteryLatch', (0.08, 0.025, 0.012), (0, 0.245, 0.145), dark, bevel=0.004, parent=B)
+    for sd in (-1, 1):
+        for yy in (-0.34, 0.34):
+            box(f'SpotShoulder_{sd}_{yy}', (0.075, 0.18, 0.14), (sd * 0.18, yy, 0.02), yel, bevel=0.035, parent=B)
+        for yy in (-0.12, 0.30):
+            cyl(f'SideLens_{sd}_{yy}', 0.016, 0.012, (sd * 0.196, yy, 0), MATS['Glass'], axis='X', parent=B, verts=24)
+        cyl(f'FrontLens_{sd}', 0.018, 0.012, (sd * 0.065, -0.54, -0.005), MATS['Glass'], axis='Y', parent=B, verts=32)
     export(R, 'quadruped')
 
 # ── 6축 협동로봇 팔 (배율 1 = 3D 모델의 makeArm 치수: 베이스 0.4 · 어깨 0.42 · 상완 1.1 · 전완 0.9 · 플랜지 0.13m)
@@ -953,6 +970,17 @@ def build_primitives():
             finish(o, m, parent=R)
     export(R, 'primitives')
     print('primitives', len(keys))
+
+exec(compile(open(os.path.join(os.path.dirname(__file__), 'realistic_robots.py')).read(), 'realistic_robots.py', 'exec'))
+
+if '--boston-dynamics' in __import__('sys').argv:
+    for fn, name in ((build_humanoid, 'humanoid'), (build_quadruped, 'quadruped')):
+        reset(); MATS.clear(); common_mats(); fn()
+        bpy.context.preferences.filepaths.save_version = 0
+        bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT, name + '.blend'))
+    preview_humanoid()
+    preview_one(build_quadruped, 'quadruped', (-1.9, -2.15, 1.45), (70, 0, -42), 40, (960, 720))
+    raise SystemExit(0)
 
 reset(); MATS.clear(); build_primitives()
 for fn in (build_amr, build_agv, build_forklift, build_drone, build_humanoid, build_quadruped, build_arm6, build_ammr, build_truck, build_gantry, build_eaxle, build_parts, build_doortrim, build_maint):

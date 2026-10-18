@@ -1,0 +1,164 @@
+{
+  "vf2": {
+    "asset": "haas_vf2",
+    "manufacturer": "Haas Automation",
+    "model": "VF-2",
+    "role": "3축 머시닝센터",
+    "axes": 3,
+    "travelMm": [
+      762,
+      406,
+      508
+    ],
+    "tableMm": [
+      914,
+      356
+    ],
+    "tableHeightMm": 889,
+    "spindleRpm": 8100,
+    "spindlePowerKw": 22.4,
+    "toolCapacity": 20,
+    "doorOpeningMm": 864,
+    "doorTravelMm": 920,
+    "spindleGapMm": [
+      102,
+      610
+    ],
+    "source": "https://www.haascnc.com/machines/vertical-mills/vf-series/models/small/vf-2.html",
+    "layoutSource": "https://www.haascnc.com/content/dam/haascnc/pdp_feed/mld/VF-2_2015-11.pdf",
+    "layoutRevision": "2015-11 Rev A",
+    "geometryBasis": "공식 테이블·이동거리·문 폭·테이블 높이, 도면 비율로 재구성한 외장; 공식 CAD 아님"
+  },
+  "nc1": {
+    "asset": "aida_nc1",
+    "manufacturer": "AIDA Engineering",
+    "model": "NC1-1100(2)E",
+    "role": "기계식 성형 프레스",
+    "forceKn": 1100,
+    "strokeMm": 180,
+    "spmRange": [
+      35,
+      65
+    ],
+    "dieHeightMm": 350,
+    "slideMm": [
+      630,
+      520
+    ],
+    "bolsterMm": [
+      1070,
+      680
+    ],
+    "frameGapMm": 350,
+    "source": "https://www.aida.co.jp/en/products/product2.html",
+    "geometryBasis": "공식 스트로크·다이 높이·슬라이드·볼스터·프레임 갭, 공식 사진 비율로 외장 재구성; 전체 외형 치수 추정"
+  },
+  "ep347": {
+    "asset": "schmidt_ep347",
+    "manufacturer": "SCHMIDT Technology",
+    "model": "ElectricPress 347 + frame 35",
+    "role": "전동 정밀 압입기",
+    "forceKn": 20,
+    "continuousForceKn": 13,
+    "dutyBasis": "20kN: S3 25%, 10초; 연속 13kN",
+    "strokeMm": 150,
+    "ramSpeedMmS": 100,
+    "throatMm": 160,
+    "frameHeightMm": 688,
+    "mountMm": [
+      300,
+      475
+    ],
+    "tableMm": [
+      300,
+      220
+    ],
+    "driveEnvelopeMm": [
+      298,
+      261,
+      464
+    ],
+    "source": "https://www.schmidttechnology.de/produkte/maschinen/schmidt-electricpress/",
+    "layoutSource": "https://www.schmidttechnology.de/en/products/press-systems/servopress/schmidt-electrical-presses-en/",
+    "geometryBasis": "공식 frame 35·작업대·드라이브 치수와 스트로크; 받침대·안전장치·조작반은 별도 가상 통합"
+  },
+  "oden": {
+    "asset": "apt_oden",
+    "manufacturer": "AP&T",
+    "model": "ODEN-F / 헤밍 금형 통합 개념",
+    "role": "유압 프레스 기반 헤밍 셀",
+    "forceRangeKn": [
+      1000,
+      12000
+    ],
+    "demoStrokeMm": 300,
+    "source": "https://www.aptgroup.com/solutions/lines-products/hydraulic-presses/oden-f",
+    "geometryBasis": "제조사의 모노블록 프레스 구조·가압력 범위 참고; 금형·베드·스트로크·외형은 시뮬레이션 설계값이며 확정된 헤밍 납품 모델 아님"
+  },
+  "umc1250": {
+    "asset": "haas_umc1250",
+    "manufacturer": "Haas Automation",
+    "model": "UMC-1250",
+    "role": "5축 머시닝센터",
+    "axes": 5,
+    "travelMm": [
+      1270,
+      762,
+      711
+    ],
+    "platterDiameterMm": 762,
+    "tableHeightMm": 914,
+    "spindleRpm": 8100,
+    "spindlePowerKw": 22.4,
+    "toolCapacity": 31,
+    "doorOpeningMm": 1193,
+    "doorTravelMm": 1250,
+    "spindleGapMm": [
+      102,
+      813
+    ],
+    "tiltDeg": [
+      -35,
+      120
+    ],
+    "operatingEnvelopeMm": [
+      4107,
+      3936,
+      3746
+    ],
+    "source": "https://www.haascnc.com/machines/vertical-mills/universal-machine/models/umc-1250.html",
+    "layoutSource": "https://pub-aem.haascnc.com/content/dam/haascnc/pdp_feed/mld/umc-1250_ss_mld_04_2022.pdf",
+    "layoutRevision": "2022-04-18 public DRAFT; table height approximate in drawing",
+    "geometryBasis": "공식 이동거리·762mm 테이블·1193mm 문 폭·B0 스윙 한계; 외장 재구성. 도면상 테이블 높이 약914mm. 큰 부품은 B0 시연, 지그·기울임 간섭 미인증",
+    "maxPartSwingMm": 991
+  },
+  "st40": {
+    "asset": "haas_st40",
+    "manufacturer": "Haas Automation",
+    "model": "ST-40",
+    "role": "CNC 선반",
+    "axes": 2,
+    "travelMm": [
+      508,
+      1118
+    ],
+    "chuckDiameterMm": 381,
+    "maxTurningDiameterMm": 762,
+    "maxTurningLengthMm": 1118,
+    "barCapacityMm": 102,
+    "spindleRpm": 2400,
+    "spindlePowerKw": 29.8,
+    "toolCapacity": 12,
+    "doorOpeningMm": 1080,
+    "doorTravelMm": 1150,
+    "source": "https://www.haascnc.com/content/haascnc/en/machines/compare-machines.ST-40.html",
+    "layoutSource": "https://www.haascnc.com/content/dam/haascnc/pdp_feed/mld/ST-40_2016-11.pdf",
+    "layoutRevision": "2016-11 Rev D archival geometry; current BOT performance from product page",
+    "operatingEnvelopeMm": [
+      5817,
+      2616,
+      2413
+    ],
+    "geometryBasis": "공식381mm척·현재BOT가공한계·축이동거리; 외장·문폭·주축높이는2016설치도면참고 재구성, 현행납품CAD아님"
+  }
+}

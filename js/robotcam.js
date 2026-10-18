@@ -181,6 +181,7 @@ export class RobotCamWall {
     if (ref.type === 'cell') {
       const cr = view?.cellRobot(ref.stationId, ref.idx), r = cr?.robot, st = cr?.st;   // 정밀조립 셀 · 확장 Zone 셀
       if (!r) return null;
+      if (r.wristCameraAnchor) return { label: r.kind === 'articulated' ? 'ABB 손목 카메라' : 'UR20 손목 카메라', pose: () => { const a = r.wristCameraAnchor; a.updateWorldMatrix(true, false); const dir = new THREE.Vector3(0, 0, 1).transformDirection(a.matrixWorld); return { pos: a.getWorldPosition(new THREE.Vector3()).addScaledVector(dir, .055), dir, ahead: 1.5 }; } };
       if (r.vla || r.wristCam) { const up = new THREE.Vector3(); return { label: r.vla ? '손목 카메라 · VLA' : '손목 카메라', pose: () => { const p = r.tip.getWorldPosition(new THREE.Vector3()); up.set(0, 1, 0).transformDirection(r.tip.parent.matrixWorld); return { pos: p.addScaledVector(up, -0.06), dir: up.clone(), ahead: 1.2 }; } }; }
       if ((r.kind === 'ammr' || r.kind === 'humanoid') && r.cams) return this.anchorCam(r.cams, ref.cam, r.kind === 'ammr' ? 'AMMR' : '휴머노이드');
       return { label: '셀 상부 카메라', pose: () => { const p = r.root.getWorldPosition(new THREE.Vector3()); const c = new THREE.Vector3(st.x, 1.2, st.z); return { pos: p.add(new THREE.Vector3(0, 2.6, 0)), dir: c.sub(p).normalize(), ahead: 3 }; } };
@@ -205,10 +206,10 @@ export class RobotCamWall {
   // assetKey: 데이터 허브 AAS 자산과 맞추는 키 (셀 로봇 = <셀ID>_R<번호>, 이동 로봇·드론 = m:<ID>)
   allCameras() {
     const sim = this.sim, view = this.view, out = []; if (!sim || !view) return out;
-    for (const sv of view.stationViews) (sv.parts.robots ?? []).forEach((r, idx) => {
-      const ref = { type: 'cell', stationId: sv.st.id, idx }, uid = sv.st.robotUids?.[idx] ?? `${sv.st.id}-${idx + 1}`;
+    for (const sv of view.stationViews) [...(sv.parts.robots ?? []), ...Object.values(sv.parts.arms ?? {}).map((a) => a.arm)].forEach((r, idx) => {
+      const ref = { type: 'cell', stationId: sv.st.id, idx }, uid = sv.st.robotUids?.[idx] ?? (sv.parts.arms ? sim.sinkRobotUids?.[idx] : null) ?? `${sv.st.id}-${idx + 1}`;
       const keys = r.cams ? ROBOT_CAMS.map(([k]) => k) : [null];
-      for (const k of keys) { const c = this.cameraFor(k ? { ...ref, cam: k } : ref); if (c && (r.vla || r.cams || r.kind === 'ammr')) out.push({ ref: k ? { ...ref, cam: k } : ref, robot: uid, cam: k ?? 'wrist', label: c.label, assetKey: `${sv.st.id}_R${idx + 1}`, kind: r.kind }); }
+      for (const k of keys) { const c = this.cameraFor(k ? { ...ref, cam: k } : ref); if (c && (r.vla || r.wristCam || r.wristCameraAnchor || r.cams || r.kind === 'ammr')) out.push({ ref: k ? { ...ref, cam: k } : ref, robot: uid, cam: k ?? 'wrist', label: c.label, assetKey: `${sv.st.id}_R${idx + 1}`, kind: r.kind }); }
     });
     // 확장 Zone 셀 로봇 (같은 규칙: 손목 카메라 · AMMR·휴머노이드 4대) — assetKey는 DataHub 자산 id (A_1_C03_R1)
     for (const { ref, robot, r } of view.xzones?.cellRobots() ?? []) {
