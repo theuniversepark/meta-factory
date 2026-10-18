@@ -26,6 +26,7 @@ import { GateView } from './gateview.js';
 import { EpisodeRecorder, buildEpisodesZip, EP_HZ, SAMPLE } from './vla.js';
 import { impactHTML, impactClick } from './impactview.js';
 import { traceHTML, traceClick, traceState } from './traceview.js';
+import { sensorHTML, sensorClick, sensorState } from './sensorview.js';
 import { caseFiles, allFiles } from './trace.js';
 import { CCTVRecorder, CameraClip, saveSnapshot, REC as CCTV_REC } from './cctvrec.js';
 import { RobotVideoRecorder, downloadVideos } from './robotrec.js';
@@ -219,6 +220,8 @@ function start(key) {
   xzones.setup(sim, labelsOn); insp.setup(sim, xzones, labelsOn);
   view.selected = null;
   hub.reset(sim, view, xzones);
+  if (sim.sensors) { sim.sensors.setEpoch(hub.epochMs); sim.sensors.run = epRec.runId; sim.sensors.publish = !hub.noServer; }   // 센서망: 같은 기준 시계 · 서버가 있으면 공장 중앙 MQTT로 발행 → 센서 서버
+  buildSensor3d();
   if (sim.qcomm) { sim.qcomm.setEpoch(hub.epochMs); sim.qcomm.mirror = () => hub.pcap; sim.qcomm.live = !hub.noServer; }   // 품질 통신: 기준 시계 · 전체 캡처에 함께 기록 · 실제 RCA 서버(앱 서버)에도 전송
   camWall.setup(sim, view); for (const w of zoneWalls) w.setup(sim, view);
   cctvView.setup(sim, view); for (const b of cctvBoards) b.setup(sim);
@@ -1320,7 +1323,7 @@ function frame() {
   if (view.telemetry && ui.robotMode) placeRobotPanel();
   if (screenTimer > 0.6 && modeKey !== 'traditional') { screenTimer = 0; view.drawScreen(sim.kpi(), agent.lastThought, { hub: hub.stats(), msgs: hub.msgs, bytes: hub.bytes }); }
   epRec.update();
-  vlaTimer += rdt; if (vlaTimer > 0.5) { vlaTimer = 0; renderVla(); renderAios(); renderImpact(); renderTrace(); aiosUpload(); renderFacos(); renderFacosView(); }
+  vlaTimer += rdt; if (vlaTimer > 0.5) { vlaTimer = 0; renderVla(); renderAios(); renderImpact(); renderTrace(); aiosUpload(); renderFacos(); renderFacosView(); renderSensors(); sensorFlush(); updateSensor3d(); }
   cctvT += rdt; if (cctvSel && cctvT > 0.12) { cctvT = 0; renderCctvPanel(); }
   if (!glLost) {
     try {
@@ -1493,6 +1496,54 @@ traceBody.addEventListener('input', (e) => {
   traceState.q = e.target.value; const pos = e.target.selectionStart; renderTrace(true);
   const el = document.getElementById('qtSearch'); el?.focus(); el?.setSelectionRange(pos, pos);
 });
+// ── 센서망 창 · 공장 중앙 MQTT 발행 · 3D 센서 위치 (js/sensors.js · js/sensorview.js) ─────────────────
+const sensorModal = document.getElementById('sensorModal'), sensorBody = document.getElementById('sensorBody');
+let sensorSrv = null, sensorSrvT = 0, sensorBusy = false;
+document.getElementById('btnSensors').addEventListener('click', () => { sensorModal.classList.remove('hidden'); sensorPoll(true); renderSensors(true); });
+document.getElementById('closeSensor').addEventListener('click', () => sensorModal.classList.add('hidden'));
+sensorModal.addEventListener('click', (e) => { if (e.target === sensorModal) sensorModal.classList.add('hidden'); });
+sensorBody.addEventListener('click', (e) => { if (sensorClick(e)) { if (e.target.closest('[data-sn-3d]')) updateSensor3d(); renderSensors(true); } });
+async function sensorPoll(force) {
+  if (hub.noServer || (!force && performance.now() - sensorSrvT < 2000)) return; sensorSrvT = performance.now();
+  try {
+    const [st, lt] = await Promise.all([fetch('/api/sensors/v1/status').then((r) => r.json()), fetch('/api/sensors/v1/latency').then((r) => r.json())]);
+    sensorSrv = st.error ? { error: st.detail ?? st.error } : { status: st, latency: lt };
+  } catch (e) { sensorSrv = { error: e.message }; }
+}
+function renderSensors(force) {
+  if (sensorModal.classList.contains('hidden') && !force) return;
+  sensorPoll();
+  if (!force && (sensorBody.querySelector('button:hover, input:focus') || window.getSelection()?.toString())) return;
+  const keep = sensorBody.scrollTop; setHTML(sensorBody, sensorHTML(sim, sensorSrv)); sensorBody.scrollTop = keep;
+}
+// 존 서버 → 공장 중앙 MQTT(앱 내장 브로커) → 센서 서버(구독 · DB) · DataHub 전체 캡처가 켜져 있으면 같은 메시지를 pcap에도
+async function sensorFlush() {
+  const N = sim.sensors; if (!N?.publish || sensorBusy || !N.pending()) return;
+  const batch = N.take(600); sensorBusy = true;
+  if (hub.pcap?.on) for (const m of batch) hub.pcap.publish({ key: m.src.id, kind: 'lan', ip: m.src.ip, topic: m.topic, payload: m.payload, tMs: m.tMs ?? hub.epochMs + sim.time * 1000, retain: m.retain, subs: [] });
+  try { await fetch('/api/mqtt/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: batch.map(({ topic, payload, retain }) => ({ topic, payload, retain })) }) }); }
+  catch { N.stats.dropped += batch.length; } finally { sensorBusy = false; }
+}
+// 3D: 센서 위치 표시 (반투명 · 셀 위 3m — 설비·이동체와 겹쳐도 간섭 점검 대상이 아님)
+var sensor3d;   // var(초기값 없음): 첫 리셋(모듈 앞부분)에서 buildSensor3d가 먼저 불린다
+function snCol(lv) { return ({ ok: 0x3ddc84, warn: 0xf5b82e, alarm: 0xff4a4a })[lv] ?? 0x3ddc84; }
+function buildSensor3d() {
+  if (sensor3d) { scene.remove(sensor3d.g); sensor3d.g.traverse((o) => o.material?.dispose?.()); }
+  const N = sim.sensors; sensor3d = null; if (!N) return;
+  const g = new THREE.Group(), geo = new THREE.OctahedronGeometry(0.11), pole = new THREE.CylinderGeometry(0.01, 0.01, 0.5, 4), items = [];
+  for (const sn of N.sensors) {
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x3ddc84, transparent: true, opacity: 0.5, depthWrite: false }));
+    m.position.set(sn.x, 3.0, sn.z); m.userData.sensor = sn.id; g.add(m);
+    const p = new THREE.Mesh(pole, new THREE.MeshBasicMaterial({ color: 0x58c4ff, transparent: true, opacity: 0.25, depthWrite: false })); p.position.set(sn.x, 3.3, sn.z); g.add(p);
+    items.push([sn, m]);
+  }
+  scene.add(g); sensor3d = { g, items }; updateSensor3d();
+}
+function updateSensor3d() {
+  if (!sensor3d) return; sensor3d.g.visible = sensorState.show3d;
+  if (!sensor3d.g.visible) return;
+  for (const [sn, m] of sensor3d.items) m.material.color.setHex(snCol(sim.sensors.latest.get(sn.id)?.lv));
+}
 function renderTrace(force) {
   const C = sim.capa, n = C ? C.pending.length : 0, badge = document.getElementById('qtBadge');
   if (badge) { badge.hidden = !n; badge.textContent = n; }

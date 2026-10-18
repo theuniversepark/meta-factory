@@ -151,6 +151,7 @@
     <button id="btnOrch" title="설비 고장·공급 차질·현장 이벤트의 처리 흐름, 공정·운영 제어·이벤트 흐름 분석, 셀 현장으로 보내는 긴급·제어 명령 콘솔">🛰 오케스트레이터 <b class="badge" id="orchBadge" hidden></b></button>
     <button id="btnNet5g" title="Private 5G 특화망 — 음영지역 없는 기지국(PCI) 배치, RSRP 커버리지 지도, 로봇 ↔ 서빙 셀 연결선·핸드오버">📶 5G</button>
     <button id="btnCctv" title="사각지대 없는 CCTV 배치 — 커버리지 지도(빨강 사각지대 · 연두 1대 · 초록 2대 이상)와 감시 반경">📹 CCTV</button>
+    <button id="btnSensors" title="환경·설비 상태 센서망 — 센서 → 셀 엣지 → 엣지 게이트웨이 → 존 서버 → 공장 중앙 → 센서 서버(별도) · 센서 DB(별도) · PTP 시간 동기">🌡 센서</button>
     <button id="btnData" title="AAS · OPC UA PubSub over MQTT 데이터 연동과 파일 저장">📡 데이터 연동</button>
     <button id="btnFac" title="FAC — FACOS 업무 기록: 발주(구매오더·입고) · 재고(로케이션·이동) · 설비보전(정비요청) · FAC API">🏢 FAC</button>
     <button id="btnFleet" title="AMR·AGV — 공통 설정·상태, 상황별 속도 변화, 전체 속도 조절·정지·시작, 설정 변경 효과 예측">🚚 AMR·AGV</button>
@@ -203,6 +204,12 @@
     <div class="modal-card wide">
       <div class="modal-h"><h2>AIOS · 공장 운영 AI <small>FACOS 관점 · 현장 생산·운영 데이터 → AI-ready 운영 데이터셋 → 서버 저장 → 운영 정책 학습 → 디지털트윈 검증 → 오케스트레이터 배포</small></h2><button id="closeAios">✕</button></div>
       <div id="aiosBody"></div>
+    </div>
+  </div>
+  <div class="modal hidden" id="sensorModal">
+    <div class="modal-card wide qt-card">
+      <div class="modal-h"><h2>센서망 · 환경·설비 상태 수집 <small>센서 → 셀 엣지 → 엣지 게이트웨이 → 존 서버 → 공장 중앙(MQTT UNS · PTP 기준 시계) → 센서 서버(별도 프로세스) → 센서 DB(별도)</small></h2><button id="closeSensor">✕</button></div>
+      <div id="sensorBody"></div>
     </div>
   </div>
   <div class="modal hidden" id="traceModal">

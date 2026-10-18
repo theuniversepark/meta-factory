@@ -1066,3 +1066,18 @@ em.up { color: var(--good); } em.dn { color: var(--bad); } em.mid { color: var(-
 .fos-ev { margin: 0; padding-left: 16px; color: var(--ink2); font-size: 11px; max-height: 210px; overflow: auto; } .fos-ev li { margin: 2px 0; }
 .fos-btn { border: 1px solid rgba(90, 169, 255, 0.5); background: rgba(90, 169, 255, 0.14); border-radius: 7px; padding: 4px 10px; font-weight: 600; margin-bottom: 4px; }
 .fos-bar { display: inline-block; width: 60px; height: 7px; background: rgba(255, 255, 255, 0.08); border-radius: 4px; vertical-align: middle; overflow: hidden; } .fos-bar b { display: block; height: 100%; }
+
+/* 센서망 창 (js/sensorview.js) */
+.sn-flow { display: flex; align-items: stretch; gap: 4px; flex-wrap: wrap; margin: 6px 0 10px; }
+.sn-box { flex: 1 1 120px; min-width: 112px; border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; background: rgba(88, 196, 255, 0.07); display: flex; flex-direction: column; gap: 2px; }
+.sn-box b { font-size: 13px; } .sn-box em { font-style: normal; color: var(--good); font-weight: 700; font-size: 12px; } .sn-box small { color: var(--muted); font-size: 11px; line-height: 1.35; }
+.sn-box.server, .sn-box.db { background: rgba(61, 220, 132, 0.08); } .sn-box.central { background: rgba(245, 184, 46, 0.08); }
+.sn-arrow { font-style: normal; align-self: center; color: var(--accent, #58c4ff); display: flex; flex-direction: column; align-items: center; font-size: 16px; }
+.sn-arrow small { font-size: 10px; color: var(--muted); }
+.sn-node { display: inline-block; border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; margin: 2px; font-size: 11px; } .sn-node small { color: var(--muted); }
+.sn-chips { line-height: 1.9; }
+.sn-chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 6px; padding: 1px 7px; margin: 2px 3px 2px 0; font-size: 11px; background: rgba(61, 220, 132, 0.1); border: 1px solid rgba(61, 220, 132, 0.3); }
+.sn-chip.warn { background: rgba(245, 184, 46, 0.14); border-color: rgba(245, 184, 46, 0.5); } .sn-chip.alarm { background: rgba(255, 74, 74, 0.16); border-color: rgba(255, 74, 74, 0.55); }
+.sn-chip b { font-variant-numeric: tabular-nums; } .sn-spark { color: var(--muted); }
+.sn-3d { margin-left: auto; font-size: 12px; }
+.sn-layers td:nth-child(4) { color: var(--muted); }

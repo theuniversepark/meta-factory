@@ -170,7 +170,7 @@ export class ProductTrace {
       robots: st.def.robot?.kind && st.def.robot.kind !== 'none' && s.mode.key !== 'traditional' ? [...(st.robotUids ?? [])] : [], robotKind: s.mode.key === 'traditional' ? 'human' : st.def.robot?.kind ?? 'none',
       operators: op, vla: st.vlaCell && st.robotUids?.length ? s.vla?.versionOf(st.robotUids[0]) : null, aios: s.aios?.on ? s.aios.version : null,
       health: r2(st.health, 1), drift: r2(st.drift, 3), cpk: r2(a.cpk, 2), amr: car?.uid ?? null, amrBattery: car ? r2(car.battery, 0) : null, env, envMul: r2(this.envMul(st), 3),
-      params: {}, defect: false, risk: null,
+      params: {}, defect: false, risk: null, sensors: s.sensors?.cellSnapshot(st.id) ?? null,   // 그 셀 센서의 지금 값 (센서망 js/sensors.js — 같은 기준 시계)
     });
   }
   // 셀 작업 끝 (sim.completeCycle) — 공정 측정값 · 이 셀에서 생긴 불량(시뮬레이션 정답 라벨, 화면·AI에는 숨김) · 이 셀 불량 확률(모델)
@@ -344,12 +344,13 @@ export function genealogy(r, iso) {
 export function featuresCSV(T, recs) {
   const ids = [...new Set(recs.flatMap((r) => r.steps.map((p) => p.id)))];
   const pk = {}; for (const r of recs) for (const p of r.steps) for (const k of Object.keys(p.params)) (pk[p.id] ??= new Set()).add(k);
+  const sk = {}; for (const r of recs) for (const p of r.steps) for (const k of Object.keys(p.sensors ?? {})) (sk[p.id] ??= new Set()).add(k);   // 셀 센서 값 열 (센서망이 있을 때)
   const head = ['serial', 'product', 'mode', 'material_lot', 'amr', 't_release_s', 'lead_time_s', 'status', 'label_ng', 'label_root_cause_station', 'inspect_torque', 'inspect_angle',
-    ...ids.flatMap((id) => [`${id}_health`, `${id}_drift`, `${id}_cpk`, `${id}_cycle_s`, `${id}_vla`, ...ENV_KEYS.map((k) => `${id}_env_${k}`), ...[...(pk[id] ?? [])].map((k) => `${id}_${k}`)])];
+    ...ids.flatMap((id) => [`${id}_health`, `${id}_drift`, `${id}_cpk`, `${id}_cycle_s`, `${id}_vla`, ...ENV_KEYS.map((k) => `${id}_env_${k}`), ...[...(pk[id] ?? [])].map((k) => `${id}_${k}`), ...[...(sk[id] ?? [])].map((k) => `${id}_sns_${k}`)])];
   const rows = recs.filter((r) => r.status !== 'wip').map((r) => {
     const by = Object.fromEntries(r.steps.map((p) => [p.id, p]));
     return [r.serial, r.product, r.mode, r.lot, r.amr ?? '', r2(r.t0, 1), r.tEnd != null ? r2(r.tEnd - r.t0, 1) : '', r.status, r.status === 'ng' || r.status === 'escaped' ? 1 : 0, r.truth ?? '', r.inspection?.torque ?? '', r.inspection?.angle ?? '',
-      ...ids.flatMap((id) => { const p = by[id]; return p ? [p.health, p.drift, p.cpk, p.cycle ?? '', p.vla ?? '', ...ENV_KEYS.map((k) => p.env[k]), ...[...(pk[id] ?? [])].map((k) => p.params[k] ?? '')] : Array(5 + ENV_KEYS.length + (pk[id]?.size ?? 0)).fill(''); })];
+      ...ids.flatMap((id) => { const p = by[id]; return p ? [p.health, p.drift, p.cpk, p.cycle ?? '', p.vla ?? '', ...ENV_KEYS.map((k) => p.env[k]), ...[...(pk[id] ?? [])].map((k) => p.params[k] ?? ''), ...[...(sk[id] ?? [])].map((k) => p.sensors?.[k] ?? '')] : Array(5 + ENV_KEYS.length + (pk[id]?.size ?? 0) + (sk[id]?.size ?? 0)).fill(''); })];
   });
   return [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\n');
 }

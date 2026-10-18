@@ -11,6 +11,7 @@ import { planCCTV, CCTVAgent } from './cctv.js';
 import { Private5G } from './net5g.js';
 import { ProductTrace } from './trace.js';
 import { QualityComm } from './qcomm.js';
+import { SensorNet } from './sensors.js';
 import { CapaManager } from './capa.js';
 import { FactoryOS } from './factoryos.js';
 import { FacLedger } from './fac.js';
@@ -632,6 +633,7 @@ export class Simulation {
     this.fac = new FacLedger(this);   // FAC(FACOS 업무 기록): 발주·재고·설비보전 (자동화·피지컬AI)
     new ProductTrace(this, seed);   // 제품 추적 관리: 시리얼·계보 · 공장 환경 센서 · 불량 사례·AI 원인 분석 (js/trace.js)
     new CapaManager(this);   // 품질 불량 → Zone·총괄 오케스트레이터 8D CAPA → 운영 정책 반영 (js/capa.js)
+    if (!this.quiet || opts.sensors) new SensorNet(this);   // 환경·설비 상태 센서망 — 센서 → 셀 엣지 → 게이트웨이 → 존 서버 → 공장 중앙 (js/sensors.js · 헤드리스 시험·트윈은 opts.sensors일 때만)
     new QualityComm(this);   // 불량 판정 리포트 → 메인 서버 → RCA 서버 통신 · 품질 통신 pcap (js/qcomm.js)
     new FactoryOS(this);   // Factory OS 계층: 공장 오케스트레이터(FacOS) · 정밀조립 Manufacturing Agent · 셀 OCS · A2A 메시지 (js/factoryos.js)
   }
@@ -1107,6 +1109,7 @@ export class Simulation {
     this.cctvAgent?.update(dt);   // 피지컬AI: CCTV 에이전트 — 영상 감시·오케스트레이터 보고·이벤트 이력
     this.updateFieldEvents();
     this.trace?.update(dt);
+    this.sensors?.tick(dt);
     this.fos?.update(dt);
     this.orch.update();
     // 자재 공급이 재개되면 공급 차질 인시던트를 닫는다

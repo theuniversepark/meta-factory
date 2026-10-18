@@ -17,7 +17,11 @@ export async function startMqtt({ host = process.env.MQTT_HOST || '127.0.0.1', p
   await new Promise((resolve) => {
     tcp.once('error', (err) => {
       state.error = err.code === 'EADDRINUSE' ? `포트 ${port}이(가) 이미 사용 중입니다 (다른 피지컬AI 실증 메타팩토리 앱이나 브로커가 실행 중일 수 있음)` : err.message;
-      resolve();
+      // 포트가 막혀도 앱 안의 구독자(센서 서버)는 이 브로커에 붙어야 한다 — 127.0.0.1의 빈 포트로 다시 연다 (외부 클라이언트는 표시된 포트로 접속)
+      if (err.code !== 'EADDRINUSE') return resolve();
+      tcp = net.createServer(broker.handle);
+      tcp.once('error', () => resolve());
+      tcp.listen(0, '127.0.0.1', () => { Object.assign(state, { listening: true, host: '127.0.0.1', port: tcp.address().port, fallback: true, startedAt: new Date().toISOString() }); state.error += ` — 빈 포트 ${tcp.address().port}로 대신 열었습니다`; resolve(); });
     });
     tcp.listen(port, host, () => { Object.assign(state, { listening: true, host, port, startedAt: new Date().toISOString() }); resolve(); });
   });

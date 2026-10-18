@@ -11,6 +11,7 @@ import { startMqtt, mqttStatus, mqttPublish } from './mqtt-gateway.mjs';
 import { ffmpegInfo, queueConvert, convertClip, readStoredZip, framesToMp4 } from './video-convert.mjs';
 import { facRoute } from './fac-api.mjs';
 import { makeRcaApi } from './rca-api.mjs';
+import { fork } from 'node:child_process';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
@@ -294,6 +295,17 @@ export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
   if (!client) setApiKey(null);
   await startMqtt();
   const rca = makeRcaApi({ publish: mqttPublish });   // 분석 결과는 내장 MQTT 브로커로도 발행
+  // 센서 서버 (별도 프로세스 · 별도 DB): 내장 브로커의 센서 묶음을 구독해 SQLite에 저장 — 앱 서버는 /api/sensors/v1/를 그 프로세스로 중계한다
+  const mq = mqttStatus(), sensor = { port: null, db: null, pid: null, error: null };
+  try {
+    const child = fork(path.join(path.dirname(fileURLToPath(import.meta.url)), 'sensor-server.mjs'), [], {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', SENSOR_PORT: '0', SENSOR_DB: path.join(DATA_DIR(), 'sensors', 'sensors.db'), SENSOR_MQTT: `mqtt://127.0.0.1:${mq.port ?? 1885}` }, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+    sensor.pid = child.pid;
+    child.on('message', (m) => { if (m?.ready) { sensor.port = m.port; sensor.db = m.db; } });
+    child.stderr.on('data', (d) => { sensor.error = String(d).slice(-400); });
+    child.on('exit', (code) => { sensor.port = null; sensor.error ??= `센서 서버 종료 (코드 ${code})`; });
+    process.on('exit', () => child.kill());
+  } catch (e) { sensor.error = e.message; }
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname === '/api/status') return send(res, 200, { llm: hasApiKey(), model: MODEL, episodes: true, aios: true, cctv: true, robotcam: true, dataDir: DATA_DIR(), ffmpeg: ffmpegInfo() });
@@ -328,6 +340,13 @@ export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
       } catch (e) { return send(res, 400, { error: e.message }); }
     }
 
+    // 센서 서버 중계 (별도 프로세스 — server/sensor-server.mjs)
+    if (url.pathname.startsWith('/api/sensors/v1')) {
+      if (!sensor.port) return send(res, 503, { error: '센서 서버가 아직 준비되지 않았습니다', detail: sensor.error });
+      const up = http.request({ host: '127.0.0.1', port: sensor.port, path: url.pathname + url.search, method: req.method, headers: { accept: req.headers.accept ?? '*/*' } }, (r) => { res.writeHead(r.statusCode, r.headers); r.pipe(res); });
+      up.on('error', (e) => send(res, 502, { error: `센서 서버 연결 실패: ${e.message}` }));
+      return req.pipe(up);
+    }
     // RCA 전담 서버 (더미) — 메인 서버(화면 FACOS 품질 모듈)가 불량 판정 리포트를 올리고 분석 결과·종결을 주고받는다 (server/rca-api.mjs)
     if (url.pathname.startsWith('/api/rca/v1')) {
       try {
