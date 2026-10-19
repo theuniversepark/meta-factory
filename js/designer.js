@@ -65,7 +65,7 @@ export class LineDesigner {
 
   // Claude 연결 상태가 바뀌었을 때(키 저장·삭제) — 남아 있던 '미연결' 안내를 지우고 다시 그린다
   onLLMChange() {
-    if (this.llm.available && this.note?.noLLM) {
+    if (this.llm.designAvailable && this.note?.noLLM) {
       this.note = { summary: 'Agent가 연결되었습니다. 요청이나 첨부 파일을 다시 보내 주세요.', applied: true };
     }
     this.render();
@@ -139,6 +139,8 @@ export class LineDesigner {
   }
 
   needKeyNote() {
+    // 웹 버전(서버 없음)은 Agent가 연결돼 있어도 공정 설계 자연어 요청·파일 분석은 서버(맥·윈도우 앱·npm start)에서만 된다
+    if (this.llm.available) return { errors: ['웹 버전에서는 공정 설계 자연어 요청과 파일 분석을 지원하지 않습니다 (맥·윈도우 앱 또는 npm start에서 사용). 아래 목록을 직접 편집하세요 — 대화 기반 운영 지시는 오른쪽 입력창에서 쓸 수 있습니다.'], noLLM: true };
     return {
       errors: ['Agent가 연결되어 있지 않아 자연어 요청과 파일 분석을 할 수 없습니다. 아래 목록을 직접 편집하거나 API 키를 설정하세요.'],
       needKey: !!window.metafactory,
@@ -151,7 +153,7 @@ export class LineDesigner {
     if (this.isZoneTarget()) return this.askZone(text);
     const files = this.files.filter((f) => !f.loading);
     if (!text && !files.length) return;
-    if (!this.llm.available) { this.note = this.needKeyNote(); this.setOpen(true); return; }
+    if (!this.llm.designAvailable) { this.note = this.needKeyNote(); this.setOpen(true); return; }
     if (!text) text = '첨부 파일의 공정·레이아웃 내용을 바탕으로 라인 컨셉을 잡아 새 라인을 설계해 줘.';
     this.busy = true; this.setOpen(true);
     $('dockStatus').innerHTML = `<span class="spin"></span>${files.length ? `첨부 ${files.length}개를 분석해 ` : ''}Agent가 공정 컨셉을 설계하는 중… “${esc(text)}”`;
@@ -184,7 +186,7 @@ export class LineDesigner {
   async askZone(text) {
     const files = this.files.filter((f) => !f.loading);
     if (!text && !files.length) return;
-    if (!this.llm.available) { this.note = this.needKeyNote(); this.setOpen(true); return; }
+    if (!this.llm.designAvailable) { this.note = this.needKeyNote(); this.setOpen(true); return; }
     if (!text) text = '첨부 파일의 공정 내용을 바탕으로 셀 레시피(사이클·로봇 구성)를 조정해 줘.';
     this.busy = true; this.setOpen(true);
     $('dockStatus').innerHTML = `<span class="spin"></span>${esc(this.zdraft.name)} 셀 레시피를 Agent가 설계하는 중… “${esc(text)}”`;
@@ -226,7 +228,7 @@ export class LineDesigner {
     $('dockLineName').textContent = this.isZoneTarget() ? `${this.zdraft.name} · 셀 레시피` : cur.name;
     $('dockArrow').textContent = this.open ? '▼' : '▲';
     $('lineDock').classList.toggle('open', this.open);
-    $('dockInput').placeholder = this.llm.available ? '요청 입력 또는 📎 공정도·레이아웃 파일 첨부' : 'Agent 미연결 — 펼쳐서 직접 편집하거나 API 키 설정';
+    $('dockInput').placeholder = this.llm.designAvailable ? '요청 입력 또는 📎 공정도·레이아웃 파일 첨부' : this.llm.available ? '웹 버전 — 공정 설계 자연어 요청은 앱·npm start에서 (펼쳐서 직접 편집)' : 'Agent 미연결 — 펼쳐서 직접 편집하거나 API 키 설정';
     $('dockSend').disabled = this.busy;
     if (!this.open) return;
     if (!this.busy) $('dockStatus').innerHTML = '';

@@ -3,8 +3,33 @@
 // 해석하지 못한 문장은 Claude가 연결되어 있을 때 Claude가 해석해 같은 조치(도구)로 돌려준다.
 import { parseInstruction, applyAction, DIALOG_EXAMPLES } from './dialog.js';
 import { evaluate } from './gate.js';
+import { runAgentTurn, runAgentTurnSample, MODEL } from './agentcore.js';
 
 const HISTORY = 12;
+
+// 서버 없는 웹 버전(GitHub Pages·claude.ai 공유 페이지): 운영자가 넣은 API 키로 브라우저에서 Claude API를 직접 부르거나,
+// 공유 페이지에서는 보는 사람의 Claude 계정(sample 기능)을 쓴다. 키는 이 브라우저 저장소에만 두고 api.anthropic.com으로만 보낸다.
+const KEY_STORE = 'mf.anthropicKey';
+const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.131.0/+esm';   // package.json과 같은 버전
+export const serverless = () => !!(globalThis.window?.METAFACTORY_SHARED || globalThis.window?.METAFACTORY_NO_SERVER);
+export function browserKey() {
+  try { return sessionStorage.getItem(KEY_STORE) || localStorage.getItem(KEY_STORE) || ''; } catch { return ''; }
+}
+// remember=true면 브라우저를 닫아도 남고(localStorage), false면 이 탭을 닫으면 지워진다(sessionStorage). 빈 키는 삭제
+export function storeBrowserKey(key, remember) {
+  try {
+    sessionStorage.removeItem(KEY_STORE); localStorage.removeItem(KEY_STORE);
+    if (key) (remember ? localStorage : sessionStorage).setItem(KEY_STORE, key);
+    return true;
+  } catch { return false; }
+}
+// sample 오류 코드 → 운영자에게 보일 문구 (아티팩트 Claude 계정)
+const SAMPLE_ERR = {
+  not_granted: '이 페이지에 Claude 사용이 허용되지 않았습니다 (권한 메뉴에서 허용)', sampling_disabled: '이 계정·조직에서 Claude를 쓸 수 없습니다',
+  rate_limited: 'Claude 사용 한도에 걸렸습니다 — 잠시 뒤 다시 시도', tools_unavailable: '이 화면에서는 Claude 도구 호출을 쓸 수 없습니다',
+  prompt_too_large: '공장 스냅샷이 너무 큽니다', cancelled: '취소됨', refused: '안전 정책으로 거절됨',
+};
+const PERMANENT = new Set(['not_granted', 'sampling_disabled', 'not_declared', 'capability_disabled', 'capability_removed', 'tools_unavailable']);
 
 const fmt = (t) => {
   const s = Math.floor(t) + 8 * 3600;
@@ -26,13 +51,77 @@ export class LLMController {
   }
 
   async probe() {
-    // 공유 페이지(서버 없음)에서는 Claude 서버에 묻지 않는다
-    if (window.METAFACTORY_SHARED || window.METAFACTORY_NO_SERVER) { this.available = false; this.onChange?.(); return; }
+    // 서버 없는 웹 버전: 저장된 API 키(브라우저 직접 호출) → 공유 페이지면 보는 사람의 Claude 계정(sample) 순서로 쓴다
+    if (serverless()) {
+      if (browserKey()) { this.provider = 'key'; this.available = true; this.model = MODEL; this.onChange?.(); return; }
+      this.provider = null; this.available = false; this.model = null; this.onChange?.();
+      if (window.METAFACTORY_SHARED && window.claude?.use && !this.sampleOff) {
+        const sample = await window.claude.use('sample').catch(() => null);   // 보는 화면이 지원하지 않으면 null
+        const lim = sample && await sample.limits().catch(() => null);
+        if (sample && lim?.tools && !browserKey()) { this.sample = sample; this.provider = 'claude'; this.available = true; this.model = 'Claude 계정'; this.onChange?.(); }
+      }
+      return;
+    }
     try {
       const r = await fetch('/api/status');
-      if (r.ok) { const j = await r.json(); this.available = !!j.llm; this.model = j.model; }
-    } catch { this.available = false; }
+      if (r.ok) { const j = await r.json(); this.available = !!j.llm; this.model = j.model; this.provider = this.available ? 'server' : null; }
+    } catch { this.available = false; this.provider = null; }
     this.onChange?.();
+  }
+
+  // 공정 설계(자연어 라인·레시피 설계)는 서버(맥·윈도우 앱·npm start)에서만 — 웹 버전 Agent는 대화 지시 해석에만 쓴다
+  get designAvailable() { return this.available && this.provider === 'server'; }
+  get providerLabel() { return ({ server: '서버', key: 'API 키 · 브라우저 직접 호출', claude: 'Claude 계정' })[this.provider] ?? ''; }
+
+  // 웹 버전 API 키 저장·삭제 (설정 창) — 저장 후 연결 상태를 다시 확인한다
+  async setBrowserKey(key, remember) {
+    const k = String(key ?? '').trim();
+    if (k && !/^sk-ant-/.test(k)) return { ok: false, error: 'Anthropic API 키는 sk-ant- 로 시작합니다.' };
+    if (!storeBrowserKey(k, remember)) return { ok: false, error: '이 브라우저는 저장소를 쓸 수 없습니다 (사생활 보호 모드 등).' };
+    this.client = null;
+    await this.probe();
+    return { ok: true };
+  }
+
+  // 브라우저에서 Claude API를 직접 부르는 SDK 클라이언트 (처음 쓸 때만 CDN에서 불러온다)
+  async sdkClient() {
+    if (this.client) return this.client;
+    this.SDK ??= (await import(SDK_URL)).default;
+    this.client = new this.SDK({ apiKey: browserKey(), dangerouslyAllowBrowser: true, maxRetries: 1 });
+    return this.client;
+  }
+
+  // 한 턴 실행 — 연결 방식(서버 · API 키 · Claude 계정)에 관계없이 같은 결과 모양 { text, actions, rejected, usage, costUSD, latencyMs }
+  async runTurn(payload) {
+    const t0 = performance.now();
+    if (this.provider === 'key') {
+      const client = await this.sdkClient();
+      try {
+        return { ...await runAgentTurn((p) => client.beta.messages.create(p), payload), latencyMs: performance.now() - t0 };
+      } catch (e) {
+        const S = this.SDK;
+        if (e instanceof S.AuthenticationError) throw new Error('API 키가 올바르지 않습니다 (⚙ 설정에서 다시 입력)');
+        if (e instanceof S.PermissionDeniedError) throw new Error('이 API 키로는 해당 모델을 쓸 수 없습니다');
+        if (e instanceof S.RateLimitError) throw new Error('API 사용 한도에 걸렸습니다 — 잠시 뒤 다시 시도');
+        if (e instanceof S.APIConnectionError) throw new Error('Claude API에 연결하지 못했습니다 (이 페이지의 네트워크 정책 또는 인터넷 연결 확인)');
+        if (e instanceof S.APIError) throw new Error(`Claude API 오류 ${e.status ?? ''}`.trim());
+        throw e;
+      }
+    }
+    if (this.provider === 'claude') {
+      try { return { ...await runAgentTurnSample(this.sample, payload), latencyMs: performance.now() - t0 }; }
+      catch (e) {
+        if (e && typeof e.code === 'string') {
+          if (PERMANENT.has(e.code)) { this.sampleOff = true; this.provider = null; this.available = false; this.sample = null; }
+          throw new Error(SAMPLE_ERR[e.code] ?? `Claude 응답 실패 (${e.code})`);
+        }
+        throw e;
+      }
+    }
+    const res = await fetch('/api/agent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error || `HTTP ${res.status}`);
+    return out;
   }
 
   attach(sim, agent) {
@@ -164,13 +253,8 @@ export class LLMController {
     this.status = `분석 중 · ${trigger}`;
     this.onChange?.();
     try {
-      const res = await fetch('/api/agent', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ snapshot: this.snapshot(), trigger, urgent: job.urgent, operatorMessage: job.operatorMessage, history: this.history.slice(-HISTORY) }),
-      });
-      const out = await res.json();
+      const out = await this.runTurn({ snapshot: this.snapshot(), trigger, urgent: job.urgent, operatorMessage: job.operatorMessage, history: this.history.slice(-HISTORY) });
       if (gen !== this.gen) return;
-      if (!res.ok) throw new Error(out.error || `HTTP ${res.status}`);
       this.calls++; this.costUSD += out.costUSD; this.tokensIn += out.usage.input_tokens; this.tokensOut += out.usage.output_tokens;
       for (const a of out.actions) this.apply(a);
       for (const r of out.rejected) this.sim.log('warn', `Agent 제안 반려 · ${r.name}`, { obs: r.input.reason, dec: r.error });

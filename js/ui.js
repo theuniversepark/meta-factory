@@ -180,10 +180,10 @@ export class UI {
     const st = $('llmStatus');
     st.classList.toggle('busy', llm.inFlight);
     let msg;
-    const helper = llm.available ? `Agent 연결됨` : '내장 해석기 (Agent 미연결)';
+    const helper = llm.available ? `Agent 연결됨${llm.provider && llm.provider !== 'server' ? ` (${llm.providerLabel})` : ''}` : '내장 해석기 (Agent 미연결)';
     if (!sim.mode.agentActive) msg = '레거시 공장은 데이터 수집이 없어 대화 기반을 쓸 수 없습니다';
     else if (!llm.enabled) msg = `대화 기반: 추론 기반 운영 + 입력 지시 해석·반영 · ${helper}`;
-    else if (llm.inFlight || llm.calls) msg = `${llm.inFlight ? '' : '대기 · '}${llm.status || '준비'} · Agent 해석 ${llm.calls}회 · 약 $${llm.costUSD.toFixed(3)}`;
+    else if (llm.inFlight || llm.calls) msg = `${llm.inFlight ? '' : '대기 · '}${llm.status || '준비'} · Agent 해석 ${llm.calls}회 · ${llm.provider === 'claude' ? 'Claude 계정 사용량' : `약 $${llm.costUSD.toFixed(3)}`}`;
     else msg = `대화 기반 · 입력창 지시를 공정에 반영합니다 · ${helper}`;
     st.innerHTML = (llm.inFlight ? '<span class="spin"></span>' : '') + esc(msg);
   }

@@ -14,7 +14,7 @@ import { ExtraZones, ZONE_VIEWS, EXTRA_ZONES } from './zones.js';
 import { InspZone } from './inspzone.js';
 import { ZONE_LABEL, inInsp, areaZone, zoneRect } from './zonedefs.js';
 import { UI } from './ui.js';
-import { LLMController } from './llm.js';
+import { LLMController, serverless } from './llm.js';
 import { LineDesigner } from './designer.js';
 import { renderConcept } from './concept.js';
 import { DataHub, PUBLISHER_ID, WRITER_GROUP } from './datahub.js';
@@ -1418,6 +1418,35 @@ if (bridge?.isApp) {
   document.getElementById('closeSettings').addEventListener('click', () => modal.classList.add('hidden'));
   document.getElementById('keyForm').addEventListener('submit', async (e) => { e.preventDefault(); afterChange(await bridge.setApiKey(input.value)); });
   document.getElementById('keyClear').addEventListener('click', async () => afterChange(await bridge.clearApiKey()));
+} else if (serverless()) {
+  // ── 웹 버전(GitHub Pages·공유 페이지) 전용: API 키를 이 브라우저에 두고 Claude API를 직접 부른다 — 공유 페이지는 키 없이 Claude 계정도 쓸 수 있다
+  document.body.classList.add('webkey');
+  const modal = document.getElementById('settings');
+  const statusEl = document.getElementById('keyStatus');
+  const input = document.getElementById('keyInput');
+  document.querySelector('#settings .modal-h small').textContent = '키는 이 브라우저 저장소에만 두고 Anthropic API(api.anthropic.com)로만 직접 보냅니다 — 페이지 서버로는 전달되지 않습니다.';
+  const keep = document.createElement('label'); keep.className = 'chk key-keep';
+  keep.innerHTML = '<input type="checkbox" id="keyRemember" /> 이 브라우저에 기억 (끄면 이 탭을 닫을 때 지워짐 · 공용 PC에서는 끄기)';
+  document.querySelector('#keyForm .key-btns').before(keep);
+  const remember = document.getElementById('keyRemember');
+  if (window.METAFACTORY_SHARED) document.querySelector('#settings .key-note').insertAdjacentHTML('beforeend', ' 키를 넣지 않아도 이 공유 페이지에서는 보는 사람의 Claude 계정으로 대화 기반 Agent를 쓸 수 있습니다 (처음 한 번 허용 창이 뜸).');
+  const showStatus = (msg) => {
+    const on = llm.available;
+    statusEl.className = 'key-status ' + (msg ? 'err' : on ? 'ok' : '');
+    statusEl.textContent = msg || (llm.provider === 'key' ? '키 설정됨 (이 브라우저) — 대화 기반 Agent가 Claude API를 직접 부릅니다'
+      : llm.provider === 'claude' ? '키 없음 — 보는 사람의 Claude 계정으로 대화 기반 Agent를 씁니다' : '키가 없습니다 — 추론 기반 에이전트와 내장 해석기만 사용');
+  };
+  const open = () => { modal.classList.remove('hidden'); input.value = ''; try { remember.checked = !!localStorage.getItem('mf.anthropicKey'); } catch { /* 저장소 없음 */ } showStatus(); input.focus(); };
+  const afterChange = (res) => { if (!res.ok) return showStatus(res.error); input.value = ''; showStatus(); if (!llm.available && llm.enabled) llm.setEnabled(false); };
+  document.getElementById('btnSettings').addEventListener('click', open);
+  document.getElementById('closeSettings').addEventListener('click', () => modal.classList.add('hidden'));
+  document.getElementById('keyForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!input.value.trim()) return showStatus('키를 입력하세요.');
+    afterChange(await llm.setBrowserKey(input.value, remember.checked));
+  });
+  document.getElementById('keyClear').addEventListener('click', async () => afterChange(await llm.setBrowserKey('', false)));
+  document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); open(); } });
 }
 // ── VLA 데이터·학습 파이프라인 창 ─────────────────
 const vlaModal = document.getElementById('vlaModal'), vlaBody = document.getElementById('vlaBody');
