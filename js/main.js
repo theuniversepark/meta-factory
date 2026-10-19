@@ -1391,13 +1391,19 @@ if (!window.METAFACTORY_SHARED && !window.METAFACTORY_NO_SERVER) fetch('/api/sta
 const bridge = window.metafactory;
 if (bridge?.isApp) {
   document.body.classList.add('app');
+  // 윈도우 앱: 기본 창틀을 쓰므로 상단 바의 신호등 여백·끌기 영역을 끄고, 키 보관 문구·단축키를 윈도우에 맞춘다 (맥은 그대로)
+  if (bridge.platform && bridge.platform !== 'darwin') {
+    document.body.classList.add('win');
+    document.querySelector('#settings .modal-h small').textContent = '키는 윈도우 데이터 보호(DPAPI)로 암호화되어 이 PC에만 저장되며, 화면(렌더러)으로는 전달되지 않습니다.';
+    document.getElementById('btnSettings').title = 'Agent API 키 설정 (Ctrl+,)';
+  }
   const modal = document.getElementById('settings');
   const statusEl = document.getElementById('keyStatus');
   const input = document.getElementById('keyInput');
   const showStatus = (st, msg) => {
     statusEl.className = 'key-status ' + (msg ? 'err' : st.hasKey ? 'ok' : '');
     statusEl.textContent = msg || (st.hasKey
-      ? `키 설정됨 (${st.source === 'keychain' ? '키체인에 저장' : '환경변수'}) — 대화 기반 Agent를 쓸 수 있습니다`
+      ? `키 설정됨 (${st.source === 'keychain' ? (document.body.classList.contains('win') ? 'PC에 암호화 저장' : '키체인에 저장') : '환경변수'}) — 대화 기반 Agent를 쓸 수 있습니다`
       : '키가 없습니다 — 추론 기반 에이전트만 사용 가능');
   };
   const open = async () => { modal.classList.remove('hidden'); input.value = ''; showStatus(await bridge.keyStatus()); input.focus(); };

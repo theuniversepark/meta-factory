@@ -9,6 +9,7 @@
     "app": "electron .",
     "package": "electron-packager . \"Meta-Factory\" --platform=darwin --arch=arm64 --icon=build/icon.icns --out=dist --overwrite --app-bundle-id=kr.or.camtic.metafactory --app-category-type=public.app-category.productivity --ignore=^/dist --ignore=^/build --ignore=^/\\.env --ignore=^/README.md --ignore=^/tests --ignore=^/blender --ignore=^/tools --ignore=^/data --ignore=^/outputs --ignore=^/analysis --ignore=^/deploy --ignore=^/docs --ignore=^/server\\.mjs$",
     "postpackage": "codesign --force --deep --sign - \"dist/Meta-Factory-darwin-arm64/Meta-Factory.app\"",
+    "package:win": "electron-packager . \"Meta-Factory\" --platform=win32 --arch=x64 --icon=build/icon.ico --out=dist --overwrite --win32metadata.CompanyName=CAMTIC --win32metadata.ProductName=Meta-Factory --win32metadata.FileDescription=Meta-Factory --ignore=^/dist --ignore=^/build --ignore=^/\\.env --ignore=^/README.md --ignore=^/tests --ignore=^/blender --ignore=^/tools --ignore=^/data --ignore=^/outputs --ignore=^/analysis --ignore=^/deploy --ignore=^/docs --ignore=^/server\\.mjs$",
     "test:ui": "electron tests/ui-scroll.cjs",
     "blender:assets": "blender -b --python blender/build_assets.py",
     "blender:collect": "electron tools/collect-primitives.cjs",

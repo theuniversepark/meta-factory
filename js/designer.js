@@ -5,6 +5,8 @@ import { prepareFile, ACCEPT } from './attachments.js';
 import { RECIPE_ZONES, ZR_KINDS, recipeOf, defaultRecipe, normalizeRecipe, diffRecipe, recipeMetrics, recipeEff } from './zonerecipe.js';
 
 const $ = (id) => document.getElementById(id);
+// 설정 단축키 표기 — 윈도우 앱은 Ctrl+, · 그 밖(맥 앱·브라우저)은 ⌘,
+const SETTINGS_KEY = globalThis.window?.metafactory?.platform && globalThis.window.metafactory.platform !== 'darwin' ? 'Ctrl+,' : '⌘,';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const opts = (obj, sel) => Object.entries(obj).map(([k, v]) => `<option value="${k}"${k === sel ? ' selected' : ''}>${esc(v.label)}</option>`).join('');
 
@@ -319,7 +321,7 @@ export class LineDesigner {
       diff.length ? `<ul class="diff">${diff.map((d) => `<li class="${d.kind}">${esc(d.text)}</li>`).join('')}</ul>` : (n.applied ? '' : '<div class="muted">현재 라인과 같습니다. 요청을 입력하거나 아래 목록을 편집하세요.</div>'),
       allWarn.length ? `<ul class="warn">${allWarn.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : '',
       allErrors.length ? `<ul class="err">${allErrors.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : '',
-      n.needKey ? '<button type="button" class="key-link" data-open-key>⚙ Agent API 키 설정 열기 (⌘,)</button>' : '',
+      n.needKey ? `<button type="button" class="key-link" data-open-key>⚙ Agent API 키 설정 열기 (${SETTINGS_KEY})</button>` : '',
     ].join('');
     $('dockApply').disabled = !diff.length || errors.length > 0 || this.busy;
     $('dockApply').textContent = diff.length ? `적용 (${diff.length}건)` : '적용';
@@ -341,7 +343,7 @@ export class LineDesigner {
       diff.length ? `<ul class="diff">${diff.map((d) => `<li class="mod">${esc(d.text)}</li>`).join('')}</ul>` : (n.applied ? '' : '<div class="muted">적용된 셀 레시피와 같습니다. 요청을 입력하거나 아래 셀을 편집하세요.</div>'),
       allWarn.length ? `<ul class="warn">${allWarn.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : '',
       allErr.length ? `<ul class="err">${allErr.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : '',
-      n.needKey ? '<button type="button" class="key-link" data-open-key>⚙ Agent API 키 설정 열기 (⌘,)</button>' : '',
+      n.needKey ? `<button type="button" class="key-link" data-open-key>⚙ Agent API 키 설정 열기 (${SETTINGS_KEY})</button>` : '',
     ].join('');
     $('dockApply').disabled = !diff.length || allErr.length > 0 || this.busy;
     $('dockApply').textContent = diff.length ? `적용 (${diff.length}건)` : '적용';

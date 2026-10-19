@@ -1,5 +1,5 @@
-// 피지컬AI 실증 메타팩토리 맥 앱 — 내장 로컬 서버를 띄우고 창에서 시뮬레이터를 연다.
-// Claude API 키는 macOS 키체인(safeStorage)으로 암호화해 사용자 데이터 폴더에만 저장한다.
+// 피지컬AI 실증 메타팩토리 맥·윈도우 앱 — 내장 로컬 서버를 띄우고 창에서 시뮬레이터를 연다.
+// Claude API 키는 safeStorage(맥 키체인 · 윈도우 DPAPI)로 암호화해 사용자 데이터 폴더에만 저장한다.
 import { app, BrowserWindow, Menu, ipcMain, safeStorage, shell, dialog } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,6 +8,7 @@ import { startServer, setApiKey, hasApiKey } from '../server/app-server.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP_NAME = 'Meta-Factory';
+const IS_MAC = process.platform === 'darwin';
 app.setName(APP_NAME);
 // 사용자 데이터 폴더는 3d 원본(Jin-3D)과 분리한다 — API 키·녹화·에피소드를 따로 보관한다
 app.setPath('userData', path.join(app.getPath('appData'), 'Meta-Factory'));
@@ -33,7 +34,7 @@ ipcMain.handle('key:status', () => keyStatus());
 ipcMain.handle('key:set', (_e, raw) => {
   const key = String(raw ?? '').trim();
   if (!key) return { ok: false, error: '키를 입력하세요.' };
-  if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: '키체인 암호화를 사용할 수 없습니다.' };
+  if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: IS_MAC ? '키체인 암호화를 사용할 수 없습니다.' : '윈도우 데이터 보호(DPAPI) 암호화를 사용할 수 없습니다.' };
   fs.mkdirSync(path.dirname(keyFile()), { recursive: true });
   fs.writeFileSync(keyFile(), safeStorage.encryptString(key), { mode: 0o600 });
   setApiKey(key); keySource = 'keychain';
@@ -47,6 +48,7 @@ ipcMain.handle('key:clear', () => {
 
 function buildMenu() {
   const openSettings = () => win?.webContents.send('open-settings');
+  if (!IS_MAC) return buildWinMenu(openSettings);
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     {
       label: APP_NAME,
@@ -84,11 +86,49 @@ function buildMenu() {
   ]));
 }
 
+// 윈도우 메뉴 — 창 위 메뉴 막대(파일·편집·보기·도움말). 맥 전용 역할(가리기·windowMenu)은 쓰지 않는다
+function buildWinMenu(openSettings) {
+  const about = () => dialog.showMessageBox(win, {
+    type: 'info', title: `${APP_NAME} 정보`, message: APP_NAME,
+    detail: `버전 ${app.getVersion()}\n제조공정 · 스마트팩토리 · 다크팩토리 시뮬레이션 에이전트`,
+  });
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    {
+      label: '파일(&F)',
+      submenu: [
+        { label: 'Agent API 키 설정…', accelerator: 'Ctrl+,', click: openSettings },
+        { type: 'separator' },
+        { role: 'quit', label: '종료' },
+      ],
+    },
+    {
+      label: '편집(&E)',
+      submenu: [
+        { role: 'undo', label: '실행 취소' }, { role: 'redo', label: '다시 실행' }, { type: 'separator' },
+        { role: 'cut', label: '잘라내기' }, { role: 'copy', label: '복사' }, { role: 'paste', label: '붙여넣기' }, { role: 'selectAll', label: '모두 선택' },
+      ],
+    },
+    {
+      label: '보기(&V)',
+      submenu: [
+        { role: 'reload', label: '시뮬레이션 다시 불러오기' },
+        { role: 'togglefullscreen', label: '전체 화면' },
+        { type: 'separator' },
+        { role: 'resetZoom', label: '실제 크기' }, { role: 'zoomIn', label: '확대' }, { role: 'zoomOut', label: '축소' },
+        { type: 'separator' },
+        { role: 'toggleDevTools', label: '개발자 도구' },
+      ],
+    },
+    { label: '도움말(&H)', submenu: [{ label: `${APP_NAME} 정보`, click: about }] },
+  ]));
+}
+
 async function createWindow() {
   win = new BrowserWindow({
     width: 1600, height: 960, minWidth: 1100, minHeight: 700,
     title: APP_NAME, backgroundColor: '#0d1117', show: false,
-    titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 21 },
+    // 맥은 제목줄을 숨기고 신호등 버튼을 상단 바 안에 둔다. 윈도우는 기본 창틀(제목줄·최소화·닫기)을 쓴다
+    ...(IS_MAC ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 21 } } : {}),
     webPreferences: {
       preload: path.join(HERE, 'preload.cjs'),
       contextIsolation: true, nodeIntegration: false, sandbox: true,
@@ -117,7 +157,7 @@ app.on('child-process-gone', (e, d) => { if (d.type === 'GPU') console.warn(`[�
 app.whenReady().then(async () => {
   loadStoredKey();
   buildMenu();
-  app.setAboutPanelOptions({
+  if (IS_MAC) app.setAboutPanelOptions({
     applicationName: APP_NAME,
     applicationVersion: app.getVersion(),
     copyright: '제조공정 · 스마트팩토리 · 다크팩토리 시뮬레이션 에이전트',

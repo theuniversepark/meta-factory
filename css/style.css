@@ -224,6 +224,8 @@ body[data-mode="dark"] .dark-only { display: inline-block; }
 body.app .app-only { display: inline-block; }
 body.app .topbar { padding-left: 88px; -webkit-app-region: drag; }
 body.app .topbar button, body.app .topbar .seg { -webkit-app-region: no-drag; }
+/* 윈도우 앱 — 기본 창틀(제목줄)이 있으므로 신호등 여백·창 끌기 영역이 필요 없음 */
+body.app.win .topbar { padding-left: 16px; -webkit-app-region: no-drag; }
 .modal-card.small { width: min(520px, 94vw); }
 .key-status { font-size: 12px; padding: 8px 10px; border-radius: 9px; background: rgba(255, 255, 255, 0.05); margin-bottom: 10px; color: var(--ink2); }
 .key-status.ok { color: var(--good); background: rgba(61, 220, 132, 0.1); }

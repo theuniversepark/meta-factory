@@ -10,7 +10,11 @@ import { spawn, spawnSync } from 'node:child_process';
 let ffmpegPath;
 export function findFfmpeg() {
   if (ffmpegPath !== undefined) return ffmpegPath;
-  const cands = [process.env.FFMPEG_PATH, '/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', path.join(os.homedir(), '.local/bin/ffmpeg'), 'ffmpeg'].filter(Boolean);
+  // 윈도우는 winget·수동 설치 위치를 PATH보다 먼저 본다 (맥 후보 순서는 그대로)
+  const win = process.platform === 'win32'
+    ? [process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links', 'ffmpeg.exe'), 'C:\\ffmpeg\\bin\\ffmpeg.exe', process.env.ProgramFiles && path.join(process.env.ProgramFiles, 'ffmpeg', 'bin', 'ffmpeg.exe')]
+    : [];
+  const cands = [process.env.FFMPEG_PATH, '/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', path.join(os.homedir(), '.local/bin/ffmpeg'), ...win, 'ffmpeg'].filter(Boolean);
   ffmpegPath = null;
   for (const c of cands) {
     try { const r = spawnSync(c, ['-hide_banner', '-version'], { timeout: 5000 }); if (r.status === 0) { ffmpegPath = c; break; } } catch { /* 다음 후보 */ }
