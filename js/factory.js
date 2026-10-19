@@ -2039,7 +2039,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
         }
       }
       this.xSlots[I.key] = { I, slots, shown: undefined };
-      put(makeSignSprite(I.label, I.zone === 'flex' ? '#6ab8ff' : '#ff9a6a', 1.5), XRACK.x + 1.25, 4.75, xrackZ(I.key), r);   // 열 표지 (동쪽 면)
+      put(makeSignPlate(I.label, I.zone === 'flex' ? '#6ab8ff' : '#ff9a6a', 1.5), XRACK.x + 1.25, 4.75, xrackZ(I.key), r).rotation.y = Math.PI / 2;   // 열 표지 (동쪽 면) — 선반에 고정
     }
     // 확장 선반 재고 현황판: 선반 꼭대기 위(동쪽을 향함) — 현황판 제목이 선반 이름을 겸한다
     const sc = document.createElement('canvas'); sc.width = 1100; sc.height = 420;
@@ -2089,7 +2089,8 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     // 왼쪽 확장동 물류존: 선반을 왼쪽 벽에 붙여 남북으로 세운다 (로컬 −x 원자재 → 남쪽, +x 부품 → 북쪽, 앞면 = 동쪽)
     const rack = new THREE.Group(); put(rack, WH_RACK.x, 0, WH_RACK.z, r); rack.rotation.y = Math.PI / 2;
     this.whRawSlots = []; this.whPartSlots = []; this.whOut = false;
-    this.whSign = put(makeSignSprite('⛔ 출고 중단 · 공급 차질', '#ff8a1f', 7.5), WH_RACK.x + 1.2, 7.4, WH_RACK.z, r); this.whSign.visible = false;
+    this.whSign = put(makeSignPlate('⛔ 출고 중단 · 공급 차질', '#ff8a1f', 7.5), WH_RACK.x + 1.2, 7.4, WH_RACK.z, r); this.whSign.rotation.y = Math.PI / 2; this.whSign.visible = false;   // 선반 위 동쪽을 향해 고정
+    this.whSign.children.forEach((m) => { m.material.depthTest = false; m.renderOrder = 10; });   // 경보 표지는 현황판에 가리지 않게 늘 위에 그린다 (스프라이트일 때와 같음)
     // AS/RS(셔틀식 자동창고) 구조: 칸마다 기둥 · 단마다 앞뒤 로드 빔과 셔틀 레일 · 끝면 X 브레이싱 · 상부 크라운 프레임
     // 가운데(로컬 x 0)는 수직 리프트 · 단마다 셔틀이 레일을 오가며 칸 ↔ 리프트를 옮기고, 리프트 아래 동쪽(로컬 +z)에 반출 컨베이어
     // 열 배치: 원자재(남쪽) 도어트림 · e-axle, 부품(북쪽) 도어트림 부품 · e-axle 부품 — 제품별로 따로 보관
@@ -2123,12 +2124,12 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     this.whRack = { rack, LV, COLS, group: put(new THREE.Group(), 0, 0, 0, rack) };
     this.buildWhStock();
     // 열 표지 (동쪽 면, 각 열 위)
-    COLS.forEach((c) => put(makeSignSprite(c.p === 'eaxle' ? 'e-axle' : '도어트림', c.p === 'eaxle' ? '#b89bff' : '#ffb35a', 1.5), WH_RACK.x + 1.25, 4.75, WH_RACK.z - c.x, r));
+    COLS.forEach((c) => { put(makeSignPlate(c.p === 'eaxle' ? 'e-axle' : '도어트림', c.p === 'eaxle' ? '#b89bff' : '#ffb35a', 1.5), WH_RACK.x + 1.25, 4.75, WH_RACK.z - c.x, r).rotation.y = Math.PI / 2; });
     // 원자재 칸이 아래 단부터 차도록 정렬 (단 → 열)
     this.whRawSlots.sort((a, b) => a.y - b.y); this.whPartSlots.sort((a, b) => a.y - b.y);
-    // 선반 앞 표지
-    put(makeSignSprite('원자재', '#c9d2dc', 2.2), WH_RACK.x + 1.2, 5.3, WH_RACK.z + 2.5, r);
-    put(makeSignSprite('부품', '#5aa9ff', 2.2), WH_RACK.x + 1.2, 5.3, WH_RACK.z - 2.5, r);
+    // 선반 앞 표지 — 선반 앞면(동쪽)에 고정해 화면을 돌려도 선반과 같이 돈다
+    put(makeSignPlate('원자재', '#c9d2dc', 2.2), WH_RACK.x + 1.2, 5.3, WH_RACK.z + 2.5, r).rotation.y = Math.PI / 2;
+    put(makeSignPlate('부품', '#5aa9ff', 2.2), WH_RACK.x + 1.2, 5.3, WH_RACK.z - 2.5, r).rotation.y = Math.PI / 2;
     // 물류 선반 재고 현황판 (선반 위 왼쪽 벽, 동쪽을 향함): 재고 막대 · 입고 순환 상태 · 입출고 횟수
     const sc = document.createElement('canvas'); sc.width = 1536; sc.height = 420;
     this.whBoard = { cv: sc, tex: new THREE.CanvasTexture(sc), key: '' }; this.whBoard.tex.colorSpace = THREE.SRGBColorSpace; this.whBoard.tex.anisotropy = 8;
@@ -2659,7 +2660,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       this.asrs.lift.position.y = 0.3 + (1 - Math.cos(t * 0.45)) * 1.6;
     }
     this.whSign.visible = out;
-    if (out) this.whSign.material.opacity = REDUCED_MOTION || Math.sin(t * Math.PI * 2 / 0.9) > 0 ? 1 : 0.35;
+    if (out) this.whSign.children[0].material.opacity = REDUCED_MOTION || Math.sin(t * Math.PI * 2 / 0.9) > 0 ? 1 : 0.35;
 
     // 불량 배출 연출
     for (let i = this.flyers.length - 1; i >= 0; i--) {
