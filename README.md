@@ -1,6 +1,6 @@
 # 피지컬AI 실증 메타팩토리 — 레거시 → 자동화 → 피지컬AI 자율공장 시뮬레이터
 
-**▶ 웹 버전 바로 실행: https://theuniversepark.github.io/meta-factory/** (설치 없이 브라우저에서 실행 · Claude 연동과 MQTT 발행은 맥 앱 또는 `npm start`에서)
+**▶ 웹 버전 바로 실행: https://theuniversepark.github.io/meta-factory/** (설치 없이 브라우저에서 실행 · Claude 연동과 MQTT 발행은 맥·윈도우 앱 또는 `npm start`에서)
 
 웹 브라우저에서 실행되는 3D 공장 시뮬레이션 에이전트입니다. 사용한 오픈소스와 출처는 [OPEN_SOURCE.md](OPEN_SOURCE.md)를 보세요.
 
@@ -13,6 +13,21 @@ npm run app         # 패키징 없이 개발용으로 바로 실행
 - Claude API 키는 **⚙ 버튼 또는 ⌘,** 에서 입력합니다. 키는 macOS 키체인(safeStorage)으로 암호화되어 `~/Library/Application Support/Meta-Factory/`에 저장되고, 화면(렌더러)으로는 전달되지 않습니다.
 - 내장 서버는 127.0.0.1의 임의 포트에서만 열립니다.
 - 개발자 서명이 없는 ad-hoc 서명 앱입니다. 이 Mac에서 직접 빌드한 앱은 바로 열립니다. 다른 Mac으로 옮기면 처음 한 번은 Finder에서 우클릭 → 열기가 필요합니다.
+
+## 윈도우 앱 (Meta-Factory.exe)
+
+**⬇ 내려받기: [Meta-Factory-win32-x64.zip](https://github.com/theuniversepark/meta-factory/releases/latest/download/Meta-Factory-win32-x64.zip)** (64비트 윈도우 10·11 · 약 214MB · [릴리스 페이지](https://github.com/theuniversepark/meta-factory/releases/latest))
+
+1. zip을 우클릭 → **모두 압축 풀기** 합니다.
+2. `Meta-Factory-win32-x64` 폴더를 **통째로** 원하는 곳(예: `C:\Meta-Factory`)에 둡니다. `Meta-Factory.exe`만 따로 복사하면 실행되지 않습니다(같은 폴더의 `resources`·DLL이 필요).
+3. `Meta-Factory.exe`를 실행합니다. 처음 한 번 **「Windows의 PC 보호」** 창이 뜨면 **추가 정보 → 실행** 을 누릅니다(코드 서명 인증서가 없는 앱이라 뜨는 경고).
+
+- 설치 프로그램이 아니라 관리자 권한·Node.js 설치가 필요 없습니다. 앱 안에 서버와 Three.js가 모두 들어 있습니다.
+- Claude API 키는 **⚙ 버튼 또는 Ctrl+,** (메뉴 파일 › Agent API 키 설정…)에서 입력합니다. 키는 윈도우 데이터 보호(DPAPI)로 암호화되어 `%APPDATA%\Meta-Factory\`에 저장됩니다. 녹화·에피소드·센서 DB는 `%APPDATA%\Meta-Factory\data\`에 쌓입니다.
+- 내장 서버는 127.0.0.1에서만 열려 보통 방화벽 허용 창이 뜨지 않습니다.
+- 영상을 MP4로 저장하려면 ffmpeg를 설치합니다: `winget install Gyan.FFmpeg` (없으면 WebM으로 저장).
+- 직접 빌드: `npm run package:win` → `dist/Meta-Factory-win32-x64/` (맥에서도 빌드됩니다).
+- ※ 맥에서 빌드해 앱 내용이 맥 앱과 같음을 확인한 상태이며, 실제 윈도우 PC 실행 확인은 진행 중입니다. 자세한 설치·제거·문제 해결은 [사용자 가이드 1.3절](docs/USER_GUIDE.md#13-윈도우-앱-설치첫-실행)을 보세요.
 
 ## 메타팩토리 3 Zone 배치 (서버실 ↔ AMR 스테이션 사이)
 서버실(뒤)과 AMR 스테이션(앞) 사이에 Zone 세 개가 앞뒤로 공존하도록 건물을 넓혔습니다 (배치 상수: `js/zonedefs.js`, 3D·흐름: `js/zones.js`).
