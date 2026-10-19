@@ -4,7 +4,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { RobotTelemetry } from './telemetry.js';
 import { BELT_Y, AISLE, chgLoc, FG_CAP, RAW_CAP, ST_LABEL, TOOL_KITS, SINK_PICK } from './sim.js';
-import { YARD, SHIP, SHIP_FRAME, shipToWorld } from './shipping.js';
+import { YARD, SHIP, SHIP_FRAME, shipToWorld, shipBayName } from './shipping.js';
 import { INBOUND, WH, WH_RACK, LOGI_DZ, XRACK, XWH, WH_ITEMS, xrackZ, stockOf } from './receiving.js';
 import { DRONE_PAD, dronePad } from './drone.js';
 import { bk, fr, BUILDING, TECH_ROOM, TECH_ROOMS, ZONE_FAC, EXTRA_ZONES, LEFT_WALL, SRV, INSP_FAC, zoneDef, facOf } from './zonedefs.js';
@@ -685,6 +685,22 @@ export function makeSignSprite(text, hex, width = 6) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, toneMapped: false }));
   sp.scale.set(width, width / 5, 1); sp.renderOrder = 10;
   return sp;
+}
+// 벽에 붙은 간판 — 스프라이트처럼 화면을 따라 돌지 않고 벽 방향에 고정된다. 앞면(그룹 +z)은 벽 바깥, 뒷면은 벽 안쪽에서 읽힌다.
+// 그룹을 벽 위치에 두고 rotation.y로 바깥 방향을 맞춘다 (판은 벽 두께 0.3m 양쪽으로 0.18m씩 띄움)
+export function makeSignPlate(text, hex, width = 6) {
+  const c = document.createElement('canvas'); c.width = 640; c.height = 128;
+  const x = c.getContext('2d');
+  x.fillStyle = 'rgba(12,14,18,0.94)'; x.beginPath(); x.roundRect(4, 4, 632, 120, 26); x.fill();
+  x.lineWidth = 8; x.strokeStyle = hex; x.stroke();
+  x.fillStyle = hex; x.font = '800 54px "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(text, 320, 68);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false });
+  const g = new THREE.Group(), geo = new THREE.PlaneGeometry(width, width / 5);
+  const front = new THREE.Mesh(geo, mat); front.position.z = 0.18; g.add(front);
+  const back = new THREE.Mesh(geo, mat); back.position.z = -0.18; back.rotation.y = Math.PI; g.add(back);
+  return g;
 }
 // 로봇 고유 ID 명판 (작은 스프라이트)
 function idPlate(text) {
@@ -1658,7 +1674,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       for (const sd of [-1, 1]) put(box(0.2, 4.6, 0.18, MAT.yellow), W + 0.2, 2.3, INBOUND.dockZ + sd * 2.35, lw);
       put(box(1.4, 0.08, 2.6, MAT.steel), W + 0.8, 0.04, INBOUND.dockZ, lw);
       for (const sd of [-1, 1]) put(box(0.25, 0.5, 0.35, MAT.rubber), W - 0.3, 1.0, INBOUND.dockZ + sd * 1.15, lw);
-      put(makeSignSprite('입고 도크', '#3ddc84', 3.2), W + 0.4, 5.6, INBOUND.dockZ, lw);
+      put(makeSignPlate('입고 도크', '#3ddc84', 3.2), W, 5.6, INBOUND.dockZ, lw).rotation.y = -Math.PI / 2;   // 문 위 벽에 고정 — 앞면이 바깥(−x)
       lw.traverse((o) => (o.castShadow = false)); }
     // 오른쪽 벽: 위쪽(뒤) 모서리에 출하 도크 문 1개(폭 4.6m · 높이 4.9m)만 트럭 상차용으로 연다 — 야드 로컬 좌표를 shipToWorld로 돌려 둔다
     { const doorW = 4.6, dz = YARD.bays.map((bx) => shipToWorld(bx, YARD.wallZ).z).sort((a, b) => a - b), W = SHIP.wallX;
@@ -1679,13 +1695,13 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     sign.rotation.x = -Math.PI / 2;
     // 출하 도크: 말아 올린 셔터·문틀·도크 레벨러·범퍼 — 야드 로컬 좌표(도크 벽 z −20)로 만들고 그룹째 오른쪽 벽으로 돌린다
     const dk = put(new THREE.Group(), SHIP_FRAME.x, 0, SHIP_FRAME.z, r); dk.rotation.y = SHIP_FRAME.rot; this.shipFrame = dk;
-    for (const [i, bx] of YARD.bays.entries()) {
+    for (const bx of YARD.bays) {
       put(cyl(0.32, 0.32, 4.6, MAT.dark, 16), bx, 4.75, -19.85, dk).rotation.z = Math.PI / 2;
       put(box(4.8, 0.25, 0.14, MAT.yellow), bx, 4.6, -19.75, dk);
       for (const sd of [-1, 1]) put(box(0.18, 4.6, 0.2, MAT.yellow), bx + sd * 2.35, 2.3, -19.8, dk);
       put(box(2.6, 0.08, 1.4, MAT.steel), bx, 0.04, -19.2, dk);
       for (const sd of [-1, 1]) put(box(0.35, 0.5, 0.25, MAT.rubber), bx + sd * 1.15, 1.0, -20.3, dk);
-      put(makeSignSprite(`출하 도크 ${i + 1}`, '#f2c230', 3.2), bx, 5.6, -19.6, dk);
+      put(makeSignPlate(shipBayName(bx), '#f2c230', 3.2), bx, 5.6, YARD.wallZ, dk).rotation.y = Math.PI;   // 문 위 벽에 고정 — 앞면이 바깥(야드 −z), 그룹째 오른쪽 벽으로 돈다
     }
     this.buildYard();
     this.buildFacadeSigns();

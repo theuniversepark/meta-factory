@@ -16,6 +16,8 @@ export const YARD = {
   truckLen: 10.5, truckW: 2.5, cap: 32,      // 트럭 길이·폭(m), 적재 용량(개 = 팔레트 4개 × 8개)
   pallet: 8,                                   // 지게차 1회 운반량 (팔레트 1개)
 };
+// 출하 도크 이름 — 도크가 하나면 번호 없이 '출하 도크', 여러 개면 '출하 도크 1·2…' (간판·로그·지게차 목적지 공통)
+export const shipBayName = (bx) => (YARD.bays.length > 1 ? `출하 도크 ${YARD.bays.indexOf(bx) + 1}` : '출하 도크');
 const DOCK_Z = YARD.wallZ - YARD.truckLen / 2 - 0.15;   // 접안 트럭 중심 (뒤쪽 끝이 벽 바로 바깥)
 const FWD = 4.2, REV = 1.8;                    // 전진·후진 속도 (m/s)
 // 야드 로컬 → 월드: 오른쪽 벽 x 38, 로컬 x 27.5 → 월드 z −31 (회전 −90°: 월드 = (−z, x) + 평행이동)
@@ -68,7 +70,7 @@ export class TruckYard {
     for (const t of this.trucks) {
       const arrived = t.update(dt);
       if (!arrived) continue;
-      if (t.state === 'toDock') { t.state = 'dock'; s.log('info', `${t.id} 도크 ${this.bayNo(t.bay)} 접안`, { obs: '후진 접안 완료 · 상차 대기' }); }
+      if (t.state === 'toDock') { t.state = 'dock'; s.log('info', `${t.id} ${shipBayName(t.bay)} 접안`, { obs: '후진 접안 완료 · 상차 대기' }); }
       else if (t.state === 'depart') { t.state = 'gone'; }
     }
     this.trucks = this.trucks.filter((t) => t.state !== 'gone');
@@ -78,7 +80,7 @@ export class TruckYard {
       if (busy) continue;
       const t = this.spawn(YARD.enterX, YARD.roadZ - 1.5); t.heading = Math.PI / 2; t.bay = bx;
       t.go([{ x: bx + 7, z: YARD.roadZ - 1.5 }, { x: bx + 1.5, z: YARD.roadZ + 4, rev: true }, { x: bx, z: DOCK_Z - 6, rev: true }, { x: bx, z: DOCK_Z, rev: true }], 'toDock');
-      s.log('info', `${t.id} 출하 야드 진입`, { obs: `도크 ${this.bayNo(bx)} 후진 접안` });
+      s.log('info', `${t.id} 출하 야드 진입`, { obs: `${shipBayName(bx)} 후진 접안` });
     }
   }
   bayNo(bx) { return YARD.bays.indexOf(bx) + 1; }
@@ -96,7 +98,7 @@ export class TruckYard {
       t.bay = null; t.bayLeft = bx;
       s.stats.trucks = (s.stats.trucks ?? 0) + 1; s.fac?.shipDone(t);   // FAC: 출고 확정
       const mix = Object.entries(t.by).map(([k, v]) => `${FG_LABEL[k] ?? k} ${v}`).join(' · ');
-      s.log('ok', `${t.id} 만재 출발`, { obs: `적재 ${t.load}/${YARD.cap}개${mix ? ` (${mix})` : ''}`, act: `도크 ${this.bayNo(bx)} 비움 → 다음 트럭 진입` });
+      s.log('ok', `${t.id} 만재 출발`, { obs: `적재 ${t.load}/${YARD.cap}개${mix ? ` (${mix})` : ''}`, act: `${shipBayName(bx)} 비움 → 다음 트럭 진입` });
     }
   }
 }
@@ -123,7 +125,7 @@ export function planForklift(sim, f) {
   t.reserved = (t.reserved ?? 0) + n;
   const pick = zfg ? ZONE_FG[product].pick : product === 'eaxle' ? sim.loc.PICK_EA : sim.loc.PICK_DT;
   // 도크 앞(벽에서 2.6m)에서 트럭 쪽을 보고 서서 포크를 적재함 높이로 올린 뒤 들어가고, 내려놓으면 포크를 넣은 채 반듯이 후진해 나온 뒤 돈다
-  const bx = t.bay, dock = { ...shipToWorld(bx, YARD.wallZ + 2.6), aisle: 'BB', name: `출하 도크 ${yard.bayNo(bx)}` };
+  const bx = t.bay, dock = { ...shipToWorld(bx, YARD.wallZ + 2.6), aisle: 'BB', name: shipBayName(bx) };
   const inside = { ...shipToWorld(bx, YARD.wallZ + 0.95), aisle: 'BB', name: `${t.id} 적재함` };   // 마스트(차체 앞 0.81m)·포크 캐리지는 적재함 밖(후방 범퍼 앞)에 두고 포크만 넣는다   // 도크 레벨러 끝에서 포크를 적재함에 넣어 내려놓는다
   const pName = FG_LABEL[product] ?? '완제품';
   f.setTask(`${pName} 출하 → ${t.id}`, [
@@ -148,7 +150,7 @@ export function planForklift(sim, f) {
   sim.log(m.agentActive ? 'act' : 'warn', `출하 지게차 배차 → ${t.id}`, {
     obs: zfg ? `${ZONE_FG[product].zone} 포장·구분 적재 ${pName} ${avail}개 (기준 ${trigger}개)` : sim.zone ? `구분 적재장 ${pName} ${avail}개 (기준 ${trigger}개)` : `완제품 ${avail}개`,
     dec: `트럭 ${t.id} 적재 ${t.load}/${YARD.cap}개`,
-    act: `${f.id} 팔레트 ${n}개 → 도크 ${yard.bayNo(bx)}`,
+    act: `${f.id} 팔레트 ${n}개 → ${shipBayName(bx)}`,
   });
   return true;
 }
