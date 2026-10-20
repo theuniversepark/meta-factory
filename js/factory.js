@@ -795,6 +795,15 @@ function ammrContact(r, o) {
   return true;
 }
 // 체결 셀 오버헤드 헤드(너트러너)가 내려와도 되는 진행률: 로봇 마지막 점 → 대기 자세 복귀(animFasten 'ret' — max(0.5, per×0.4)초)가 끝나고 0.3초 뒤 — 팔이 아직 점 위(0.3m)에 있을 때 헤드가 내려오면 손목과 부딪힌다
+// 손목(마지막 관절) 비트 회전: 실물 로봇 모델(native)은 관절 한계(UR J6 ±360°)에서 잘려 1바퀴 넘게 돌지 못한다 —
+// 바퀴 수를 덜어(±2π, 같은 자세) 한계 안으로 접어 넣어 여러 바퀴를 끊김 없이 돌린다
+function wristSpin(A, q, spin) {
+  if (!spin) return q;
+  const d = A.jointDefs?.[5], T = Math.PI * 2;
+  let a = q + (spin % T);
+  if (d) { while (a > d.max) a -= T; while (a < d.min) a += T; }
+  return a;
+}
 function headAfter(st, dflt) {
   const F = st.def.fasten; if (!F || !st.fastenPts) return dflt;
   return Math.min(0.97, (F.setup + Math.max(...st.fastenPts) * F.per + Math.max(0.5, F.per * 0.4) + 0.3) / fastenT(F, st.fastenPts));
@@ -3228,12 +3237,20 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       else if (f < 0.5) q = lerp(up, high, ease(seg(f, 0.35, 0.5)));          // 점 0.3m 위로 가져가
       else if (f < 0.57) q = lerp(high, above, ease(seg(f, 0.5, 0.57)));
       else if (f < 0.64) q = lerp(above, touch, ease(seg(f, 0.57, 0.64)));    // 손끝 접촉
-      else if (f < 0.88) { q = lerp(touch, work, ease(seg(f, 0.64, 0.68))); if (F.kind === 'screw') spin = seg(f, 0.64, 0.88) * Math.PI * 8; }   // 런다운 / 압입
+      else if (f < 0.88) {
+        q = lerp(touch, work, ease(seg(f, 0.64, 0.68)));   // 압입: 손끝 접촉 → 1cm 누름
+        if (F.kind === 'screw') {   // 체결: 3번 — 런다운 1번 + 토크업 2번. 번마다 비트를 눌러 10/3바퀴 돌리고 살짝 들었다가 다시 물린다 (합계 10바퀴 — 정수 바퀴라 끝나고 손목이 튀지 않는다)
+          const u = seg(f, 0.64, 0.88) * 3, k = Math.min(2, Math.floor(u)), w = u - k;
+          const lift = w > 0.82 && k < 2 ? Math.sin((w - 0.82) / 0.18 * Math.PI) : 0;   // 번 사이 비트를 떼었다 다시 물림
+          q = lerp(work, touch, lift);
+          spin = (k + Math.min(1, w / 0.82)) * (10 / 3) * Math.PI * 2;
+        }
+      }
       else if (f < 0.94) q = lerp(work, above, ease(seg(f, 0.88, 0.94)));
       else q = lerp(above, high, ease(seg(f, 0.94, 1)));
       held = f >= 0.25 && f < 0.85;   // 집은 부품은 체결이 끝날 때까지 그리퍼에
     } else { const k = (tau - F.setup - n * F.per) / Math.max(0.5, F.per * 0.4); q = lerp(plan.pts[n - 1][3], home, ease(k)); }   // 마지막 점 위(high)에서 대기 자세로 — 사이클 마무리(FASTEN_RETRACT) 안에 끝난다
-    r.fCur = q.slice(); const out = q.slice(); out[5] += spin; A.pose(...out);
+    r.fCur = q.slice(); const out = q.slice(); out[5] = wristSpin(A, out[5], spin); A.pose(...out);
     const H = r.vla?.held ?? (r.fHeld ??= (() => {   // 자동화: 그리퍼에 집은 부품 1개 (스크류·볼트·클립·베어링)
       const name = { DT_FAST: 'P_Screw', EA_FAST: 'P_Bolt', DT_ASSY: 'P_Clip', EA_ASSY: 'P_Bearing' }[st.id], o = name && partClone(name);
       const g = o ? (o.scale.setScalar(1.3), o) : box(0.03, 0.02, 0.03, MAT.steel); g.position.set(0, 0.02, 0); r.tip.add(g); return g; })());
@@ -3261,7 +3278,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       if (u >= 0.55 && u < 0.75) { const f = (u - 0.55) / 0.2; if (st.type === 'screw' || st.type === 'fasten') e = f * Math.PI * 6; else d = Math.sin(f * Math.PI * 4) * 0.12; }
     }
     r.vlaCur = r.vlaCur ? r.vlaCur.map((v, n) => v + (q[n] - v) * 0.35) : q.slice();
-    if (A.native) { const q = r.vlaCur.slice(); q[4] += d; q[5] += e; A.pose(...q); }
+    if (A.native) { const q = r.vlaCur.slice(); q[4] += d; q[5] = wristSpin(A, q[5], e); A.pose(...q); }
     else A.pose(r.vlaCur[0], r.vlaCur[1], r.vlaCur[2], r.vlaCur[3], d, e);
     if (held && !V.held.visible && V.heldParts) { V.pick = (V.pick + 1) % V.heldParts.length; V.heldParts.forEach((o, k) => { o.visible = k === V.pick; }); }
     V.held.visible = held;

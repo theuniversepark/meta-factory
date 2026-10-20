@@ -10,17 +10,33 @@ export const BLENDER_ASSETS = { haas_vf2: 'Haas VF-2', haas_umc1250: 'Haas UMC-1
 export const RENDER = { style: 'blender', assets: {}, prims: new Map(), loaded: false, error: null, swapped: 0 };
 let loading = null;
 
-// 공유 페이지(Claude 아티팩트)는 .glb를 내려주지 못해 같은 모델을 JSON glTF(버퍼 내장, .gltf.json)로 둔다
+// 공유 페이지(Claude 아티팩트)는 .glb를 내려주지 못해 같은 모델을 JSON glTF(버퍼 내장, .gltf.json)로 둔다.
+// 공유 페이지는 data: 주소 내려받기(fetch)를 막으므로 GLTFLoader가 내장 버퍼(data:…base64)를 읽지 못한다 —
+// JSON을 받아 base64 버퍼를 직접 풀어 메모리에서 GLB(JSON 청크 + BIN 청크)로 묶은 뒤 parse한다 (네트워크 요청 없음)
+function gltfJsonToGlb(json) {
+  const uri = json.buffers?.[0]?.uri ?? '', i = uri.indexOf('base64,');
+  let bin = new Uint8Array(0);
+  if (i >= 0) { const raw = atob(uri.slice(i + 7)); bin = new Uint8Array(raw.length); for (let k = 0; k < raw.length; k++) bin[k] = raw.charCodeAt(k); delete json.buffers[0].uri; }
+  const pad4 = (n) => (n + 3) & ~3;
+  const jsonBytes = new TextEncoder().encode(JSON.stringify(json)), jLen = pad4(jsonBytes.length), bLen = pad4(bin.length);
+  const out = new ArrayBuffer(12 + 8 + jLen + (bin.length ? 8 + bLen : 0)), dv = new DataView(out), u8 = new Uint8Array(out);
+  dv.setUint32(0, 0x46546c67, true); dv.setUint32(4, 2, true); dv.setUint32(8, out.byteLength, true);   // 'glTF' · 버전 2 · 전체 길이
+  dv.setUint32(12, jLen, true); dv.setUint32(16, 0x4e4f534a, true); u8.set(jsonBytes, 20); u8.fill(0x20, 20 + jsonBytes.length, 20 + jLen);   // JSON 청크 (공백 채움)
+  if (bin.length) { const o = 20 + jLen; dv.setUint32(o, bLen, true); dv.setUint32(o + 4, 0x004e4942, true); u8.set(bin, o + 8); }   // BIN 청크 (0 채움)
+  return out;
+}
+const loadModel = (loader, url) => (!url.endsWith('.gltf.json') ? loader.loadAsync(url)
+  : fetch(url).then((r) => { if (!r.ok) throw new Error(`${url} ${r.status}`); return r.json(); }).then((j) => loader.parseAsync(gltfJsonToGlb(j), url.replace(/[^/]*$/, ''))));
 export function loadBlenderAssets(base = 'assets/blender/', ext = globalThis.window?.METAFACTORY_SHARED ? '.gltf.json' : '.glb') {
   if (RENDER.loaded) return Promise.resolve(RENDER.assets);
   if (loading) return loading;
   const loader = new GLTFLoader();
-  loading = Promise.all([...Object.keys(BLENDER_ASSETS).map((k) => loader.loadAsync(`${base}${k}${ext}`).then((g) => {
+  loading = Promise.all([...Object.keys(BLENDER_ASSETS).map((k) => loadModel(loader, `${base}${k}${ext}`).then((g) => {
     g.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     RENDER.assets[k] = g.scene;
   })),
   // 기본 도형 라이브러리: 노드 이름 → Blender에서 다듬은 지오메트리
-  loader.loadAsync(`${base}primitives${ext}`).then((g) => { g.scene.traverse((o) => { if (o.isMesh) RENDER.prims.set(o.name, o.geometry); }); })]).then(() => { RENDER.loaded = true; return RENDER.assets; }).catch((e) => { RENDER.error = e.message; loading = null; throw e; });
+  loadModel(loader, `${base}primitives${ext}`).then((g) => { g.scene.traverse((o) => { if (o.isMesh) RENDER.prims.set(o.name, o.geometry); }); })]).then(() => { RENDER.loaded = true; return RENDER.assets; }).catch((e) => { RENDER.error = e.message; loading = null; throw e; });
   return loading;
 }
 export const blenderOn = () => RENDER.style === 'blender' && RENDER.loaded;
