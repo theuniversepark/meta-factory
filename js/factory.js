@@ -2794,7 +2794,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       cv.g.userData.led.emissive.setHex(c.state === 'park' ? 0x3dff8a : c.state === 'atSrc' ? 0xffb020 : 0x2aa8ff);
     }
     for (const tv of this.techViews) this.animatePerson(tv, rdt, t, true);
-    for (const hv of this.helperViews) { this.animatePerson(hv, rdt, t, true); hv.g.userData.bin.visible = !!hv.v.carry; }
+    for (const hv of this.helperViews) this.animatePerson(hv, rdt, t, true);   // 부품 빈은 carryPose가 보이고 숨긴다
     for (const qv of this.quadViews) this.animateQuad(qv, rdt, t);
     for (const dk of this.quadDocks ?? []) {   // 충전 도크 상태등
       const at = Math.hypot(dk.q.x - dk.q.home.x, dk.q.z - dk.q.home.z) < 0.3;
@@ -2831,6 +2831,26 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     }
   }
 
+  // 휴머노이드 운반 자세: 위팔은 몸 옆으로 거의 내리고, 아래팔은 앞으로 (Blender 모델은 팔꿈치를 굽힘) — 손이 허리 높이(약 0.93m) 몸 앞 0.38m에 오고,
+  // 부품 빈은 두 손 사이(양옆을 잡는 높이)에 놓아 손과 함께 움직인다. 빈 윗면 먼 모서리가 머리 카메라(수직 화각 70°, 18° 내려봄) 아래 경계보다
+  // 약 7° 더 아래라 시야를 가리지 않고, 빈 안쪽 면은 몸통 앞에 떨어져 있다
+  carryPose(ud, on) {
+    const { bin, waist } = ud;
+    if (!on) { if (bin.visible) bin.visible = false; return; }
+    if (bin.parent !== waist) { waist.add(bin); bin.rotation.set(0, 0, 0); }   // 허리를 돌리면 상체와 함께 돈다
+    if (ud.elbowL) { ud.armL.rotation.set(-0.15, 0, 0.12); ud.armR.rotation.set(-0.15, 0, -0.12); ud.elbowL.rotation.x = -0.8; ud.elbowR.rotation.x = -0.8; }
+    else { ud.armL.rotation.set(-0.62, 0, 0.06); ud.armR.rotation.set(-0.62, 0, -0.06); }
+    if (!ud.hands) {   // 손 끝(손바닥 가운데) 기준점: 기본 모델은 어깨에서 0.62m, Blender 모델은 팔꿈치에서 0.42m 아래
+      const at = (o, y) => put(new THREE.Object3D(), 0, y, 0, o);
+      ud.hands = ud.elbowL ? [at(ud.elbowL, -0.42), at(ud.elbowR, -0.42)] : [at(ud.armL, -0.62), at(ud.armR, -0.62)];
+    }
+    waist.updateWorldMatrix(true, true);
+    const [a, b] = ud.hands.map((h) => waist.worldToLocal(h.getWorldPosition(new THREE.Vector3())));
+    const gap = Math.abs(a.x - b.x) - 0.1;   // 손바닥 두께만큼 안쪽 — 빈 양옆 면이 손에 닿는다
+    bin.scale.set(Math.max(0.6, Math.min(1.4, gap / 0.42)), 1, 1);
+    bin.position.set((a.x + b.x) / 2, (a.y + b.y) / 2 - 0.02, (a.z + b.z) / 2);
+    bin.visible = true;
+  }
   animatePerson(pv, rdt, t, isTech) {
     const v = pv.v, g = pv.g;
     const moved = Math.hypot(v.x - pv.px, v.z - pv.pz) > 1e-4;
@@ -2873,7 +2893,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
         ud.armR.rotation.x = working ? -1.1 + Math.cos(t * 6) * 0.35 : 0;
         if (ud.legL) { ud.legL.rotation.x = 0; ud.legR.rotation.x = 0; }
       }
-      if (v.carry && ud.bin) { ud.armL.rotation.x = -1.2; ud.armR.rotation.x = -1.2; }
+      if (ud.bin) this.carryPose(ud, v.carry);   // 운반: 두 손으로 부품 빈 양옆을 잡고 몸 앞 허리 높이에 든다
       if (ud.visor) ud.visor.emissive.setHex(v.task ? 0x37e8ff : 0x3dff8a);
       // 챙긴 도구 표시 (정비실에서 챙기고 반납할 때까지)
       if (v.tool !== undefined || ud.toolKits) {
@@ -2889,9 +2909,10 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       if (ud.kneeL) {   // Blender 휴머노이드: 앞으로 내딛는 다리의 무릎을 굽히고, 팔꿈치는 걸음·작업·운반에 맞춰 굽힌다
         const sw = moved ? Math.sin(t * 9) : 0;
         ud.kneeL.rotation.x = Math.max(0, sw) * 0.7; ud.kneeR.rotation.x = Math.max(0, -sw) * 0.7;
-        const el = v.carry ? -0.5 : moved ? -0.35 : -0.12;
-        ud.elbowL.rotation.x = ud.armL.rotation.x < -0.5 && !v.carry ? -0.7 : el; ud.elbowR.rotation.x = ud.armR.rotation.x < -0.5 && !v.carry ? -0.7 : el;
+        const el = moved ? -0.35 : -0.12;
+        if (!v.carry) { ud.elbowL.rotation.x = ud.armL.rotation.x < -0.5 ? -0.7 : el; ud.elbowR.rotation.x = ud.armR.rotation.x < -0.5 ? -0.7 : el; }
       }
+      if (ud.bin && v.carry) this.carryPose(ud, true);   // 무릎·팔꿈치 계산 뒤 다시 — 팔꿈치 각도까지 운반 자세로
     } else if (ud.arm) {
       const working = v.task && !moved;
       ud.arm.pose(Math.sin(t * 1.5) * 0.6, working ? 0.8 + Math.sin(t * 3) * 0.2 : 0.2, working ? 1.0 : 0.9, 0.5);
