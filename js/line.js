@@ -220,6 +220,8 @@ export function normalizeLine(raw) {
     for (const s of stations) {
       const cell = ZONE_CELLS[s.id];
       if (cell && s.type !== cell.type) { warnings.push(`${cell.label}의 유형은 ${STATION_TYPES[cell.type].label}로 고정 → 되돌림`); s.type = cell.type; }
+      const F = ZONE_RECIPES.find((r) => r.id === s.id)?.fasten;   // 체결·압입 점(2~4점) 설정은 셀에 고정 — 저장된 라인·편집 초안에 없어도 되살린다 (빠지면 점마다 선반 왕복 체결이 꺼진다)
+      if (F) s.fasten = { ...F };
     }
   } else if (!LAYOUTS[layout]) { warnings.push(`알 수 없는 레이아웃 "${raw?.layout}" → 일자형`); out.layout = 'straight'; }
   return { line: out, errors, warnings };

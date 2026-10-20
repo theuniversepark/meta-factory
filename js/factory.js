@@ -193,6 +193,8 @@ function armIK(s, x, y, z) {
 // 관절 정의 (이름·단위·가동 범위) — 텔레메트리 표시용
 const DEG = Math.PI / 180;
 const UP = new THREE.Vector3(0, 1, 0);
+// 셀 휴머노이드 작업 자세 (팔마다 [어깨 앞뒤, 어깨 벌림(안쪽 +), 어깨 회전, 팔꿈치]) — 왼손은 대상물 가장자리를 누르고 오른손 툴은 윗면에
+const HUMANOID_REACH = [[-0.75, 0.45, -0.4, -0.05], [-0.65, 0.15, 0.5, -0.8]];   // 셀 바닥에서 통로 경계 바깥(zones.js HUM_SLOT_Z)에 섰을 때 손바닥·툴 끝이 대상물에 1~3cm 안으로 닿는 값 (앱에서 측정)
 const ARM_JOINTS = [
   { name: 'J1 베이스 회전', unit: 'deg', min: -180 * DEG, max: 180 * DEG },
   { name: 'J2 어깨', unit: 'deg', min: -90 * DEG, max: 150 * DEG },
@@ -1009,66 +1011,44 @@ function makeRobot(kind, color, opts = {}) {
     };
   }
   if (kind === 'humanoid') {
-    // 휴머노이드 로봇: 두 다리로 셀 작업 위치에 서서 허리를 돌리며 양팔(각 6축)로 작업. 머리에 스테레오 카메라. 로컬 +z가 작업 쪽
-    const root = new THREE.Group();
-    const jm = std(0x2a2f36, { roughness: 0.5, metalness: 0.4 });
-    let legs, torso, head;
-    if (blenderOn()) {   // Blender 휴머노이드 몸체(다리·허리·머리 관절)에 셀 작업용 6축 양팔을 단다
-      const A = cloneAsset('humanoid'); root.add(A.root);
-      legs = [A.find('Hip_L'), A.find('Hip_R')]; torso = A.find('Waist'); head = A.find('Head');
-      A.find('Shoulder_L').visible = false; A.find('Shoulder_R').visible = false;
-    } else {
-      const shell = std(0xe6e9ee, { roughness: 0.35, metalness: 0.2 });
-      legs = [-0.12, 0.12].map((x) => {
-        const hip = put(new THREE.Group(), x, 0.92, 0, root);
-        put(mesh(new THREE.CapsuleGeometry(0.08, 0.36, 4, 8), shell), 0, -0.22, 0, hip);
-        put(mesh(new THREE.SphereGeometry(0.075, 10, 8), jm), 0, -0.45, 0.01, hip);
-        put(mesh(new THREE.CapsuleGeometry(0.07, 0.34, 4, 8), shell), 0, -0.67, 0, hip);
-        put(box(0.13, 0.06, 0.24, jm), 0, -0.89, 0.04, hip);
-        return hip;
-      });
-      put(box(0.34, 0.16, 0.2, jm), 0, 0.98, 0, root);                                       // 골반
-      torso = put(new THREE.Group(), 0, 1.0, 0, root);                                  // 허리 회전
-      put(mesh(new THREE.CapsuleGeometry(0.19, 0.3, 4, 10), shell), 0, 0.3, 0, torso);
-      const led = emis(0xff8a2a, 1.6); put(box(0.2, 0.1, 0.03, led, false), 0, 0.36, 0.2, torso);   // 가슴 상태등
-      put(cyl(0.05, 0.06, 0.08, jm), 0, 0.64, 0, torso);
-      head = put(new THREE.Group(), 0, 0.8, 0, torso);
-      put(mesh(new THREE.SphereGeometry(0.15, 16, 12), shell), 0, 0, 0, head);
-      put(box(0.22, 0.06, 0.06, emis(0x37e8ff, 2.2), false), 0, 0.01, 0.12, head);             // 스테레오 카메라 (바이저)
-    }
-    const arms = [-1, 1].map((sd) => {
-      put(mesh(new THREE.SphereGeometry(0.085, 10, 8), jm), sd * 0.25, 0.52, 0, torso);       // 어깨
-      const a = makeArm(COBOT_MAT, 0.42);
-      put(a.root, sd * 0.3, 0.5, 0.06, torso); a.root.rotation.set(1.35, 0, -sd * 0.2);    // 어깨에서 앞쪽(작업대)으로 뻗도록 장착
-      return a;
-    });
+    // 휴머노이드 로봇: 물류·정비 휴머노이드와 같은 몸(사람형 양팔 — 어깨 3축 + 팔꿈치)으로 셀 작업 위치에 서서 대상물에 두 손을 대고 작업. 머리에 스테레오 카메라. 로컬 +z가 작업 쪽
+    // 왼손은 대상물 가장자리를 눌러 잡고, 오른손은 보수 툴(재용접 토치·재도포 노즐)을 대상물 윗면에 대고 짧게 오가며 작업 — 이따금 허리를 돌려 옆 부품을 머리 카메라로 확인
+    const root = makeHumanoid(0xff8a2a), ud = root.userData, torso = ud.waist, head = ud.head, legs = [ud.legL, ud.legR], cams = ud.cams;
+    const sh = [ud.armL, ud.armR], el = [ud.elbowL, ud.elbowR];
+    const hand = (k) => put(new THREE.Object3D(), 0, el[k] ? -0.42 : -0.62, 0, el[k] ?? sh[k]);   // 손바닥 가운데 (carryPose와 같은 기준점)
+    const tips = [hand(0), hand(1)];
+    const tool = put(new THREE.Group(), 0, -0.03, 0.03, tips[1]); tool.rotation.x = 0.9;   // 오른손에 쥔 보수 툴: 손잡이 + 노즐 — 아래팔에서 아래로 약 50° 꺾여 팔을 앞으로 뻗으면 노즐 끝이 대상물 윗면을 향한다
+    put(box(0.05, 0.1, 0.05, MAT.dark), 0, 0, 0, tool); put(cyl(0.012, 0.018, 0.14, MAT.steel, 10), 0, -0.12, 0, tool);
+    const tipT = put(new THREE.Object3D(), 0, -0.19, 0, tool);   // 노즐 끝 (TCP)
     const sideNames = ['왼팔', '오른팔'];
-    const backZ = blenderOn() ? -0.22 : -0.2, backY = blenderOn() ? 0.5 : 0.42;
-    const cams = { head: camModule(head, 0, 0.02, 0.14, 0.45, 0, 0.05, false), handL: camModule(arms[0].tip, 0.045, -0.02, 0, -Math.PI / 2, 0, 0.035), handR: camModule(arms[1].tip, 0.045, -0.02, 0, -Math.PI / 2, 0, 0.035), back: camModule(torso, 0, backY, backZ, 0.2, Math.PI, 0.055) };
+    const ARM = [{ name: '어깨 앞뒤', min: -170 * DEG, max: 60 * DEG }, { name: '어깨 벌림', min: -90 * DEG, max: 90 * DEG }, { name: '어깨 회전', min: -90 * DEG, max: 90 * DEG }, { name: '팔꿈치', min: -150 * DEG, max: 0 }];
+    const REST = [0.05, 0.06, 0, -0.15], REACH = HUMANOID_REACH;
     return {
-      root, kind, tip: arms[0].tip, tip2: arms[1].tip, head, payload: 15, dual: true, arms, torso, legs, cams,
-      // Atlas형: 허리 360° 연속 회전 · 머리 좌우 180°(±90°)
+      root, kind, tip: tipT, tip2: tips[0], head, payload: 15, torso, legs, cams, humanoidArms: true,
+      // Atlas형: 허리 360° 연속 회전 · 머리 좌우 180°(±90°) · 팔마다 어깨 3축 + 팔꿈치
       jointDefs: [{ name: '허리 회전', unit: 'rad', min: -Math.PI, max: Math.PI }, { name: '머리 회전', unit: 'rad', min: -Math.PI / 2, max: Math.PI / 2 },
-        ...sideNames.flatMap((n) => ARM_JOINTS.map((j) => ({ ...j, name: `${n} ${j.name}` })))],
-      joints: () => [Math.atan2(Math.sin(torso.rotation.y), Math.cos(torso.rotation.y)), head.rotation.y, ...arms[0].joints(), ...arms[1].joints()],
+        ...sideNames.flatMap((n) => ARM.map((j) => ({ ...j, name: `${n} ${j.name}`, unit: 'deg' })))],
+      joints: () => [Math.atan2(Math.sin(torso.rotation.y), Math.cos(torso.rotation.y)), head.rotation.y, ...[0, 1].flatMap((k) => [sh[k].rotation.x, sh[k].rotation.z, sh[k].rotation.y, el[k]?.rotation.x ?? 0])],
       cur: null,
-      anim(busy, t) {
-        const w = t * 1.4;
-        // 작업 사이클마다 허리를 옆 부품 쪽으로 크게 돌려(약 100°) 머리 카메라로 부품을 확인하고 돌아온다 — 발은 그대로
-        const turn = busy ? Math.max(0, Math.sin(w * 0.22)) ** 6 * 1.75 : 0;
-        const target = [busy ? Math.sin(w * 0.45) * 0.28 + turn : 0, busy ? Math.sin(w * 0.7) * 0.25 : 0];
-        arms.forEach((a, i) => {
-          const ph = w + i * Math.PI * 0.5, sd = i ? -1 : 1;   // 두 팔이 엇갈려 집고 놓는다
-          target.push(...(busy ? [sd * (0.25 + Math.sin(ph) * 0.22), 0.85 + Math.sin(ph * 1.3) * 0.15, 1.25 + Math.cos(ph) * 0.12, 0.7, Math.sin(ph * 0.9) * 0.3, Math.sin(ph * 0.6) * 1.4]
-            : [sd * 0.1, 0.2, 0.9, 0.4, 0, 0]));
+      anim(busy, t, p = 0.5) {
+        const w = t * 1.4, sm = (a, b, x) => { const k = Math.min(1, Math.max(0, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
+        // 대상물이 셀에 서 있는 작업 구간(진행 0.1~0.85 — zones.js CELL_WORK.rework)에만 두 손을 대상물에 댄다
+        const on = busy ? sm(0.04, 0.12, p) * (1 - sm(0.83, 0.9, p)) : 0;
+        // 손을 떼고 있을 때(작업 구간 앞뒤) 이따금 허리를 옆 부품 쪽으로 크게 돌려(약 100°) 머리 카메라로 부품을 확인하고 돌아온다 · 발은 그대로
+        const turn = busy ? (1 - on) * Math.max(0, Math.sin(w * 0.22)) ** 6 * 1.75 : 0;
+        const target = [busy ? Math.sin(w * 0.45) * 0.05 * on + turn : 0, busy ? Math.sin(w * 0.7) * 0.2 : 0];
+        [0, 1].forEach((k) => {
+          const sd = k ? -1 : 1, R = REACH[k], stroke = k ? Math.sin(w * 2.6) * 0.15 : 0;   // 오른손: 툴을 윗면을 따라 좌우로 짧게 오가며 (재용접·재도포 비드)
+          const work = [R[0], sd * R[1], R[2] + stroke, R[3]], rest = [REST[0], sd * REST[1], REST[2], REST[3]];
+          target.push(...rest.map((v, j) => v + (work[j] - v) * on));
         });
         this.cur = this.cur ? this.cur.map((c, i) => c + (target[i] - c) * 0.12) : target;
         const c = this.cur;
         torso.rotation.y = c[0]; head.rotation.y = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, c[1] - c[0] * 0.3));
-        arms[0].pose(...c.slice(2, 8)); arms[1].pose(...c.slice(8, 14));
+        [0, 1].forEach((k) => { const o = 2 + k * 4; sh[k].rotation.set(c[o], c[o + 2], c[o + 1]); if (el[k]) el[k].rotation.x = c[o + 3]; });
         // 작업 중에는 무게중심을 옮기며 다리를 살짝 굽혔다 편다
-        const k = busy ? Math.sin(w * 0.9) * 0.05 : 0;
-        legs.forEach((h, j) => { h.rotation.x = (j ? -k : k); });
+        const kk = busy ? Math.sin(w * 0.9) * 0.05 : 0;
+        legs.forEach((h, j) => { h.rotation.x = (j ? -kk : kk); });
       },
     };
   }

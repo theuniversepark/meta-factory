@@ -137,6 +137,8 @@ function buildRework(g) {
   put(box(0.3, 0.14, 0.3, MAT.white), 1.25, 1.85, 0, g);
   return { sparks: put(makeSparks(0xffc060, 24, 0.05), 0, 0, 0, g) };
 }
+// 휴머노이드는 셀 바닥(0.06m)에 서서 AMR 통로 경계선(±0.78m) 바로 바깥 — 두 손이 AMR 위 대상물(폭 ±0.29m · 윗면 1.11m) 가장자리와 윗면에 닿는 거리
+const HUM_SLOT_Z = 0.88;
 // 확장 Zone 6축·협동로봇 접촉 작업 구간(셀 진행률)과 방식 — 헤밍 램(0.45~0.85) · CMM 탐침(0.3~0.9) · 디버링 드릴(0.12~0.42)·세척(0.78~)과 겹치지 않게
 const CELL_WORK = {
   kit: { from: 0.1, to: 0.85, kind: 'touch' }, locate: { from: 0.1, to: 0.85, kind: 'touch' }, spot: { from: 0.08, to: 0.9, kind: 'press' }, seal: { from: 0.1, to: 0.85, kind: 'trace' },
@@ -682,7 +684,7 @@ class ExtraZone {
         const r = makeRobot(kind, MAT.orange);
         const [x, z, yaw] = slots[i];
         // 접촉 작업 셀의 협동로봇(UR20 도달 1.75m)은 셀 중심에서 1.25m — 툴을 세워 대상물 윗면에 손끝이 닿도록
-        put(r.root, x, kind === 'ammr' ? 0.06 : kind === 'cobot' ? .5 : 0.15, kind === 'ammr' ? Math.sign(z) * AMMR.slotZ : kind === 'cobot' && CELL_WORK[c.def.type] ? Math.sign(z) * 1.25 : z, c.robotsG); r.root.rotation.y = yaw;
+        put(r.root, x, kind === 'ammr' || kind === 'humanoid' ? 0.06 : kind === 'cobot' ? .5 : 0.15, kind === 'ammr' ? Math.sign(z) * AMMR.slotZ : kind === 'humanoid' ? Math.sign(z) * HUM_SLOT_Z : kind === 'cobot' && CELL_WORK[c.def.type] ? Math.sign(z) * 1.25 : z, c.robotsG); r.root.rotation.y = yaw;
         if (kind === 'ammr') r.slot = { x, z: Math.sign(z) * AMMR.slotZ };   // 접촉 작업 기본 자리 (ammrContact)
         // 피지컬AI: 6축·협동로봇 손목 카메라 (정밀조립 VLA 셀 로봇과 같은 자리·모양 — factory.js placeRobots) · AMMR·휴머노이드는 모델에 카메라 4대(r.cams)
         if (dark && !r.wristCameraAnchor && (kind === 'articulated' || kind === 'cobot')) {

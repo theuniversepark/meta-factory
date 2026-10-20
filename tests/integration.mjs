@@ -1,6 +1,6 @@
 // 기능 간 연동 검증 — 최근 추가된 기능(CCTV 에이전트 · Private 5G · 배터리 · FAC 업무 기록 · 패킷/데이터)이
 // 기존 기능(진화 컨셉 · 오케스트레이터 · Claude 에이전트 스냅샷 · AAS 데이터 연동 · 설비 현황판 · AIOS 운영 데이터)과 이어져 있는지. 실행: npm test
-import { zoneLine } from '../js/line.js';
+import { zoneLine, normalizeLine } from '../js/line.js';
 import { Simulation } from '../js/sim.js';
 import { FactoryAgent } from '../js/agent.js';
 import { DataHub } from '../js/datahub.js';
@@ -52,5 +52,13 @@ console.log('== AAS 데이터 연동 · 설비 현황판 · AIOS');
 { const t = new Simulation('traditional', 2, { line: zoneLine(), quiet: true }), L = new LLMController(); L.sim = t; L.agent = new FactoryAgent(t);
   const snap = L.snapshot();
   check('레거시: 5G·FAC 없음 (스냅샷 null · 현황판 통신 없음)', snap.network_5g === null && snap.fac === null && !equipmentList(t).some((e) => e.group === '통신')); }
+console.log('== 저장된 라인 불러오기 ↔ 체결 셀');
+{ const saved = JSON.parse(JSON.stringify(zoneLine()));
+  for (const st of saved.stations) delete st.fasten;   // 이전 버전이 저장한 라인 (fasten 없음)
+  const { line } = normalizeLine(saved), F = line.stations.filter((st) => st.fasten);
+  check('정규화해도 체결·압입 셀 4곳에 2~4점 설정이 남음', F.map((st) => st.id).join() === 'DT_ASSY,DT_FAST,EA_ASSY,EA_FAST' && F.every((st) => st.fasten.min === 2 && st.fasten.max === 4));
+  const s = new Simulation('smart', 2, { line, quiet: true });
+  let pts = null; for (let t = 0; t < 400 && !pts; t += 0.1) { s.step(0.1); pts = s.stations.find((st) => st.id === 'DT_FAST' && st.fastenPts)?.fastenPts; }
+  check('불러온 라인에서도 스크류 체결 셀이 로봇마다 2~4점을 잡음', !!pts && pts.every((n) => n >= 2 && n <= 4), String(pts)); }
 console.log(`\n결과: ${pass} PASS / ${fail} FAIL`);
 process.exitCode = fail ? 1 : 0;
