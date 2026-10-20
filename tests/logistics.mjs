@@ -1,6 +1,6 @@
 // 입고 물류 검증 — 입고 지게차 전용 영역에 다른 이동체가 들어오지 않는지, 입고 트럭 순환·반듯한 접안, 창고 재고 유지. 실행: npm test
 import { zoneLine } from '../js/line.js';
-import { Simulation, moverRadius } from '../js/sim.js';
+import { Simulation, moverRadius, MINILOAD_OUTS } from '../js/sim.js';
 import { FactoryAgent } from '../js/agent.js';
 import { INBOUND, WH, WH_RACK, XRACK, XWH, xrackZ, stockOf, MINILOAD } from '../js/receiving.js';
 let pass = 0, fail = 0;
@@ -52,6 +52,31 @@ console.log('== 확장 선반 (유연생산 · 적응가공 자재)');
   check('FAC: 확장 Zone 자재 구매오더 · 확장 선반 재고', !!po && Object.keys(XWH).every((z) => e.quant.rackX[`${z}:raw`] >= 0), po ? `${po.name} ${po.lines.map((l) => l.product).join(',')}` : '구매오더 없음');
   const s2 = new Simulation('smart', 3, { line: zoneLine(), quiet: true }); s2.whZone.flex.parts = 0;
   check('재고가 없으면 투입 대기 (꺼내지 않음)', !s2.takeZoneStock('flex') && s2.zoneStarved.flex && s2.whZone.flex.raw === stockOf(s2, 'flex:raw'));
+}
+console.log('== 미니로드 몸체·출고 컨베이어와 이동체 간섭 (휴머노이드 몸통 · AGV · 작업자)');
+{ // 선반 몸체(두 줄 4단 선반 ①·②)와 AGV 출고 신축 롤러(AGV가 섰을 때만 선반 면 밖으로 뻗음)를 바닥 상자로 보고, 이동체 원(몸 반경)이 들어가는지 0.1초마다 검사
+  const face = WH_RACK.x + MINILOAD.half;
+  const boxes = [{ name: '미니로드 몸체', x0: WH_RACK.x - MINILOAD.half, x1: face, z0: XRACK.z - XRACK.len / 2, z1: WH_RACK.z + 5.1 },
+    ...[...MINILOAD_OUTS.wh, ...MINILOAD_OUTS.x].filter((o) => o.end > face).map((o) => ({ name: `출고 컨베이어 z ${o.z.toFixed(1)}`, x0: face, x1: o.end, z0: o.z - 0.36, z1: o.z + 0.36, pick: o.pick }))];
+  const hum = [...MINILOAD_OUTS.wh, ...MINILOAD_OUTS.x].filter((o) => !o.agv);
+  check('휴머노이드 피킹 자리 컨베이어는 선반 면 안에서 끝남 (몸 앞 0.5m 이상 비움)', hum.every((o) => o.end <= face + 0.05 && o.pick.x - o.end >= 0.5), hum.map((o) => (o.pick.x - o.end).toFixed(2)).join(' · '));
+  for (const mode of ['traditional', 'smart', 'dark']) {
+    const s = new Simulation(mode, 3, { line: zoneLine(), quiet: true }); const ag = new FactoryAgent(s);
+    let hit = 0, who = '', worst = 0;
+    for (let t = 0; t < 2 * 3600; t += 0.1) {
+      s.step(0.1); ag.update(0.1);
+      for (const m of s.movers) {
+        if (m.receiver) continue;
+        const r = m.kind === 'agv' ? 0.55 : moverRadius(m);   // AGV는 차폭 반(0.55m) — 상차 자리에서 컨베이어 끝에 닿는 것은 정상 (롤러 이재)
+        for (const b of boxes) {
+          if (b.pick && !s.vehicles.some((v) => v.kind === 'agv' && Math.hypot(v.x - b.pick.x, v.z - b.pick.z) < 0.3)) continue;   // AGV 신축 롤러는 AGV가 자리 0.3m 안에 있을 때만 뻗어 있다 (factory.js animMiniload)
+          const dx = Math.max(b.x0 - m.x, 0, m.x - b.x1), dz = Math.max(b.z0 - m.z, 0, m.z - b.z1), pen = r - Math.hypot(dx, dz);
+          if (pen > 0.02 && !(b.pick && Math.hypot(m.x - b.pick.x, m.z - b.pick.z) < 0.05)) { hit++; worst = Math.max(worst, pen); who ||= `${m.id} ${b.name} (${m.x.toFixed(2)}, ${m.z.toFixed(2)}) ${m.task ?? ''}`; }
+        }
+      }
+    }
+    check(`${mode}: 이동체가 미니로드 선반·출고 컨베이어를 파고들지 않음 (2시간)`, hit === 0, hit ? `${hit}회 · 최대 ${worst.toFixed(2)}m · ${who}` : '');
+  }
 }
 console.log(`\n결과: ${pass} PASS / ${fail} FAIL`);
 process.exitCode = fail ? 1 : 0;

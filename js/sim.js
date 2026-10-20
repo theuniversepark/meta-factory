@@ -5,7 +5,7 @@ import { CommandCenter } from './commands.js';
 import { TruckYard, planForklift, YARD, SHIP } from './shipping.js';
 // 출하 지게차 대기 자리: 오른쪽 벽 두 출하 도크(z −31 · −19) 사이 안쪽 — 오른쪽 세로 통로(x 30)·뒤쪽 시설 통로(z −30)를 비켜 주차
 const SHIP_PARK = { x: SHIP.wallX - 7.5, z: -38 };   // 출하 도크(z −38) 앞 줄 왼쪽
-import { InboundYard, planReceiver, WH, INBOUND, LOGI_DZ, XWH, xrackZ, MINILOAD } from './receiving.js';
+import { InboundYard, planReceiver, WH, INBOUND, LOGI_DZ, XWH, xrackZ, MINILOAD, WH_RACK } from './receiving.js';
 import { PatrolDrone, MISSION_PRIO } from './drone.js';
 import { planCCTV, CCTVAgent } from './cctv.js';
 import { Private5G } from './net5g.js';
@@ -184,6 +184,18 @@ export const ZONE_KIT = { cap: 12, reorder: 4, carry: 8 };
 // 미니로드 출고 컨베이어 상차: AGV는 롤러 이재로 자동 적재 (MINILOAD.xfer초), 유인 지게차는 포크로 떠서 싣는다 (4초)
 const xferWait = (v) => (v.kind === 'agv' ? MINILOAD.xfer : 4);
 export const KIT_PICK = { x: -43.4, z: 14.6, aisle: 'F' };   // 확장 선반 동쪽 면 부품 열 앞 (물류 휴머노이드 키트 피킹) — 북쪽 원재료 열 앞은 Zone 전용 AGV 상차 자리
+// Zone 전용 AGV 원재료 상차 자리 (확장 선반 = 미니로드 ② 동쪽 면)
+export const zoneRawPick = (key) => ({ x: -43.0, z: Math.min(xrackZ(`${key}:raw`), 13.0) });
+// 미니로드 출고 자리 (동쪽 면 바닥 출고 이재 컨베이어) — 화면(factory.js)과 간섭 검사(tests/logistics.mjs)가 같이 쓴다
+// end = 컨베이어 동쪽 끝 세계 x: AGV 자리는 차체 옆(차폭 1.1m의 서쪽 끝)까지 내밀어 롤러로 넘기고,
+// 휴머노이드 피킹 자리는 선반 면에서 멈춘다 — 휴머노이드는 선반을 보고 서서 손을 뻗어 토트를 집으므로 몸·다리가 컨베이어에 닿지 않는다
+const ML_FACE = WH_RACK.x + MINILOAD.half + 0.03;
+export const MINILOAD_OUTS = {
+  wh: [{ z: LOC.WH.z, end: LOC.WH.x - 0.6, pick: LOC.WH, keys: ['raw'], agv: true },
+    ...[0, 1, 2].map((i) => ({ z: LOC.WH_PARTS.z - i * 1.4, end: ML_FACE, pick: { x: LOC.WH_PARTS.x, z: LOC.WH_PARTS.z - i * 1.4 }, keys: ['parts'] }))],   // 부품 피킹: 휴머노이드마다 1.4m 간격 (h.pick)
+  x: [...['flex', 'adapt'].map((z) => ({ z: zoneRawPick(z).z, end: -43.55, pick: zoneRawPick(z), keys: [`${z}:raw`], agv: true })),
+    { z: KIT_PICK.z, end: ML_FACE, pick: KIT_PICK, keys: ['flex:parts', 'adapt:parts'] }],
+};
 // 확장 Zone 자재 투입구 원재료 버퍼: 양쪽(제품별) 20칸씩 40 · 20 이하로 떨어지면 Zone 전용 AGV가 확장 선반에서 20개씩 실어 온다
 export const ZONE_SRC = { cap: 40, load: 20 };
 // 확장 Zone 셀(고장·정비 대상): 위치·건강도·정비 요청·수리 진행만 가진다 (셀 흐름은 zones.js). 정비 자리(svc)·순찰 점검 자리(scan)는 셀 줄에 따라
@@ -1911,7 +1923,7 @@ export class Simulation {
       const halted = this.zoneDisrupted?.[key] > this.time, safety = halted && this.zoneSafety?.[key];   // 공급 차질: 확장 선반 출고 중단 — 안전재고 긴급 운송 1회만
       if (this.zoneRaw[key] + this.zoneRawIn[key] > ZONE_SRC.cap - ZONE_SRC.load || (halted && !safety) || (!safety && w.raw < 1)) continue;
       if (safety) this.zoneSafety[key] = false;
-      const pick = { x: -43.0, z: Math.min(xrackZ(`${key}:raw`), 13.0), aisle: 'F', name: `확장 선반 ${code} 원재료 출고` };
+      const pick = { ...zoneRawPick(key), aisle: 'F', name: `확장 선반 ${code} 원재료 출고` };
       v.setTask(`${code} 원재료 운반`, [
         { go: pick },
         { wait: xferWait(v), done: () => { const n = Math.min(ZONE_SRC.load, safety ? ZONE_SRC.load : w.raw, ZONE_SRC.cap - this.zoneRaw[key] - this.zoneRawIn[key]); if (!safety) { w.raw -= n; if (n) this.fac?.consume(`${key}:raw`, n, `${code} 투입구`); } this.zoneRawIn[key] += n; v.load = { type: 'raw', n, safety }; } },

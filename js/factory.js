@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { RobotTelemetry } from './telemetry.js';
-import { BELT_Y, AISLE, chgLoc, FG_CAP, RAW_CAP, ST_LABEL, TOOL_KITS, SINK_PICK, LOC, KIT_PICK } from './sim.js';
+import { BELT_Y, AISLE, chgLoc, FG_CAP, RAW_CAP, ST_LABEL, TOOL_KITS, SINK_PICK, LOC, MINILOAD_OUTS } from './sim.js';
 import { YARD, SHIP, SHIP_FRAME, shipToWorld, shipBayName } from './shipping.js';
 import { INBOUND, WH, WH_RACK, LOGI_DZ, XRACK, XWH, WH_ITEMS, xrackZ, stockOf, MINILOAD } from './receiving.js';
 import { DRONE_PAD, dronePad } from './drone.js';
@@ -708,7 +708,7 @@ function mlConveyor(g, x0, x1, z, y, w) {
   const len = x1 - x0, cx = (x0 + x1) / 2;
   for (const s of [-1, 1]) put(box(len, 0.1, 0.04, MAT.dark), cx, y - 0.05, z + (s * w) / 2, g);   // 옆 프레임
   for (let x = x0 + 0.08; x < x1 - 0.04; x += 0.14) put(cyl(0.03, 0.03, w - 0.04, MAT.steel, 8), x, y - 0.03, z, g).rotation.x = Math.PI / 2;   // 롤러
-  if (y > 0.3) for (const x of [x0 + 0.06, x1 - 0.06]) for (const s of [-1, 1]) put(box(0.05, y - 0.08, 0.05, MAT.dark), x, (y - 0.08) / 2, z + s * (w / 2 - 0.03), g);   // 다리
+  if (y > 0.3 && !g.userData.legless) for (const x of [x0 + 0.06, x1 - 0.06]) for (const s of [-1, 1]) put(box(0.05, y - 0.08, 0.05, MAT.dark), x, (y - 0.08) / 2, z + s * (w / 2 - 0.03), g);   // 다리
 }
 // 로봇 고유 ID 명판 (작은 스프라이트)
 function idPlate(text) {
@@ -1981,6 +1981,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       for (const b of S.ins) { b.n = 0; b.totes.forEach((t) => (t.visible = false)); b.pallet.visible = false; }
       S.shown = {};
     }
+    this.mlFace = new Map();
   }
 
   // ── 미니로드 AS/RS (SSI Miniload형) — 크레인 1대가 맡는 선반 구간 하나 ──
@@ -2027,11 +2028,18 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     }
     cells.sort((p, q) => p.l - q.l);   // 아래 단부터 찬다
     // 출고 이재 컨베이어 (동쪽 면 바닥층 → 차량 쪽으로 내민 롤러)
+    // AGV 자리는 선반 면 밖으로 신축(텔레스코픽) 롤러가 AGV가 섰을 때만 뻗어 나가고 평소엔 선반 바닥층 안으로 들어가 있다 — 지나가는 지게차·사람과 닿지 않게
+    const face = M.half + 0.03;
     const O = outs.map((o) => {
-      const z = o.z - zc, x1 = o.end - WH_RACK.x;
-      mlConveyor(g, M.aisle / 2 + 0.05, x1, z, M.conv, 0.68);
-      put(box(0.05, 0.2, 0.7, emis(0x3ddc84, 0.9), false), x1 + 0.02, M.conv + 0.02, z, g);   // 끝 스토퍼 (초록)
-      return { ...o, lz: z, x1, tote: Object.assign(put(box(TOTE.x, TOTE.y, TOTE.z, MAT.raw), X, M.conv + TOTE.y / 2, z, g), { visible: false }), state: 'empty', k: 0, rr: 0 };
+      const z = o.z - zc, x1 = o.end - WH_RACK.x, fx = Math.min(x1, face);
+      mlConveyor(g, M.aisle / 2 + 0.05, fx, z, M.conv, 0.68);
+      let ext = null, len = 0;
+      if (x1 > face + 0.05) {
+        len = x1 - face; ext = put(new THREE.Group(), -len, 0, 0, g); ext.userData.legless = true;
+        mlConveyor(ext, face, x1, z, M.conv - 0.025, 0.62);
+        put(box(0.05, 0.2, 0.64, emis(0x3ddc84, 0.9), false), x1 + 0.02, M.conv, z, ext);   // 끝 스토퍼 (초록)
+      } else put(box(0.05, 0.2, 0.7, emis(0x3ddc84, 0.9), false), fx + 0.02, M.conv + 0.02, z, g);
+      return { ...o, lz: z, x1, rest: fx - TOTE.x / 2 - 0.04, ext, len, e: 0, tote: Object.assign(put(box(TOTE.x, TOTE.y, TOTE.z, MAT.raw), X, M.conv + TOTE.y / 2, z, g), { visible: false }), state: 'empty', k: 0, rr: 0 };
     });
     // 입고 팔레트 받침 (서쪽 면 바닥층, 지게차 포크가 닿는 낮은 롤러) — 토트 4개(2 × 2단)를 크레인이 하나씩 칸에 넣는다
     const I = ins.map((o) => {
@@ -2059,14 +2067,26 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
           b.state = 'xfer'; b.m = m; b.st = m.steps[0]; if (!W.has(b.st)) W.set(b.st, b.st.wait); b.tote.visible = true;
         }
       }
-      const t = b.tote, end = b.x1 - TOTE.x / 2 - 0.04;
+      if (b.ext) {   // 신축 롤러: AGV가 상차 자리 가까이 오면 뻗고, 떠나면 접힌다
+        const agv = sim.movers.some((o) => o.kind === 'agv' && Math.hypot(o.x - b.pick.x, o.z - b.pick.z) < 0.3);
+        b.e = Math.max(0, Math.min(1, b.e + (agv ? 1 : -1) * dt * 1.6)); b.ext.position.x = -b.len * (1 - b.e);
+      }
+      const t = b.tote, end = b.rest;
       if (b.state === 'roll') { b.k = Math.min(1, b.k + dt / 1.2); t.position.set(X + (end - X) * b.k, M.conv + TOTE.y / 2, b.lz); if (b.k >= 1) b.state = 'ready'; }
       else if (b.state === 'xfer') {
         const m = b.m;
-        if (m.steps?.[0] !== b.st) { b.state = 'empty'; t.visible = false; b.m = null; continue; }   // 상차 끝 — 차량 적재물로 넘어감
-        const w0 = W.get(b.st) || 1, k = Math.max(0, Math.min(1, 1 - b.st.wait / w0)), mx = m.x - WH_RACK.x, mz = m.z - S.zc;
-        const dy = m.kind === 'agv' ? 0.56 : m.kind === 'forklift' ? 0.2 : 0.95;
-        t.position.set(end + (mx - end) * k, M.conv + (dy - M.conv) * Math.min(1, k * 1.4) + TOTE.y / 2, b.lz + (mz - b.lz) * k);
+        if (m.steps?.[0] !== b.st) { b.state = 'empty'; t.visible = false; b.m = null; this.mlFace?.delete(m); continue; }   // 상차 끝 — 차량 적재물·휴머노이드 손 바구니로 넘어감
+        const w0 = W.get(b.st) || 1; let k = Math.max(0, Math.min(1, 1 - b.st.wait / w0));
+        if (m.kind === 'humanoid' || m.kind === 'human') {
+          // 휴머노이드: 선반(서쪽)을 보고 서서 컨베이어 끝의 토트를 두 손으로 들어 올린다 — 토트는 몸 앞(손 높이)까지만 오고 몸통으로 들어가지 않는다
+          (this.mlFace ??= new Map()).set(m, -Math.PI / 2);
+          const hx = m.x - WH_RACK.x - 0.36 - TOTE.x / 2, u = Math.min(1, k * 2);
+          t.position.set(end + (hx - end) * u, M.conv + TOTE.y / 2 + 0.5 * u, b.lz + (m.z - S.zc - b.lz) * u);
+        } else {
+          const mx = m.x - WH_RACK.x, mz = m.z - S.zc, dy = m.kind === 'agv' ? 0.56 : 0.2;   // AGV 적재 면 · 지게차 포크
+          if (b.ext) k = Math.max(0, (k - 0.3) / 0.7);   // 신축 롤러가 다 뻗은 뒤 넘긴다
+          t.position.set(end + (mx - end) * k, M.conv + (dy - M.conv) * Math.min(1, k * 1.4) + TOTE.y / 2, b.lz + (mz - b.lz) * k);
+        }
       }
     }
     for (const b of S.ins) {   // 입고 지게차가 받침 앞에서 팔레트를 내려놓는 중이면 토트 4개가 생긴다
@@ -2141,10 +2161,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
   buildXRack() {
     const r = this.root, items = WH_ITEMS.filter((x) => x.zone), mat = {};
     for (const I of items) mat[I.key] = I.kind === 'raw' ? (I.zone === 'flex' ? MAT.steel : MAT.crate) : std(XWH[I.zone].col);
-    const rawPick = (k) => ({ x: -43.0, z: Math.min(xrackZ(k), 13.0) });   // sim.js assignZoneVehicles 상차 자리
-    this.buildMiniload(XRACK.z, XRACK.len, 8, (i) => ({ key: items[Math.floor(i / 2)].key, mat: mat[items[Math.floor(i / 2)].key] }),
-      [...['flex:raw', 'adapt:raw'].map((k) => ({ z: rawPick(k).z, end: -43.55, pick: rawPick(k), keys: [k] })),
-        { z: KIT_PICK.z, end: KIT_PICK.x - 0.42, pick: KIT_PICK, keys: ['flex:parts', 'adapt:parts'] }],
+    this.buildMiniload(XRACK.z, XRACK.len, 8, (i) => ({ key: items[Math.floor(i / 2)].key, mat: mat[items[Math.floor(i / 2)].key] }), MINILOAD_OUTS.x,
       items.map((I) => ({ z: xrackZ(I.key), keys: [I.key] })));
     for (const I of items) put(makeSignPlate(I.label, I.zone === 'flex' ? '#6ab8ff' : '#ff9a6a', 1.5), XRACK.x + MINILOAD.half + 0.15, 6.0, xrackZ(I.key), r).rotation.y = Math.PI / 2;   // 열 표지 (동쪽 면) — 선반에 고정
     put(makeSignPlate('미니로드 ② · 확장 Zone', '#8fd3ff', 3.0), XRACK.x + MINILOAD.half + 0.15, 6.5, XRACK.z, r).rotation.y = Math.PI / 2;
@@ -2192,9 +2209,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     const COLS = [{ p: 'eaxle', key: 'parts', mat: std(0x6f5bd6) }, { p: 'doortrim', key: 'parts', mat: std(0xe08a2a) }, { p: 'eaxle', key: 'raw', mat: MAT.crate }, { p: 'doortrim', key: 'raw', mat: MAT.raw }];
     const H = 5.1, bay = 0.85, colZ = (j) => WH_RACK.z - H + (j * 3 + 1.5) * bay;   // 열 j의 가운데 z (북 → 남)
     this.buildMiniload(WH_RACK.z, 2 * H, 12, (i) => COLS[Math.floor(i / 3)],
-      [{ z: LOC.WH.z, end: LOC.WH.x - 0.6, pick: LOC.WH, keys: ['raw'] },
-        ...[0, 1, 2].map((i) =>   // 부품 피킹 자리: 휴머노이드마다 1.4m 간격 (sim.js h.pick)
-          ({ z: LOC.WH_PARTS.z - i * 1.4, end: LOC.WH_PARTS.x - 0.42, pick: { x: LOC.WH_PARTS.x, z: LOC.WH_PARTS.z - i * 1.4 }, keys: ['parts'] }))],
+      MINILOAD_OUTS.wh,
       [{ z: LOC.WH_IN.z, keys: ['raw'] }, { z: LOC.WH_PARTS_IN.z, keys: ['parts'] }]);
     COLS.forEach((c, j) => { put(makeSignPlate(c.p === 'eaxle' ? 'e-axle' : '도어트림', c.p === 'eaxle' ? '#b89bff' : '#ffb35a', 1.5), WH_RACK.x + MINILOAD.half + 0.15, 6.0, colZ(j), r).rotation.y = Math.PI / 2; });   // 열 표지 (동쪽 면)
     // 선반 앞 표지 — 선반 앞면(동쪽)에 고정해 화면을 돌려도 선반과 같이 돈다
@@ -2832,6 +2847,8 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     }
     if (!moved && st && !ud.waist) target = Math.atan2(st.x - v.x, st.z - v.z);
     if (!moved && isTech && v.task && v.kind === 'human') target = Math.PI;
+    const face = !moved && this.mlFace?.get(v);   // 미니로드 출고 자리에서 토트를 받는 동안은 선반을 본다
+    if (face != null && face !== false) { target = face; look = face; }
     pv.yaw = lerpAngle(pv.yaw, target, Math.min(1, rdt * 6));
     g.rotation.y = pv.yaw;
     if (ud.waist) {
