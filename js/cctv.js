@@ -1,6 +1,6 @@
 import { bk, BUILDING, extraCellBoxes, inBuilding, SRV, zoneServerBoxes, INSP_CELLS, camArea } from './zonedefs.js';
 import { shipToWorld, SHIP_FRAME } from './shipping.js';
-import { INBOUND, LOGI_DZ, XRACK } from './receiving.js';
+import { INBOUND, XRACK, WH_RACK, MINILOAD } from './receiving.js';
 // CCTV — 사각지대 없는 배치. 바닥을 1m 간격 점으로 나누고, 카메라에서 각 점까지 시야가 큰 설비(셀·창고 랙·서버 랙)에
 // 가리지 않는지 따져 "보이는 점"을 구한 뒤, 아직 안 보이는 점을 가장 많이 덮는 후보 자리부터 차례로 골라(탐욕적 집합 덮개)
 // 모든 점이 최소 한 대에 보일 때까지 설치한다. 건물 안은 Zone별로 나눠(정밀검사 → 유연생산 → 적응가공 → 정밀조립 → 공용 시설, zonedefs.js camArea) Zone 바닥을 그 Zone 천장 카메라로만 덮고,
@@ -25,8 +25,9 @@ function obstacles(sim) {
     const h = st.type === 'source' ? 3.2 : st.type === 'sink' ? 2.6 : 2.9;
     ob.push({ x0: st.x - 2.3, x1: st.x + 2.3, z0: st.z - 2.3, z1: st.z + (st.type === 'source' ? 3.1 : 2.3), h, name: st.name });
   }
-  ob.push({ x0: -46.3, x1: -44.1, z0: -6.8 + LOGI_DZ, z1: 3.6 + LOGI_DZ, h: 5.0, name: '물류 선반' });   // 지게차 통로와 로봇 통로 사이 남북 방향 통과형 선반
-  ob.push({ x0: -46.3, x1: -44.1, z0: XRACK.z - XRACK.len / 2, z1: XRACK.z + XRACK.len / 2, h: 5.2, name: '확장 선반' });   // 물류 선반 북쪽 (A-1·A-2 자재)
+  const mx0 = WH_RACK.x - MINILOAD.half, mx1 = WH_RACK.x + MINILOAD.half;
+  ob.push({ x0: mx0, x1: mx1, z0: WH_RACK.z - 5.1, z1: WH_RACK.z + 5.1, h: MINILOAD.top, name: '물류 선반 (미니로드 ①)' });   // 지게차 통로와 로봇 통로 사이 남북 방향 두 줄 4단 선반
+  ob.push({ x0: mx0, x1: mx1, z0: XRACK.z - XRACK.len / 2, z1: XRACK.z + XRACK.len / 2, h: MINILOAD.top, name: '확장 선반 (미니로드 ②)' });   // 물류 선반 북쪽 (A-1·A-2 자재)
   ob.push({ x0: SRV.x - 0.55, x1: SRV.x + 0.55, z0: SRV.z - 2.2, z1: SRV.z + 2.2, h: 2.3, name: '정밀조립 데이터 서버 랙' });   // 왼쪽 벽 앞 (zonedefs.js SRV)
   ob.push(...zoneServerBoxes());   // A-1 · A-2 데이터 서버 랙 (뒷벽 · 오른쪽 벽 앞)
   ob.push(...Object.values(INSP_CELLS).map((c) => ({ x0: c.x - 2.3, x1: c.x + 2.3, z0: c.z - 2.3, z1: c.z + 2.3, h: 2.8, name: `정밀검사 ${c.label}` })));   // 정밀검사Zone 셀

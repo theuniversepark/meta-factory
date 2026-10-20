@@ -5,7 +5,7 @@ import { CommandCenter } from './commands.js';
 import { TruckYard, planForklift, YARD, SHIP } from './shipping.js';
 // 출하 지게차 대기 자리: 오른쪽 벽 두 출하 도크(z −31 · −19) 사이 안쪽 — 오른쪽 세로 통로(x 30)·뒤쪽 시설 통로(z −30)를 비켜 주차
 const SHIP_PARK = { x: SHIP.wallX - 7.5, z: -38 };   // 출하 도크(z −38) 앞 줄 왼쪽
-import { InboundYard, planReceiver, WH, INBOUND, LOGI_DZ, XWH, xrackZ } from './receiving.js';
+import { InboundYard, planReceiver, WH, INBOUND, LOGI_DZ, XWH, xrackZ, MINILOAD } from './receiving.js';
 import { PatrolDrone, MISSION_PRIO } from './drone.js';
 import { planCCTV, CCTVAgent } from './cctv.js';
 import { Private5G } from './net5g.js';
@@ -160,8 +160,8 @@ export const LOC = {
   // 원자재 칸(e-axle 원자재 열) 가운데 — 선반 기둥(z 23.85 · 26.1) 사이 한가운데라 지게차가 선반을 보고 서도 포크(±0.42m)·마스트가 기둥에 닿지 않는다 (0.9면 기둥 0.2m 옆)
   WH: { x: -42.9, z: -0.05 + LOGI_DZ, aisle: 'FF', name: '자재창고' },   // 선반 동쪽 면(x −44.2)에서 1.3m — 지게차가 돌아설 때 뒤 카운터웨이트(차체 뒤 1.3m)가 선반 아래 빔에 닿지 않게
   WH_PARTS: { x: -43.5, z: -2.6 + LOGI_DZ, aisle: 'FF', name: '부품 랙' },
-  WH_IN: { x: -47.5, z: 0.9 + LOGI_DZ, aisle: 'FF', name: '자재창고 입고' },        // 입고 지게차: 선반 서쪽 면 원자재 칸 (지게차 통로 안)
-  WH_PARTS_IN: { x: -47.5, z: -4.1 + LOGI_DZ, aisle: 'FF', name: '부품 입고' },    // 입고 지게차: 선반 서쪽 면 부품 칸
+  WH_IN: { x: -48.0, z: 0.9 + LOGI_DZ, aisle: 'FF', name: '자재창고 입고' },        // 입고 지게차: 선반 서쪽 면 원자재 칸 (지게차 통로 안)
+  WH_PARTS_IN: { x: -48.0, z: -4.1 + LOGI_DZ, aisle: 'FF', name: '부품 입고' },    // 입고 지게차: 선반 서쪽 면 부품 칸
   WH_LANE: -41.2,   // 부품 보충 휴머노이드의 선반 앞 진출입 세로 줄 (AGV 상차 자리 x −43.2를 비켜)
   WH_LANE_IN: -41.6, WH_LANE_OUT: -40.8,   // 일방통행 두 줄 — 선반으로 갈 때 서쪽 줄, 나올 때 동쪽 줄 (두 휴머노이드가 마주쳐 비켜서다 충전 도크 쪽으로 밀리지 않게)
   WH_TOP_Z: 17.0,   // 물류 휴머노이드 진출입 줄(WH_LANE_OUT)의 북쪽 끝 — 물류 대기 줄 맨 위(A-1) 도크 앞보다 북쪽, 여기서 앞 통로(z 9)로 곧게 나간다
@@ -181,7 +181,9 @@ export const svcLoc = (st) => st.svc ?? localLoc(st.def, 0.9, SVC_Z, st.name);  
 // 확장 Zone 투입구 부품 키트 버퍼 (피지컬AI): 가득 12 · 4개 이하이면 물류 휴머노이드가 확장 선반에서 8개씩 가져온다
 export { ZONE_LABEL };
 export const ZONE_KIT = { cap: 12, reorder: 4, carry: 8 };
-const KIT_PICK = { x: -43.4, z: 14.6, aisle: 'F' };   // 확장 선반 동쪽 면 부품 열 앞 (물류 휴머노이드 키트 피킹) — 북쪽 원재료 열 앞은 Zone 전용 AGV 상차 자리
+// 미니로드 출고 컨베이어 상차: AGV는 롤러 이재로 자동 적재 (MINILOAD.xfer초), 유인 지게차는 포크로 떠서 싣는다 (4초)
+const xferWait = (v) => (v.kind === 'agv' ? MINILOAD.xfer : 4);
+export const KIT_PICK = { x: -43.4, z: 14.6, aisle: 'F' };   // 확장 선반 동쪽 면 부품 열 앞 (물류 휴머노이드 키트 피킹) — 북쪽 원재료 열 앞은 Zone 전용 AGV 상차 자리
 // 확장 Zone 자재 투입구 원재료 버퍼: 양쪽(제품별) 20칸씩 40 · 20 이하로 떨어지면 Zone 전용 AGV가 확장 선반에서 20개씩 실어 온다
 export const ZONE_SRC = { cap: 40, load: 20 };
 // 확장 Zone 셀(고장·정비 대상): 위치·건강도·정비 요청·수리 진행만 가진다 (셀 흐름은 zones.js). 정비 자리(svc)·순찰 점검 자리(scan)는 셀 줄에 따라
@@ -1912,7 +1914,7 @@ export class Simulation {
       const pick = { x: -43.0, z: Math.min(xrackZ(`${key}:raw`), 13.0), aisle: 'F', name: `확장 선반 ${code} 원재료 출고` };
       v.setTask(`${code} 원재료 운반`, [
         { go: pick },
-        { wait: 4, done: () => { const n = Math.min(ZONE_SRC.load, safety ? ZONE_SRC.load : w.raw, ZONE_SRC.cap - this.zoneRaw[key] - this.zoneRawIn[key]); if (!safety) { w.raw -= n; if (n) this.fac?.consume(`${key}:raw`, n, `${code} 투입구`); } this.zoneRawIn[key] += n; v.load = { type: 'raw', n, safety }; } },
+        { wait: xferWait(v), done: () => { const n = Math.min(ZONE_SRC.load, safety ? ZONE_SRC.load : w.raw, ZONE_SRC.cap - this.zoneRaw[key] - this.zoneRawIn[key]); if (!safety) { w.raw -= n; if (n) this.fac?.consume(`${key}:raw`, n, `${code} 투입구`); } this.zoneRawIn[key] += n; v.load = { type: 'raw', n, safety }; } },
         { go: F.agvDrop },
         { wait: 4, done: () => { const n = v.load?.n ?? 0, sf = v.load?.safety; this.zoneRaw[key] = Math.min(ZONE_SRC.cap, this.zoneRaw[key] + n); this.zoneRawIn[key] -= n; v.load = null; this.stats.zoneTrips = (this.stats.zoneTrips ?? 0) + 1; if (sf) this.orch.step(this.orch.find(`supply:${key}`), 'exec', 'act', `${v.id} 안전재고 ${n}개 ${ZONE_LABEL[key]} 투입구 도착 (재고 ${this.zoneRaw[key]}개)`); } },
         { go: v.home },   // 내려놓은 자리(Zone AMR 투입 경로 옆)에 서 있지 않고 충전 자리로 — 다음 운반도 바로 옆 확장 선반에서 시작한다
@@ -2008,7 +2010,7 @@ export class Simulation {
       { go: LOC.WH },
       { until: () => this.time >= this.supplyDisruptedUntil, task: '출고 대기 (공급 차질)' },
       { until: () => this.whRaw > 0, task: '창고 재고 대기 (입고 트럭 대기)' },
-      { wait: 4, done: () => { const n = Math.min(PALLET_RAW, this.whRaw); this.whRaw -= n; v.load = { type: 'raw', n }; this.fac?.consume('raw', n, '투입구 (AS/RS)'); } },
+      { wait: xferWait(v), done: () => { const n = Math.min(PALLET_RAW, this.whRaw); this.whRaw -= n; v.load = { type: 'raw', n }; this.fac?.consume('raw', n, '투입구 (AS/RS)'); } },
       { go: this.loc.SRC },
       { wait: 4, done: () => {
         const n = v.load?.n ?? PALLET_RAW;
@@ -2022,7 +2024,7 @@ export class Simulation {
     this.safetyStock -= n; this.inboundRaw += n;
     v.setTask('안전재고 긴급 운송', [
       { go: LOC.WH },
-      { wait: 4, done: () => { v.load = { type: 'raw', n }; } },
+      { wait: xferWait(v), done: () => { v.load = { type: 'raw', n }; } },
       { go: this.loc.SRC },
       { wait: 4, done: () => {
         this.rawStock = Math.min(RAW_CAP, this.rawStock + n); this.inboundRaw -= n; v.load = null; this.stats.supplyTrips++;

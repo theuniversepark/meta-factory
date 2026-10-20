@@ -3,9 +3,9 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { RobotTelemetry } from './telemetry.js';
-import { BELT_Y, AISLE, chgLoc, FG_CAP, RAW_CAP, ST_LABEL, TOOL_KITS, SINK_PICK } from './sim.js';
+import { BELT_Y, AISLE, chgLoc, FG_CAP, RAW_CAP, ST_LABEL, TOOL_KITS, SINK_PICK, LOC, KIT_PICK } from './sim.js';
 import { YARD, SHIP, SHIP_FRAME, shipToWorld, shipBayName } from './shipping.js';
-import { INBOUND, WH, WH_RACK, LOGI_DZ, XRACK, XWH, WH_ITEMS, xrackZ, stockOf } from './receiving.js';
+import { INBOUND, WH, WH_RACK, LOGI_DZ, XRACK, XWH, WH_ITEMS, xrackZ, stockOf, MINILOAD } from './receiving.js';
 import { DRONE_PAD, dronePad } from './drone.js';
 import { bk, fr, BUILDING, TECH_ROOM, TECH_ROOMS, ZONE_FAC, EXTRA_ZONES, LEFT_WALL, SRV, INSP_FAC, zoneDef, facOf } from './zonedefs.js';
 import { STAGES, INCIDENT_TYPES, prioOf } from './orchestrator.js';
@@ -701,6 +701,14 @@ export function makeSignPlate(text, hex, width = 6) {
   const front = new THREE.Mesh(geo, mat); front.position.z = 0.18; g.add(front);
   const back = new THREE.Mesh(geo, mat); back.position.z = -0.18; back.rotation.y = Math.PI; g.add(back);
   return g;
+}
+// 미니로드 토트 (600 × 400 규격 토트를 화면에서 보이게 키운 크기) · 롤러 컨베이어 (x0 → x1 방향, 폭 w, 윗면 높이 y)
+const TOTE = { x: 0.62, y: 0.34, z: 0.55 };
+function mlConveyor(g, x0, x1, z, y, w) {
+  const len = x1 - x0, cx = (x0 + x1) / 2;
+  for (const s of [-1, 1]) put(box(len, 0.1, 0.04, MAT.dark), cx, y - 0.05, z + (s * w) / 2, g);   // 옆 프레임
+  for (let x = x0 + 0.08; x < x1 - 0.04; x += 0.14) put(cyl(0.03, 0.03, w - 0.04, MAT.steel, 8), x, y - 0.03, z, g).rotation.x = Math.PI / 2;   // 롤러
+  if (y > 0.3) for (const x of [x0 + 0.06, x1 - 0.06]) for (const s of [-1, 1]) put(box(0.05, y - 0.08, 0.05, MAT.dark), x, (y - 0.08) / 2, z + s * (w / 2 - 0.03), g);   // 다리
 }
 // 로봇 고유 ID 명판 (작은 스프라이트)
 function idPlate(text) {
@@ -1965,37 +1973,150 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     flatY(16, 2, new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }), YARD.bays[0] + 7, -30, 0.03).rotation.z = Math.PI / 2;   // 글자는 화면 앞에서 바로 읽히게
   }
 
-  // 물류 선반 칸 내용 (제품별 실물 모델 · 부품 토트) — Blender 모델은 앱 시작 후 불러오므로 화면을 만들 때마다(setup) 다시 채운다
+  // 미니로드 상태 초기화 — 화면을 만들 때마다(setup, 새 시뮬레이션) 크레인 작업 · 입출고 자리 토트 · 칸 채움 표시를 처음으로
   buildWhStock() {
-    const { LV, COLS, group: G } = this.whRack;
-    G.clear(); this.whRawSlots = []; this.whPartSlots = []; this.whRawShown = this.whPartsShown = undefined;
-    const models = blenderOn() && RENDER.assets.eaxle && RENDER.assets.doortrim;
-    const one = (name, m4, skip) => { const st = instancedStock(bakedOf(name, skip), m4); return st.group; };
-    for (const y of LV) for (const c of COLS) {
-      const x = c.x;
-      put(box(2.0, 0.12, 1.6, MAT.pallet), x, y + 0.11, 0, G);
-      if (c.kind === 'raw') {
-        let lo, hi;
-        if (models && c.p === 'doortrim') {   // 도어트림: 2장 × 3줄씩 세워 꽂음 (앞면 = 동쪽) — 앞 3줄 lo · 뒤 3줄 hi
-          const rows = (zs) => zs.flatMap((z) => [-0.44, 0.44].map((dx) => new THREE.Matrix4().makeTranslation(x + dx, y + 0.17, z)));
-          lo = one('doortrim', rows([0.55, 0.36, 0.17])); hi = one('doortrim', rows([-0.02, -0.21, -0.4])); G.add(lo, hi);
-        } else if (models) {                  // e-axle: 축을 깊이 방향으로 3개씩 2단 (아래 lo · 위 hi)
-          const row = (yy) => [-0.64, 0, 0.64].map((dx) => new THREE.Matrix4().makeTranslation(x + dx, yy, 0).multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2)));
-          const skip = (o) => o.name === 'FastenBolts';
-          lo = one('eaxle', row(y + 0.17), skip); hi = one('eaxle', row(y + 0.76), skip); G.add(lo, hi);
-        } else {
-          const mat = c.p === 'eaxle' ? MAT.crate : MAT.raw;
-          lo = put(box(1.8, 0.42, 1.4, mat), x, y + 0.38, 0, G); hi = put(box(1.8, 0.42, 1.4, mat), x, y + 0.82, 0, G);
+    for (const S of this.miniloads ?? []) {
+      S.job = null; S.ph = 'move'; S.cr.position.z = 0; S.car.position.y = MINILOAD.lv[0]; S.fk.position.x = 0; S.tote.visible = false;
+      for (const b of S.outs) { b.state = 'empty'; b.tote.visible = false; b.m = null; }
+      for (const b of S.ins) { b.n = 0; b.totes.forEach((t) => (t.visible = false)); b.pallet.visible = false; }
+      S.shown = {};
+    }
+  }
+
+  // ── 미니로드 AS/RS (SSI Miniload형) — 크레인 1대가 맡는 선반 구간 하나 ──
+  // 로컬 원점 = 구간 가운데 바닥, 로컬 x = 세계 x − WH_RACK.x (서쪽 A열 −0.9 · 크레인 통로 0 · 동쪽 B열 +0.9), 로컬 z = 세계 z − zc
+  // 저장: 4단(MINILOAD.lv) × 두 줄 × nb베이, 한 칸 = 토트 1개. 그 아래 바닥층: 서쪽 면 입고 팔레트 받침(지게차가 내려놓음) · 동쪽 면 출고 이재 컨베이어
+  // bayItem(i) = 베이 i(북 → 남)의 { key: 재고 품목, mat: 토트 재질 } · outs = [{ z, end(동쪽 끝 세계 x), pick: 차량이 서는 자리, keys }] · ins = [{ z, keys }]
+  buildMiniload(zc, L, nb, bayItem, outs, ins) {
+    const M = MINILOAD, X = (M.aisle + M.row) / 2, H = L / 2, bay = L / nb, T = M.top;
+    const g = put(new THREE.Group(), WH_RACK.x, 0, zc, this.root);
+    const faces = [-M.half, -M.aisle / 2, M.aisle / 2, M.half];
+    const bays = [...outs.map((o) => [o.z - zc, 0.4]), ...ins.map((o) => [o.z - zc, 0.62])];
+    for (let k = 0; k <= nb; k += 2) for (const x of faces) {   // 기둥 (2베이마다) — 입출고 자리 앞은 바닥층을 비우고 첫 단부터 세운다
+      const z = -H + k * bay, y0 = bays.some(([bz, w]) => Math.abs(z - bz) < w) && k > 0 && k < nb ? M.lv[0] - 0.1 : 0;
+      put(box(0.08, T - y0, 0.08, MAT.accent), x, (T + y0) / 2, z, g);
+    }
+    for (const y of M.lv) for (const sd of [-1, 1]) {
+      for (const x of [M.aisle / 2 + 0.03, M.half - 0.03]) put(box(0.05, 0.1, L, MAT.orange), sd * x, y - 0.06, 0, g);   // 줄 앞뒤 로드 빔
+      put(box(M.row - 0.06, 0.025, L, MAT.steel), sd * X, y - 0.02, 0, g);   // 선반 판
+    }
+    for (const x of faces) put(box(0.1, 0.12, L, MAT.accent), x, T, 0, g);   // 크라운 프레임
+    for (const z of [-H, H]) for (const sd of [-1, 1]) for (let k = 1; k < M.lv.length; k++) {   // 끝면 X 브레이싱 (줄마다 단 사이)
+      const y0 = M.lv[k - 1], h = M.lv[k] - y0;
+      for (const s2 of [-1, 1]) put(box(0.03, Math.hypot(M.row, h), 0.03, MAT.steel), sd * X, y0 + h / 2, z, g).rotation.z = s2 * Math.atan2(M.row, h);
+    }
+    put(box(0.12, 0.06, L + 0.3, MAT.steel), 0, 0.03, 0, g);   // 바닥 주행 레일
+    put(box(0.1, 0.08, L, MAT.steel), 0, T - 0.12, 0, g);      // 상부 가이드 레일
+    // 스태커 크레인: 주행 대차 · 두 기둥 마스트 · 승강 캐리지 · 양쪽 줄로 뻗는 텔레스코픽 포크
+    const cr = put(new THREE.Group(), 0, 0, 0, g);
+    for (const z of [-0.42, 0.42]) { put(box(0.4, 0.32, 0.3, MAT.orange), 0, 0.2, z, cr); put(box(0.14, T - 0.62, 0.12, MAT.orange), 0, (T - 0.62) / 2 + 0.36, z, cr); }
+    put(box(0.3, 0.14, 1.0, MAT.dark), 0, T - 0.26, 0, cr);
+    put(box(0.3, 0.5, 0.26, MAT.dark), 0, 0.6, 0.72, cr);   // 제어반
+    put(box(0.08, 0.06, 0.08, emis(0xf5b82e, 1.8), false), 0, T - 0.15, 0.56, cr);   // 운전 표시등
+    const car = put(new THREE.Group(), 0, M.lv[0], 0, cr);
+    put(box(0.74, 0.05, 0.7, MAT.steel), 0, -0.03, 0, car);
+    for (const z of [-0.36, 0.36]) put(box(0.74, 0.24, 0.03, MAT.dark), 0, 0.1, z, car);
+    const fk = put(new THREE.Group(), 0, 0, 0, car);
+    for (const z of [-0.3, 0.3]) put(box(0.72, 0.05, 0.05, MAT.accent), 0, 0.02, z, fk);
+    const tote = put(box(TOTE.x, TOTE.y, TOTE.z, MAT.raw), 0, TOTE.y / 2 + 0.05, 0, fk); tote.visible = false;
+    // 저장 칸 토트 (재고만큼 보인다)
+    const cells = [];
+    for (let i = 0; i < nb; i++) {
+      const it = bayItem(i), z = -H + (i + 0.5) * bay;
+      M.lv.forEach((y, l) => { for (const sd of [-1, 1]) cells.push({ key: it.key, mat: it.mat, l, x: sd * X, y, z, mesh: put(box(TOTE.x, TOTE.y, TOTE.z, it.mat), sd * X, y + TOTE.y / 2, z, g) }); });
+    }
+    cells.sort((p, q) => p.l - q.l);   // 아래 단부터 찬다
+    // 출고 이재 컨베이어 (동쪽 면 바닥층 → 차량 쪽으로 내민 롤러)
+    const O = outs.map((o) => {
+      const z = o.z - zc, x1 = o.end - WH_RACK.x;
+      mlConveyor(g, M.aisle / 2 + 0.05, x1, z, M.conv, 0.68);
+      put(box(0.05, 0.2, 0.7, emis(0x3ddc84, 0.9), false), x1 + 0.02, M.conv + 0.02, z, g);   // 끝 스토퍼 (초록)
+      return { ...o, lz: z, x1, tote: Object.assign(put(box(TOTE.x, TOTE.y, TOTE.z, MAT.raw), X, M.conv + TOTE.y / 2, z, g), { visible: false }), state: 'empty', k: 0, rr: 0 };
+    });
+    // 입고 팔레트 받침 (서쪽 면 바닥층, 지게차 포크가 닿는 낮은 롤러) — 토트 4개(2 × 2단)를 크레인이 하나씩 칸에 넣는다
+    const I = ins.map((o) => {
+      const z = o.z - zc, mat = cells.find((c) => c.key === o.keys[0])?.mat ?? MAT.raw;
+      mlConveyor(g, -M.half - 0.3, -M.aisle / 2 - 0.05, z, 0.18, 1.24);
+      const pallet = put(box(0.9, 0.1, 1.15, MAT.pallet), -X, 0.23, z, g); pallet.visible = false;
+      const totes = [0, 1, 2, 3].map((k) => Object.assign(put(box(TOTE.x, TOTE.y, TOTE.z, mat), -X, 0.28 + Math.floor(k / 2) * (TOTE.y + 0.01) + TOTE.y / 2, z + (k % 2 ? 0.29 : -0.29), g), { visible: false }));
+      return { ...o, lz: z, mat, pallet, totes, n: 0 };
+    });
+    const S = { g, cr, car, fk, tote, cells, outs: O, ins: I, job: null, ph: 'move', rr: 0, shown: {}, zc };
+    (this.miniloads ??= []).push(S);
+    return S;
+  }
+  // 미니로드 운전 (렌더 프레임마다): 출고 자리가 비면 크레인이 칸에서 토트를 꺼내 출고 컨베이어에 대 두고,
+  // AGV·휴머노이드가 그 앞에 서서 상차(wait)하는 동안 토트가 롤러를 타고 차량 위로 넘어간다. 입고 받침에 팔레트가 오면 남는 틈에 칸으로 넣는다
+  animMiniload(S, dt) {
+    const M = MINILOAD, sim = this.sim, X = (M.aisle + M.row) / 2, W = (this.mlWait ??= new WeakMap());
+    const has = (k) => (k === 'parts' && !sim.partsTracked) || stockOf(sim, k) > 0;   // 부품 재고를 따로 세지 않는 모드는 늘 있음
+    const waitAt = (m, x, z, r = 0.5) => Math.hypot(m.x - x, m.z - z) < r && m.steps?.[0]?.wait != null;
+    for (const b of S.outs) {
+      if (b.state !== 'xfer') {
+        const m = sim.movers.find((o) => !o.receiver && waitAt(o, b.pick.x, b.pick.z));
+        if (m) {   // 차량이 섰는데 아직 토트가 오는 중이면 출고 자리에 바로 대 둔다 (크레인 작업 취소)
+          if (S.job?.bay === b) { S.job = null; S.ph = 'move'; S.tote.visible = false; }
+          b.state = 'xfer'; b.m = m; b.st = m.steps[0]; if (!W.has(b.st)) W.set(b.st, b.st.wait); b.tote.visible = true;
         }
-        this.whRawSlots.push({ lo, hi, y });
-      } else {
-        const bins = [], tote = std(c.p === 'eaxle' ? 0x6f5bd6 : 0xe08a2a);   // 제품별 부품 토트 (도어트림 주황 · e-axle 보라)
-        for (let k = 0; k < 6; k++) bins.push(put(box(0.56, 0.36, 0.62, tote), x - 0.62 + (k % 3) * 0.62, y + 0.37, -0.34 + Math.floor(k / 3) * 0.68, G));
-        fillBins(bins, cellParts({ id: c.p === 'eaxle' ? 'EA_ASSY' : 'DT_ASSY' }));
-        this.whPartSlots.push({ bins, y });
+      }
+      const t = b.tote, end = b.x1 - TOTE.x / 2 - 0.04;
+      if (b.state === 'roll') { b.k = Math.min(1, b.k + dt / 1.2); t.position.set(X + (end - X) * b.k, M.conv + TOTE.y / 2, b.lz); if (b.k >= 1) b.state = 'ready'; }
+      else if (b.state === 'xfer') {
+        const m = b.m;
+        if (m.steps?.[0] !== b.st) { b.state = 'empty'; t.visible = false; b.m = null; continue; }   // 상차 끝 — 차량 적재물로 넘어감
+        const w0 = W.get(b.st) || 1, k = Math.max(0, Math.min(1, 1 - b.st.wait / w0)), mx = m.x - WH_RACK.x, mz = m.z - S.zc;
+        const dy = m.kind === 'agv' ? 0.56 : m.kind === 'forklift' ? 0.2 : 0.95;
+        t.position.set(end + (mx - end) * k, M.conv + (dy - M.conv) * Math.min(1, k * 1.4) + TOTE.y / 2, b.lz + (mz - b.lz) * k);
       }
     }
-    this.whRawSlots.sort((a, b) => a.y - b.y); this.whPartSlots.sort((a, b) => a.y - b.y);
+    for (const b of S.ins) {   // 입고 지게차가 받침 앞에서 팔레트를 내려놓는 중이면 토트 4개가 생긴다
+      const f = sim.forklifts?.find((o) => o.receiver && o.x < WH_RACK.x - M.half - 0.5 && Math.abs(o.z - b.z) < 0.6 && o.steps?.[0]?.wait != null && o.load);
+      if (f && !W.has(f.steps[0])) { W.set(f.steps[0], 1); b.n = 4; b.pallet.visible = true; b.totes.forEach((x) => (x.visible = true)); }
+    }
+    // 다음 작업: ① 빈 출고 자리 채우기 (재고 있는 품목) ② 입고 받침 토트를 칸에 넣기 ③ 없으면 구간 가운데 아래에서 대기
+    if (!S.job) {
+      const ob = S.outs.find((b) => b.state === 'empty' && b.keys.some(has));
+      if (ob) {
+        const ks = ob.keys.filter(has), key = ks[ob.rr++ % ks.length];
+        const all = S.cells.filter((c) => c.key === key), vis = all.filter((c) => c.mesh.visible), pool = vis.length ? vis : all, c = pool[(S.rr = (S.rr * 7 + 3) % 9973) % pool.length];
+        ob.state = 'coming';
+        S.job = { bay: ob, steps: [
+          { z: c.z, y: c.y, x: c.x, act: () => { S.tote.material = c.mat; S.tote.visible = true; } },
+          { z: ob.lz, y: M.conv, x: X, act: () => { S.tote.visible = false; ob.tote.material = c.mat; ob.tote.visible = true; ob.state = 'roll'; ob.k = 0; } },
+        ] };
+      } else {
+        const ib = S.ins.find((b) => b.n > 0);
+        if (ib) {
+          const k = ib.n - 1, tt = ib.totes[k], pool = S.cells.filter((c) => c.key === ib.keys[0]), c = pool[(S.rr = (S.rr * 7 + 3) % 9973) % pool.length];
+          S.job = { steps: [
+            { z: tt.position.z, y: tt.position.y - TOTE.y / 2 - 0.05, x: -X, act: () => { tt.visible = false; ib.n--; if (!ib.n) ib.pallet.visible = false; S.tote.material = ib.mat; S.tote.visible = true; } },
+            { z: c.z, y: c.y, x: c.x, act: () => { S.tote.visible = false; } },
+          ] };
+        }
+      }
+    }
+    const app = (cur, to, v) => (Math.abs(to - cur) <= v ? to : cur + Math.sign(to - cur) * v);
+    const cr = S.cr.position, car = S.car.position, fk = S.fk.position, tg = S.job?.steps[0] ?? { z: 0, y: M.lv[0], x: 0 };
+    if (S.ph === 'move') {
+      cr.z = app(cr.z, tg.z, 3.0 * dt); car.y = app(car.y, tg.y, 1.6 * dt); fk.x = app(fk.x, 0, 1.4 * dt);
+      if (S.job && cr.z === tg.z && car.y === tg.y && fk.x === 0) S.ph = 'ext';
+    } else if (S.ph === 'ext') {
+      fk.x = app(fk.x, tg.x, 1.4 * dt);
+      if (fk.x === tg.x) { tg.act?.(); S.ph = 'ret'; }
+    } else if (S.ph === 'ret') {
+      fk.x = app(fk.x, 0, 1.4 * dt);
+      if (fk.x === 0) { S.job?.steps.shift(); if (!S.job?.steps.length) S.job = null; S.ph = 'move'; }
+    }
+  }
+  // 칸 채움: 품목 재고 ÷ (가득 재고 ÷ 칸 수)만큼 아래 단부터 토트가 보인다
+  fillMiniload(S) {
+    const sim = this.sim;
+    for (const key of new Set(S.cells.map((c) => c.key))) {
+      const I = WH_ITEMS.find((x) => x.key === key), v = key === 'parts' && !sim.partsTracked ? I.cap : stockOf(sim, key);
+      if (S.shown[key] === v) continue; S.shown[key] = v;
+      const cs = S.cells.filter((c) => c.key === key), n = Math.ceil((Math.max(0, v) / I.cap) * cs.length - 1e-9);
+      cs.forEach((c, i) => (c.mesh.visible = i < n));
+    }
   }
 
   // 정비실 비품: 뒤쪽(+z, 앞면이 실내를 봄) 캐비닛 · 공구 카트 · 작업대(공구 타공판) · 소모품 선반 · 에어 컴프레서, 오른쪽 확장 구역에 청소도구,
@@ -2014,50 +2135,29 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     }
   }
 
-  // 확장 선반 (A-1 유연생산 · A-2 적응가공 자재): 물류 선반 바로 북쪽에 같은 줄로 이어 선 4열 × 3단 팔레트 선반 — 서쪽 면 입고(지게차) · 동쪽 면 출고
-  // 열(북 → 남): A-1 원재료 · A-1 부품 · A-2 원재료 · A-2 부품, 한 칸 = 입고 팔레트 1개 (receiving.js XRACK · XWH) — 재고만큼 차고 투입할수록 줄어든다
+  // 확장 선반 (A-1 유연생산 · A-2 적응가공 자재) = 미니로드 ② — 물류 선반 바로 북쪽에 같은 줄로 이어 선 두 줄 4단 선반 · 크레인 1대
+  // 열(북 → 남, 2베이씩): 유연생산 원재료 · 적응가공 원재료 · 유연생산 부품 · 적응가공 부품 — 서쪽 면 입고 받침(지게차) · 동쪽 면 출고 컨베이어
+  // 출고: 원재료 두 자리 = Zone 전용 AGV 자동 적재, 부품 한 자리 = 물류 휴머노이드 키트 피킹 (sim.js KIT_PICK)
   buildXRack() {
-    const r = this.root, LV = [0.3, 1.9, 3.5], H = XRACK.len / 2;
-    const rack = put(new THREE.Group(), XRACK.x, 0, XRACK.z, r); rack.rotation.y = Math.PI / 2;   // 로컬 +x = 북쪽 (물류 선반과 같은 방향)
-    for (let k = 0; k <= 4; k++) for (const z of [-1, 1]) put(box(0.12, 5.2, 0.12, MAT.accent), -H + k * XRACK.pitch, 2.6, z, rack);   // 칸마다 기둥
-    for (const x of [-H, H]) for (const [y0, sg] of [[0.3, 1], [2.7, -1]]) for (const sd of [-1, 1]) { const br = put(box(0.04, 2.6, 0.04, MAT.steel), x, y0 + 1.2, 0, rack); br.rotation.x = sd * sg * 0.72; }   // 끝면 X 브레이싱
-    for (const z of [-1, 1]) put(box(XRACK.len, 0.14, 0.12, MAT.accent), 0, 5.15, z, rack);   // 크라운 프레임
-    for (const y of LV) for (const z of [-0.95, 0.95]) put(box(XRACK.len, 0.12, 0.08, MAT.orange), 0, y, z, rack);   // 앞뒤 로드 빔
-    this.xSlots = {};
-    for (const I of WH_ITEMS.filter((x) => x.zone)) {
-      const lx = -(xrackZ(I.key) - XRACK.z), Z = XWH[I.zone], tint = std(Z.col), slots = [];
-      for (const y of LV) {
-        put(box(1.5, 0.12, 1.6, MAT.pallet), lx, y + 0.11, 0, rack);
-        if (I.kind === 'raw') {   // 원재료: 아래·위 두 묶음 (A-1 패널 블랭크 묶음 · A-2 주조 소재 상자)
-          const mat = I.zone === 'flex' ? MAT.steel : MAT.crate;
-          const lo = put(box(1.35, 0.42, 1.4, mat), lx, y + 0.38, 0, rack), hi = put(box(1.35, 0.42, 1.4, mat), lx, y + 0.82, 0, rack);
-          put(box(1.36, 0.06, 0.06, tint), lx, y + 0.6, 0.71, rack);   // Zone 색 띠 (동쪽 면)
-          slots.push({ y, lo, hi });
-        } else {                  // 부품: Zone 색 토트 4개
-          const bins = [0, 1, 2, 3].map((k) => put(box(0.62, 0.36, 0.66, tint), lx - 0.34 + (k % 2) * 0.68, y + 0.37, -0.36 + Math.floor(k / 2) * 0.72, rack));
-          slots.push({ y, bins });
-        }
-      }
-      this.xSlots[I.key] = { I, slots, shown: undefined };
-      put(makeSignPlate(I.label, I.zone === 'flex' ? '#6ab8ff' : '#ff9a6a', 1.5), XRACK.x + 1.25, 4.75, xrackZ(I.key), r).rotation.y = Math.PI / 2;   // 열 표지 (동쪽 면) — 선반에 고정
-    }
-    // 확장 선반 재고 현황판: 선반 꼭대기 위(동쪽을 향함) — 현황판 제목이 선반 이름을 겸한다
+    const r = this.root, items = WH_ITEMS.filter((x) => x.zone), mat = {};
+    for (const I of items) mat[I.key] = I.kind === 'raw' ? (I.zone === 'flex' ? MAT.steel : MAT.crate) : std(XWH[I.zone].col);
+    const rawPick = (k) => ({ x: -43.0, z: Math.min(xrackZ(k), 13.0) });   // sim.js assignZoneVehicles 상차 자리
+    this.buildMiniload(XRACK.z, XRACK.len, 8, (i) => ({ key: items[Math.floor(i / 2)].key, mat: mat[items[Math.floor(i / 2)].key] }),
+      [...['flex:raw', 'adapt:raw'].map((k) => ({ z: rawPick(k).z, end: -43.55, pick: rawPick(k), keys: [k] })),
+        { z: KIT_PICK.z, end: KIT_PICK.x - 0.42, pick: KIT_PICK, keys: ['flex:parts', 'adapt:parts'] }],
+      items.map((I) => ({ z: xrackZ(I.key), keys: [I.key] })));
+    for (const I of items) put(makeSignPlate(I.label, I.zone === 'flex' ? '#6ab8ff' : '#ff9a6a', 1.5), XRACK.x + MINILOAD.half + 0.15, 6.0, xrackZ(I.key), r).rotation.y = Math.PI / 2;   // 열 표지 (동쪽 면) — 선반에 고정
+    put(makeSignPlate('미니로드 ② · 확장 Zone', '#8fd3ff', 3.0), XRACK.x + MINILOAD.half + 0.15, 6.5, XRACK.z, r).rotation.y = Math.PI / 2;
+    // 확장 선반 재고 현황판: 선반 뒤 왼쪽 벽(동쪽을 향함) — 선반이 4단으로 높아져 꼭대기 위 대신 물류 선반 현황판과 나란히 벽에 단다
     const sc = document.createElement('canvas'); sc.width = 1100; sc.height = 420;
     this.xBoard = { cv: sc, tex: new THREE.CanvasTexture(sc), key: '' }; this.xBoard.tex.colorSpace = THREE.SRGBColorSpace; this.xBoard.tex.anisotropy = 8;
-    const bd = put(new THREE.Group(), XRACK.x, 6.5, XRACK.z, r); bd.rotation.y = Math.PI / 2; bd.scale.setScalar(0.8);
+    const bd = put(new THREE.Group(), INBOUND.wallX + 0.3, 6.25, XRACK.z, r); bd.rotation.y = Math.PI / 2; bd.scale.setScalar(0.8);
     put(box(XRACK.len + 0.2, 2.85, 0.12, std(0x0b0d10, { roughness: 0.5, metalness: 0.4 })), 0, 0, -0.07, bd);
     put(new THREE.Mesh(new THREE.PlaneGeometry(XRACK.len, (XRACK.len * 420) / 1100), new THREE.MeshBasicMaterial({ map: this.xBoard.tex, toneMapped: false })), 0, 0, 0, bd);
     bd.traverse((o) => (o.castShadow = false));
   }
-  // 확장 선반 칸 채움: 원재료 칸은 팔레트 반마다 한 묶음씩, 부품 칸은 4분의 1마다 토트 하나씩
+  // 확장 선반 현황판 (칸 채움은 fillMiniload)
   updateXRack() {
-    for (const X of Object.values(this.xSlots ?? {})) {
-      const v = stockOf(this.sim, X.I.key); if (v === X.shown) continue; X.shown = v;
-      X.slots.forEach((sl, i) => {
-        const n = Math.max(0, Math.min(X.I.pallet, v - i * X.I.pallet));
-        if (sl.lo) { sl.lo.visible = n > 0; sl.hi.visible = n > X.I.pallet / 2; } else sl.bins.forEach((b, k) => (b.visible = k < Math.ceil((n / X.I.pallet) * 4)));
-      });
-    }
     const B = this.xBoard; if (!B) return;
     const sim = this.sim, vals = WH_ITEMS.filter((x) => x.zone).map((I) => [I, stockOf(sim, I.key)]), st = sim.zoneStarved ?? {};
     const key = vals.map(([, v]) => v).join('|') + Object.values(st).join('|');
@@ -2083,53 +2183,24 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
   buildAreas() {
     const r = this.root;
     // 자재 공급 차질 경보: 자재창고 랙 주변
-    this.whAlarm = put(makeAlarmFx(12.4, 4.6, 5.2), WH_RACK.x + 0.6, 0, WH_RACK.z, r); this.whAlarm.rotation.y = Math.PI / 2;
-    // 물류 선반(자재창고 랙): 왼쪽 2열 × 3단 = 원자재 6칸, 오른쪽 2열 × 3단 = 부품 6칸 (한 칸 = 입고 팔레트 1개)
-    // 원자재 칸은 박스 2단(20박스씩 = AGV 1회분), 부품 칸은 부품 빈 6개(40개씩) — 재고만큼 차고 배달할수록 줄어든다
-    // 왼쪽 확장동 물류존: 선반을 왼쪽 벽에 붙여 남북으로 세운다 (로컬 −x 원자재 → 남쪽, +x 부품 → 북쪽, 앞면 = 동쪽)
-    const rack = new THREE.Group(); put(rack, WH_RACK.x, 0, WH_RACK.z, r); rack.rotation.y = Math.PI / 2;
-    this.whRawSlots = []; this.whPartSlots = []; this.whOut = false;
-    this.whSign = put(makeSignPlate('⛔ 출고 중단 · 공급 차질', '#ff8a1f', 7.5), WH_RACK.x + 1.2, 7.4, WH_RACK.z, r); this.whSign.rotation.y = Math.PI / 2; this.whSign.visible = false;   // 선반 위 동쪽을 향해 고정
+    this.whAlarm = put(makeAlarmFx(12.4, 4.6, MINILOAD.top + 0.4), WH_RACK.x + 0.6, 0, WH_RACK.z, r); this.whAlarm.rotation.y = Math.PI / 2;
+    // 물류 선반(자재창고 랙) = 미니로드 ① — 왼쪽 벽 입고 지게차 통로와 로봇 통로 사이에 남북으로 선 두 줄 4단 선반 · 크레인 1대 (12베이 × 2줄 × 4단 = 토트 96칸)
+    // 베이(북 → 남, 3베이씩): e-axle 부품 · 도어트림 부품 · e-axle 원자재 · 도어트림 원자재 — 제품별로 따로 보관
+    // 서쪽 면 바닥 입고 받침(지게차가 팔레트를 내려놓음) → 크레인이 칸에 넣고, 출고 때는 칸 → 동쪽 면 출고 컨베이어 → AGV 롤러 자동 적재 · 휴머노이드 피킹
+    this.whSign = put(makeSignPlate('⛔ 출고 중단 · 공급 차질', '#ff8a1f', 7.5), WH_RACK.x + 1.5, 7.4, WH_RACK.z, r); this.whSign.rotation.y = Math.PI / 2; this.whSign.visible = false;   // 선반 위 동쪽을 향해 고정
     this.whSign.children.forEach((m) => { m.material.depthTest = false; m.renderOrder = 10; });   // 경보 표지는 현황판에 가리지 않게 늘 위에 그린다 (스프라이트일 때와 같음)
-    // AS/RS(셔틀식 자동창고) 구조: 칸마다 기둥 · 단마다 앞뒤 로드 빔과 셔틀 레일 · 끝면 X 브레이싱 · 상부 크라운 프레임
-    // 가운데(로컬 x 0)는 수직 리프트 · 단마다 셔틀이 레일을 오가며 칸 ↔ 리프트를 옮기고, 리프트 아래 동쪽(로컬 +z)에 반출 컨베이어
-    // 열 배치: 원자재(남쪽) 도어트림 · e-axle, 부품(북쪽) 도어트림 부품 · e-axle 부품 — 제품별로 따로 보관
-    const LV = [0.3, 1.9, 3.5], COLS = [{ x: -3.85, kind: 'raw', p: 'doortrim' }, { x: -1.55, kind: 'raw', p: 'eaxle' }, { x: 1.55, kind: 'parts', p: 'doortrim' }, { x: 3.85, kind: 'parts', p: 'eaxle' }];
-    for (const x of [-5.0, -2.7, -0.45, 0.45, 2.7, 5.0]) for (const z of [-1, 1]) put(box(0.12, 5.2, 0.12, MAT.accent), x, 2.6, z, rack);
-    for (const x of [-5.0, 5.0]) for (const [y0, sg] of [[0.3, 1], [2.7, -1]]) {   // 끝면 X 브레이싱
-      for (const sd of [-1, 1]) { const br = put(box(0.04, 2.6, 0.04, MAT.steel), x, y0 + 1.2, 0, rack); br.rotation.x = sd * sg * 0.72; }
-    }
-    for (const z of [-1, 1]) put(box(10.2, 0.14, 0.12, MAT.accent), 0, 5.15, z, rack);                       // 크라운 프레임
-    for (const x of [-5.0, -2.7, 0, 2.7, 5.0]) put(box(0.1, 0.1, 2.1, MAT.accent), x, 5.15, 0, rack);
-    const shuttles = [];
-    for (const y of LV) {
-      for (const sd of [-1, 1]) {   // 리프트 양쪽 칸 구역 (가운데 리프트 칸 제외)
-        for (const z of [-0.95, 0.95]) put(box(4.5, 0.12, 0.08, MAT.orange), sd * 2.72, y, z, rack);   // 앞뒤 로드 빔
-        for (const z of [-0.18, 0.18]) put(box(4.5, 0.04, 0.05, MAT.steel), sd * 2.72, y + 0.02, z, rack);   // 셔틀 레일
-        const sh = put(new THREE.Group(), sd * 2.7, y + 0.05, 0, rack); sh.userData.x0 = sd * 2.7;   // 셔틀 (칸 아래를 오감)
-        put(box(0.9, 0.09, 0.62, MAT.orange), 0, 0.045, 0, sh);
-        put(box(0.06, 0.03, 0.5, emis(0x3ddc84, 1.6), false), 0.46, 0.05, 0, sh);
-        shuttles.push(sh);
-      }
-    }
-    for (const x of [-0.45, 0.45]) for (const z of [-0.6, 0.6]) put(box(0.06, 5.0, 0.06, MAT.steel), x * 0.8, 2.6, z, rack);   // 리프트 가이드
-    const lift = put(new THREE.Group(), 0, 0.3, 0, rack);
-    put(box(0.7, 0.08, 1.3, MAT.orange), 0, 0, 0, lift);
-    for (const x of [-0.3, 0.3]) put(box(0.04, 0.05, 1.2, MAT.steel), x, 0.06, 0, lift);
-    put(box(0.8, 0.3, 0.8, MAT.dark), 0, 5.4, 0, rack);   // 리프트 구동부
-    const io = put(new THREE.Group(), 0, 0, 1.25, rack);   // 반출 컨베이어 (동쪽, AGV·휴머노이드 쪽)
-    put(box(0.8, 0.5, 0.5, MAT.dark), 0, 0.25, 0, io); put(box(0.85, 0.06, 0.55, MAT.steel), 0, 0.53, 0, io);
-    for (let k = 0; k < 5; k++) put(cyl(0.03, 0.03, 0.8, MAT.steel, 10), 0, 0.57, -0.2 + k * 0.1, io).rotation.z = Math.PI / 2;
-    this.asrs = { shuttles, lift };
-    this.whRack = { rack, LV, COLS, group: put(new THREE.Group(), 0, 0, 0, rack) };
-    this.buildWhStock();
-    // 열 표지 (동쪽 면, 각 열 위)
-    COLS.forEach((c) => { put(makeSignPlate(c.p === 'eaxle' ? 'e-axle' : '도어트림', c.p === 'eaxle' ? '#b89bff' : '#ffb35a', 1.5), WH_RACK.x + 1.25, 4.75, WH_RACK.z - c.x, r).rotation.y = Math.PI / 2; });
-    // 원자재 칸이 아래 단부터 차도록 정렬 (단 → 열)
-    this.whRawSlots.sort((a, b) => a.y - b.y); this.whPartSlots.sort((a, b) => a.y - b.y);
+    const COLS = [{ p: 'eaxle', key: 'parts', mat: std(0x6f5bd6) }, { p: 'doortrim', key: 'parts', mat: std(0xe08a2a) }, { p: 'eaxle', key: 'raw', mat: MAT.crate }, { p: 'doortrim', key: 'raw', mat: MAT.raw }];
+    const H = 5.1, bay = 0.85, colZ = (j) => WH_RACK.z - H + (j * 3 + 1.5) * bay;   // 열 j의 가운데 z (북 → 남)
+    this.buildMiniload(WH_RACK.z, 2 * H, 12, (i) => COLS[Math.floor(i / 3)],
+      [{ z: LOC.WH.z, end: LOC.WH.x - 0.6, pick: LOC.WH, keys: ['raw'] },
+        ...[0, 1, 2].map((i) =>   // 부품 피킹 자리: 휴머노이드마다 1.4m 간격 (sim.js h.pick)
+          ({ z: LOC.WH_PARTS.z - i * 1.4, end: LOC.WH_PARTS.x - 0.42, pick: { x: LOC.WH_PARTS.x, z: LOC.WH_PARTS.z - i * 1.4 }, keys: ['parts'] }))],
+      [{ z: LOC.WH_IN.z, keys: ['raw'] }, { z: LOC.WH_PARTS_IN.z, keys: ['parts'] }]);
+    COLS.forEach((c, j) => { put(makeSignPlate(c.p === 'eaxle' ? 'e-axle' : '도어트림', c.p === 'eaxle' ? '#b89bff' : '#ffb35a', 1.5), WH_RACK.x + MINILOAD.half + 0.15, 6.0, colZ(j), r).rotation.y = Math.PI / 2; });   // 열 표지 (동쪽 면)
     // 선반 앞 표지 — 선반 앞면(동쪽)에 고정해 화면을 돌려도 선반과 같이 돈다
-    put(makeSignPlate('원자재', '#c9d2dc', 2.2), WH_RACK.x + 1.2, 5.3, WH_RACK.z + 2.5, r).rotation.y = Math.PI / 2;
-    put(makeSignPlate('부품', '#5aa9ff', 2.2), WH_RACK.x + 1.2, 5.3, WH_RACK.z - 2.5, r).rotation.y = Math.PI / 2;
+    put(makeSignPlate('원자재', '#c9d2dc', 2.2), WH_RACK.x + MINILOAD.half + 0.15, 6.5, WH_RACK.z + 2.5, r).rotation.y = Math.PI / 2;
+    put(makeSignPlate('부품', '#5aa9ff', 2.2), WH_RACK.x + MINILOAD.half + 0.15, 6.5, WH_RACK.z - 2.5, r).rotation.y = Math.PI / 2;
+    this.whRack = { rack: this.miniloads[0].g };
     // 물류 선반 재고 현황판 (선반 위 왼쪽 벽, 동쪽을 향함): 재고 막대 · 입고 순환 상태 · 입출고 횟수
     const sc = document.createElement('canvas'); sc.width = 1536; sc.height = 420;
     this.whBoard = { cv: sc, tex: new THREE.CanvasTexture(sc), key: '' }; this.whBoard.tex.colorSpace = THREE.SRGBColorSpace; this.whBoard.tex.anisotropy = 8;
@@ -2644,21 +2715,9 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     blinkAlarmFx(this.whAlarm, sim.supplyAlarm, ALARM_COLOR.supply, t);
     // 출고 중단 동안 창고 랙은 비어 보이고 '출고 중단' 표지가 깜빡인다
     const out = sim.supplyDisrupted;
-    // 물류 선반: 원자재 칸은 20박스(AGV 1회분)마다 한 단씩, 부품 칸은 40개마다 빈 하나씩 — 입고되면 차고 배달하면 줄어든다
-    const raw = sim.whRaw ?? 0, partsOn = sim.partsTracked, parts = partsOn ? sim.whParts : WH.partsCap;
-    if (raw !== this.whRawShown) {
-      this.whRawShown = raw;
-      this.whRawSlots.forEach((sl, i) => { const n = Math.max(0, Math.min(WH.rawPallet, raw - i * WH.rawPallet)); sl.lo.visible = n > 0; sl.hi.visible = n > WH.rawPallet / 2; });
-    }
-    if (parts !== this.whPartsShown) {
-      this.whPartsShown = parts;
-      this.whPartSlots.forEach((sl, i) => { const n = Math.max(0, Math.min(WH.partsPallet, parts - i * WH.partsPallet)); const b = Math.ceil(n / (WH.partsPallet / 6)); sl.bins.forEach((x, k) => (x.visible = k < b)); });
-    }
+    // 미니로드 ①·②: 칸 채움(재고만큼) · 크레인 입출고 · 출고 컨베이어 → AGV 롤러 이재 (일시정지면 멈춤, 빠른 배속은 8배까지 따라간다)
+    for (const S of this.miniloads ?? []) { this.fillMiniload(S); this.animMiniload(S, Math.min(dts, rdt * 8)); }
     this.drawWhBoard(); this.updateXRack();
-    if (this.asrs && !REDUCED_MOTION) {   // AS/RS: 셔틀이 단마다 칸 ↔ 리프트를 오가고 리프트가 오르내린다
-      this.asrs.shuttles.forEach((sh, i) => { sh.position.x = sh.userData.x0 + Math.sin(t * 0.55 + i * 1.3) * 1.7; });
-      this.asrs.lift.position.y = 0.3 + (1 - Math.cos(t * 0.45)) * 1.6;
-    }
     this.whSign.visible = out;
     if (out) this.whSign.children[0].material.opacity = REDUCED_MOTION || Math.sin(t * Math.PI * 2 / 0.9) > 0 ? 1 : 0.35;
 

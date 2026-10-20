@@ -2,7 +2,7 @@
 import { zoneLine } from '../js/line.js';
 import { Simulation, moverRadius } from '../js/sim.js';
 import { FactoryAgent } from '../js/agent.js';
-import { INBOUND, WH, WH_RACK, XRACK, XWH, xrackZ, stockOf } from '../js/receiving.js';
+import { INBOUND, WH, WH_RACK, XRACK, XWH, xrackZ, stockOf, MINILOAD } from '../js/receiving.js';
 let pass = 0, fail = 0;
 const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  — ' + info : ''}`); };
 const Z = INBOUND.zone;
@@ -21,7 +21,7 @@ for (const mode of ['traditional', 'smart', 'dark']) {
     }
     const r = moverRadius(rcv);
     if (rcv.x + r < Z.x0 - 1.2 || rcv.x - r > Z.x1 || rcv.z - r < Z.z0 || rcv.z + r > Z.z1) out++;
-    const RK = { x0: WH_RACK.x - 1.1, x1: WH_RACK.x + 1.1, z0: WH_RACK.z - 5.2, z1: WH_RACK.z + 5.2 };   // 물류 선반 몸체(왼쪽 벽에 붙은 남북 방향)와 겹치지 않음
+    const RK = { x0: WH_RACK.x - MINILOAD.half, x1: WH_RACK.x + MINILOAD.half, z0: XRACK.z - XRACK.len / 2, z1: WH_RACK.z + 5.1 };   // 미니로드 ①·② 몸체(두 줄 선반, 왼쪽 벽 쪽 남북 방향)와 겹치지 않음
     if (rcv.x + 0.9 > RK.x0 && rcv.x - 0.9 < RK.x1 && rcv.z + 0.6 > RK.z0 && rcv.z - 0.6 < RK.z1) out++;   // 문 밖 적재함까지(1.2m)는 허용
     minRaw = Math.min(minRaw, s.whRaw);
     if (rcv.idle && Math.hypot(rcv.x - rcv.home.x, rcv.z - rcv.home.z) < 1e-3) { parked++; const e = Math.abs(((rcv.heading - INBOUND.park.heading + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI); worst = Math.max(worst, e); if (e > 1e-3) crooked++; }
