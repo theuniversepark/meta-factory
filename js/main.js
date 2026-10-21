@@ -391,6 +391,11 @@ function zoneOfClick(hit, r) {
   if (p.x > -36.8 && p.x < 31.3 && p.z > -10.3 && p.z < 10.3) return 'precision';   // 정밀조립Zone (좌우 세로 통로 · 앞뒤 통로 사이)
   return null;
 }
+// 왼쪽에서 Zone을 고르면 오른쪽 공장 운영 로그도 그 존으로 — 로그 탭을 손으로 눌러 연동이 꺼졌어도 다시 켠다
+function syncLogZone() {
+  const f = document.getElementById('logFollow'); if (f) f.checked = true;
+  ui?.setLogFilter?.(zonePick.view === 'precision' ? 'main' : zonePick.view); ui?.renderFacos?.();
+}
 function selectZone(key) {
   if (!key || key === zonePick.view || !ZONE_PICKS.some((z) => z.key === key)) return;
   zonePick.view = key; saveZonePick(); renderZoneCard();
@@ -402,7 +407,7 @@ function flyTo(key) {
   persp.position.set(...p); ctlP.target.set(...t); ctlP.update();
 }
 document.addEventListener('click', (e) => { if (!e.target.closest('.zc-dd')) zoneCard.querySelector('.zc-dd.open')?.classList.remove('open'); });
-xzCard?.addEventListener('click', (e) => { const b = e.target.closest('button[data-view]'); if (b) flyTo(b.dataset.view); });
+xzCard?.addEventListener('click', (e) => { const b = e.target.closest('button[data-view]'); if (b) { flyTo(b.dataset.view); selectZone(b.dataset.view); syncLogZone(); } });   // 보기 ▸: 카메라 이동 + 그 Zone 선택 (Zone 카드·공장 운영 로그)
 function updateXzCard() {
   if (!xzCard) return;
   const row = (key, name, prods, s) => `<div class="xz-row"><div class="xz-h"><b>${name}</b><button type="button" class="xz-go" data-view="${key}">보기 ▸</button></div><div class="xz-s">${prods} · ${s}</div></div>`;
@@ -441,6 +446,7 @@ zoneCard.addEventListener('click', (e) => {
   if (pk) {
     if (pk.dataset.pick !== zonePick.view) { zonePick.view = pk.dataset.pick; saveZonePick(); renderZoneCard(); }
     else zoneCard.querySelector('.zc-dd')?.classList.remove('open');
+    syncLogZone();   // 같은 Zone을 다시 골라도 로그를 그 존으로
     flyTo(zonePick.view);
     return;
   }
@@ -610,6 +616,14 @@ document.getElementById('engineSeg').addEventListener('click', (e) => {
   });
 });
 document.getElementById('pauseThink').addEventListener('change', (e) => { llm.pauseWhileThinking = e.target.checked; });
+// 오른쪽 FACOS · 공장 운영 머리를 누르면 존 요약 칩 · 존 에이전트 설정을 접고 펼친다 (이 브라우저에 기억 — 로그·입력창은 그대로)
+{
+  const head = document.getElementById('facosHead'), panel = document.getElementById('agentPanel'), KEY = 'metafactory.facosFolded';
+  const set = (f) => { panel.classList.toggle('facos-folded', f); head.setAttribute('aria-expanded', String(!f)); try { localStorage.setItem(KEY, f ? '1' : '0'); } catch { /* 저장소 없음 */ } };
+  try { set(localStorage.getItem(KEY) === '1'); } catch { /* 저장소 없음 */ }
+  head.addEventListener('click', () => set(!panel.classList.contains('facos-folded')));
+  head.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); set(!panel.classList.contains('facos-folded')); } });
+}
 document.getElementById('chatForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = document.getElementById('chatInput');

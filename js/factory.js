@@ -906,7 +906,7 @@ function pointWork(r, o) {
     const box = o.box(); if (!box) return rest();
     const [x0, , z0] = box.min, [x1, y1, z1] = box.max, cz = (z0 + z1) / 2, f = Math.sign(cz - r.slot.z) || 1, hz = (z1 - z0) / 2;
     const [xa, xb, inA, inB] = pointRange(r, o.robots, x0, x1), zP = (f > 0 ? z0 : z1) + f * Math.min(0.08, hz * 0.3);   // 자기 구간 · 로봇 쪽 가장자리 안쪽
-    const cm = contactMode(box), ik = (x, y, z) => { const v = r.root.worldToLocal(P.localToWorld(new THREE.Vector3(x, y, z))); return A.ik(v.x, v.y, v.z, cm.dir); };
+    const cm = contactMode(box), ikC = (x, y, z) => { const v = r.root.worldToLocal(P.localToWorld(new THREE.Vector3(x, y, z))); return A.ik(v.x, v.y, v.z, cm.dir); };
     const span = xb - xa - inA - inB, xs = Array.from({ length: o.n }, (_, k) => span > 0 ? xa + inA + span * (o.n === 1 ? 0.5 : k / (o.n - 1)) : (xa + xb) / 2);
     const nz = f > 0 ? z0 : z1, cx = (x0 + x1) / 2;
     // 얇게 선 판: 로봇이 있는 쪽 판면(윗모서리 0.08m 아래)을 옆에서 — 판면 법선 방향 0.1m 앞에서 다가가 손끝을 댄다 (끝면을 대면 아래팔이 판면을 스친다)
@@ -914,7 +914,10 @@ function pointWork(r, o) {
     const nd = ((a, b) => b.sub(a))(loc(fx, y1, nz), loc(fx + sx, y1 + 0.3, nz)), ikS = (x, y, z) => { const v = loc(x, y, z); return A.ik(v.x, v.y, v.z, nd); };
     r.pwPlan = cm.side
       ? xs.map((_, k) => { const z = nz + f * (0.12 + 0.25 * (o.n === 1 ? 0.5 : k / (o.n - 1))), y = y1 - 0.08; return [ikS(fx + sx * 0.1, y, z), ikS(fx + sx * 0.012, y, z), ikS(fx + sx * (o.kind === 'press' ? 0.002 : 0.008), y, z), ikS(fx + sx * 0.3, y + 0.15, z)]; })
-      : xs.map((x) => { const y = o.obj ? surfaceY(o.obj, P, null, x, zP, y1) : y1; return [ik(x, y + 0.08, zP), ik(x, y + 0.005, zP), ik(x, y - (o.kind === 'press' ? 0.01 : 0.002), zP), ik(x, y + 0.3, zP)]; });
+      : xs.map((x) => { const y = o.vertical ? y1 : o.obj ? surfaceY(o.obj, P, null, x, zP, y1) : y1;   // 세운 툴은 대상물 맨 윗면 기준 — 블록 사이 틈으로 내려가 옆 블록 옆면에 부딪히지 않게
+        const ik = o.vertical ? (x, y, z) => { const v = loc(x, y, z); return A.ik(v.x, v.y, v.z, true); } : ikC;   // o.vertical: 툴을 세워(수직) — 넓은 툴(스캐너)·굵은 몸체(스핀들)가 기울면 대상물에 들어간다
+        if (o.kind === 'scan') { const zs = cz + (zP - cz) * 0.3, ys = y1; return [ik(x, ys + 0.3, zs), ik(x, ys + 0.16, zs), ik(x, ys + 0.16, zs), ik(x, ys + 0.35, zs)]; }   // 3D 스캔: 닿지 않고 윗면 0.12m 위를 대상물 가운데 쪽으로 지나간다
+        return [ik(x, y + 0.08, zP), ik(x, y + 0.005, zP), ik(x, y - (o.kind === 'press' ? 0.01 : 0.002), zP), ik(x, y + 0.3, zP)]; });
     if (o.align && o.support) {   // 스폿용접 C건: 아래 전극 턱이 들어갈 틈(판 밑에 지그가 없는 가장자리)에만 점을 두고, 건을 세워 그 가장자리 바깥에서 판 높이로 밀어 넣는다
       const S = o.support(), plan = S && weldPlan(r, o, box, S, loc, A);
       if (plan) { r.pwPlan = plan.pl; r.pwGap = plan.gap; r.pwOut = plan.out; r.pwEnd = plan.end; r.pwPick = null; r.pwKey = o.key; }
@@ -929,7 +932,7 @@ function pointWork(r, o) {
   // 대기 자세 ↔ 첫·마지막 점, 점 ↔ 점은 대상물 0.3m 위 경유점(high, pl[k][3])으로 — 관절 보간으로 곧장 가면 아래팔이 대상물 위로 처진다
   if (u < 0.12) q = u < 0.08 ? lerp(home, pl[0][3], ease(u / 0.08)) : lerp(pl[0][3], pl[0][0], ease((u - 0.08) / 0.04));
   else if (u > 0.9) q = u < 0.94 ? lerp(pl[n - 1][0], pl[n - 1][3], ease((u - 0.9) / 0.04)) : lerp(pl[n - 1][3], home, ease((u - 0.94) / 0.06));
-  else if (o.kind === 'trace') {   // 첫 점에 내려앉아 마지막 점까지 붙은 채 따라 긋고 들어 올린다
+  else if (o.kind === 'trace' || o.kind === 'scan') {   // 첫 점에 내려앉아 마지막 점까지 붙은 채 따라 긋고 들어 올린다 (스캔은 윗면 위를 같은 길로)
     const w = (u - 0.12) / 0.78;
     if (w < 0.12) q = lerp(pl[0][0], pl[0][1], ease(w / 0.12));
     else if (w > 0.88) q = lerp(pl[n - 1][1], pl[n - 1][0], ease((w - 0.88) / 0.12));

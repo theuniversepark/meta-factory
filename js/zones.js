@@ -8,7 +8,7 @@ import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { KIT } from './factory.js';
 import { blenderOn, cloneAsset, RENDER } from './blender.js';
 import { makeProductMachine } from './product-machines.js';
-import { attachSpotGun, attachSealGun, attachVacuumGripper, attachNutrunner, holdPart, makeHose, processMarks } from './endeffectors.js';
+import { attachSpotGun, attachSealGun, attachVacuumGripper, attachNutrunner, attachScanner, attachDeburrSpindle, attachAirNozzle, holdPart, makeHose, processMarks } from './endeffectors.js';
 import { pointAt, pathLength, ROBOT_KINDS, PARALLEL_GAIN } from './line.js';
 import { EXTRA_ZONES, ZONE_FAC, zoneRobotUid, zoneAmrUid, ZONE_FG_CAP, zonePack, zoneCtl } from './zonedefs.js';
 import { BATTERY, moverRadius, moverWidth } from './sim.js';
@@ -153,7 +153,7 @@ const HUM_SLOT_Z = 0.88;
 const CELL_WORK = {
   kit: { from: 0.1, to: 0.85, kind: 'touch' }, locate: { from: 0.1, to: 0.85, kind: 'touch' }, spot: { from: 0.08, to: 0.9, kind: 'press' }, seal: { from: 0.1, to: 0.85, kind: 'trace' },
   hem: { from: 0.08, to: 0.42, kind: 'press' }, mount: { from: 0.1, to: 0.85, kind: 'screw' }, rework: { from: 0.1, to: 0.85, kind: 'press' },
-  matid: { from: 0.1, to: 0.85, kind: 'touch' }, deburr: { from: 0.45, to: 0.76, kind: 'touch' }, cmm: { from: 0.06, to: 0.28, kind: 'touch' },
+  matid: { from: 0.1, to: 0.85, kind: 'scan' }, deburr: { from: 0.45, to: 0.76, kind: 'trace' }, cmm: { from: 0.06, to: 0.28, kind: 'trace' },   // 소재 3D 스캔(닿지 않음) · 가장자리 디버링 · 측정 전 에어 블로
 };
 // 머신텐딩 배치 (adaptive-machining TEND): 로봇 −z 1.25m (문 중심선 x −0.1 위 — 팔이 문 열림 폭 1.3m 가운데로 드나든다), 머시닝센터 −z 3.25m (통로 반대쪽, 앞면 −z 2.25m), 테이블 앞 −z 3.05m
 const TEND = { robot: { x: -0.1, z: -1.25 }, mc: { z: -3.25 }, table: { x: -0.1, z: -3.05 } };
@@ -193,6 +193,7 @@ function tendPose(r, p, doorK = 1) {
   let i = 0; while (i < TEND_SEQ.length - 2 && p >= TEND_SEQ[i + 1][0]) i++;
   const [p0, a] = TEND_SEQ[i], [p1, b] = TEND_SEQ[i + 1], k0 = Math.min(1, Math.max(0, (p - p0) / Math.max(1e-6, p1 - p0))), k = k0 * k0 * (3 - 2 * k0);
   const inside = a === 'entry' || a === 'table' || b === 'entry' || b === 'table';
+  r.tendI = i;   // 경로 구간 — 소재를 손에 든 구간 · 기계 안 구간 (animCell tendPart)
   r.tendInside = inside && doorK >= 0.95;
   if (inside && !r.tendInside) { r.arm.native ? r.arm.pose(...J.home) : r.arm.pose(J.home[0], J.home[1], J.home[2], J.home[3], 0, 0); return; }
   const A = J[a], B = J[b], yaw = (q) => (Math.abs(q) > 3 ? PI : q);
@@ -716,6 +717,9 @@ class ExtraZone {
           else if (c.def.type === 'seal') { const s = attachSealGun(r.arm); if (s) { r.tool = s.tool; r.hoseFit = s.fitting; r.hose = makeHose(r.root); } }   // 호스는 로봇에 딸린 것 (로봇 로컬로 그린다)
           else if (c.def.type === 'hem') r.tool = attachVacuumGripper(r.arm);
           else if (c.def.type === 'kit') { r.held = holdPart(r.tip, 'bracket'); r.tool = r.held; }   // 키팅: 기본 그리퍼로 브래킷을 하나씩
+          else if (c.def.type === 'matid') r.tool = attachScanner(r.arm);   // 적응가공 소재 식별·3D 측정: 3D 스캐너
+          else if (c.def.type === 'deburr') r.tool = attachDeburrSpindle(r.arm);   // 디버링: 고속 스핀들 + 버
+          else if (c.def.type === 'cmm') r.tool = attachAirNozzle(r.arm);   // 측정 전 에어 블로
           else if (c.def.type === 'mount') { attachNutrunner(r.arm); r.held = holdPart(r.tip, 'hinge'); r.tool = r.held; }   // 정밀 장착: 그리퍼 + 너트러너 — 힌지를 놓고 그 자리에서 체결
         }
         // 피지컬AI: 6축·협동로봇 손목 카메라 (정밀조립 VLA 셀 로봇과 같은 자리·모양 — factory.js placeRobots) · AMMR·휴머노이드는 모델에 카메라 4대(r.cams)
@@ -1064,6 +1068,11 @@ class ExtraZone {
       r.flash.visible = on; if (on) { r.flash.position.copy(r.sparkAt); r.flash.scale.setScalar(0.7 + Math.random() * 0.8); r.flash.material.opacity = 0.55 + Math.random() * 0.4; }
       if (on) { r.weldT = (r.weldT ?? 0) + rdt; r.weldP = pm.worldToLocal(tcp.clone()); }
       else { if (r.weldT > 0.05 && r.weldP) processMarks(pm).nugget(r.weldP.setY(r.weldP.y + 0.011)); r.weldT = 0; r.weldP = null; }   // 통전이 끝난 점에 너깃 자국 (팁이 1cm 눌렀던 자리 → 윗면)
+    } else if (c.def.type === 'matid') r.tool.userData.scanOn?.(!!r.pwContact);   // 스캔 중에만 패턴 빛
+    else if (c.def.type === 'deburr' || c.def.type === 'cmm') {   // 디버링 칩 · 에어 블로 물안개 — 툴 끝이 닿아 있는 동안 그 자리에서
+      const on = !!r.pwContact; if (on) r.tool.userData.spin?.(rdt);
+      r.fx ??= put(makeSparks(c.def.type === 'deburr' ? 0xc8ccd2 : 0xe8f4ff, 50, c.def.type === 'deburr' ? 0.018 : 0.03), 0, 0, 0, c.g);
+      stepSparks(r.fx, on, c.g.worldToLocal(tcp.clone()), rdt, c.def.type === 'deburr' ? 1.1 : 0.7, c.def.type === 'deburr' ? -9 : -1.5);
     } else if (r.held) {   // 키팅·정밀 장착: 집은 부품을 손끝에 · 내려놓는 순간 그 자리에 부품을 남긴다
       if (r.wasHeld && !r.pwHeld && r.pwContact) processMarks(pm).place(pm.worldToLocal(tcp.clone()), c.def.type === 'mount' ? 'hinge' : 'bracket');
       r.held.visible = !!r.pwHeld; r.wasHeld = !!r.pwHeld;
@@ -1166,6 +1175,39 @@ class ExtraZone {
     const q = p < 0.08 ? home.map((v, k) => v + (ik(0.3)[k] - v) * sm(0.02, 0.08, p)) : p < 0.45 ? ik(0.3) : p < 0.52 ? ik(0.3 * (1 - sm(0.45, 0.52, p))) : p < 0.78 ? ik(0) : p < 0.86 ? ik(0.3 * sm(0.78, 0.86, p)) : ik(0.3).map((v, k) => v + (home[k] - v) * sm(0.86, 0.96, p));
     A.pose(...q); r.locCur = q.slice(); r.pwContact = p >= 0.52 && p < 0.78;
   }
+  // 머신텐딩 소재 옮기기 (로봇 경로 구간 r.tendI — TEND_SEQ): 2~7 AMR에서 집어 들고 감 · 8~12 기계 안(척·테이블) · 13~18 꺼내 들고 옴 · 그 밖 AMR 지그 위
+  // 대상물(AMR 위 제품)은 손에 들거나 기계 안에 있는 동안 지그에서 숨기고, 그리퍼 끝에 복제본을, 기계 안에는 기계 작업물을 보인다
+  tendPart(c, P) {
+    const r = c.robots[0], car = this.carriers.find((k) => k.at === c.id && k.state === 'work' && k.pm), wp = (c.mcWp ??= P.machine.root.getObjectByName('ProcessWorkpiece'));
+    const i = c.state === 'BUSY' && car && r ? r.tendI ?? 0 : 0, held = (i >= 2 && i <= 7) || (i >= 13 && i <= 18), inMc = i >= 8 && i <= 12;
+    // 대상물 모델에서 소재만 (지그 판·레일·클램프는 AMR에 남는다)
+    const FIX = /^(Jig_|Clamp_)/, holder = (pm) => { let h = null; pm.traverse((o) => { if (!h && o.children.some((ch) => FIX.test(ch.name))) h = o; }); return h; };   // 지그 부품이 달린 노드 (모델마다 깊이가 다름)
+    const parts = (pm) => { const h = holder(pm); return h ? h.children.filter((o) => !FIX.test(o.name)) : [pm]; };
+    if (c.tendPm && c.tendPm !== car?.pm) { c.tendPm.visible = true; c.tendJig?.removeFromParent(); c.tendJig = null; c.tendPm = null; }   // AMR가 떠났으면(빠른 배속에서 한 프레임에 끝나도) 대상물을 다시 보인다
+    if (r && car?.pm && r.tendHeldKey !== car.item?.id) {   // 대상물마다 그리퍼가 든 소재 복제본 — 운반체 그룹에 두고 매 프레임 손끝 아래에 수평으로 매단다 (머신텐딩은 툴 축이 수직이 아니라 손목에 붙이면 기울어 손목과 겹친다)
+      r.tendHeld?.removeFromParent();
+      const cl = car.pm.clone(true), src = parts(car.pm);   // 그리퍼가 든 복제본은 지그를 뺀 소재만
+      cl.traverse((o) => { if (FIX.test(o.name)) o.visible = false; });
+      cl.visible = false; car.pm.parent.add(cl);
+      const bb = new THREE.Box3(); for (const o of src) bb.expandByObject(o);   // 소재 윗면 (운반체 그룹 기준)
+      const inv = car.pm.parent.matrixWorld.clone().invert(); bb.applyMatrix4(inv);
+      r.tendHeld = cl; r.tendHeldKey = car.item?.id; r.tendTop = bb.isEmpty() ? 0.1 : bb.max.y - car.pm.position.y;
+    }
+    if (r?.tendHeld && held && car) {   // 손가락이 윗면 3cm를 잡는다
+      const tip = car.pm.parent.worldToLocal(r.tip.getWorldPosition(new THREE.Vector3()));
+      r.tendHeld.position.set(tip.x, tip.y + 0.03 - r.tendTop, tip.z);
+    }
+    if (car?.pm) {   // 소재를 든·기계에 넣은 동안은 대상물을 숨기고 같은 자리에 지그(판·레일·클램프)만 남긴 복제본을 둔다 — 대상물 모델의 공정 표시는 매 프레임 다시 켜지므로 그룹째 숨긴다
+      if (!c.tendJig || c.tendJig.userData.of !== car.pm) {
+        c.tendJig?.removeFromParent(); const j = car.pm.clone(true); j.userData.of = car.pm;
+        const h = holder(j); if (h) for (const o of h.children) o.visible = FIX.test(o.name); else j.visible = false;
+        car.pm.parent.add(j); c.tendJig = j;
+      }
+      car.pm.visible = !(held || inMc); c.tendJig.visible = held || inMc; c.tendJig.position.copy(car.pm.position); c.tendJig.quaternion.copy(car.pm.quaternion); c.tendPm = car.pm;
+    }
+    if (r?.tendHeld) r.tendHeld.visible = held && !!car;
+    if (wp) wp.visible = inMc;
+  }
   // 헤밍 프레스: 넣고 뺄 때 램을 0.5m 더 열고, 패널이 베드에 있을 때(0.48 ~ 0.62) 다이 아래면이 패널 윗면까지 내려와 누른 뒤 올라간다
   hemPress(c, busy, p, dts) {
     const M = c.parts.machine, ram = M.nodes.Ram; if (!ram) return;
@@ -1191,16 +1233,17 @@ class ExtraZone {
       if (W && r.arm?.native && !r.machineTargets && !r.body) {
         const seed = Math.abs(Number(String(c.item?.id ?? '').replace(/\D/g, '')) || 0);
         for (const o of c.robots) o.slot ??= { x: o.root.position.x, z: o.root.position.z };
-        const n = 2 + (seed * 7 + i * 2) % 3, u = wcar ? (p - W.from) / (W.to - W.from) : 0;
+        const n = W.kind === 'trace' || W.kind === 'scan' ? 8 : 2 + (seed * 7 + i * 2) % 3, u = wcar ? (p - W.from) / (W.to - W.from) : 0;   // 따라 긋기·스캔은 경유점을 촘촘히 (관절 보간으로 점 사이에서 툴 끝이 처지지 않게)
         // 마주 보는 로봇(통로 반대편에 같은 x 대)이 있으면 반 점씩 엇갈려 — 한쪽이 점에 내려가 있을 때 다른 쪽은 위로 옮겨 간다
         const facing = c.robots.some((o) => o !== r && o.slot && Math.sign(o.slot.z) === -Math.sign(r.slot.z) && Math.abs(o.slot.x - r.slot.x) < 0.5), d = facing ? 0.5 / 4 : 0;
         let uu = !facing ? u : r.slot.z < 0 ? u / (1 - d) : (u - d) / (1 - d);
         // 용접: 두 로봇이 같은 짧은 끝(후드 — 긴 가장자리 밑은 지그라 아래 전극이 못 들어감)을 용접하면 앞 절반 · 뒤 절반을 나눠 차례로 — 동시에 끝 가운데로 오면 아래팔(J4)끼리 닿는다
         if (c.def.type === 'spot' && facing && r.pwEnd && r.pwKey === `${c.item?.id}:${i}`) uu = r.slot.z < 0 ? u * 2 : (u - 0.5) * 2;
         const pick = r.held ? PICK_AT[c.def.type]?.(r) : null;   // 부품함 (키팅 빈 · 힌지 트레이)
-        pointWork(r, { key: `${c.item?.id}:${i}`, box: () => wcar && contactBox(wcar.pm, r.root.parent), obj: wcar?.pm, n, kind: W.kind, u: uu, robots: c.robots, align: c.def.type === 'spot', pick, spin: c.def.type === 'mount',
+        pointWork(r, { key: `${c.item?.id}:${i}`, box: () => wcar && contactBox(wcar.pm, r.root.parent), obj: wcar?.pm, n, kind: W.kind, u: uu, robots: c.robots, align: c.def.type === 'spot', pick, spin: c.def.type === 'mount', vertical: ['matid', 'deburr', 'cmm'].includes(c.def.type),
           support: c.def.type === 'spot' ? () => wcar && supportBox(wcar.g, r.root.parent, wcar.pm, (contactBox(wcar.pm, r.root.parent)?.min[1] ?? BELT_Y) - 0.15) : null });   // 용접: 판 밑 지그 — 아래 전극이 들어갈 가장자리 고르기
-        if (r.tool && wcar?.pm) this.toolMarks(c, r, wcar.pm, rdt);
+        if (r.tool && wcar?.pm) this.toolMarks(c, r, wcar.pm, rdt);   // 용접 불꽃·자국 · 실러 비드 · 스캔 빛 · 디버링 칩은 툴 끝이 대상물에 닿아(스캔은 위를 지나) 있는 동안 그 자리에
+        else if (r.tool) { r.tool.userData.scanOn?.(false); if (r.fx) stepSparks(r.fx, false, { x: 0, y: 0, z: 0 }, rdt); }   // 대상물이 없으면 스캔 빛·칩·물안개 끔
         if (r.held) r.held.visible = !!r.pwHeld && !!wcar;   // 용접 불꽃·자국 · 실러 비드는 툴 끝이 대상물에 닿아 있는 동안 그 자리에
         return;
       }
@@ -1209,6 +1252,7 @@ class ExtraZone {
       if (r.slot && r.contactKey) { r.root.position.x = r.slot.x; r.root.position.z = r.slot.z; r.body?.pose(); }
       r.anim(busy, t + r.phase, p);
     });
+    if ((c.def.type === 'mill5' || c.def.type === 'turn') && P.machine) this.tendPart(c, P);   // 머신텐딩 소재: AMR 지그 → 그리퍼 → 기계 → 그리퍼 → AMR 지그
     const ty = c.def.type, it = c.item, legacy = this.mode === 'traditional';
     if (P.gateSign) {
       const entering = busy && p < 0.18;

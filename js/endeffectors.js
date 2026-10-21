@@ -82,6 +82,42 @@ export function attachNutrunner(arm) {
   box(0.03, 0.04, 0.02, M.blue, 0, 0.06, 0.105, g);
   return g;
 }
+// 3D 스캐너 (소재 식별·3D 측정): 툴 축을 보는 스테레오 카메라 2대 + 가운데 청색 패턴 프로젝터 · scanOn(on)이면 툴 축 방향으로 부채꼴 빛 (끝 y 0.29 — TCP 0.16 위에서 스캔하면 대상물 윗면 바로 위)
+export function attachScanner(arm) {
+  let fan = null;
+  const g = mount(arm, (g) => {
+    box(0.1, 0.04, 0.1, M.arm, 0, 0.02, 0, g);
+    box(0.32, 0.06, 0.08, M.body, 0, 0.07, 0, g);                                   // 스캐너 몸체 (가로 막대)
+    for (const x of [-0.13, 0.13]) cyl(0.022, 0.022, 0.02, M.nozzle, x, 0.105, 0, g); // 카메라 렌즈
+    cyl(0.018, 0.018, 0.02, std(0x2b6cff, { emissive: 0x2b6cff, emissiveIntensity: 1.5 }), 0, 0.105, 0, g);   // 프로젝터
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0.11, 0, -0.1, 0.29, 0, 0.1, 0.29, 0], 3));
+    fan = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x4aa8ff, transparent: true, opacity: 0.35, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })); fan.visible = false; g.add(fan);
+  });
+  if (g) g.userData.scanOn = (on) => { fan.visible = on; };
+  return g;
+}
+// 디버링 스핀들: 모터 + 툴 축 방향 버(bur) — 버 끝이 TCP · spin(dt)로 버가 돈다
+export function attachDeburrSpindle(arm) {
+  let bit = null;
+  const g = mount(arm, (g) => {
+    box(0.1, 0.04, 0.1, M.arm, 0, 0.02, 0, g);
+    cyl(0.04, 0.04, 0.1, M.body, 0, 0.09, 0, g);                                     // 고속 스핀들 모터
+    cyl(0.012, 0.012, 0.02, M.arm, 0, 0.145, 0.0, g).position.y = 0.13;               // 콜릿
+    bit = new THREE.Group(); bit.position.y = 0.14; g.add(bit);
+    cyl(0.004, 0.004, 0.01, M.nozzle, 0, 0.0, 0, bit); cyl(0.007, 0.004, 0.012, std(0xd0b060, { metalness: 0.9, roughness: 0.25 }), 0, 0.006, 0, bit);   // 버 (끝 = TCP)
+  });
+  if (g) g.userData.spin = (dt) => { bit.rotation.y += dt * 60; };
+  return g;
+}
+// 에어 블로 노즐 (측정 전 표면 청소): 툴 축 방향 가는 노즐 · 끝이 TCP
+export function attachAirNozzle(arm) {
+  return mount(arm, (g) => {
+    box(0.1, 0.04, 0.1, M.arm, 0, 0.02, 0, g);
+    box(0.06, 0.06, 0.06, M.blue, 0, 0.07, 0, g);                                    // 에어 밸브
+    cyl(0.006, 0.01, 0.05, M.nozzle, 0, 0.125, 0, g);                                // 노즐 (끝 = TCP)
+  });
+}
+
 // 디스펜서 ↔ 실러 건 호스: 점 목록(부모 로컬)을 지나는 튜브 — 점이 조금씩 바뀌어도 같은 메시를 다시 쓴다
 export function makeHose(parent, radius = 0.018) {
   const mesh = new THREE.Mesh(new THREE.BufferGeometry(), M.hose); mesh.castShadow = true; mesh.frustumCulled = false; mesh.userData.flexible = true; parent.add(mesh);   // 휘는 호스 — 간섭 점검(tools/check-collisions)에서 뺀다

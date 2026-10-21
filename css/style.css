@@ -108,6 +108,13 @@ body[data-mode="dark"] #modeSeg button.on { background: #6d4aff; }
 
 /* 에이전트 */
 .agent-h { display: flex; gap: 10px; align-items: center; }
+/* FACOS 머리: 눌러 존 요약 칩 · 존 에이전트 설정을 접고 펼침 (main.js) */
+#facosHead { cursor: pointer; border-radius: 8px; user-select: none; }
+#facosHead:hover { background: rgba(255,255,255,0.04); }
+#facosHead:focus-visible { outline: 2px solid #4aa8ff; outline-offset: 2px; }
+#facosHead .fold { font-style: normal; font-size: 0.8em; opacity: 0.7; display: inline-block; transition: transform 0.15s; }
+#agentPanel.facos-folded #facosHead .fold { transform: rotate(-90deg); }
+#agentPanel.facos-folded #facosSum, #agentPanel.facos-folded #zoneAgentBox { display: none; }
 .agent-avatar { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-weight: 800; background: linear-gradient(135deg, #1f6feb, #37e8ff); box-shadow: 0 0 18px rgba(55, 160, 255, 0.45); }
 body[data-mode="dark"] .agent-avatar { background: linear-gradient(135deg, #6d4aff, #37e8ff); box-shadow: 0 0 22px rgba(109, 74, 255, 0.6); }
 body[data-mode="traditional"] .agent-avatar { background: linear-gradient(135deg, #8a5a2b, #c27c2c); box-shadow: none; }
