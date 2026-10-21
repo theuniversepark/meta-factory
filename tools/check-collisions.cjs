@@ -1,7 +1,7 @@
 // 간섭·충돌 점검 — 앱을 띄워 세 단계(레거시·자동화·피지컬AI)를 차례로 돌리며, 화면의 메시를 방향 상자(OBB)로 보고 겹침을 잰다.
 //  · 로봇 팔 ↔ 설비·시설 (가공기 문·베이스·펜스·선반 …)   · 이동체(AMR·AGV·지게차·사람) ↔ 설비·시설 (게이트 기둥·갠트리 기둥 …)
 //  · 이동체 ↔ 이동체 · 로봇 ↔ 로봇 · 로봇 관절이 바닥 아래로
-// 손목·툴(J5·J6·그리퍼)이 집는 대상(부품·지그·작업물)에 닿는 것은 작업 접촉이라 뺀다. 결과: outputs/collisions/report.json
+// 손목·툴(J5·J6·그리퍼)이 집는 대상(부품·지그·작업물)에 닿는 것은 작업 접촉이라 뺀다. 휘는 호스·케이블(userData.flexible)도 뺀다 (튜브 전체가 큰 상자로 잡혀 늘 겹친다). 결과: outputs/collisions/report.json
 // 실행: npm run check:collisions  (단계당 초: COLLIDE_SECS, 기본 90 · 재생 배속 3×)
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs'), path = require('node:path');
@@ -40,7 +40,7 @@ const CYL=new WeakMap();const cylOf=(m)=>{if(CYL.has(m.geometry))return CYL.get(
  CYL.set(m.geometry,res);return res;};
 const inCyl=(cyl,owner,other)=>{const inv=owner.matrixWorld.clone().invert(),P=other.geometry.attributes.position,st=Math.max(1,Math.floor(P.count/400)),v=new THREE.Vector3();for(let i=0;i<P.count;i+=st){v.fromBufferAttribute(P,i).applyMatrix4(other.matrixWorld).applyMatrix4(inv);const a=v.toArray();if(Math.hypot(a[cyl.u]-cyl.c[cyl.u],a[cyl.w]-cyl.c[cyl.w])<cyl.r&&Math.abs(a[cyl.ax]-cyl.c[cyl.ax])<cyl.hh)return true;}return false;};
 const real=(a,b)=>{const ca=cylOf(a),cb=cylOf(b);if(cb&&!inCyl(cb,b,a))return false;if(ca&&!inCyl(ca,a,b))return false;return true;};
-const solid=(m)=>{if(!m.isMesh||m.isInstancedMesh)return false;const mt=Array.isArray(m.material)?m.material[0]:m.material;if(mt&&(mt.transparent&&mt.opacity<0.6||mt.blending===THREE.AdditiveBlending||mt.depthWrite===false))return false;return visible(m);};
+const solid=(m)=>{if(!m.isMesh||m.isInstancedMesh||m.userData.flexible)return false;const mt=Array.isArray(m.material)?m.material[0]:m.material;if(mt&&(mt.transparent&&mt.opacity<0.6||mt.blending===THREE.AdditiveBlending||mt.depthWrite===false))return false;return visible(m);};
 const collect=()=>{v.scene.updateMatrixWorld(true);const o=[];v.scene.traverse(m=>{if(!solid(m))return;const B=obb(m);if(!B||B.max[1]<0.06)return;const sz=[0,1,2].map(i=>B.max[i]-B.min[i]);if(Math.max(...sz)>30)return;
  const ow=ownerOf(m);if(!ow&&m.parent&&/AMR|Forklift|AGV/.test(nameOf(m)))return;o.push({m,ow:ow??{cls:'fac',label:'시설'},B});});return o;};
 const grid=(arr)=>{const G=new Map();for(const o of arr)for(let x=Math.floor(o.B.min[0]);x<=Math.floor(o.B.max[0]);x++)for(let z=Math.floor(o.B.min[2]);z<=Math.floor(o.B.max[2]);z++){const k=x+','+z;(G.get(k)??G.set(k,[]).get(k)).push(o);}return G;};

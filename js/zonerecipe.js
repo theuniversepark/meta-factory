@@ -2,7 +2,7 @@
 // 셀 배치·유형·흐름(routes)은 바닥에 고정 — 편집하는 것: 셀 이름 · 하는 일 · 기준 사이클 · 로봇 종류·대수 (셀 종류별 제약)
 // 로봇 대수 효과: 기본 대수 대비 병렬 처리 이득(line.js PARALLEL_GAIN)만큼 사이클이 줄거나 늘어난다 — def.cycleK (기본 구성 = 1, 기존 시뮬레이션 그대로)
 import { EXTRA_ZONES, INSP_CELLS } from './zonedefs.js';
-import { PARALLEL_GAIN } from './line.js';
+import { PARALLEL_GAIN, ROBOT_KINDS } from './line.js';
 
 export const RECIPE_ZONES = ['flex', 'adapt', 'insp'];
 export const ZR_KINDS = { none: '로봇 없음', cobot: '협동로봇', articulated: '6축 산업용 로봇' };
@@ -30,7 +30,7 @@ export function recipeOf(key) {
   const Z = zoneOf(key); if (!Z) return null;
   const cells = Object.entries(Z.cells).map(([id, c]) => {
     const L = limits(key, c), R = key === 'insp' ? ['articulated', c.robots ?? 0] : c.robot ?? ['none', 0];
-    return { id, no: c.no ?? id, type: c.type, name: c.label, task: c.use, product: c.product ?? 'shared', cycle: c.cycle, robot: { kind: key === 'insp' ? 'articulated' : R[0], count: R[1] }, alt: R[2] ? { kind: R[2], count: R[3], label: ALT_LABEL[R[2]] ?? R[2] } : null, base: c.baseCount ?? R[1], lim: L };
+    return { id, no: c.no ?? id, type: c.type, name: c.label, task: c.use, product: c.product ?? 'shared', cycle: c.cycle, robot: { kind: key === 'insp' ? 'articulated' : R[0], count: R[1] }, alt: R[2] ? { kind: R[2], count: R[3], label: ALT_LABEL[R[2]] ?? R[2] } : null, base: c.baseCount ?? R[1], lim: L, par: !!Z.parallel };
   });
   return { zone: key, name: Z.name, cells, routes: Z.routes, mix: Z.mix ?? null };
 }
@@ -70,7 +70,13 @@ export function diffRecipe(a, b) {
 }
 
 // 실효 사이클(셀 1개) · 셀 부하(혼류 비율 × 경로) · 병목 · 이론 UPH
-export const recipeEff = (c, mode = 'smart') => c.cycle * (MODE_MUL[mode] ?? 1) * (c.robot.count && c.base ? gain(c.base) / gain(c.robot.count) : 1);
+export const recipeEff = (c, mode = 'smart') => {
+  if (c.par) {   // 유연생산: 레시피 사이클은 로봇 1대 기준 — × 로봇 종류 배율 ÷ 대수 병렬 이득 (zones.js buildCrew와 같은 식)
+    const R = mode === 'dark' && c.alt ? c.alt : c.robot, kf = mode === 'traditional' || !R.count ? 1 : ROBOT_KINDS[R.kind]?.factor ?? 1;
+    return (c.cycle * (MODE_MUL[mode] ?? 1) * kf) / gain(R.count);
+  }
+  return c.cycle * (MODE_MUL[mode] ?? 1) * (c.robot.count && c.base ? gain(c.base) / gain(c.robot.count) : 1);
+};
 export function recipeMetrics(r, mode = 'smart', mixW = null) {
   const w = mixW ?? r.mix ?? Object.fromEntries(Object.keys(r.routes).map((p) => [p, 1])), tot = Object.values(w).reduce((a, x) => a + x, 0) || 1;
   const share = (id) => Object.entries(r.routes).reduce((a, [p, route]) => a + (route.includes(id) ? (w[p] ?? 0) / tot : 0), 0);   // 그 셀을 지나는 제품 비율 (정밀검사는 시료 경로 하나 = 1)

@@ -204,10 +204,19 @@ const ARM_JOINTS = [
   { name: 'J6 툴 플랜지', unit: 'deg', min: -360 * DEG, max: 360 * DEG },
 ];
 
+// 불꽃·입자 점 모양: 가운데가 밝고 가장자리로 흐려지는 원 (점 기본 모양은 네모)
+let SPARK_TEX = null;
+function sparkTex() {
+  if (SPARK_TEX || typeof document === 'undefined') return SPARK_TEX;
+  const c = document.createElement('canvas'); c.width = c.height = 32;
+  const x = c.getContext('2d'), g = x.createRadialGradient(16, 16, 0, 16, 16, 16);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.35, 'rgba(255,255,255,0.85)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 32, 32); SPARK_TEX = new THREE.CanvasTexture(c); return SPARK_TEX;
+}
 function makeSparks(color, n = 40, size = 0.07) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3));
-  const mat = new THREE.PointsMaterial({ color, size, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false });
+  const mat = new THREE.PointsMaterial({ color, size, map: sparkTex(), transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false });
   const p = new THREE.Points(geo, mat);
   p.userData.vel = new Float32Array(n * 3); p.userData.life = new Float32Array(n);
   p.frustumCulled = false;
@@ -836,13 +845,23 @@ function workHome(r) {
   const t = r.root.worldToLocal(r.tip.getWorldPosition(new THREE.Vector3()));
   return Math.hypot(t.x, t.z) > 0.6 && t.y < 0.6 ? A.ik(0, 0.75, 0.35, true) : h;
 }
+// 툴 축(J6) 둘레로 손목을 돌려 플랜지 로컬 축 local이 수평 방향 want를 향하게 한 관절값 — J6 회전 방향(거울 배치 셀은 반대)은 로봇마다 처음 한 번 시험 회전으로 잰다
+function alignTool(r, q, local, want) {
+  const A = r.arm, fl = A.flange ?? r.tip.parent, out = q.slice(), V = THREE.Vector3;
+  const read = () => { A.pose(...out); fl.updateWorldMatrix(true, false); const ax = new V(0, 1, 0).transformDirection(fl.matrixWorld); return [ax, local.clone().transformDirection(fl.matrixWorld)]; };
+  const ang = (ax, cur, w) => Math.atan2(ax.dot(cur.clone().cross(w)), cur.dot(w));
+  let [ax, cur] = read(); const w = want.clone().addScaledVector(ax, -want.dot(ax)); if (w.lengthSq() < 1e-6) return out; w.normalize();
+  if (r.j6Sign == null) { const a0 = ang(ax, cur, w); out[5] += 0.5; const [, c1] = read(); const a1 = ang(ax, c1, w); out[5] -= 0.5; r.j6Sign = Math.sign(a0 - a1) || 1; }   // J6 +0.5 rad → 남은 각이 줄면 같은 방향
+  out[5] += r.j6Sign * ang(ax, cur, w);
+  return out;
+}
 // 6축·협동로봇 접촉 작업 (확장 Zone 셀): 대상물 윗면의 자기 점 n곳을 차례로 — 툴을 세워 위에서 접근 → 손끝 접촉 → 작업 → 들어 올림 — 처리하고 대기 자세로 돌아간다
 // kind: touch(접촉·정렬·측정) · press(용접 팁·헤밍·압입 1cm 누름) · screw(체결 — 손목 끝 회전) · trace(실링 — 점과 점 사이를 붙은 채 따라 긋기)
 // o: { key(대상물·로봇마다 다름), box(), n, kind, u(작업 구간 진행 0 ~ 1 — 밖이면 대기 자세), robots(셀 로봇 전부) }
 function pointWork(r, o) {
   const A = r.arm; if (!A?.native || !r.slot) return false;
-  const home = r.pwHome ??= workHome(r), P = r.root.parent;
-  const rest = () => { r.pwCur = r.pwCur ? r.pwCur.map((v, k) => v + (home[k] - v) * 0.15) : home.slice(); A.pose(...r.pwCur); return true; };
+  const P = r.root.parent, home = r.pwHome ??= r.pwHomeAt ? (() => { const v = r.root.worldToLocal(P.localToWorld(new THREE.Vector3(r.pwHomeAt.x, r.pwHomeAt.y, r.pwHomeAt.z))); return A.ik(v.x, v.y, v.z, true); })() : workHome(r);   // pwHomeAt: 셀이 정한 대기 위치 (셀 로컬)
+  const rest = () => { r.pwContact = false; r.pwHeld = false; r.pwCur = r.pwCur ? r.pwCur.map((v, k) => v + (home[k] - v) * 0.15) : home.slice(); A.pose(...r.pwCur); return true; };
   if (!(o.u > 0 && o.u < 1)) return rest();
   if (r.pwKey !== o.key) {
     const box = o.box(); if (!box) return rest();
@@ -857,10 +876,13 @@ function pointWork(r, o) {
     r.pwPlan = cm.side
       ? xs.map((_, k) => { const z = nz + f * (0.12 + 0.25 * (o.n === 1 ? 0.5 : k / (o.n - 1))), y = y1 - 0.08; return [ikS(fx + sx * 0.1, y, z), ikS(fx + sx * 0.012, y, z), ikS(fx + sx * (o.kind === 'press' ? 0.002 : 0.008), y, z), ikS(fx + sx * 0.3, y + 0.15, z)]; })
       : xs.map((x) => { const y = o.obj ? surfaceY(o.obj, P, null, x, zP, y1) : y1; return [ik(x, y + 0.08, zP), ik(x, y + 0.005, zP), ik(x, y - (o.kind === 'press' ? 0.01 : 0.002), zP), ik(x, y + 0.3, zP)]; });
+    if (o.pick) { const ikD = (x, y, z) => { const v = loc(x, y, z); return A.ik(v.x, v.y, v.z, true); }; r.pwPick = [ikD(o.pick.x, o.pick.y + 0.25, o.pick.z), ikD(o.pick.x, o.pick.y, o.pick.z)]; }   // 부품함: 위 · 집는 높이
+    else r.pwPick = null;
+    r.pwOut = new THREE.Vector3(0, 0, -f);   // 점에서 판 바깥쪽(로봇 쪽 가장자리 밖) — C형 용접 건 등을 이쪽으로 (o.align)
     r.pwKey = o.key;
   }
   const pl = r.pwPlan, n = pl.length, lerp = (a, b, k) => a.map((v, j) => v + (b[j] - v) * k), ease = (k) => { k = Math.min(1, Math.max(0, k)); return k * k * (3 - 2 * k); };
-  const u = o.u; let q, spin = 0;
+  const u = o.u; let q, spin = 0, contact = false, idx = -1; r.pwHeld = false;
   // 대기 자세 ↔ 첫·마지막 점, 점 ↔ 점은 대상물 0.3m 위 경유점(high, pl[k][3])으로 — 관절 보간으로 곧장 가면 아래팔이 대상물 위로 처진다
   if (u < 0.12) q = u < 0.08 ? lerp(home, pl[0][3], ease(u / 0.08)) : lerp(pl[0][3], pl[0][0], ease((u - 0.08) / 0.04));
   else if (u > 0.9) q = u < 0.94 ? lerp(pl[n - 1][0], pl[n - 1][3], ease((u - 0.9) / 0.04)) : lerp(pl[n - 1][3], home, ease((u - 0.94) / 0.06));
@@ -868,14 +890,25 @@ function pointWork(r, o) {
     const w = (u - 0.12) / 0.78;
     if (w < 0.12) q = lerp(pl[0][0], pl[0][1], ease(w / 0.12));
     else if (w > 0.88) q = lerp(pl[n - 1][1], pl[n - 1][0], ease((w - 0.88) / 0.12));
-    else { const s = (w - 0.12) / 0.76 * (n - 1), k = Math.min(n - 2, Math.floor(s)); q = n > 1 ? lerp(pl[k][1], pl[k + 1][1], s - k) : pl[0][1]; }
+    else { const s = (w - 0.12) / 0.76 * (n - 1), k = Math.min(n - 2, Math.floor(s)); q = n > 1 ? lerp(pl[k][1], pl[k + 1][1], s - k) : pl[0][1]; contact = true; }
+  } else if (r.pwPick) {   // 부품 옮겨 달기: 점마다 부품함에서 1개 집어 → 점 위 → 손끝 접촉 → 내려놓음(o.spin: 그 자리에서 너트러너로 체결) → 들어 올림 — 한 번에 1개
+    const s = (u - 0.12) / 0.78 * n, k = Math.min(n - 1, Math.floor(s)), f = s - k, [above, touch] = pl[k], high = pl[k][3], prevHigh = k ? pl[k - 1][3] : high, [pUp, pDn] = r.pwPick;
+    const sg = (a, b) => ease((f - a) / (b - a));
+    q = f < 0.14 ? lerp(prevHigh, pUp, sg(0, 0.14)) : f < 0.22 ? lerp(pUp, pDn, sg(0.14, 0.22)) : f < 0.26 ? pDn : f < 0.34 ? lerp(pDn, pUp, sg(0.26, 0.34)) : f < 0.46 ? lerp(pUp, high, sg(0.34, 0.46))
+      : f < 0.52 ? lerp(high, above, sg(0.46, 0.52)) : f < 0.6 ? lerp(above, touch, sg(0.52, 0.6)) : f < 0.84 ? touch : lerp(touch, high, sg(0.84, 1));
+    if (o.spin && f >= 0.62 && f < 0.8) spin = (f - 0.62) / 0.18 * Math.PI * 6;
+    contact = f >= 0.6 && f < 0.84; idx = k; r.pwHeld = f >= 0.24 && f < 0.8;
   } else {
     const s = (u - 0.12) / 0.78 * n, k = Math.min(n - 1, Math.floor(s)), f = s - k, [above, touch, work] = pl[k];
     const high = pl[k][3], prevHigh = k ? pl[k - 1][3] : high;
     q = !k && f < 0.3 ? above : f < 0.12 ? lerp(pl[k - 1][0], prevHigh, ease(f / 0.12)) : f < 0.22 ? lerp(prevHigh, high, ease((f - 0.12) / 0.1)) : f < 0.3 ? lerp(high, above, ease((f - 0.22) / 0.08)) : f < 0.4 ? lerp(above, touch, ease((f - 0.3) / 0.1)) : f < 0.8 ? lerp(touch, work, ease((f - 0.4) / 0.1)) : lerp(work, above, ease((f - 0.8) / 0.2));
     if (o.kind === 'screw' && f >= 0.4 && f < 0.8) spin = (f - 0.4) / 0.4 * Math.PI * 8;
+    contact = f >= 0.42 && f < 0.8; idx = k;   // 툴 끝이 대상물에 닿아 작업 중 (용접 통전 · 압입) — zones.js가 불꽃·용접 자국을 이 구간에만
   }
-  r.pwCur = q.slice(); const out = q.slice(); out[5] += spin; A.pose(...out); return true;
+  r.pwCur = q.slice(); const out = q.slice(); out[5] += spin; A.pose(...out);
+  r.pwContact = contact; r.pwIdx = idx;
+  if (o.align && r.pwOut) A.pose(...alignTool(r, out, new THREE.Vector3(-1, 0, 0), r.pwOut.clone().transformDirection(P.matrixWorld)));   // C형 용접 건: 건 등(플랜지 −x)을 판 바깥쪽으로 — 아래 전극 턱이 판 가장자리 밑으로
+  return true;
 }
 // 셀 대상물의 부모 로컬 상자 (보이는 메시만 · AMR 차체 제외)
 function contactBox(obj, parent, skip) {
@@ -3619,6 +3652,6 @@ function lerpAngle(a, b, k) {
 // 확장 Zone(js/zones.js — 유연생산Zone · 적응가공Zone)이 정밀조립Zone과 같은 재질·로봇·설비 모델을 쓰도록 내보낸다
 export const KIT = {
   std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, ZONE_COLOR,
-  makeRobot, ammrContact, contactBox, pointWork, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK, makeArm, ARM_JOINTS,
+  makeRobot, ammrContact, contactBox, surfaceY, pointWork, alignTool, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK, makeArm, ARM_JOINTS,
   buildWeld, buildSort, buildGate, buildVision, fillBins,
 };

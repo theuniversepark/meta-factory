@@ -113,6 +113,7 @@ export const EXTRA_ZONES = [
     products: { hood: { label: '후드', full: "LT2 후드 Ass'y" }, door: { label: '도어', full: '상용트럭 도어 Ass\'y' } },
     mix: { hood: 1, door: 1 },
     // 혼류 비율 (flexible-manufacturing ZONE_MIXES) — 왼쪽 패널 Zone 카드에서 고른다
+    parallel: true,   // 셀 사이클은 로봇 1대 기준 레시피 — 실효 사이클 = 레시피 × 로봇 종류 배율 ÷ (1 + 0.7 × (대수 − 1)) (flexible-manufacturing ZONE_DESIGN 4장 · line.js effCycle과 같은 식)
     mixes: { dt: { label: '후드만', w: { hood: 1, door: 0 } }, '2:1': { label: '2 : 1', w: { hood: 2, door: 1 } }, '1:1': { label: '1 : 1', w: { hood: 1, door: 1 } }, '1:2': { label: '1 : 2', w: { hood: 1, door: 2 } }, ea: { label: '도어만', w: { hood: 0, door: 1 } } },
     // 왼쪽 패널 셀 목록: 셀 id 또는 분기 [{ product, title, cells }] (flexible-manufacturing renderZoneCard와 같은 묶음)
     card: ['C01', 'C02', 'C03', 'C04', 'C05', [{ product: 'door', title: '도어만 · 확장 셀', cells: ['C10'] }], 'C06', [{ product: 'ng', title: 'NG 분기 · 재검 포함', cells: ['C07'] }]],
