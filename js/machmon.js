@@ -124,7 +124,7 @@ export class MachineMonitor {
     if (d !== M.decision || action) this.record(M, d, v, T, action);
     M.decision = d;
     // 서버 묶음 (5초마다 · 가공기별)
-    if ((M.lastQ ?? -9) <= sim.time - 5) { M.lastQ = sim.time; this.outbox.push({ topic: MON_TOPIC(M.id), kind: 'sample', asset: `ADP-${M.id}`, t: r2(sim.time, 1), decision: d, anomaly: M.anomaly, rul: M.rul, tool: T ? { id: T.id, wear: r2(T.wear, 3), parts: T.parts } : null, v }); if (this.outbox.length > 2000) this.outbox.splice(0, this.outbox.length - 2000); }
+    if ((M.lastQ ?? -9) <= sim.time - 5) { M.lastQ = sim.time; this.emit({ topic: MON_TOPIC(M.id), kind: 'sample', asset: `ADP-${M.id}`, t: r2(sim.time, 1), decision: d, anomaly: M.anomaly, rul: M.rul, tool: T ? { id: T.id, wear: r2(T.wear, 3), parts: T.parts } : null, v }); }
   }
   // 판단 기록(정비·교체 데이터) → 존 로그 · 상위 오케스트레이터 상태 보고 · 서버 묶음
   record(M, d, v, T, action) {
@@ -136,7 +136,7 @@ export class MachineMonitor {
       tool: T ? { id: T.id, wear: r2(T.wear, 3), parts: T.parts, life: T.life, VB_um: v.toolVB, chipping: v.toolChip, lengthDev_um: v.toolLength } : null,
       rul: M.rul, anomaly: M.anomaly, evidence: ev, reportedTo: 'factory' };
     M.records.unshift(rec); if (M.records.length > 40) M.records.pop();
-    this.outbox.push({ topic: `${MON_TOPIC(M.id)}/event`, kind: 'record', ...rec });
+    this.emit({ topic: `${MON_TOPIC(M.id)}/event`, kind: 'record', ...rec });
     if (d !== 'ok' && d !== 'changing' || action) {
       O.note(`${M.id} 예지보전 · ${DECISION[d]} — ${why}${action ? ` → ${action}` : ''}`);
       sim.fos.bus.send(O.ep, 'factory', 'status', { subject: { cell: `ADP-${M.id}`, tool: T?.id }, body: { kind: 'pdm', record: rec }, text: `${label} 예지보전 보고 — ${DECISION[d]} · ${why}` });
@@ -144,6 +144,8 @@ export class MachineMonitor {
       if (action || d === 'now' || d === 'spindle') sim.log(action ? 'plan' : 'warn', `적응가공 ${label} · ${DECISION[d]}`, { obs: why, dec: `엣지 AI 이상 점수 ${M.anomaly} · 잔여 ${M.rul.parts ?? '-'}개`, act: action ?? '상위 보고', zone: 'adapt' });
     }
   }
+  // 서버 묶음에 쌓고, 같은 메시지를 패킷 캡처(main.js onItem → pcap)에도 — 서버가 내장 MQTT로 발행하는 것과 같은 토픽·페이로드
+  emit(item) { this.outbox.push(item); if (this.outbox.length > 2000) this.outbox.splice(0, this.outbox.length - 2000); this.onItem?.(item); }
   take(n = 500) { return this.outbox.splice(0, n); }
   snapshot(id) {
     const M = this.m[id]; if (!M) return null; const T = this.tool(id);

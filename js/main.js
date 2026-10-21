@@ -227,6 +227,7 @@ function start(key) {
   hub.reset(sim, view, xzones);
   if (sim.sensors) { sim.sensors.setEpoch(hub.epochMs); sim.sensors.run = epRec.runId; sim.sensors.publish = !hub.noServer; }   // 센서망: 같은 기준 시계 · 서버가 있으면 공장 중앙 MQTT로 발행 → 센서 서버
   buildSensor3d();
+  if (sim.machmon) sim.machmon.onItem = machmonPcap;   // 가공기 감시 MQTT → 전체 캡처 · 그 가공기 개별 캡처
   if (sim.qcomm) { sim.qcomm.setEpoch(hub.epochMs); sim.qcomm.mirror = () => hub.pcap; sim.qcomm.live = !hub.noServer; }   // 품질 통신: 기준 시계 · 전체 캡처에 함께 기록 · 실제 RCA 서버(앱 서버)에도 전송
   camWall.setup(sim, view); for (const w of zoneWalls) w.setup(sim, view);
   cctvView.setup(sim, view); for (const b of cctvBoards) b.setup(sim);
@@ -736,6 +737,7 @@ function pcapHtml() {
     <span>패킷</span><b>${n(S.packets)}개 (→ 브로커 ${n(S.up)} · 브로커 → ${n(S.down)}) · ${kb(P.bytes)}</b>
     <span>MQTT</span><b>PUBLISH 발행 ${n(S.publishUp)} · 구독자 전달 ${n(S.publishDown)} · PUBACK ${n(S.puback)} · CONNECT ${n(S.connect)} · SUBSCRIBE ${n(S.subscribe)} · PING ${n(S.ping)}</b>
     <span>영상</span><b>${P.video === false ? '끔' : `프레임 ${n(S.video)}개`} — CCTV·로봇 카메라 JPEG를 OPC UA ua-data ByteString(base64)으로 1초마다 (<code>…/Video_&lt;카메라&gt;</code>)</b>
+    <span>가공기 감시</span><b>${n(S.machmon ?? 0)}건 — 적응가공 가공기 측정(5초)·예지보전 판단 (<code>metafactory/machmon/v1/adapt/&lt;셀&gt;</code> · <code>…/event</code>)</b>
     <span>호스트</span><b>FACOS 10.20.0.20 · 설비·셀 LAN 10.20.1.x ${H.lan} · 5G 이동 로봇 10.45.x.x ${H['5g']} · CCTV 10.20.2.x ${H.cam}</b></div>
     <div class="dh-save">
       ${P.on ? '<button data-pcap="stop"><b>⏹ 캡처 중지</b><small>지금까지 기록 유지</small></button>' : '<button data-pcap="start"><b>⏺ 캡처 시작</b><small>새로 기록 (이전 기록 지움)</small></button>'}
@@ -981,7 +983,7 @@ function renderPcapBox() {
   const state = !P ? '대기' : P.full ? '<span class="rec">용량 한도 — 자동 중지</span>' : P.on ? `<span class="rec">⏺ 캡처 중</span> ${P.duration.toFixed(0)}초` : `중지됨 · ${P.duration.toFixed(0)}초`;
   setHTML(box, `<div class="ph">📦 패킷 캡처 (이 자산만) · ${state}</div>
     <div>클라이언트 <b>${escH(t.key)}</b> · ${escH(ip)} ↔ 브로커 10.20.0.10:1883 · MQTT 3.1.1 (AAS → OPC UA PubSub JSON)</div>
-    ${S ? `<div>패킷 ${n(S.packets)} (→ 브로커 ${n(S.up)} · 브로커 → ${n(S.down)}) · 발행 PUBLISH ${n(S.publishUp)} · 받은 명령 ${n(S.publishDown)} · PUBACK ${n(S.puback)} · 영상 ${n(S.video)}프레임 · PING ${n(S.ping)} · ${kb(P.bytes)}</div>` : ''}
+    ${S ? `<div>패킷 ${n(S.packets)} (→ 브로커 ${n(S.up)} · 브로커 → ${n(S.down)}) · 발행 PUBLISH ${n(S.publishUp)} · 받은 명령 ${n(S.publishDown)} · PUBACK ${n(S.puback)} · 영상 ${n(S.video)}프레임${S.machmon ? ` · 가공기 감시 ${n(S.machmon)}건` : ''} · PING ${n(S.ping)} · ${kb(P.bytes)}</div>` : ''}
     <div class="prow">${P?.on ? '<button type="button" data-act="pcapStop">⏹ 캡처 중지</button>' : '<button type="button" data-act="pcapStart">⏺ 캡처 시작</button>'}
       <button type="button" data-act="pcapSave">💾 pcap 저장</button>
       <label class="chk"><input type="checkbox" id="pcapAssetVideo" ${(P?.on ? P.video !== false : assetPcapVideo) ? 'checked' : ''} ${P?.on ? 'disabled' : ''}/> 카메라 영상 포함</label></div>
@@ -1013,6 +1015,12 @@ function pcapAssetAction(act) {
 ui.mmFmt = 'aasx'; ui.mmServer = !hub.noServer;
 document.addEventListener('change', (e) => { if (e.target?.id === 'mmFmt') ui.mmFmt = e.target.value; });
 let mmBusy = false;
+// 가공기 감시 메시지를 pcap에 — 가공기 자산(ADP_HB_MILL 등)의 MQTT 연결로, 서버가 내장 MQTT로 내보내는 것과 같은 토픽·JSON
+function machmonPcap(item) {
+  const a = hub.assets.find((x) => x.id === String(item.asset).replace(/-/g, '_')), t = hub.assetTarget(a); if (!t) return;
+  const m = { key: t.key, kind: t.kind, ip: t.ip, topic: item.topic, payload: JSON.stringify(item), tMs: hub.epochMs + item.t * 1000, subs: t.subs };
+  for (const P of new Set([hub.pcap, hub.assetPcaps.get(t.key)])) if (P?.on && !P.full) { P.publish(m); P.stats.machmon = (P.stats.machmon ?? 0) + 1; }
+}
 async function machmonFlush(extra = []) {
   const mon = sim.machmon; if (!mon?.on || hub.noServer || mmBusy) return null;
   const items = [...extra, ...mon.take(1000)]; if (!items.length) return { stored: 0 };

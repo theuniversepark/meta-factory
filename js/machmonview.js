@@ -23,7 +23,7 @@ export function machmonHtml(mon, id, { fmt = 'aasx', ver = '3.1', note = '', ser
     <table class="mm-t"><thead><tr><th>센서</th><th>현재</th><th>경보</th></tr></thead><tbody>${MON_SENSORS.map(row).join('')}</tbody></table>
     <div class="mm-h">예지보전 판단 기록 (공장 오케스트레이터 보고 · 서버 전송)</div><ul class="mm-r">${recs}</ul>
     <div class="mm-h">데이터 전송</div>
-    <small>토픽 metafactory/machmon/v1/adapt/${esc(id)} · 서버 전송 ${sent.batches}묶음 · ${sent.records}건${sent.last ? ` · 마지막 ${esc(sent.last)}` : ''}${sent.err ? ` · <span style="color:#ff8a8a">${esc(sent.err)}</span>` : ''} · 대기 ${mon.outbox.length}건 · 보고 ${mon.stats.reports}건 · 예지 교환 ${mon.stats.preventive} · 주축 정비 요청 ${mon.stats.spindleReq}</small>
+    <small>토픽 metafactory/machmon/v1/adapt/${esc(id)} · 서버 전송 ${sent.batches}묶음 · ${sent.records}건${sent.last ? ` · 마지막 ${esc(sent.last)}` : ''}${sent.err ? ` · <span style="color:#ff8a8a">${esc(sent.err)}</span>` : ''} · 대기 ${mon.outbox.length}건 · 보고 ${mon.stats.reports}건 · 예지 교환 ${mon.stats.preventive} · 주축 정비 요청 ${mon.stats.spindleReq}<br>패킷 캡처(아래 「이 자산만」 · 데이터 연동 전체 캡처)가 켜져 있으면 같은 MQTT 메시지가 pcap에도 기록됩니다</small>
     <div class="btns"><button data-act="mmSend" ${server ? '' : 'disabled title="서버가 없는 화면(웹·공유 페이지)에서는 서버 전송을 할 수 없습니다"'}>📤 측정·판단 데이터 서버로 전송</button></div>
     <div class="rb-save">
       <div class="rb-h">💾 누적 데이터 저장 (AAS)</div>
