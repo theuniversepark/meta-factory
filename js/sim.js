@@ -12,6 +12,7 @@ import { Private5G } from './net5g.js';
 import { ProductTrace } from './trace.js';
 import { QualityComm } from './qcomm.js';
 import { SensorNet } from './sensors.js';
+import { MachineMonitor } from './machmon.js';
 import { CapaManager } from './capa.js';
 import { FactoryOS } from './factoryos.js';
 import { FacLedger } from './fac.js';
@@ -191,7 +192,7 @@ export const zoneRawPick = (key) => ({ x: -43.0, z: Math.min(xrackZ(`${key}:raw`
 // 휴머노이드 피킹 자리는 선반 면에서 멈춘다 — 휴머노이드는 선반을 보고 서서 손을 뻗어 토트를 집으므로 몸·다리가 컨베이어에 닿지 않는다
 const ML_FACE = WH_RACK.x + MINILOAD.half + 0.03;
 export const MINILOAD_OUTS = {
-  wh: [{ z: LOC.WH.z, end: LOC.WH.x - 0.6, pick: LOC.WH, keys: ['raw'], agv: true },
+  wh: [{ z: LOC.WH.z, end: LOC.WH.x - 0.8, pick: LOC.WH, keys: ['raw'], agv: true },
     ...[0, 1, 2].map((i) => ({ z: LOC.WH_PARTS.z - i * 1.4, end: ML_FACE, pick: { x: LOC.WH_PARTS.x, z: LOC.WH_PARTS.z - i * 1.4 }, keys: ['parts'] }))],   // 부품 피킹: 휴머노이드마다 1.4m 간격 (h.pick)
   x: [...['flex', 'adapt'].map((z) => ({ z: zoneRawPick(z).z, end: -43.55, pick: zoneRawPick(z), keys: [`${z}:raw`], agv: true })),
     { z: KIT_PICK.z, end: ML_FACE, pick: KIT_PICK, keys: ['flex:parts', 'adapt:parts'] }],
@@ -650,6 +651,7 @@ export class Simulation {
     if (!this.quiet || opts.sensors) new SensorNet(this);   // 환경·설비 상태 센서망 — 센서 → 셀 엣지 → 게이트웨이 → 존 서버 → 공장 중앙 (js/sensors.js · 헤드리스 시험·트윈은 opts.sensors일 때만)
     new QualityComm(this);   // 불량 판정 리포트 → 메인 서버 → RCA 서버 통신 · 품질 통신 pcap (js/qcomm.js)
     new FactoryOS(this);   // Factory OS 계층: 공장 오케스트레이터(FacOS) · 정밀조립 Manufacturing Agent · 셀 OCS · A2A 메시지 (js/factoryos.js)
+    new MachineMonitor(this);   // 적응가공 가공기 상태 감시 · 공구 상태 · 엣지 AI 예지보전 → 공장 오케스트레이터 보고 · 서버 전송 · AAS (js/machmon.js)
   }
 
   // 설비·로봇 고유 ID — 현황판·라벨·텔레메트리·데이터 연동에 같은 ID를 쓴다 (사람은 제외)
@@ -1125,6 +1127,7 @@ export class Simulation {
     this.trace?.update(dt);
     this.sensors?.tick(dt);
     this.fos?.update(dt);
+    this.machmon?.tick(dt);
     this.orch.update();
     // 자재 공급이 재개되면 공급 차질 인시던트를 닫는다
     const sup = this.orch.find('supply');

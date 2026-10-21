@@ -1,4 +1,5 @@
 // HTML 오버레이 UI — KPI, 추이 차트, 에이전트 로그, 설비 상세, 모드 비교
+import { machmonHtml } from './machmonview.js';
 import { Simulation, MODES, ST_LABEL, RAW_CAP, FG_CAP } from './sim.js';
 import { STATION_TYPES, ROBOT_KINDS } from './line.js';
 import { FactoryAgent } from './agent.js';
@@ -229,14 +230,14 @@ export class UI {
     }
   }
 
-  showDetail(st) { this.robotMode = false; $('detail').classList.remove('robot'); this.detailSt = st; $('detail').classList.remove('hidden'); this.renderDetail(); }
-  hideDetail() { this.detailSt = null; this.robotMode = false; $('detail').classList.add('hidden'); $('detail').classList.remove('robot'); }
+  showDetail(st) { this.robotMode = false; $('detail').classList.remove('robot', 'machine'); this.detailSt = st; $('detail').classList.remove('hidden'); this.renderDetail(); }
+  hideDetail() { this.detailSt = null; this.robotMode = false; $('detail').classList.add('hidden'); $('detail').classList.remove('robot', 'machine'); }
 
   // ── 로봇 텔레메트리 패널 (관절·센서 실시간) ─────────────────
   showRobot() {
     this.detailSt = null; this.robotMode = true;
     const el = $('detail');
-    el.classList.remove('hidden'); el.classList.add('robot');
+    el.classList.remove('hidden', 'machine'); el.classList.add('robot');
     el.innerHTML = `<h3><span id="rbTitle">로봇</span><button data-act="close">✕</button></h3>
       <div class="rb-status" id="rbStatus"></div>
       <div class="rb-cam" id="rbCamBox" hidden><div class="rb-camtabs" id="rbCamTabs"></div><canvas id="rbCam" width="480" height="270"></canvas><small class="rb-rec" id="rbRec"></small></div>
@@ -416,7 +417,10 @@ export class UI {
     const req = st.request ? `${st.request.kind === 'repair' ? '긴급수리' : st.request.kind === 'cal' ? '재보정' : '예지정비'}${st.request.tech ? ` · ${st.request.tech.id}` : ' · 배정 대기'}` : '없음';
     const item = cell?.item, prod = item ? `${Z.products[item.product]?.label ?? item.product} #${String(item.id).split('-').pop()}${item.rework ? ' (리워크)' : ''}` : '-';
     const uids = cell?.robotUids?.length ? cell.robotUids.join(' · ') : '-';
+    const mm = st.zone === 'adapt' && sim.machmon?.has(st.cellId) ? machmonHtml(sim.machmon, st.cellId, { fmt: this.mmFmt, ver: this.aasVer?.() ?? '3.1', note: this.mmNote?.id === st.cellId ? this.mmNote.text : '', server: this.mmServer !== false }) : '';
+    el.classList.toggle('machine', !!mm);   // 가공기는 로봇 창처럼 넓게 — 셀 정보 | 상태 감시·AAS 저장 2열 (저장 버튼까지 한 화면)
     el.innerHTML = `<h3>${esc(st.name)}<button data-act="close">✕</button></h3>
+      <div class="zc-split"><div class="zc-col">
       <div class="task">${esc(Z?.name ?? '')} · ${esc(rb)}<br>하는 일: ${esc(d.use ?? '')}</div>
       ${machineInfo(d.type)}
       <div class="bar"><i style="width:${st.health}%;background:${col}"></i></div>
@@ -441,6 +445,7 @@ export class UI {
       ${m.key === 'traditional' ? '<div class="note">※ 레거시 공장에는 센서가 없어 건강도·RUL은 현장에서 보이지 않는 시뮬레이션 내부값입니다.</div>' : ''}
       ${this.facLine(st)}
       <div class="btns"><button data-act="fault">⚡ 고장 주입</button><button data-act="pm">🔧 정비 지시</button></div>
+      </div>${mm ? `<div class="zc-col">${mm}</div>` : ''}</div>
       <div class="pcap-box" id="pcapBox"></div>`;
     this.onDetailRendered?.();
   }

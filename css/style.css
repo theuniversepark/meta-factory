@@ -1117,3 +1117,31 @@ em.up { color: var(--good); } em.dn { color: var(--bad); } em.mid { color: var(-
 details.zone-agent > summary { list-style: none; cursor: pointer; } details.zone-agent > summary::-webkit-details-marker { display: none; }
 .za-more { font-style: normal; color: var(--accent, #58c4ff); margin-left: 4px; } details.zone-agent[open] .za-more { opacity: 0.6; }
 details.zone-agent:not([open]) { padding-bottom: 7px; } details.zone-agent:not([open]) .za-h { margin-bottom: 0; }
+/* 적응가공 가공기 상태 감시 (js/machmonview.js) */
+#detail .mm { margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 8px; }
+#detail .mm h4 { margin: 0 0 6px; font-size: 13px; }
+#detail .mm-dec { border-left: 3px solid; padding: 4px 8px; margin-bottom: 6px; background: rgba(255,255,255,0.03); display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+#detail .mm-tool { font-size: 12px; margin-bottom: 6px; }
+#detail .mm-tool .bar { margin: 3px 0; }
+#detail .mm-t { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+#detail .mm-t td, #detail .mm-t th { padding: 2px 4px; border-bottom: 1px solid rgba(255,255,255,0.05); text-align: left; }
+#detail .mm-t th { color: #8fa3b8; font-weight: 600; }
+#detail .mm-h { margin: 8px 0 3px; color: #8fa3b8; font-size: 11.5px; }
+#detail .mm-r { margin: 0; padding-left: 16px; font-size: 11.5px; }
+#detail .mm-r li { margin: 2px 0; }
+#detail .mm .btns select { background: #142030; color: #dce6f0; border: 1px solid #2a3a4e; border-radius: 6px; padding: 3px 6px; }
+.rb-save-note { white-space: pre-line; }   /* 저장 결과 · 서버 전송 위치 두 줄 */
+/* 적응가공 가공기 창 — 로봇 창처럼 넓혀 셀 정보 | 상태 감시·AAS 저장을 2열로 (저장 버튼까지 한 화면) */
+.detail.machine { width: min(780px, calc(100vw - var(--lx) - var(--rx) - 24px)); }
+.detail.machine .zc-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 0 16px; align-items: start; }
+.detail.machine .zc-split > .zc-col:last-child > .mm { margin-top: 0; border-top: 0; padding-top: 0; }
+@media (max-width: 900px) { .detail.machine .zc-split { grid-template-columns: 1fr; } }
+.detail.machine .rb-save-row select { min-width: 0; }   /* 좁은 열에서도 저장 버튼이 잘리지 않게 선택 상자가 줄어든다 */
+.detail.machine .rb-save-row button { flex: 0 0 auto; }
+/* 낮은 화면(노트북 등) — 저장 블록을 공구 상태 바로 아래로 올려 스크롤 없이 저장 버튼이 보이게 */
+@media (max-height: 900px) {
+  .detail.machine .mm { display: flex; flex-direction: column; }
+  .detail.machine .mm > * { order: 2; }
+  .detail.machine .mm > h4, .detail.machine .mm > .mm-dec, .detail.machine .mm > .mm-tool { order: 0; }
+  .detail.machine .mm > .rb-save { order: 1; margin: 2px 0 8px; padding: 0 0 8px; border-top: 0; border-bottom: 1px solid var(--line); }
+}

@@ -2156,7 +2156,8 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
           const fl = m.kind !== 'agv' && this.vehicleViews?.find((v) => v.v === m)?.g.userData.load, fp = fl && S.g.worldToLocal(fl.getWorldPosition(new THREE.Vector3()));
           const mx = fp ? fp.x : m.x - WH_RACK.x, mz = fp ? fp.z : m.z - S.zc, dy = m.kind === 'agv' ? 0.56 : fp ? fp.y + 0.12 : 0.2;   // AGV 적재 면 · 지게차 포크 위 팔레트 면
           if (b.ext) k = Math.max(0, (k - 0.3) / 0.7);   // 신축 롤러가 다 뻗은 뒤 넘긴다
-          t.position.set(end + (mx - end) * k, M.conv + (dy - M.conv) * Math.min(1, k * 1.4) + TOTE.y / 2, b.lz + (mz - b.lz) * k);
+          const arc = fp ? Math.sin(Math.PI * k) * 0.4 : 0;   // 지게차는 컨베이어 옆에 나란히 서서 받는다 — 포크 뿌리(힐, 높이 0.55m) 위로 넘겨 포크에 내려놓는다
+          t.position.set(end + (mx - end) * k, M.conv + (dy - M.conv) * Math.min(1, k * 1.4) + TOTE.y / 2 + arc, b.lz + (mz - b.lz) * k);
         }
       }
     }
@@ -3270,9 +3271,11 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       if (near) return { x: (b.min[0] + b.max[0]) / 2, y: b.max[1] - 0.025, z: (b.min[2] + b.max[2]) / 2 };
       // 자기 쪽에 닿는 피더가 없으면 로봇 뒤 바깥 대각(셀 끝 쪽 0.6m · 통로 반대쪽 셀 경계 안)에 부품 트레이를 둔다 — 바로 옆(셀 끝)은 경광등 기둥 앞이라 집으러 오가는 팔이 경광등을 친다
       const tx = r.slot.x + (r.slot.x < 0 ? -0.6 : 0.6), tz = Math.sign(r.slot.z) * Math.min(Math.abs(r.slot.z) + 0.8, 2.05), tray = put(new THREE.Group(), tx, 0, tz, P);
+      tray.userData.nearLight = Math.hypot(tx + 1.9, tz + 1.6) < 0.9;   // 경광등(셀 로컬 −1.9, −1.6 · 머리 높이 1.0~1.45m) 바로 옆 트레이
       put(box(0.4, 0.85, 0.4, MAT.steel), 0, 0.425, 0, tray); put(box(0.36, 0.08, 0.36, std(0x2f6fd6)), 0, 0.89, 0, tray);
-      return { x: tx, y: 0.93 - 0.03 + 0.005, z: tz }; })());
-    const pick = r.fPick ??= [A.ik(...loc0(pk.x, pk.y + 0.3, pk.z).toArray(), true), A.ik(...loc0(pk.x, pk.y + 0.1, pk.z).toArray(), true)];   // 집는 높이: 부품 윗면 + 손끝에 매달린 부품 길이(볼트·스크류 약 8cm) 여유 — 낮으면 집은 부품이 피더 속으로 들어간다
+      return { x: tx, y: 0.93 - 0.03 + 0.005, z: tz, lift: tray.userData.nearLight ? 0.68 : 0.3 }; })());
+    const pick = r.fPick ??= [A.ik(...loc0(pk.x, pk.y + (pk.lift ?? 0.3), pk.z).toArray(), true),   // lift: 경광등 옆 트레이는 집은 볼트가 경광등 머리 위로 지나가게 높이 들어 올린다
+       A.ik(...loc0(pk.x, pk.y + 0.1, pk.z).toArray(), true)];   // 집는 높이: 부품 윗면 + 손끝에 매달린 부품 길이(볼트·스크류 약 8cm) 여유 — 낮으면 집은 부품이 피더 속으로 들어간다
     const plan = (r.fPlan?.item === it) ? r.fPlan : !inCell ? null : (() => {
       const g = this.itemMeshes.get(it), box = g && contactBox(g, P, g.userData.amr); if (!box) return null;
       const [x0, , z0] = box.min, [x1, y1, z1] = box.max, cz = (z0 + z1) / 2, f = Math.sign(cz - r.slot.z) || 1, hz = (z1 - z0) / 2;

@@ -318,6 +318,34 @@ function buildCMM(g) {
   put(box(0.06, 1.35, 0.06, MAT.dark), 1.95, 0.68, 1.5, g);
   return { ...gate, gateTitle: 'CMM 판정', bridge, car, quill, tipMat, rwSpin, rwLamp, screen };
 }
+// 적응가공 가공기 상태 감시 장비 (js/machmon.js 센서와 같은 구성): 공구 검사 카메라 · 3축 가속도계·AE·베어링 온도(주축 머리) · 절삭유 유량계
+// · 레이저 공구 측정기 · 엣지 AI 박스(IPC — 이상 점수·RUL 계산 → 존 서버 · 공장 오케스트레이터) — 셀 설비 부모 기준
+const CM_MAT = { body: std(0x1d2733, { metalness: 0.4 }), led: emis(0x37e8ff, 2.2), lens: std(0x0a0f14, { metalness: 0.9, roughness: 0.15 }), sensor: std(0xd8a13a, { metalness: 0.6 }), pipe: std(0x2b6cb0) };
+function addCMSensors(g, def, parts) {
+  const M = put(new THREE.Group(), 0, 0, 0, g); M.name = 'ConditionMonitoring';
+  const dev = (parent, x, y, z) => { const o = put(new THREE.Group(), x, y, z, parent); return o; };
+  const sensorPod = (parent, x, y, z) => { const o = dev(parent, x, y, z); put(cyl(0.025, 0.025, 0.05, CM_MAT.sensor, 10), 0, 0, 0, o); put(cyl(0.006, 0.006, 0.12, CM_MAT.body, 6), 0, 0.08, 0, o); return o; };   // 가속도계·AE·온도: 금색 센서 + 케이블
+  const front = def.type === 'mill5' ? -1.78 : def.type === 'turn' ? -2.08 : 0, side = def.type === 'mill5' ? 1.85 : 2.01;   // 기계 앞면(문) z · 오른쪽 옆면 x (UMC-1250 · ST-40 모델 실측, 셀 로컬)
+  // 공구 검사 카메라: 문 위 앞판에서 안쪽 아래(공구 교환 위치)를 본다 · 링 조명
+  const cam = dev(M, def.type === 'deburr' ? -0.35 : -1.25, def.type === 'deburr' ? 2.62 : def.type === 'turn' ? 2.2 : 2.55, def.type === 'deburr' ? 0.35 : front + 0.09);   // 문(x −0.55~0.65 · 열리면 오른쪽) 왼쪽 위 — 로봇이 드나드는 문 앞을 비운다
+  put(box(0.12, 0.09, 0.16, CM_MAT.body), 0, 0, 0, cam); const ln = put(cyl(0.03, 0.03, 0.04, CM_MAT.lens, 12), 0, -0.05, 0.05, cam); ln.rotation.x = -0.6;
+  put(new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.008, 6, 16), CM_MAT.led), 0, -0.07, 0.07, cam).rotation.x = Math.PI / 2 - 0.6;
+  // 주축 머리 센서: 머시닝센터 Head · 선반 Turret · 디버링 head (없으면 기계 위 앞쪽)
+  const head = parts?.head ?? parts?.machine?.nodes?.Head ?? parts?.turret ?? parts?.machine?.nodes?.Turret ?? null;
+  if (head) { sensorPod(head, 0.12, 0.05, 0.12); sensorPod(head, -0.12, 0.05, 0.12); sensorPod(head, 0, 0.12, -0.12); }
+  else for (const x of [-0.3, 0, 0.3]) sensorPod(M, x, 2.2, front - 0.3);
+  if (def.type !== 'deburr') {
+    // 절삭유 유량계 (기계 왼쪽 아래 배관) · 레이저 공구 측정기 (테이블 옆 — 문 안쪽)
+    const fl = dev(M, -1.6, 0.35, front + 0.1); put(box(0.14, 0.14, 0.14, CM_MAT.pipe), 0, 0, 0, fl); put(cyl(0.025, 0.025, 0.5, std(0x9aa3ad, { metalness: 0.7 }), 8), 0, 0, 0, fl).rotation.z = Math.PI / 2; put(box(0.06, 0.04, 0.01, CM_MAT.led, false), 0, 0.04, 0.075, fl);
+    const ls = dev(M, -1.25, 1.0, front + 0.06);   // 레이저 공구 측정기 (앞면 왼쪽 · 공구 교환 위치와 같은 높이 표시) put(box(0.08, 0.12, 0.06, CM_MAT.body), 0, 0, 0, ls); put(box(0.08, 0.12, 0.06, CM_MAT.body), 0.2, 0, 0, ls); put(box(0.2, 0.004, 0.004, emis(0xff3030, 3), false), 0.1, 0.03, 0, ls);   // 송·수광부 + 레이저 빔
+  }
+  // 엣지 AI 박스 (IPC): 기계 오른쪽 옆면 · 상태 LED · 안테나 (5G 모뎀)
+  const ipc = dev(M, def.type === 'deburr' ? 1.95 : side + 0.07, def.type === 'deburr' ? 1.0 : 1.3, def.type === 'deburr' ? 1.6 : front - 0.8);   // 오른쪽 옆면
+  if (def.type !== 'deburr') ipc.rotation.y = Math.PI / 2;   // 옆면에 붙여 바깥을 봄
+  put(box(0.24, 0.3, 0.12, CM_MAT.body), 0, 0, 0, ipc); put(box(0.18, 0.04, 0.01, CM_MAT.led, false), 0, 0.08, 0.065, ipc); put(cyl(0.006, 0.006, 0.16, CM_MAT.body, 6), 0.08, 0.23, 0, ipc);
+  return M;
+}
+const CM_TYPES = new Set(['mill5', 'turn', 'deburr']);
 const BUILD = { kit: buildKit, locate: buildLocate, spot: buildSpot, seal: buildSeal, hem: buildHem, mount: buildMount, vision: (g) => buildVision(g), rework: buildRework, mill5: buildMill5, turn: buildTurn, deburr: buildDeburr, matid: buildMatId, cmm: buildCMM };
 
 // 투입 스테이션(AS/RS 출고 포트) · 구분 적재장 — 두 Zone 공통 간이 형상
@@ -443,6 +471,7 @@ class ExtraZone {
       cellBase(g, 4.6);
       const equipmentRoot = put(new THREE.Group(), 0, 0, 0, g);
       const parts = BUILD[c.type](equipmentRoot, c);
+      if (Z.key === 'adapt' && CM_TYPES.has(c.type)) addCMSensors(equipmentRoot, c, parts);   // 가공기 상태 감시 장비 (js/machmon.js)
       const light = put(makeStackLight(), -1.9, 0.15, -1.6, g);
       // IoT 노드 (정밀조립Zone 셀과 같은 자리·모양 — factory.js setup): 셀 데이터를 Zone 데이터 서버로 올린다
       const sensorMat = emis(0x37e8ff, 2.5), ringM = new THREE.MeshBasicMaterial({ color: 0x37e8ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false });
@@ -652,6 +681,7 @@ class ExtraZone {
     for (const c of this.order) if (c.equipmentBlender !== ready) {
       c.equipmentRoot.clear();
       c.parts = BUILD[c.def.type](c.equipmentRoot, c.def);
+      if (this.Z.key === 'adapt' && CM_TYPES.has(c.def.type)) addCMSensors(c.equipmentRoot, c.def, c.parts);
       c.equipmentBlender = ready;
     }
   }
@@ -1193,9 +1223,12 @@ class ExtraZone {
       const inv = car.pm.parent.matrixWorld.clone().invert(); bb.applyMatrix4(inv);
       r.tendHeld = cl; r.tendHeldKey = car.item?.id; r.tendTop = bb.isEmpty() ? 0.1 : bb.max.y - car.pm.position.y;
     }
-    if (r?.tendHeld && held && car) {   // 손가락이 윗면 3cm를 잡는다
-      const tip = car.pm.parent.worldToLocal(r.tip.getWorldPosition(new THREE.Vector3()));
-      r.tendHeld.position.set(tip.x, tip.y + 0.03 - r.tendTop, tip.z);
+    if (r?.tendHeld && held && car) {   // 손가락 끝이 윗면에 닿게 수평으로 매단다 (윗면 = 손끝 2cm 아래)
+      // 팔을 세워 접고 선회하는 동안(손끝이 로봇 축 0.75m 안 · 1.17m까지 줄여 감)은 아래팔(J4)이 소재 옆으로 들어가지 않게 소재를 로봇 바깥쪽으로 비켜 든다 — 집는 곳(AMR · 1.25m)·기계 테이블(1.7m)에서는 손끝 바로 아래
+      const par = car.pm.parent, tip = par.worldToLocal(r.tip.getWorldPosition(new THREE.Vector3())), base = par.worldToLocal(r.root.getWorldPosition(new THREE.Vector3()));
+      const h = new THREE.Vector3(tip.x - base.x, 0, tip.z - base.z), rad = h.length(), k = 1 - Math.min(1, Math.max(0, (rad - 0.75) / 0.42));
+      if (rad > 1e-3) h.multiplyScalar((0.32 * k * k * (3 - 2 * k)) / rad);
+      r.tendHeld.position.set(tip.x + h.x, tip.y - 0.02 - r.tendTop, tip.z + h.z); r.tendHeld.quaternion.copy(car.pm.quaternion);
     }
     if (car?.pm) {   // 소재를 든·기계에 넣은 동안은 대상물을 숨기고 같은 자리에 지그(판·레일·클램프)만 남긴 복제본을 둔다 — 대상물 모델의 공정 표시는 매 프레임 다시 켜지므로 그룹째 숨긴다
       if (!c.tendJig || c.tendJig.userData.of !== car.pm) {

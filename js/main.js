@@ -32,12 +32,13 @@ import { caseFiles, allFiles } from './trace.js';
 import { CCTVRecorder, CameraClip, saveSnapshot, REC as CCTV_REC } from './cctvrec.js';
 import { RobotVideoRecorder, downloadVideos } from './robotrec.js';
 import { buildAiosZip, HEADS as AIOS_HEADS, FEATURES as AIOS_FEATURES, SAMPLE_S as AIOS_SAMPLE_S, CHUNK as AIOS_CHUNK, TRAIN_MIN as AIOS_TRAIN_MIN } from './aios.js';
-import { zipStore } from './aasx.js';
+import { zipStore, buildAASX } from './aasx.js';
+import { machineEnvironment, machineCSV } from './machmon.js';
 import { DRONE_SIZING } from './drone.js';
 import { CCTVView, CCTVBoard, CCTV_CLASSES } from './cctvview.js';
 import { AI_MODELS } from './cctv.js';
 import { NR, STACK, LAT, UE_LOAD, maxRobots } from './net5g.js';
-import { setAasVersion, AAS_VERSIONS } from './aas.js';
+import { setAasVersion, AAS_VERSIONS, toXML, toTurtle } from './aas.js';
 import { OrchView } from './orchview.js';
 import { FLEET_RANGE, FLEET_NAMES, SHARED_SPACE_LIMIT, fleetAdvice, predictFleet, predictFleetCounts, ZONE_FLEETS, isAmrFleet } from './fleet.js';
 import { SEC_LAYERS, SEC_KPI, SEC_THREATS, SEC_LANES, SEC_STAGES, SEC_ACTORS } from './security.js';
@@ -640,7 +641,16 @@ let dataTimer = null, dataNote = '';
 const kb = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 // AAS 메타모델 버전 선택 (로봇 정보 창 · 데이터 연동 창 공통, 브라우저에 기억) — 기본 3.1
 const aasVer = () => { try { return localStorage.getItem('metafactory.aasVersion') ?? '3.1'; } catch { return '3.1'; } };
-document.addEventListener('change', (e) => { if (e.target?.id === 'rbVer' || e.target?.id === 'dhVer') { try { localStorage.setItem('metafactory.aasVersion', e.target.value); } catch { /* 저장소 없음 */ } setAasVersion(e.target.value); } });
+ui.aasVer = aasVer;   // 가공기 정보 창 AAS 버전 선택 유지
+// AASX 패키지 저장 → 앱 서버로도 전송 (data/aasx/<kind>/) — 전송 위치(서버 주소 · 저장 경로)를 돌려준다
+async function sendAasx(name, blob, kind) {
+  if (hub.noServer) return '서버 전송 안 함 — 서버가 없는 화면(웹·공유 페이지)';
+  try {
+    const r = await (await fetch(`/api/aasx/v1?kind=${kind}&name=${encodeURIComponent(name)}`, { method: 'POST', body: blob })).json();
+    return r.ok ? `서버 전송: ${location.origin}/api/aasx/v1 → ${r.file}` : `서버 전송 실패: ${r.error}`;
+  } catch (e) { return `서버 전송 실패: ${e.message}`; }
+}
+document.addEventListener('change', (e) => { if (e.target?.id === 'rbVer' || e.target?.id === 'dhVer' || e.target?.id === 'mmVer') { try { localStorage.setItem('metafactory.aasVersion', e.target.value); } catch { /* 저장소 없음 */ } setAasVersion(e.target.value); } });
 setAasVersion(aasVer());
 const FORMATS = [
   ['json', 'JSON', 'AAS JSON 직렬화 (셸·서브모델·개념 설명, 자산별 최근 60개 기록 + 전체는 CSV 참조)'],
@@ -845,12 +855,15 @@ dataBody.addEventListener('click', (e) => {
   setAasVersion(document.getElementById('dhVer')?.value ?? aasVer());
   // AAS 저장: 진행 중인 로봇 카메라·CCTV 녹화 구간을 먼저 마감해 로컬(서버 data/)에 저장하고, 영상 파일 링크를 자산별 VideoRecordings 서브모델로 넣는다
   if (aas && robotRec.ffmpeg) { dataNote = '영상 구간 마감 · ffmpeg MP4 변환 중… (전체 + 카메라별)'; renderData(); }
-  (aas ? Promise.all([robotRec.flush(), cctvRec.flush()]).then(() => Promise.all([robotRec.convertAll(), cctvRec.convertAll()])) : Promise.resolve()).then(() => {
+  let conv = null;
+  const prog = (what) => (d, n) => { dataNote = `ffmpeg MP4 변환 중… ${what} ${d}/${n} 구간 — 최근 구간부터 · 최대 30초 기다린 뒤 저장`; renderData(); };
+  (aas ? Promise.all([robotRec.flush(), cctvRec.flush()]).then(() => Promise.all([robotRec.convertAll('robotcam', robotRec.segs, { budgetMs: 30000, onProgress: prog('로봇 카메라') }), cctvRec.convertAll({ budgetMs: 30000, onProgress: prog('CCTV') })])).then((c) => { conv = c; }) : Promise.resolve()).then(() => {
     const videosOf = (a) => { const k = hub.videoKey(a); return !k ? [] : k === 'cctv' ? cctvRec.videos() : robotRec.videosFor(k); };
     const out = hub.download(fmt, aas ? videosOf : null);
     let nv = 0; if (aas) nv = hub.assets.reduce((n, a) => n + videosOf(a).length, 0);
     const dl = aas && !robotRec.server ? downloadVideos([...robotRec.segs.map((sg) => robotRec.entry(sg, sg.index[0] ?? {})), ...cctvRec.videos()]) : 0;   // 서버가 없으면 영상도 로컬 파일로
-    dataNote = out ? `저장: ${out.name} (${kb(out.bytes)})${aas ? ` · 영상 링크 ${nv}개${robotRec.ffmpeg ? ' (MP4 · ffmpeg 카메라별)' : ''} (로봇 카메라 ${robotRec.segs.length}구간 · CCTV ${cctvRec.segs.length}구간${robotRec.server ? ' — data/robotcam · data/cctv에 저장' : dl ? ` — 영상 ${dl}개 함께 저장` : ''})` : ''}${fmt === 'aml' ? ' — 시계열은 같은 이름의 CSV를 함께 저장해 두면 연결됩니다' : ''}` : '';
+    const pend = conv ? conv.reduce((n, c) => n + (c?.pending ?? 0), 0) : 0;
+    dataNote = out ? `${pend ? `[MP4 남은 ${pend}구간은 서버에서 계속 변환 — 이번 파일은 WebM 링크] ` : ''}저장: ${out.name} (${kb(out.bytes)})${aas ? ` · 영상 링크 ${nv}개${robotRec.ffmpeg ? ' (MP4 · ffmpeg 카메라별)' : ''} (로봇 카메라 ${robotRec.segs.length}구간 · CCTV ${cctvRec.segs.length}구간${robotRec.server ? ' — data/robotcam · data/cctv에 저장' : dl ? ` — 영상 ${dl}개 함께 저장` : ''})` : ''}${fmt === 'aml' ? ' — 시계열은 같은 이름의 CSV를 함께 저장해 두면 연결됩니다' : ''}` : '';
     renderData();
   });
 });
@@ -996,7 +1009,54 @@ function pcapAssetAction(act) {
   }
   renderPcapBox();
 }
+// ── 적응가공 가공기 상태 감시 (js/machmon.js): 서버 전송(5초 묶음 · 정보 창 즉시 전송) · AAS 제조 데이터 저장 ─────────────────
+ui.mmFmt = 'aasx'; ui.mmServer = !hub.noServer;
+document.addEventListener('change', (e) => { if (e.target?.id === 'mmFmt') ui.mmFmt = e.target.value; });
+let mmBusy = false;
+async function machmonFlush(extra = []) {
+  const mon = sim.machmon; if (!mon?.on || hub.noServer || mmBusy) return null;
+  const items = [...extra, ...mon.take(1000)]; if (!items.length) return { stored: 0 };
+  mmBusy = true;
+  try {
+    const r = await (await fetch('/api/machmon/v1/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ run: hub.runId, items }) })).json();
+    if (r.error) throw new Error(r.error);
+    mon.sent.batches++; mon.sent.records += items.filter((x) => x.kind === 'record').length; mon.sent.last = new Date().toLocaleTimeString('ko-KR'); mon.sent.err = null;
+    return r;
+  } catch (e) { mon.outbox.unshift(...items.slice(0, 1000)); mon.sent.err = `전송 실패: ${e.message}`; return null; } finally { mmBusy = false; }
+}
+setInterval(() => { machmonFlush(); }, 5000);
+function mmSave(name, data, type) {
+  if (hub.shared) return false;
+  const blob = data instanceof Blob ? data : new Blob([data], { type }), a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  return blob.size;
+}
+async function machmonAction(act, st) {
+  const mon = sim.machmon, id = st?.cellId; if (!mon?.has(id)) return;
+  const note = (text) => { ui.mmNote = { id, text }; ui.renderDetail(); };
+  if (act === 'mmSend') {
+    if (hub.noServer) return note('서버가 없는 화면(웹·공유 페이지)에서는 서버로 전송할 수 없습니다 — 맥·윈도우 앱이나 npm start에서 실행하세요.');
+    const snap = { topic: `metafactory/machmon/v1/adapt/${id}/snapshot`, kind: 'snapshot', ...mon.snapshot(id), history: mon.m[id].hist.slice(-150) };
+    note('서버로 전송 중…');
+    const r = await machmonFlush([snap]);
+    return note(r ? `서버 전송 완료 — ${r.stored}건 저장 (${r.file}) · MQTT 발행 ${r.published}건` : `서버 전송 실패${mon.sent.err ? ` — ${mon.sent.err}` : ''}`);
+  }
+  const fmt = document.getElementById('mmFmt')?.value ?? ui.mmFmt; ui.mmFmt = fmt;
+  setAasVersion(document.getElementById('mmVer')?.value ?? aasVer());
+  if (hub.shared) return note('공유 페이지에서는 브라우저 보안 정책으로 파일 내려받기가 막혀 있습니다. 맥 앱이나 npm start로 실행한 화면에서 저장하세요.');
+  const env = machineEnvironment(mon, id, { iso: (t) => hub.iso(t) }), base = `metafactory_ADP-${id}_${hub.runId}`;
+  const out = fmt === 'json' ? { name: `${base}.aas.json`, type: 'application/json', data: JSON.stringify(env, null, 1) }
+    : fmt === 'xml' ? { name: `${base}.aas.xml`, type: 'application/xml', data: toXML(env) }
+    : fmt === 'rdf' ? { name: `${base}.aas.ttl`, type: 'text/turtle', data: toTurtle(env) }
+    : { name: `${base}.aasx`, type: 'application/asset-administration-shell-package', data: buildAASX(`ADP-${id}`, toXML(env), [{ path: `/aasx/ADP-${id}/files/ADP-${id}_condition.csv`, data: machineCSV(mon, id), contentType: 'text/csv' }]) };
+  const blob = out.data instanceof Blob ? out.data : new Blob([out.data], { type: out.type });
+  mmSave(out.name, blob, out.type);
+  const saved = `저장: ${out.name} (${Math.max(1, Math.round(blob.size / 1024))} KB · AAS v${document.getElementById('mmVer')?.value ?? aasVer()} · 셸 1 · 서브모델 6)`;
+  note(fmt === 'aasx' ? `${saved} · 서버 전송 중…` : saved);
+  if (fmt === 'aasx') note(`${saved}\n${await sendAasx(out.name, blob, 'machine')}`);
+}
 ui.onDetailAction = (act, st) => {
+  if (act === 'mmSend' || act === 'mmAas') return machmonAction(act, st);
   if (act === 'pcapStart' || act === 'pcapStop' || act === 'pcapSave') return pcapAssetAction(act);
   if (act === 'fault') { sim.log('warn', `[시나리오] ${st.name} 고장 주입`, {}); sim.injectFault(st); }
   if (act === 'pm') {
@@ -1007,14 +1067,18 @@ ui.onDetailAction = (act, st) => {
   else if (act === 'robotSave' && view.telemetry) {
     const fmt = document.getElementById('rbFmt').value, tele = view.telemetry;
     setAasVersion(document.getElementById('rbVer')?.value ?? aasVer());
-    ui.robotSaved(robotRec.ffmpeg ? '영상 녹화 구간 마감 · ffmpeg MP4 변환 중… (카메라별)' : '영상 녹화 구간 마감 · 저장 중…');
-    // 이 로봇 카메라 영상: 진행 중 구간을 마감·로컬 저장 → ffmpeg로 MP4(카메라별) 변환 → 영상 파일 링크를 AAS(VideoRecordings)에, AASX에는 링크 파일(.url)도 함께
-    robotRec.flush().then(() => robotRec.convertAll()).then(() => {
+    ui.robotSaved(robotRec.ffmpeg ? '영상 녹화 구간 마감 · ffmpeg MP4 변환 준비…' : '영상 녹화 구간 마감 · 저장 중…');
+    // 이 로봇 카메라 영상: 진행 중 구간을 마감·로컬 저장 → 이 로봇이 찍힌 구간만 ffmpeg로 MP4(카메라별) 변환(최근 것부터 · 최대 20초 대기) → 영상 파일 링크를 AAS(VideoRecordings)에, AASX에는 링크 파일(.url)도 함께
+    const a0 = hub.robotAsset(tele), key0 = tele.ref.type === 'cell' ? a0.id : `m:${tele.ref.id}`;
+    let conv = null;
+    robotRec.flush().then(() => robotRec.convertAll('robotcam', robotRec.segs, { assetKey: key0, budgetMs: 20000, onProgress: (d, n) => ui.robotSaved(`ffmpeg MP4 변환 중… ${d}/${n} 구간 (이 로봇이 찍힌 구간 · 카메라별) — 최대 20초 기다린 뒤 저장`) })).then((c) => { conv = c; }).then(() => {
       try {
-        const a = hub.robotAsset(tele), key = tele.ref.type === 'cell' ? a.id : `m:${tele.ref.id}`, videos = robotRec.videosFor(key);
+        const a = a0, key = key0, videos = robotRec.videosFor(key);
         const out = hub.downloadRobot(tele, fmt, videos);
+        if (fmt === 'aasx') sendAasx(out.name, out.blob, 'robot').then((t) => ui.robotSaved(`${document.getElementById('rbSaveNote')?.textContent ?? ''}\n${t}`));
         const dl = !robotRec.server ? downloadVideos(videos) : 0;
-        ui.robotSaved(`저장: ${out.name} (${out.bytes > 1048576 ? (out.bytes / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(out.bytes / 1024)) + ' KB'}) · 영상 링크 ${videos.length}개${videos.some((v) => v.mp4Url) ? ' (MP4)' : ''}${robotRec.server ? ` (영상 ${new Set(videos.map((v) => v.segment)).size}구간 data/robotcam에 저장)` : dl ? ` · 영상 ${dl}개 함께 저장` : ''}`);
+        const convNote = conv?.pending ? ` · MP4 ${conv.ready}/${conv.total}구간 (남은 ${conv.pending}구간은 서버에서 계속 변환 — 이번 파일은 WebM 링크, 다음 저장 때 MP4 링크)` : '';
+        ui.robotSaved(`저장: ${out.name} (${out.bytes > 1048576 ? (out.bytes / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(out.bytes / 1024)) + ' KB'}) · 영상 링크 ${videos.length}개${videos.some((v) => v.mp4Url) ? ' (MP4)' : ''}${robotRec.server ? ` (영상 ${new Set(videos.map((v) => v.segment)).size}구간 data/robotcam에 저장)` : dl ? ` · 영상 ${dl}개 함께 저장` : ''}${convNote}`);
       } catch (e) { ui.robotSaved(`저장 실패: ${e.message}`); }
     });
   }

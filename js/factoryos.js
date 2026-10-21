@@ -349,6 +349,7 @@ export class FactoryOS {
     if (k === 'timeout') return this.decision(m, '확인', `${m.body.what ?? '응답'} 시간 초과 — 대기 연장 · 재요청 1회`, { resume: '응답 수신' });
     if (k === 'first-article') { this.bump(); return this.decision(m, '롤백', `레시피 ${m.body.product} 이전 버전 슬롯으로 롤백 · 다음 지그부터 재적용 · 첫물 재판정`, { constraints: '2슬롯 중 이전 버전 · 감시 기준선 함께', resume: '첫물 합격 보고' }); }
     if (k === 'tool-stock') return this.decision(m, '승인', `FAC 공구 발주 · 공구실 재고 보충 (교환 ${m.body.tools}회 누적)`, { constraints: '표준 공구만', resume: '입고 확인' });
+    if (k === 'machine-pm') return this.decision(m, '승인', `${m.subject.cell ?? ''} 주축 예지정비 — 적응가공 정비 인력 배정 · 해당 셀 투입 보류 후 재개 (베어링 ${m.body.bearingTemp}°C · 진동 ${m.body.vibration}mm/s)`, { constraints: '정비 중 셀만 정지', resume: '정비 완료 · 진동·온도 정상' });
     if (k === 'insp-priority') return this.decision(m, '결정', m.body.mainFirst ? '정밀조립 샘플 먼저 (오더 납기 위험)' : '요청 시각 순 (FIFO) 유지', { constraints: '정밀검사 대기열 순서만' });
     return this.decision(m, '확인', '기록');
   }

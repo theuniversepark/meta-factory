@@ -239,6 +239,44 @@ function send(res, status, body, type = 'application/json; charset=utf-8') {
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 }
 
+// ── 적응가공 가공기 상태 감시 데이터 (js/machmon.js) ─────────────────
+// 묶음: { run, items: [{ topic, kind: 'sample'|'record'|'snapshot', asset, t, … }] } → data/machmon/<run>.jsonl 에 한 줄씩 · 같은 내용을 내장 MQTT로 발행
+const MM_DIR = () => path.join(DATA_DIR(), 'machmon');
+const mmStat = { batches: 0, items: 0, records: 0, last: null };
+async function machmonBatch(req, res) {
+  try {
+    const body = JSON.parse(await readBody(req, 8 * 1024 * 1024)), items = Array.isArray(body?.items) ? body.items.slice(0, 5000) : [];
+    const run = SAFE.test(String(body?.run ?? '')) ? body.run : 'run';
+    fs.mkdirSync(MM_DIR(), { recursive: true });
+    if (items.length) fs.appendFileSync(path.join(MM_DIR(), `${run}.jsonl`), items.map((x) => JSON.stringify({ rx: new Date().toISOString(), ...x })).join('\n') + '\n');
+    const published = mqttPublish(items.filter((x) => typeof x?.topic === 'string').map((x) => ({ topic: x.topic, payload: JSON.stringify(x) })));
+    mmStat.batches++; mmStat.items += items.length; mmStat.records += items.filter((x) => x?.kind === 'record').length; mmStat.last = new Date().toISOString();
+    return send(res, 200, { ok: true, stored: items.length, published, file: `machmon/${run}.jsonl` });
+  } catch (e) { return send(res, 400, { error: e.message }); }
+}
+// AASX 패키지: ?kind=robot|machine&name=<파일 이름>.aasx — 본문 그대로 저장 · 저장한 절대 경로를 돌려준다 (화면이 전송 위치로 표시)
+const AASX_KINDS = new Set(['robot', 'machine', 'factory']);
+async function saveAasx(req, res, url) {
+  const name = url.searchParams.get('name') ?? '', kind = url.searchParams.get('kind') ?? 'robot';
+  if (!AASX_KINDS.has(kind) || !/^[A-Za-z0-9_.-]{1,120}\.aasx$/.test(name)) return send(res, 400, { error: '파일 이름·종류 형식 오류' });
+  try {
+    const buf = await readRaw(req, 256 * 1024 * 1024), dir = path.join(DATA_DIR(), 'aasx', kind), file = path.join(dir, name);
+    if (buf.length < 22 || buf.readUInt32LE(0) !== 0x04034b50) return send(res, 400, { error: 'AASX(zip) 형식이 아님' });
+    fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(file, buf);
+    return send(res, 200, { ok: true, bytes: buf.length, file, rel: `aasx/${kind}/${name}` });
+  } catch (e) { return send(res, 400, { error: e.message }); }
+}
+function aasxList() {
+  const root = path.join(DATA_DIR(), 'aasx'), out = {};
+  for (const k of AASX_KINDS) { try { out[k] = fs.readdirSync(path.join(root, k)).filter((f) => f.endsWith('.aasx')).length; } catch { out[k] = 0; } }
+  return { dir: root, files: out };
+}
+function machmonStatus() {
+  let files = [];
+  try { files = fs.readdirSync(MM_DIR()).filter((f) => f.endsWith('.jsonl')); } catch { /* 아직 없음 */ }
+  return { ...mmStat, dir: MM_DIR(), files: files.length, mqtt: mqttStatus() };
+}
+
 function readBody(req, limit = 512 * 1024) {
   return new Promise((resolve, reject) => {
     let size = 0; const chunks = [];
@@ -340,6 +378,12 @@ export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
     if (url.pathname === '/api/line' && req.method === 'POST') return handleLine(req, res);
     if (url.pathname === '/api/zone-design' && req.method === 'POST') return handleZoneDesign(req, res);
     // OPC UA PubSub(JSON) over MQTT — 내장 브로커로 발행
+    // 적응가공 가공기 상태 감시 (js/machmon.js): 측정·예지보전 묶음 저장(JSONL) + MQTT 발행 · AAS 파일 저장 · 상태 조회
+    if (url.pathname === '/api/machmon/v1/batch' && req.method === 'POST') return machmonBatch(req, res);
+    if (url.pathname === '/api/machmon/v1/status') return send(res, 200, machmonStatus());
+    // AASX 패키지 저장 (로봇 정보 창 · 가공기 정보 창): 화면이 내려받기와 함께 올린다 → data/aasx/<kind>/<파일>
+    if (url.pathname === '/api/aasx/v1' && req.method === 'POST') return saveAasx(req, res, url);
+    if (url.pathname === '/api/aasx/v1') return send(res, 200, aasxList());
     if (url.pathname === '/api/mqtt/status') return send(res, 200, mqttStatus());
     if (url.pathname === '/api/mqtt/publish' && req.method === 'POST') {
       try {

@@ -538,7 +538,7 @@ export class DataHub {
     a.href = URL.createObjectURL(blob); a.download = out.name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    return { name: out.name, bytes: blob.size, videos: videos.length };
+    return { name: out.name, bytes: blob.size, videos: videos.length, blob };   // blob: AASX면 화면이 앱 서버로도 올린다 (main.js sendAasx)
   }
 
   stats() {

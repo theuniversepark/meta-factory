@@ -5,6 +5,22 @@
 // 영상은 시뮬레이션 장면을 CCTV 카메라 시점으로 렌더한 것이다 (MediaRecorder · canvas.captureStream).
 import * as THREE from 'three';
 
+// MP4 변환 요청 (서버 ffmpeg 큐): 최근 구간부터 · 기다리는 시간은 budgetMs까지 — 넘으면 기다리지 않고 돌려준다(서버는 이어서 변환, 다음 저장 때 MP4 링크)
+// 돌려주는 값: { done(이번에 끝난 구간), ready(MP4 있는 구간), total(대상), pending(남은 구간) }
+export async function convertSegs(kind, segs, { budgetMs = 20000, onProgress } = {}) {
+  const list = segs.filter((s) => s.stored).reverse(), todo = list.filter((s) => !s.mp4), t0 = performance.now();
+  let done = 0;
+  for (const s of todo) {
+    const left = budgetMs - (performance.now() - t0); if (left <= 0) break;
+    onProgress?.(done, todo.length);
+    const req = fetch(`/api/convert?kind=${kind}&id=${encodeURIComponent(s.id)}`).then(async (r) => { if (r.ok) s.mp4 = await r.json(); return r.ok; }).catch(() => false);
+    const ok = await Promise.race([req, new Promise((res) => setTimeout(() => res('late'), left))]);
+    if (ok === 'late') break;
+    if (ok) done++;
+  }
+  const ready = list.filter((s) => s.mp4).length;
+  return { done, ready, total: list.length, pending: list.length - ready };
+}
 export const REC = { fps: 2, segS: 300, keep: 2, width: 2592, bitrate: 1_100_000 };   // 2fps · 5분 구간 · 칸 288×162(9열 기준) · 구간 약 40MB
 const FONT = '"Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif';
 const two = (n) => String(n).padStart(2, '0');
@@ -75,11 +91,9 @@ export class CCTVRecorder {
     }
     return out;
   }
-  async convertAll() {
-    if (!this.server || !this.ffmpeg) return 0;
-    let n = 0;
-    for (const s of this.segs) { if (!s.stored || s.mp4) continue; try { const r = await fetch(`/api/convert?kind=cctv&id=${encodeURIComponent(s.id)}`); if (r.ok) { s.mp4 = await r.json(); n++; } } catch { /* WebM만 */ } }
-    return n;
+  async convertAll(opts = {}) {   // 최근 구간부터 · budgetMs까지만 기다림 (robotrec.js convertSegs)
+    if (!this.server || !this.ffmpeg) return { done: 0, ready: 0, total: 0, pending: 0 };
+    return convertSegs('cctv', this.segs, opts);
   }
   // 가장 최근 구간 MP4(서버 ffmpeg) — 변환이 끝날 때까지 기다렸다가 로컬 파일로
   async saveLatestMp4() {
