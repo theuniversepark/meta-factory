@@ -1,0 +1,45 @@
+// 확장 Zone 대화 지시 검증 — 유연생산·적응가공·정밀검사에 입력한 지시가 해석 → 게이트 → 반영/미반영(원인)으로 처리되는지. 실행: npm test
+import { zoneOfText, zoneCtx, parseZoneInstruction, evaluateZone, applyZone } from '../js/zonedialog.js';
+import { validate } from '../js/agentcore.js';
+import { EXTRA_ZONES, INSP_CELLS, zoneCtl } from '../js/zonedefs.js';
+let pass = 0, fail = 0;
+const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  — ' + info : ''}`); };
+// 화면 없는 시험용 Zone · 시뮬레이션 (zones.js · inspzone.js · sim.js에서 대화 지시가 쓰는 것만)
+const mkZone = (Z) => ({ Z, ctl: zoneCtl(), mix: Z.mixes ? { ...Object.values(Z.mixes).find((m) => m.label === '1 : 1').w } : null, cells: Object.fromEntries(Object.keys(Z.cells).map((id) => [id, { state: 'IDLE', done: 0 }])), stats: { good: {}, ng: 0 }, summary: () => ({ uph: 30, busy: 2, done: 3, queue: 0, active: 1 }), setMix(w) { this.mix = { ...w }; } });
+const zones = Object.fromEntries(EXTRA_ZONES.map((Z) => [Z.key, mkZone(Z)]));
+const fac = {}, reqs = [];
+const sim = { xzones: { byKey: (k) => zones[k] }, inspZone: mkZone({ key: 'insp', cells: INSP_CELLS }), cmd: {}, mode: { pmTime: 45 },
+  zoneCell: (k, id) => (fac[k + id] ??= { state: 'OK', health: 70, request: null }), requestTech: (st, kind) => { reqs.push(kind); st.request = { kind }; return true; } };
+const run = (zk, text) => { const ctx = zoneCtx(sim, zk), { actions, unknown } = parseZoneInstruction(text, ctx); return { ctx, unknown, out: actions.map((a) => { const g = evaluateZone(a, ctx); const r = g.verdict !== 'reject' ? applyZone(a, ctx) : null; return { a, g, r }; }) }; };
+console.log('== 대상 Zone');
+check('문장의 Zone 이름 · 제품 이름으로 Zone을 고름', zoneOfText('유연생산 속도 80%') === 'flex' && zoneOfText('유압블록만 생산') === 'adapt' && zoneOfText('ATOS 셀 정지') === 'insp' && zoneOfText('포장셀 정지') === null);
+console.log('== 반영');
+let r = run('flex', '헤밍셀 예방정비');
+check('유연생산: 헤밍셀 예방정비 → C05 정비 인력 배정', r.out[0]?.a.cell === 'C05' && r.out[0].g.verdict === 'approve' && r.out[0].r.ok && reqs.at(-1) === 'pm');
+r = run('flex', '용접셀 정지');
+check('유연생산: 용접셀 정지 → C03 셀 정지', zones.flex.ctl.hold.has('C03') && r.out[0].g.verdict === 'approve');
+r = run('flex', '용접셀 재개, 속도 80%, 후드 2:1로 생산, 투입 정지');
+check('여러 문장: 재개 · 속도 80% · 혼류 2:1 · 투입 정지 모두 반영', !zones.flex.ctl.hold.has('C03') && zones.flex.ctl.speed === 0.8 && zones.flex.mix.hood === 2 && zones.flex.mix.door === 1 && zones.flex.ctl.feed && r.out.every((o) => o.g.verdict === 'approve'));
+r = run('adapt', '유압블록만 생산');
+check('적응가공: 유압블록만 → hb 혼류', zones.adapt.mix.rcover === 0 && zones.adapt.mix.hblock > 0);
+r = run('insp', 'ATOS 셀 정지');
+check('정밀검사: ATOS 셀 정지', sim.inspZone.ctl.hold.has('ATOS'));
+r = run('flex', '유연생산 상태 어때?');
+check('상태 질의 → 응답 (UPH · 가동 셀 · 혼류 · 제어 상태)', r.out[0]?.g.verdict === 'answer' && /UPH 30/.test(r.out[0].r.text) && /투입 정지 중/.test(r.out[0].r.text), r.out[0]?.r?.text);
+console.log('== 미반영과 원인');
+r = run('flex', 'C03 속도 90%');
+check('셀 하나 속도 → 미반영 · 원인 · 대안', r.out[0]?.g.verdict === 'reject' && /셀 단위/.test(r.out[0].g.reason) && /Zone 속도|속도 90%/.test(r.out[0].g.alt ?? ''));
+r = run('insp', '정밀검사 투입 정지');
+check('정밀검사 투입 정지 → 미반영 (투입 단계 없음)', r.out[0]?.g.verdict === 'reject' && /투입/.test(r.out[0].g.reason));
+r = run('flex', '헤밍셀 예방정비');
+check('이미 정비 요청된 셀 → 미반영 (중복)', r.out[0]?.g.verdict === 'reject' && /이미/.test(r.out[0].g.reason));
+r = run('flex', '로봇 팔 색을 바꿔');
+check('알 수 없는 지시 → 해석 못 함 (Agent로 넘김)', r.unknown.length === 1 && !r.out.length);
+sim.cmd.estopAll = true; zones.flex.ctl.stop = true; r = run('flex', '유연생산 재개'); sim.cmd.estopAll = false;
+check('공장 비상정지 중 재개 → 미반영 (안전 규칙)', r.out[0]?.g.verdict === 'reject' && r.out[0].g.checks.some((c) => c.key === 'safety' && c.status === 'fail'));
+console.log('== Agent 도구(zone_command) 검증');
+const snap = { zones: { flex: { name: '유연생산Zone', cells: Object.keys(EXTRA_ZONES[0].cells).map((id) => ({ id })), mixes: { '2:1': '2 : 1' } }, insp: { name: '정밀검사Zone', cells: [{ id: 'ATOS' }], mixes: null } } };
+const v = (input) => validate('zone_command', { cell: '', arg: '', reason: 'x', ...input }, snap, new Set());
+check('정상 조치 통과 · 셀 속도 · 없는 셀 · 정밀검사 투입 · 정비 셀 누락은 거부', v({ zone: 'flex', action: 'MAINT', cell: 'C04' }) === null && v({ zone: 'flex', action: 'SPEED', cell: 'C03', arg: '90' }) && v({ zone: 'flex', action: 'STOP', cell: 'X9' }) && v({ zone: 'insp', action: 'FEED_HOLD' }) && v({ zone: 'flex', action: 'MAINT' }));
+console.log(`\n결과: ${pass} PASS / ${fail} FAIL`);
+process.exitCode = fail ? 1 : 0;

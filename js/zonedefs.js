@@ -104,6 +104,9 @@ const adaptEast = () => { const r = zoneRect(EXTRA_ZONES.find((z) => z.key === '
 export const camArea = (p) => (inspAreas().some((r) => inR(p, r)) ? 'insp' : null) ?? ['flex', 'adapt'].find((k) => zoneAreas(k).some((r) => inR(p, r)) || (k === 'adapt' && inR(p, adaptEast()))) ?? (MAIN_AREAS.some((r) => inR(p, r)) ? 'main' : 'shared');
 export const areaZone = (p) => ['flex', 'adapt'].find((k) => zoneAreas(k).some((r) => p.x > r.x0 && p.x < r.x1 && p.z > r.z0 && p.z < r.z1)) ?? 'main';
 
+// 확장 Zone 운영자 제어 (대화 기반 지시 — js/zonedialog.js): stop Zone 정지 · hold 정지한 셀 · speed 작업·이동 속도 배율 · feed 투입 정지
+export const zoneCtl = () => ({ stop: false, hold: new Set(), speed: 1, feed: false });
+
 const TOP = -4.6, BOT = 4.6, MID = 0, PI = Math.PI;
 // 셀 구성·제품·사이클·로봇은 상위 폴더 flexible-manufacturing(유연생산Zone)·adaptive-machining(적응가공Zone) 프로젝트를 따른다
 // 좌표는 Zone 로컬 (origin = Zone 가운데). robot: [자동화 종류, 대수, 피지컬AI 종류, 대수] — 레거시는 작업자

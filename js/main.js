@@ -134,6 +134,9 @@ document.getElementById('log').addEventListener('click', (e) => {
   if (rec) gateView.show(rec, sim);
 });
 llm.onMix = (key) => { currentLine = lines.zone = { ...currentLine, mix: key }; saveLines(); renderZoneCard(); designer?.sync(); };
+// 대화 지시 대상 Zone: 문장에 Zone 이름이 없으면 왼쪽에서 고른 Zone (js/llm.js chat) · 확장 Zone 혼류 비율을 대화로 바꾸면 Zone 카드·저장값도 같이
+llm.zoneView = () => (zonePick.view === 'precision' ? 'main' : zonePick.view);
+llm.onZoneMix = (key, mix) => { zonePick.mix[key] = mix; saveZonePick(); renderZoneCard(); };
 let sim, agent, agentArch = 'single';   // 에이전트 구조: single · hybrid (혼합형 다중 에이전트)
 const archPref = {};   // 단계별 운영자 선택 (없으면 MODES[단계].agentArch — 피지컬AI 기본 혼합형)
 let modeKey = 'smart', speed = 3, running = true, labelsOn = true;
@@ -289,8 +292,10 @@ function zoneDropdown() {
   const items = ZONE_PICKS.map((z) => `<button type="button" class="zc-dd-it${z.key === cur.key ? ' on' : ''}" data-pick="${z.key}"><b>${escH(z.name)}</b><small>${escH(z.sub)}</small></button>`).join('');
   return `<div class="zc-dd"><button type="button" class="zc-dd-btn" data-dd aria-haspopup="listbox" title="Zone 선택">${escH(cur.name)} <i>▾</i></button><div class="zc-dd-menu" role="listbox">${items}</div></div>`;
 }
+const CHAT_HINT = { precision: '정밀조립Zone 공정 지시 (예: 포장셀 속도 75%, 도어트림 2:1, e-axle 조립셀 예방정비)', flex: '유연생산Zone 지시 (예: 유연생산 상태 어때?, 헤밍셀 예방정비, 용접셀 정지, 속도 80%, 후드 2:1)', adapt: '적응가공Zone 지시 (예: 적응가공 상태 어때?, 유압블록 5축 가공셀 예방정비, 유압블록만 생산)', insp: '정밀검사Zone 지시 (예: 정밀검사 상태 어때?, ATOS 셀 정지, 속도 120%)' };
 function renderZoneCard() {
   designer?.setTarget(zonePick.view === 'precision' ? 'precision' : zonePick.view);   // 오른쪽 아래 공정 설계도 고른 Zone으로
+  const ci = document.getElementById('chatInput'); if (ci) ci.placeholder = CHAT_HINT[zonePick.view] ?? CHAT_HINT.precision;   // 오른쪽 대화 입력창도 고른 Zone 기준
   if (document.getElementById('logFollow')?.checked) ui?.setLogFilter?.(zonePick.view === 'precision' ? 'main' : zonePick.view);   // 오른쪽 공장 운영 로그도 그 존으로 (왼쪽 Zone 연동)
   if (zonePick.view === 'insp') return renderInspZoneCard();
   if (zonePick.view !== 'precision') return renderXzZoneCard();

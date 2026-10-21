@@ -8,7 +8,7 @@ import { CMD_STATE } from './commands.js';
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const clock = (t) => { const s = Math.floor(t) + 8 * 3600; return `${String(Math.floor(s / 3600) % 24).padStart(2, '0')}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const ICON = { pass: '✓', warn: '⚠', fail: '✗', skip: '·', pending: '⏳', cur: '…' };
-const VERDICT = { approve: ['수행', 'pass'], reject: ['거절', 'fail'], answer: ['응답', 'pass'], pending: ['Agent 해석 중', 'pending'], delegated: ['Agent로 전환', 'pending'] };
+const VERDICT = { approve: ['반영', 'pass'], reject: ['미반영', 'fail'], answer: ['응답', 'pass'], pending: ['Agent 해석 중', 'pending'], delegated: ['Agent로 전환', 'pending'] };
 // 노드 안 글자: 10자씩 2줄
 const wrap = (t, n = 10, max = 2) => { const w = [...String(t ?? '')], a = []; for (let i = 0; i < w.length && a.length < max; i += n) a.push(w.slice(i, i + n).join('')); if (w.length > n * max) a[max - 1] = a[max - 1].slice(0, n - 1) + '…'; return a; };
 
@@ -27,7 +27,7 @@ export class GateView {
     const items = [...rec.items, ...(rec.agentItems ?? []).filter((x) => !rec.items.includes(x))];
     this.sub.textContent = `${clock(rec.t)} · 운영자 지시 "${rec.text}" · 조치 ${items.length}건`;
     const html = items.map((it, i) => this.row(it, i)).join('') || '<p class="g-empty">조치가 없습니다.</p>';
-    const legend = `<div class="g-legend"><span class="pass">✓ 통과</span><span class="warn">⚠ 주의 (수행하되 영향 표시)</span><span class="fail">✗ 거절 사유</span><span class="skip">· 도달하지 않음</span><span class="cur">… 진행 중</span></div>`;
+    const legend = `<div class="g-legend"><span class="pass">✓ 통과</span><span class="warn">⚠ 주의 (반영하되 영향 표시)</span><span class="fail">✗ 미반영 원인</span><span class="skip">· 도달하지 않음</span><span class="cur">… 진행 중</span></div>`;
     if (html !== this.last) { this.last = html; this.body.innerHTML = legend + html; }
   }
 
@@ -79,14 +79,14 @@ export class GateView {
     const ex = this.execSteps(it), took = v === 'approve' || v === 'answer';
     svg += arrow(dx + R, dy, x(7) - 2, dy, took ? 'on' : 'off');
     ex.forEach((s, k) => { if (k) svg += arrow(x(6 + k) + NW, dy, x(7 + k) - 2, dy, s.status === 'skip' ? 'off' : s.status === 'fail' ? 'fail' : 'on'); svg += node(7 + k, Y1, s.label, s.text ?? '', took ? s.status : 'skip'); });
-    svg += `<text x="${x(7)}" y="${Y1 - 8}" class="gb ${took ? 'on' : ''}">수행</text>`;
+    svg += `<text x="${x(7)}" y="${Y1 - 8}" class="gb ${took ? 'on' : ''}">반영</text>`;
     // 거절 갈래 (아래)
     const rej = v === 'reject', pend = v === 'pending' || v === 'delegated';
     svg += `<path d="M${dx},${dy + R} L${dx},${Y2 + NH / 2} L${x(7) - 2},${Y2 + NH / 2}" class="ga ${rej ? 'fail' : pend ? 'pend' : 'off'}" marker-end="${mk(rej ? 'fail' : pend ? 'pend' : 'off')}"/>`;
-    svg += node(7, Y2, pend ? 'Agent 해석' : '거절', pend ? (v === 'delegated' ? 'Agent가 조치로 전환' : '해석 요청 중') : g.reason ?? '', rej ? 'fail' : pend ? 'pending' : 'skip');
+    svg += node(7, Y2, pend ? 'Agent 해석' : '미반영', pend ? (v === 'delegated' ? 'Agent가 조치로 전환' : '해석 요청 중') : g.reason ?? '', rej ? 'fail' : pend ? 'pending' : 'skip');
     svg += arrow(x(7) + NW, Y2 + NH / 2, x(8) - 2, Y2 + NH / 2, rej ? 'fail' : 'off');
     svg += node(8, Y2, '운영자 통보', rej ? g.alt ?? '대화창에 사유 표시' : pend ? '결과는 대화창에' : '', rej ? 'warn' : pend ? 'pending' : 'skip');
-    svg += `<text x="${x(7)}" y="${Y2 - 8}" class="gb ${rej ? 'bad' : ''}">${pend ? 'Agent' : '거절'}</text></svg>`;
+    svg += `<text x="${x(7)}" y="${Y2 - 8}" class="gb ${rej ? 'bad' : ''}">${pend ? 'Agent' : '미반영'}</text></svg>`;
     // 단계별 상세
     const detail = GATE_STEPS.map((s) => { const c = byKey[s.key]; return `<li class="s-${c?.status ?? 'skip'}"><b>${ICON[c?.status ?? 'skip']} ${s.label}</b><span>${esc(c?.text ?? '도달하지 않음 (앞 단계에서 판정)')}</span></li>`; }).join('');
     const prog = it.cmd ? ['sent', 'ack', 'exec', 'done', 'rejected'].map((sname) => { const h = it.cmd.history.find((x) => x.state === sname); return h ? `<span class="cp on">${CMD_STATE[sname]} ${clock(h.t)}</span>` : ''; }).join('') : '';

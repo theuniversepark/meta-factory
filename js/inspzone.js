@@ -10,7 +10,7 @@ import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { KIT } from './factory.js';
 import { route, moverRadius, moverWidth } from './sim.js';
 import { pointAt, pathLength } from './line.js';
-import { INSP_AREA, INSP_SERVER, INSP_CELLS } from './zonedefs.js';
+import { INSP_AREA, INSP_SERVER, INSP_CELLS, zoneCtl } from './zonedefs.js';
 
 const { std, emis, mesh, box, cyl, put, MAT, BELT_Y, makeRobot, makeWorker, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK } = KIT;
 const PI = Math.PI;
@@ -274,6 +274,7 @@ export class InspZone {
   }
   // 새 실행마다 (main.js setup): 단계별 로봇·인력, 검사 AMR, 실적 초기화
   reset(modeKey, seed) {
+    this.ctl = zoneCtl();
     this.mode = modeKey; this.rng = mulberry((seed ?? 1) * 7919 + 11); this.time = 0; this.seq = 0;
     this.queue = []; this.counts = { main: 0, flex: 0, adapt: 0 }; this.unsampled = {}; this.base = null; this.recent = [];
     this.stats = { samples: 0, done: 0, ok: 0, unc: 0, ng: 0, by: {}, rx: 0 };
@@ -386,14 +387,16 @@ export class InspZone {
   }
   step(dt, halted) {
     if (!this.sim) return;
-    this.halted = halted; if (halted) return;
+    const K = this.ctl ??= zoneCtl();
+    this.halted = halted || K.stop; if (this.halted) return;   // 정밀조립 비상·보호정지 또는 운영자 Zone 정지(대화 지시)
+    dt *= K.speed;   // 운영자 Zone 속도 (대화 지시)
     this.time += dt;
     this.sampleTick();
     for (const c of this.order) {
       // 셀 고장·정비 (sim.js 설비 관리 — 정밀검사 정비실 인력이 수리): 끝날 때까지 검사가 멈춘다 · 가동 여부를 알려 마모 계산에 쓴다
       const zc = this.sim.zoneCell?.('insp', c.id); c.fault = zc && (zc.state === 'DOWN' || zc.state === 'MAINT') ? zc.state : null;
       if (zc) zc.busy = c.state === 'BUSY';
-      if (c.fault || c.state !== 'BUSY') continue;
+      if (c.fault || c.state !== 'BUSY' || K.hold.has(c.id)) continue;   // 운영자 셀 정지 (대화 지시)
       c.busy += dt; c.progress = Math.min(1, c.progress + dt / c.cur);
       if (c.progress >= 1) { c.state = 'DONE'; c.done++; }
     }

@@ -33,6 +33,7 @@ export const SYSTEM_PROMPT = `당신은 제조 라인의 운영을 맡은 AI 운
 공장은 추론 기반 에이전트가 계속 운영합니다(정비·품질·병목·투입·공급 차질·AGV 배차·충전·절전). 당신은 운영자가 입력창에 쓴 지시 중 내장 해석기가 알아듣지 못한 문장만 받습니다. 그 지시를 해석해 도구로 공정에 반영하고, 질문이면 스냅샷을 근거로 답하십시오. 지시와 관계없는 운영 조치는 하지 마십시오.
 - 셀 정지·속도·투입·대피·재보정·예방정비 지시는 issue_command로 보냅니다. code: ESTOP 비상정지, RESET 비상정지 해제·리셋, SAFE_STOP 보호정지, SAFE_SPEED 안전 감속 25%, SAFE_SPEED_OFF 감속 해제, EVACUATE 이동로봇 대피(target=all), EVAC_END 대피 해제(target=all), CYCLE_STOP 사이클 정지, RESUME 운전 재개, SPEED 속도 오버라이드(arg=30~120 %), FEED_HOLD 투입 정지(target=all), FEED_RESUME 투입 재개(target=all), RECALIB 자율 재보정(셀만), MAINT 예방정비(셀만). arg는 SPEED에만 쓰고 나머지는 null.
 - 혼류 비율(정밀조립Zone) 지시는 set_mix로 보냅니다: 1:1, 2:1(도어트림이 두 배), 1:2(e-axle이 두 배), dt(도어트림만), ea(e-axle만).
+- 유연생산·적응가공·정밀검사 Zone 지시는 zone_command로 보냅니다 (스냅샷 zones에 Zone별 셀·상태·제어 상태·혼류 비율이 있음). action: STOP 정지(cell 비우면 Zone 전체, 셀 id면 그 셀), RESUME 재개, FEED_HOLD 투입 정지, FEED_RESUME 투입 재개(정밀검사 제외), SPEED Zone 속도(arg=30~120, 셀 단위 불가), MAINT 예방정비(셀 필수), MIX 혼류 비율(arg=zones.<zone>.mixes의 키), STATUS 상태 조회. 운영자 지시가 [대상 Zone: …]으로 시작하면 그 Zone에 적용합니다. 그 Zone에서 할 수 없는 지시(예: 셀 하나의 속도 변경, 정밀검사 투입 정지, 없는 셀)는 도구를 쓰지 말고 반영할 수 없는 이유와 대안을 답하십시오.
 - 지시가 모호하면(대상 셀을 알 수 없는 등) 도구를 쓰지 말고 무엇이 필요한지 물으십시오. 안전하지 않거나 생산에 해롭다면 이유를 설명하고 대안을 제시하십시오.
 
 ## 작업 방식
@@ -78,6 +79,11 @@ export function buildTools(stationIds) {
     input_schema: obj({ mix: { type: 'string', enum: ['1:1', '2:1', '1:2', 'dt', 'ea'] }, reason }),
   },
   {
+    name: 'zone_command',
+    description: '유연생산(flex)·적응가공(adapt)·정밀검사(insp) Zone에 운영자 지시를 반영한다. cell은 셀 id(스냅샷 zones.<zone>.cells[].id) 또는 빈 문자열(Zone 전체). arg는 SPEED면 속도 %(30~120), MIX면 혼류 비율 키, 그 밖에는 빈 문자열.',
+    input_schema: obj({ zone: { type: 'string', enum: ['flex', 'adapt', 'insp'] }, action: { type: 'string', enum: ['STOP', 'RESUME', 'FEED_HOLD', 'FEED_RESUME', 'SPEED', 'MAINT', 'MIX', 'STATUS'] }, cell: { type: 'string' }, arg: { type: 'string' }, reason }),
+  },
+  {
     name: 'expedite_supply',
     description: '자재 공급 차질 중일 때 안전재고를 긴급 투입하고 대체 공급처에 발주해 차질 기간을 절반으로 줄인다.',
     input_schema: obj({ reason }),
@@ -117,6 +123,17 @@ export function validate(name, input, snap, pending) {
     case 'set_mix':
       if (!snap.product_mix) return '정밀조립Zone 라인이 아님';
       return null;
+    case 'zone_command': {
+      const Z = snap.zones?.[input.zone];
+      if (!Z) return `${input.zone} Zone 상태가 없음 (3D 화면 시뮬레이션에서만 제어)`;
+      if (input.cell && !Z.cells.some((c) => c.id === input.cell)) return `${Z.name}에 셀 ${input.cell}이 없음 (셀: ${Z.cells.map((c) => c.id).join(', ')})`;
+      if (input.action === 'MAINT' && !input.cell) return '예방정비는 셀을 지정해야 함';
+      if (input.action === 'SPEED' && input.cell) return '셀 하나의 속도는 바꿀 수 없음 (Zone 전체 속도만)';
+      if (input.action === 'SPEED' && !(+input.arg >= 30 && +input.arg <= 120)) return '속도는 30~120%';
+      if (input.action === 'MIX' && !Z.mixes?.[input.arg]) return `${Z.name} 혼류 비율 키가 아님 (${Object.keys(Z.mixes ?? {}).join(', ') || '혼류 없음'})`;
+      if ((input.action === 'FEED_HOLD' || input.action === 'FEED_RESUME') && input.zone === 'insp') return '정밀검사Zone은 투입 단계가 없음 (다른 Zone 시료를 받음)';
+      return null;
+    }
     case 'expedite_supply':
       if (!(snap.material.supply_disrupted_remaining_s > 0)) return '현재 공급 차질이 없음';
       if (snap.material.expedited) return '이번 차질에는 이미 긴급 조달을 실행함';

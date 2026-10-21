@@ -10,7 +10,7 @@ import { blenderOn, cloneAsset, RENDER } from './blender.js';
 import { makeProductMachine } from './product-machines.js';
 import { attachSpotGun, attachSealGun, attachVacuumGripper, attachNutrunner, holdPart, makeHose, processMarks } from './endeffectors.js';
 import { pointAt, pathLength, ROBOT_KINDS, PARALLEL_GAIN } from './line.js';
-import { EXTRA_ZONES, ZONE_FAC, zoneRobotUid, zoneAmrUid, ZONE_FG_CAP, zonePack } from './zonedefs.js';
+import { EXTRA_ZONES, ZONE_FAC, zoneRobotUid, zoneAmrUid, ZONE_FG_CAP, zonePack, zoneCtl } from './zonedefs.js';
 import { BATTERY, moverRadius, moverWidth } from './sim.js';
 export { EXTRA_ZONES };
 
@@ -161,10 +161,10 @@ const TEND = { robot: { x: -0.1, z: -1.25 }, mc: { z: -3.25 }, table: { x: -0.1,
 // 키팅 빈은 속 부품 윗면(0.49m) 위에서 집는다 (손가락이 빈 속 부품에 들어가지 않게)
 const PICK_AT = { kit: (r) => ({ x: 0.45, y: 0.505, z: Math.sign(r.slot.z) * 1.15 }), mount: (r) => ({ x: 0.35, y: 0.972, z: Math.sign(r.slot.z) * 2.05 }) };
 // 헤밍 셀(C05): 로봇은 AMR 정차 자리(셀 가운데)와 헤밍 프레스(셀 로컬 z 1.9, 베드 윗면 0.77m) 사이 통로 쪽 받침대(0.45m) 위에서 패널을 옮긴다
-// 받침대가 없으면 J1 하우징이 프레스 베이스(높이 0.65m · 앞면 z 1.1) 위를 돌며 부딪히고, 더 앞(z > 0.9)이면 받침대가 베이스에 닿는다
+// 받침대가 없으면 J1 하우징이 프레스 베이스(높이 0.65m · 앞면 z 1.1) 위를 돌며 부딪히고, 더 앞(z > 0.82)이면 받침대·J1 하우징이 베이스·기둥에 닿는다
 // x는 패널 끝(±0.8m) 바깥 — 패널 길이 안쪽에 서면 프레스에 넣을 때 패널 안쪽 가장자리가 로봇 어깨·위팔 위에 걸린다
 // 프레스 램은 넣고 뺄 때 0.5m 더 열리고(손목·아래팔이 다이 밑으로 들어감), 헤밍 때 다이 아래면이 패널 윗면까지 내려온다
-const HEM = { robot: { x: -1.1, z: 0.87, y: 0.5 }, press: { x: 0, z: 1.9 }, bedY: 0.77, open: 0.5, dieY: 1.1, edge: 0.15 };
+const HEM = { robot: { x: -1.1, z: 0.8, y: 0.5 }, press: { x: 0, z: 1.9 }, bedY: 0.77, open: 0.5, dieY: 1.1, edge: 0.15 };
 // 머신텐딩 동작 경유점 (로봇 루트 로컬: +z = 기계 쪽, 높이는 루트 기준) — 문 밖 대기 · 문 앞 · 테이블/척 · AMR 위 · AMR 지그
 // 대기(home)는 팔을 접어 TCP를 몸 앞 0.15m에 둔다 — 머시닝센터 문이 로봇 중심에서 0.53m 앞이라, 0.45m 앞에 두면 닫힌 문(가공 중)에 팔·그리퍼가 들어간다
 const TEND_PTS = (() => {
@@ -657,6 +657,7 @@ class ExtraZone {
 
   // 새 실행(단계·라인 변경)마다 처음부터
   reset(modeKey = 'smart', seed = 1) {
+    this.ctl = zoneCtl();   // 운영자 대화 지시 제어 (정지 · 셀 정지 · 속도 · 투입 정지) — 단계를 바꾸면 처음으로
     this.mode = modeKey; this.rng = mulberry(seed + (this.Z.key === 'flex' ? 11 : 23));
     this.time = 0; this.seq = 0; this.mixAcc = {}; this.starved = false;
     if (this.board2) { this.board2.g.visible = this.srv.visible = this.pkG.visible = modeKey !== 'traditional'; }
@@ -834,7 +835,9 @@ class ExtraZone {
 
   // ── 흐름 시뮬레이션 (dt: 시뮬레이션 초) ─────────────────
   step(dt, halted) {
-    if (halted) { for (const c of this.order) if (c.state === 'BUSY') c.halt = true; return; }
+    const K = this.ctl ??= zoneCtl();
+    if (halted || K.stop) { for (const c of this.order) if (c.state === 'BUSY') c.halt = true; return; }   // 정밀조립 비상·보호정지 또는 운영자 Zone 정지(대화 지시)
+    dt *= K.speed;   // 운영자 Zone 속도 (대화 지시 · 셀 작업과 AMR 이동 모두)
     this.time += dt;
     const Z = this.Z;
     // 셀 작업
@@ -844,6 +847,7 @@ class ExtraZone {
       const zc = this.sim?.zoneCell(Z.key, c.id); c.fault = zc && (zc.state === 'DOWN' || zc.state === 'MAINT') ? zc.state : null;
       if (zc) zc.busy = c.state === 'BUSY';
       if (c.fault) continue;
+      if (K.hold.has(c.id)) { if (c.state === 'BUSY') c.halt = true; continue; }   // 운영자 셀 정지 (대화 지시) — 다시 지시할 때까지 그 자리
       if (c.state !== 'BUSY') continue;
       // 셀 OCS HOLD: 품목 전환(유연생산 CHANGEOVER) · 공구 교환(적응가공) 동안은 작업이 진행되지 않는다
       if (c.holdT > 0) { c.holdT -= dt; c.busy += dt; if (c.holdT <= 0) c.hold = null; continue; }
@@ -890,7 +894,7 @@ class ExtraZone {
       case 'queue': {   // 투입 대기열 — 앞자리가 비면 한 칸씩 당기고, 맨 앞이면서 투입 위치가 비면 들어간다
         const k = this.carriers.filter((o) => o.state === 'queue' && o.qAt < c.qAt).length;
         const q = this.qSlots[Math.min(k, this.qSlots.length - 1)];
-        if (k === 0 && !this.src.occ) { this.src.occ = c; this.go(c, [{ x: c.x, z: c.z }, { x: Z.src.x, z: Z.src.z }], 'toSrc', 'SRC'); break; }
+        if (k === 0 && !this.src.occ && !this.ctl?.feed) { this.src.occ = c; this.go(c, [{ x: c.x, z: c.z }, { x: Z.src.x, z: Z.src.z }], 'toSrc', 'SRC'); break; }   // 투입 정지(대화 지시) 중에는 대기열에서 기다린다
         this.moveToward(c, q, Z.amr.ret * sc, dt);
         break;
       }

@@ -2134,7 +2134,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
         }
       }
       if (b.ext) {   // 신축 롤러: AGV가 상차 자리 가까이 오면 뻗고, 떠나면 접힌다
-        const agv = sim.movers.some((o) => o.kind === 'agv' && Math.hypot(o.x - b.pick.x, o.z - b.pick.z) < 0.3);
+        const agv = sim.movers.some((o) => o.kind === 'agv' && waitAt(o, b.pick.x, b.pick.z, 0.3));   // 상차 자리에 멈춘 뒤에만 뻗는다 — 들어오는 중에 뻗으면 AGV 상판 옆면에 롤러가 닿는다
         b.e = Math.max(0, Math.min(1, b.e + (agv ? 1 : -1) * dt * 1.6)); b.ext.position.x = -b.len * (1 - b.e);
       }
       const t = b.tote, end = b.rest;
@@ -2149,7 +2149,9 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
           const hx = m.x - WH_RACK.x - 0.36 - TOTE.x / 2, u = Math.min(1, k * 2);
           t.position.set(end + (hx - end) * u, M.conv + TOTE.y / 2 + 0.5 * u, b.lz + (m.z - S.zc - b.lz) * u);
         } else {
-          const mx = m.x - WH_RACK.x, mz = m.z - S.zc, dy = m.kind === 'agv' ? 0.56 : 0.2;   // AGV 적재 면 · 지게차 포크
+          // 넘겨줄 자리: AGV는 적재 면 가운데 · 지게차는 포크 위(차체 앞 1.3m) — 지게차 가운데로 보내면 토트가 카운터웨이트와 겹친다
+          const fl = m.kind !== 'agv' && this.vehicleViews?.find((v) => v.v === m)?.g.userData.load, fp = fl && S.g.worldToLocal(fl.getWorldPosition(new THREE.Vector3()));
+          const mx = fp ? fp.x : m.x - WH_RACK.x, mz = fp ? fp.z : m.z - S.zc, dy = m.kind === 'agv' ? 0.56 : fp ? fp.y + 0.12 : 0.2;   // AGV 적재 면 · 지게차 포크 위 팔레트 면
           if (b.ext) k = Math.max(0, (k - 0.3) / 0.7);   // 신축 롤러가 다 뻗은 뒤 넘긴다
           t.position.set(end + (mx - end) * k, M.conv + (dy - M.conv) * Math.min(1, k * 1.4) + TOTE.y / 2, b.lz + (mz - b.lz) * k);
         }

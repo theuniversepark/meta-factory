@@ -3,6 +3,7 @@
 // 해석하지 못한 문장은 Claude가 연결되어 있을 때 Claude가 해석해 같은 조치(도구)로 돌려준다.
 import { parseInstruction, applyAction, DIALOG_EXAMPLES } from './dialog.js';
 import { evaluate } from './gate.js';
+import { zoneOfText, zoneCtx, zoneName, parseZoneInstruction, evaluateZone, applyZone, zonesSnapshot, ZONE_EXAMPLES } from './zonedialog.js';
 import { runAgentTurn, runAgentTurnSample, MODEL } from './agentcore.js';
 
 const HISTORY = 12;
@@ -153,10 +154,13 @@ export class LLMController {
   chat(text) {
     if (!this.enabled) return false;
     const sim = this.sim;
-    this.history.push({ t: fmt(sim.time), who: '운영자', text });
-    const rec = { id: (this.dlgSeq = (this.dlgSeq ?? 0) + 1), t: sim.time, text, items: [] };
+    // 대상 Zone: 문장에 Zone 이름이 있으면 그 Zone, 없으면 왼쪽에서 고른 Zone (main.js zoneView) — 유연생산·적응가공·정밀검사는 zonedialog.js
+    const zk = zoneOfText(text) ?? this.zoneView?.() ?? 'main';
+    this.history.push({ t: fmt(sim.time), who: '운영자', text: zk === 'main' ? text : `[${zoneName(zk)}] ${text}` });
+    const rec = { id: (this.dlgSeq = (this.dlgSeq ?? 0) + 1), t: sim.time, text, items: [], zone: zk };
     (this.dialogs ??= []).unshift(rec); if (this.dialogs.length > 40) this.dialogs.pop();
-    sim.log('chat', '운영자 지시', { obs: text, dlg: rec.id });
+    sim.log('chat', '운영자 지시', { obs: zk === 'main' ? text : `[${zoneName(zk)}] ${text}`, dlg: rec.id, zone: zk });
+    if (zk !== 'main') return this.chatZone(rec, text, zk);
     const { actions, unknown } = parseInstruction(text, sim);
     for (const a of actions) this.gateAndRun(rec, a, '내장 해석기');
     for (const c of unknown) {
@@ -168,8 +172,35 @@ export class LLMController {
     return true;
   }
 
+  // 확장 Zone 지시: 내장 해석기 → 게이트 → 반영/미반영 · 알 수 없는 문장은 Agent(Claude)가 Zone 스냅샷을 보고 zone_command로 해석 (없으면 미반영 · 원인 보고)
+  chatZone(rec, text, zk) {
+    const sim = this.sim, ctx = zoneCtx(sim, zk);
+    if (!ctx) { rec.items.push({ clause: text, source: '내장 해석기', gate: { checks: [{ key: 'target', status: 'fail', text: `알 수 없는 Zone ${zk}` }], verdict: 'reject', reason: '알 수 없는 Zone', summary: text } }); this.logDialog(rec); return true; }
+    const { actions, unknown } = parseZoneInstruction(text, ctx);
+    for (const a of actions) this.gateAndRun(rec, a, '내장 해석기');
+    for (const c of unknown) {
+      if (this.available) rec.items.push({ clause: c, source: 'Agent', gate: { checks: [{ key: 'parse', status: 'warn', text: `"${c}" — 내장 해석기로 알 수 없어 Agent(Claude)에 ${ctx.name} 상태와 함께 해석 요청` }], verdict: 'pending', summary: 'Agent 해석 대기' } });
+      else {
+        const g = evaluateZone({ type: 'unknown', clause: c }, ctx);
+        g.reason = `내장 해석기로 알 수 없음 · AI(Agent) 미연결이라 해석 보조 불가`; g.alt = `예: ${(ZONE_EXAMPLES[zk] ?? []).slice(0, 3).join(' · ')} — 또는 설정에서 API 키 연결`;
+        rec.items.push({ clause: c, source: '내장 해석기', gate: g });
+      }
+    }
+    this.logDialog(rec);
+    if (unknown.length && this.available) { this.pendingDialog = rec; this.request(`${ctx.name} 운영자 지시 해석 (내장 해석기로 알 수 없는 문장)`, true, `[대상 Zone: ${ctx.name} (zone=${zk}) — zone_command 도구로 반영하거나, 할 수 없으면 도구 없이 이유를 답하십시오] ${unknown.join(' / ')}`); }
+    return true;
+  }
+
   // 게이트 판정 후 수행(실행 결과·명령 추적) 또는 거절
   gateAndRun(rec, a, source) {
+    if (a.zone && a.zone !== 'main') {   // 확장 Zone 조치 (zonedialog.js)
+      const ctx = zoneCtx(this.sim, a.zone), gate = evaluateZone(a, ctx), item = { clause: a.clause, source, action: a, gate };
+      if (gate.verdict === 'approve' || gate.verdict === 'answer') {
+        const r = applyZone(a, ctx, { onMix: this.onZoneMix }); item.result = r;
+        if (!r.ok) { gate.verdict = 'reject'; gate.reason = r.text; } else if (gate.verdict === 'approve') this.agent.decisions++;
+      }
+      rec.items.push(item); return item;
+    }
     const sim = this.sim, gate = evaluate(a, sim, this.agent);
     const item = { clause: a.clause, source, action: a, gate };
     if (gate.verdict === 'approve' || gate.verdict === 'answer') {
@@ -185,14 +216,14 @@ export class LLMController {
   logDialog(rec, items = rec.items) {
     const sim = this.sim;
     if (!items.length) return;
-    const line = (it) => it.gate.verdict === 'approve' ? `✓ 수행 · ${it.result?.text ?? it.gate.summary}`
+    const line = (it) => it.gate.verdict === 'approve' ? `✓ 반영 · ${it.result?.text ?? it.gate.summary}`
       : it.gate.verdict === 'answer' ? `💬 ${it.result?.text ?? ''}` : it.gate.verdict === 'pending' ? `⏳ ${it.gate.summary} · "${it.clause}"`
-      : `✗ 거절 · ${it.gate.summary} — ${it.gate.reason}${it.gate.alt ? ` (${it.gate.alt})` : ''}`;
+      : `✗ 미반영 · ${it.gate.summary} — 원인: ${it.gate.reason}${it.gate.alt ? ` (대안: ${it.gate.alt})` : ''}`;
     const nOk = items.filter((i) => i.gate.verdict === 'approve').length, nNo = items.filter((i) => i.gate.verdict === 'reject').length;
-    sim.log('dialog', `지시 게이트 · 수행 ${nOk} · 거절 ${nNo}${items.some((i) => i.gate.verdict === 'answer') ? ' · 응답' : ''}${items.some((i) => i.gate.verdict === 'pending') ? ' · Agent 해석 중' : ''}`, {
+    sim.log('dialog', `${rec.zone && rec.zone !== 'main' ? `${zoneName(rec.zone)} ` : ''}지시 게이트 · 반영 ${nOk} · 미반영 ${nNo}${items.some((i) => i.gate.verdict === 'answer') ? ' · 응답' : ''}${items.some((i) => i.gate.verdict === 'pending') ? ' · Agent 해석 중' : ''}`, {
       obs: [...new Set(items.map((i) => i.clause))].join(' / '),
       dec: items.map((i) => i.gate.checks.map((c) => `${{ pass: '✓', warn: '⚠', fail: '✗' }[c.status]}${{ parse: '해석', target: '대상', safety: '안전', feasible: '가능', impact: '영향' }[c.key]}`).join(' ')).join(' | '),
-      act: items.map(line).join('\n'), dlg: rec.id,
+      act: items.map(line).join('\n'), dlg: rec.id, zone: rec.zone ?? 'main',
     });
     this.history.push({ t: fmt(sim.time), who: '에이전트', text: items.map(line).join(' / ') });
   }
@@ -230,6 +261,7 @@ export class LLMController {
       }),
       vehicles: sim.vehicles.map((v) => ({ id: v.id, task: v.task ?? 'idle', battery: Math.round(v.battery) })),
       product_mix: sim.zone ? sim.line.mix : null,
+      zones: zonesSnapshot(sim),   // 확장 Zone(유연생산·적응가공·정밀검사) 상태·제어 — zone_command 해석 근거
       commands: { estop_all: sim.cmd.estopAll, pstop_all: sim.cmd.pstopAll, feed_hold: sim.cmd.feedHold, evacuate: sim.cmd.evac, line_speed_pct: Math.round(sim.cmd.lineSpeed * 100),
         cells: sim.processing.map((st) => ({ id: st.id, estop: !!st.cmd?.estop, hold: st.cmd?.hold ?? null, safe_speed: !!st.cmd?.safe, speed_pct: Math.round((st.cmd?.override ?? 1) * 100) })) },
       // 드론 현장 관찰: 사고 현장을 먼저 날아가 본 영상 분석 결과 — 대응 조치 수립 근거
@@ -260,12 +292,12 @@ export class LLMController {
       for (const r of out.rejected) this.sim.log('warn', `Agent 제안 반려 · ${r.name}`, { obs: r.input.reason, dec: r.error });
       const rec = this.pendingDialog; this.pendingDialog = null;
       if (rec) {
-        for (const it of rec.items) if (it.gate.verdict === 'pending') { it.gate.verdict = rec.agentItems?.length ? 'delegated' : 'reject'; it.gate.reason = rec.agentItems?.length ? 'Agent가 해석해 아래 조치로 전환' : 'Agent도 공정 조치로 해석하지 못함'; it.gate.checks[0].text += rec.agentItems?.length ? ' → 해석됨' : ' → 조치 없음'; it.reply = out.text; }
-        this.logDialog(rec, rec.agentItems ?? []);
+        for (const it of rec.items) if (it.gate.verdict === 'pending') { it.gate.verdict = rec.agentItems?.length ? 'delegated' : 'reject'; it.gate.reason = rec.agentItems?.length ? 'Agent가 해석해 아래 조치로 전환' : `Agent 판단: ${(out.text || '공정 조치로 해석하지 못함').replace(/\s+/g, ' ').slice(0, 160)}`; it.gate.checks[0].text += rec.agentItems?.length ? ' → 해석됨' : ' → 조치 없음'; it.reply = out.text; }
+        this.logDialog(rec, rec.agentItems?.length ? rec.agentItems : rec.items.filter((i) => i.source === 'Agent'));   // Agent가 조치하지 않았으면 미반영과 그 원인(Agent 판단)을 보고
       }
       if (out.text) {
         this.history.push({ t: fmt(this.sim.time), who: '에이전트', text: out.text });
-        this.sim.log('llm', 'Agent 판단', { obs: trigger, dec: out.text, act: out.actions.length ? `조치 ${out.actions.length}건 실행` : '추가 조치 없음' });
+        this.sim.log('llm', 'Agent 판단', { obs: trigger, dec: out.text, act: out.actions.length ? `조치 ${out.actions.length}건 실행` : '추가 조치 없음 (원인은 위 판단 참고)', zone: rec?.zone ?? 'main' });
       }
       this.status = `${(out.latencyMs / 1000).toFixed(1)}초 응답 · 조치 ${out.actions.length}건`;
     } catch (e) {
@@ -324,6 +356,17 @@ export class LLMController {
         const r = applyAction(a, sim, { by: 'Agent · 대화 지시 해석', agent, onMix: this.onMix });
         if (!r.ok) { sim.log('warn', `Agent 조치 미적용 · ${r.text}`, { dec: input.reason }); return; }
         act = r.text;
+        break;
+      }
+      case 'zone_command': {   // 확장 Zone 지시 해석 결과 — 내장 해석기와 같은 게이트·실행 경로
+        const map = { STOP: { type: 'zrun', stop: true }, RESUME: { type: 'zrun', stop: false }, FEED_HOLD: { type: 'zfeed', on: true }, FEED_RESUME: { type: 'zfeed', on: false }, SPEED: { type: 'zspeed', pct: Number(input.arg) || 100 }, MAINT: { type: 'zmaint' }, MIX: { type: 'zmix', mix: input.arg }, STATUS: { type: 'zstatus' } }[input.action];
+        if (!map) return;
+        const a = { zone: input.zone, cell: input.cell || null, clause: input.reason, ...map };
+        const rec = this.pendingDialog;
+        if (rec) { rec.agentItems ??= []; rec.agentItems.push(this.gateAndRun(rec, a, 'Agent')); return; }
+        const item = this.gateAndRun({ items: [] }, a, 'Agent');
+        if (item.gate.verdict === 'reject') { sim.log('warn', `Agent 조치 미반영 · ${item.gate.reason}`, { dec: input.reason, zone: input.zone }); return; }
+        act = item.result?.text ?? item.gate.summary;
         break;
       }
       default:
