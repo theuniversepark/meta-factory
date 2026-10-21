@@ -1054,8 +1054,8 @@ class ExtraZone {
   toolMarks(c, r, pm, rdt) {
     const tcp = r.tip.getWorldPosition(new THREE.Vector3());
     if (c.def.type === 'spot') {
-      r.sparks ??= put(makeSparks(0xffe08a, 110, 0.032), 0, 0, 0, c.g);
-      r.flash ??= put(new THREE.Mesh(new THREE.SphereGeometry(0.035, 12, 8), new THREE.MeshBasicMaterial({ color: 0xfff4d0, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false })), 0, 0, 0, c.g);   // 통전 섬광 (전극 접점)
+      r.sparks ??= put(makeSparks(0xffe08a, 110, 0.026), 0, 0, 0, c.g);
+      r.flash ??= put(new THREE.Mesh(new THREE.SphereGeometry(0.016, 12, 8), new THREE.MeshBasicMaterial({ color: 0xfff4d0, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false })), 0, 0, 0, c.g);   // 통전 섬광 (전극 접점)
       const on = !!r.pwContact; r.weldOn = on; r.sparkAt = c.g.worldToLocal(tcp.clone());
       r.flash.visible = on; if (on) { r.flash.position.copy(r.sparkAt); r.flash.scale.setScalar(0.7 + Math.random() * 0.8); r.flash.material.opacity = 0.55 + Math.random() * 0.4; }
       if (on) { r.weldT = (r.weldT ?? 0) + rdt; r.weldP = pm.worldToLocal(tcp.clone()); }
@@ -1215,7 +1215,7 @@ class ExtraZone {
     if (P.machine) { P.machine.update({ busy, progress: p, time: t, rdt, dts, frozen: !!c.halt || this.halted, fault: !!c.fault, open: c.robots.some((r) => r.tendInside) || undefined }); return; }   // 팔이 기계 안에 있으면 문을 열어 둔다
     switch (ty) {
       case 'locate': P.scan.visible = busy && p > 0.05 && p < 0.45; if (P.scan.visible) P.scan.position.x = Math.sin(p * PI * 6) * 0.7; break;   // 비전 측정 → 로봇 보정 (locateWork)
-      case 'spot': stepSparks(P.sparks, legacy && busy && Math.sin(t * 6) > -0.3, { x: -0.3, y: BELT_Y + 0.45, z: 0 }, rdt, 2.2, -7); for (const r of c.robots) { if (r.sparks) stepSparks(r.sparks, !!r.weldOn && busy, r.sparkAt, rdt, 3.2, -8); if (r.flash && !busy) r.flash.visible = false; } break;   // 수작업(레거시)만 셀 가운데 — 로봇은 툴 끝 (toolMarks)
+      case 'spot': stepSparks(P.sparks, legacy && busy && Math.sin(t * 6) > -0.3, { x: -0.3, y: BELT_Y + 0.45, z: 0 }, rdt, 2.2, -7); for (const r of c.robots) { if (r.sparks) stepSparks(r.sparks, !!r.weldOn && busy, r.sparkAt, rdt, 1.5, -9); if (r.flash && !busy) r.flash.visible = false; } break;   // 수작업(레거시)만 셀 가운데 — 로봇은 툴 끝 (toolMarks)
       case 'seal': P.lamp.emissiveIntensity = busy ? 1.4 : 0.5; for (const r of c.robots) if (r.hose) this.sealHose(c, r); break;
       case 'hem': { const k = busy && p > 0.45 && p < 0.85 ? Math.sin(((p - 0.45) / 0.4) * PI) : 0; P.ram.position.y = 2.2 - k * 1.05; break; }
       case 'mount': P.screen.emissive.setHex(busy && Math.sin(t * 10) > 0 ? 0xf5b82e : 0x3ddc84); break;
