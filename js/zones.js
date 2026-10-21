@@ -14,7 +14,7 @@ import { EXTRA_ZONES, ZONE_FAC, zoneRobotUid, zoneAmrUid, ZONE_FG_CAP, zonePack 
 import { BATTERY, moverRadius, moverWidth } from './sim.js';
 export { EXTRA_ZONES };
 
-const { std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, makeRobot, ammrContact, contactBox, surfaceY, pointWork, alignTool, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK, makeArm, ARM_JOINTS, buildWeld, buildGate, buildVision } = KIT;
+const { std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, makeRobot, ammrContact, contactBox, surfaceY, supportBox, pointWork, alignTool, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK, makeArm, ARM_JOINTS, buildWeld, buildGate, buildVision } = KIT;
 const PI = Math.PI;
 const PC = { shared: 0x2bb3a6, hood: 0xf0a030, door: 0x9a6bff, hblock: 0xf0a030, rcover: 0x9a6bff, ng: 0xd23b3b };
 const USE_CLS = { hood: 'doortrim', hblock: 'doortrim', door: 'eaxle', rcover: 'eaxle' };   // 셀 라벨 색 (주황·보라)
@@ -1190,9 +1190,12 @@ class ExtraZone {
         const n = 2 + (seed * 7 + i * 2) % 3, u = wcar ? (p - W.from) / (W.to - W.from) : 0;
         // 마주 보는 로봇(통로 반대편에 같은 x 대)이 있으면 반 점씩 엇갈려 — 한쪽이 점에 내려가 있을 때 다른 쪽은 위로 옮겨 간다
         const facing = c.robots.some((o) => o !== r && o.slot && Math.sign(o.slot.z) === -Math.sign(r.slot.z) && Math.abs(o.slot.x - r.slot.x) < 0.5), d = facing ? 0.5 / 4 : 0;
-        const uu = !facing ? u : r.slot.z < 0 ? u / (1 - d) : (u - d) / (1 - d);
+        let uu = !facing ? u : r.slot.z < 0 ? u / (1 - d) : (u - d) / (1 - d);
+        // 용접: 두 로봇이 같은 짧은 끝(후드 — 긴 가장자리 밑은 지그라 아래 전극이 못 들어감)을 용접하면 앞 절반 · 뒤 절반을 나눠 차례로 — 동시에 끝 가운데로 오면 아래팔(J4)끼리 닿는다
+        if (c.def.type === 'spot' && facing && r.pwEnd && r.pwKey === `${c.item?.id}:${i}`) uu = r.slot.z < 0 ? u * 2 : (u - 0.5) * 2;
         const pick = r.held ? PICK_AT[c.def.type]?.(r) : null;   // 부품함 (키팅 빈 · 힌지 트레이)
-        pointWork(r, { key: `${c.item?.id}:${i}`, box: () => wcar && contactBox(wcar.pm, r.root.parent), obj: wcar?.pm, n, kind: W.kind, u: uu, robots: c.robots, align: c.def.type === 'spot', pick, spin: c.def.type === 'mount' });
+        pointWork(r, { key: `${c.item?.id}:${i}`, box: () => wcar && contactBox(wcar.pm, r.root.parent), obj: wcar?.pm, n, kind: W.kind, u: uu, robots: c.robots, align: c.def.type === 'spot', pick, spin: c.def.type === 'mount',
+          support: c.def.type === 'spot' ? () => wcar && supportBox(wcar.g, r.root.parent, wcar.pm, (contactBox(wcar.pm, r.root.parent)?.min[1] ?? BELT_Y) - 0.15) : null });   // 용접: 판 밑 지그 — 아래 전극이 들어갈 가장자리 고르기
         if (r.tool && wcar?.pm) this.toolMarks(c, r, wcar.pm, rdt);
         if (r.held) r.held.visible = !!r.pwHeld && !!wcar;   // 용접 불꽃·자국 · 실러 비드는 툴 끝이 대상물에 닿아 있는 동안 그 자리에
         return;

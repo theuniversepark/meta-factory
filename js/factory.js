@@ -855,13 +855,52 @@ function alignTool(r, q, local, want) {
   out[5] += r.j6Sign * ang(ax, cur, w);
   return out;
 }
+// 대상물 아랫면 높이 (부모 로컬 x·z에서 아래로부터 레이) — 없으면 윗면 − 1cm
+function surfaceBottom(obj, parent, x, z, top) {
+  const meshes = []; obj.traverse((m) => { if (m.isMesh && m.visible && m.parent?.name !== 'LiveProcessMarks') meshes.push(m); });
+  const o = parent.localToWorld(new THREE.Vector3(x, top - 0.6, z)); SURF_RAY.set(o, UP); SURF_RAY.far = 1;
+  const h = SURF_RAY.intersectObjects(meshes, false)[0];
+  return h ? parent.worldToLocal(h.point.clone()).y : top - 0.01;
+}
+// 지그·받침 상자: 운반체에서 대상물 바로 밑 높이(대상물 아랫면 − 0.15m 위)까지 올라오는 메시만 (AMR 차체는 뺀다)
+function supportBox(car, parent, pm, yMin) {
+  const bb = new THREE.Box3(), inv = parent.matrixWorld.clone().invert(); car.updateWorldMatrix(true, true);
+  car.traverse((m) => {
+    if (!m.isMesh || !m.visible) return; for (let p = m; p; p = p.parent) if (p === pm || !p.visible) return;
+    m.geometry.boundingBox ?? m.geometry.computeBoundingBox(); const b = m.geometry.boundingBox.clone().applyMatrix4(m.matrixWorld).applyMatrix4(inv);
+    if (b.max.y > yMin) bb.union(b);
+  });
+  return bb.isEmpty() ? null : { min: bb.min.toArray(), max: bb.max.toArray() };
+}
+// 스폿용접 점 계획: 로봇 쪽 긴 가장자리 밑이 비어 있으면(판이 지그보다 0.08m 넘게 나옴) 그 가장자리, 아니면 로봇 쪽 짧은 끝 — 점은 판 가장자리에서 안쪽으로 (튀어나온 길이 − 3cm, 최대 6cm)
+// 경로 점마다 [바깥(판 높이 · 건 벌림), 점(벌림), 점(닫힘 · 위 전극이 윗면), 바깥 0.3m 위] — 건은 세워(툴 축 수직) 가장자리 바깥에서 판 높이로 밀고 들어간다
+function weldPlan(r, o, b, S, loc, A) {
+  const [x0, , z0] = b.min, [x1, y1, z1] = b.max, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, f = Math.sign(cz - r.slot.z) || 1, P = r.root.parent;
+  const ze = f > 0 ? z0 : z1, ovZ = f > 0 ? S.min[2] - z0 : z1 - S.max[2];
+  const sx = Math.sign(r.slot.x - cx) || -1, xe = sx < 0 ? x0 : x1, ovX = sx < 0 ? S.min[0] - x0 : x1 - S.max[0];
+  let pts, out;
+  if (ovZ >= 0.08) {
+    const [xa, xb, inA, inB] = pointRange(r, o.robots, x0, x1), span = xb - xa - inA - inB, z = ze + f * Math.min(0.06, ovZ - 0.03);
+    pts = Array.from({ length: o.n }, (_, k) => [span > 0 ? xa + inA + span * (o.n === 1 ? 0.5 : k / (o.n - 1)) : (xa + xb) / 2, z]); out = new THREE.Vector3(0, 0, -f);
+  } else if (ovX >= 0.08) {
+    const x = xe - sx * Math.min(0.06, ovX - 0.03), za = f > 0 ? z0 + 0.06 : cz + 0.08, zb = f > 0 ? cz - 0.08 : z1 - 0.06;   // 마주 보는 로봇과 끝을 반씩 (가운데 0.16m 비움)
+    pts = Array.from({ length: o.n }, (_, k) => [x, o.n === 1 ? (za + zb) / 2 : za + (zb - za) * k / (o.n - 1)]); out = new THREE.Vector3(sx, 0, 0);
+  } else return null;
+  const ik = (x, y, z) => { const v = loc(x, y, z); return A.ik(v.x, v.y, v.z, true); }, gap = [];
+  const pl = pts.map(([x, z]) => {
+    const top = surfaceY(o.obj, P, null, x, z, y1), bot = surfaceBottom(o.obj, P, x, z, top); gap.push(Math.max(0.004, top - bot) + 0.002);
+    const sxo = x + out.x * 0.34, szo = z + out.z * 0.34;
+    return [ik(sxo, top + 0.012, szo), ik(x, top + 0.012, z), ik(x, top + 0.001, z), ik(sxo, top + 0.3, szo)];
+  });
+  return { pl, gap, out, end: ovZ < 0.08 };
+}
 // 6축·협동로봇 접촉 작업 (확장 Zone 셀): 대상물 윗면의 자기 점 n곳을 차례로 — 툴을 세워 위에서 접근 → 손끝 접촉 → 작업 → 들어 올림 — 처리하고 대기 자세로 돌아간다
 // kind: touch(접촉·정렬·측정) · press(용접 팁·헤밍·압입 1cm 누름) · screw(체결 — 손목 끝 회전) · trace(실링 — 점과 점 사이를 붙은 채 따라 긋기)
 // o: { key(대상물·로봇마다 다름), box(), n, kind, u(작업 구간 진행 0 ~ 1 — 밖이면 대기 자세), robots(셀 로봇 전부) }
 function pointWork(r, o) {
   const A = r.arm; if (!A?.native || !r.slot) return false;
   const P = r.root.parent, home = r.pwHome ??= r.pwHomeAt ? (() => { const v = r.root.worldToLocal(P.localToWorld(new THREE.Vector3(r.pwHomeAt.x, r.pwHomeAt.y, r.pwHomeAt.z))); return A.ik(v.x, v.y, v.z, true); })() : workHome(r);   // pwHomeAt: 셀이 정한 대기 위치 (셀 로컬)
-  const rest = () => { r.pwContact = false; r.pwHeld = false; r.pwCur = r.pwCur ? r.pwCur.map((v, k) => v + (home[k] - v) * 0.15) : home.slice(); A.pose(...r.pwCur); return true; };
+  const rest = () => { r.pwContact = false; r.pwHeld = false; r.tool?.userData.setGap?.(0.04, 0); r.pwCur = r.pwCur ? r.pwCur.map((v, k) => v + (home[k] - v) * 0.15) : home.slice(); A.pose(...r.pwCur); return true; };
   if (!(o.u > 0 && o.u < 1)) return rest();
   if (r.pwKey !== o.key) {
     const box = o.box(); if (!box) return rest();
@@ -876,10 +915,14 @@ function pointWork(r, o) {
     r.pwPlan = cm.side
       ? xs.map((_, k) => { const z = nz + f * (0.12 + 0.25 * (o.n === 1 ? 0.5 : k / (o.n - 1))), y = y1 - 0.08; return [ikS(fx + sx * 0.1, y, z), ikS(fx + sx * 0.012, y, z), ikS(fx + sx * (o.kind === 'press' ? 0.002 : 0.008), y, z), ikS(fx + sx * 0.3, y + 0.15, z)]; })
       : xs.map((x) => { const y = o.obj ? surfaceY(o.obj, P, null, x, zP, y1) : y1; return [ik(x, y + 0.08, zP), ik(x, y + 0.005, zP), ik(x, y - (o.kind === 'press' ? 0.01 : 0.002), zP), ik(x, y + 0.3, zP)]; });
-    if (o.pick) { const ikD = (x, y, z) => { const v = loc(x, y, z); return A.ik(v.x, v.y, v.z, true); }; r.pwPick = [ikD(o.pick.x, o.pick.y + 0.25, o.pick.z), ikD(o.pick.x, o.pick.y, o.pick.z)]; }   // 부품함: 위 · 집는 높이
+    if (o.align && o.support) {   // 스폿용접 C건: 아래 전극 턱이 들어갈 틈(판 밑에 지그가 없는 가장자리)에만 점을 두고, 건을 세워 그 가장자리 바깥에서 판 높이로 밀어 넣는다
+      const S = o.support(), plan = S && weldPlan(r, o, box, S, loc, A);
+      if (plan) { r.pwPlan = plan.pl; r.pwGap = plan.gap; r.pwOut = plan.out; r.pwEnd = plan.end; r.pwPick = null; r.pwKey = o.key; }
+    }
+    if (r.pwKey === o.key) { /* 용접 계획 완료 */ }
+    else if (o.pick) { const ikD = (x, y, z) => { const v = loc(x, y, z); return A.ik(v.x, v.y, v.z, true); }; r.pwPick = [ikD(o.pick.x, o.pick.y + 0.25, o.pick.z), ikD(o.pick.x, o.pick.y, o.pick.z)]; }   // 부품함: 위 · 집는 높이
     else r.pwPick = null;
-    r.pwOut = new THREE.Vector3(0, 0, -f);   // 점에서 판 바깥쪽(로봇 쪽 가장자리 밖) — C형 용접 건 등을 이쪽으로 (o.align)
-    r.pwKey = o.key;
+    if (r.pwKey !== o.key) { r.pwOut = new THREE.Vector3(0, 0, -f); r.pwGap = null; r.pwKey = o.key; }   // 점에서 판 바깥쪽(로봇 쪽 가장자리 밖)
   }
   const pl = r.pwPlan, n = pl.length, lerp = (a, b, k) => a.map((v, j) => v + (b[j] - v) * k), ease = (k) => { k = Math.min(1, Math.max(0, k)); return k * k * (3 - 2 * k); };
   const u = o.u; let q, spin = 0, contact = false, idx = -1; r.pwHeld = false;
@@ -904,6 +947,7 @@ function pointWork(r, o) {
     q = !k && f < 0.3 ? above : f < 0.12 ? lerp(pl[k - 1][0], prevHigh, ease(f / 0.12)) : f < 0.22 ? lerp(prevHigh, high, ease((f - 0.12) / 0.1)) : f < 0.3 ? lerp(high, above, ease((f - 0.22) / 0.08)) : f < 0.4 ? lerp(above, touch, ease((f - 0.3) / 0.1)) : f < 0.8 ? lerp(touch, work, ease((f - 0.4) / 0.1)) : lerp(work, above, ease((f - 0.8) / 0.2));
     if (o.kind === 'screw' && f >= 0.4 && f < 0.8) spin = (f - 0.4) / 0.4 * Math.PI * 8;
     contact = f >= 0.42 && f < 0.8; idx = k;   // 툴 끝이 대상물에 닿아 작업 중 (용접 통전 · 압입) — zones.js가 불꽃·용접 자국을 이 구간에만
+    if (r.pwGap) r.tool?.userData.setGap?.(r.pwGap[k], f >= 0.4 && f < 0.8 ? Math.min(1, (f - 0.4) / 0.04) * (1 - Math.max(0, (f - 0.76) / 0.04)) : 0);   // C건 아래 전극: 판 두께만큼 벌린 채 들어가 닫고(가압) 다시 벌려 빠져나온다
   }
   r.pwCur = q.slice(); const out = q.slice(); out[5] += spin; A.pose(...out);
   r.pwContact = contact; r.pwIdx = idx;
@@ -3652,6 +3696,6 @@ function lerpAngle(a, b, k) {
 // 확장 Zone(js/zones.js — 유연생산Zone · 적응가공Zone)이 정밀조립Zone과 같은 재질·로봇·설비 모델을 쓰도록 내보낸다
 export const KIT = {
   std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, ZONE_COLOR,
-  makeRobot, ammrContact, contactBox, surfaceY, pointWork, alignTool, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK, makeArm, ARM_JOINTS,
+  makeRobot, ammrContact, contactBox, surfaceY, supportBox, pointWork, alignTool, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK, makeArm, ARM_JOINTS,
   buildWeld, buildSort, buildGate, buildVision, fillBins,
 };

@@ -17,18 +17,22 @@ function mount(arm, build) {
   const g = new THREE.Group(); g.name = 'EndEffector'; fl.add(g); build(g); return g;
 }
 
-// 스폿용접 C건: 위 전극 팁이 TCP(y 0.15) · 아래 전극 팁 y 0.19 (판 사이 4cm 미만 간격) · 목(throat) 깊이 0.26m — 판 가장자리 0.08m 안쪽 점까지 아래 전극이 판 밑으로 들어간다
+// 스폿용접 C건: 위 전극 팁이 TCP(y 0.15) · 아래 전극(턱 · 팁 · 홀더)은 C암을 따라 툴 축 방향으로 움직인다 — setGap(판 두께, 닫힘 0~1)
+// 벌림 = 판 두께 + 3cm(열림) → 판 두께(닫힘: 아래 팁이 판 아랫면) · 목(throat) 깊이 0.26m — 판 가장자리 안쪽 점까지 아래 전극이 판 밑으로 들어간다
 export function attachSpotGun(arm) {
   return mount(arm, (g) => {
-    box(0.14, 0.05, 0.14, M.arm, 0, 0.025, 0, g);                      // 플랜지 어댑터
-    box(0.22, 0.16, 0.2, M.body, -0.1, 0.07, 0, g);                    // 변압기·서보 모터
-    box(0.02, 0.1, 0.12, M.blue, -0.215, 0.07, 0, g);                  // 용접 타이머 케이블 박스
-    cyl(0.03, 0.03, 0.06, M.arm, 0, 0.11, 0, g);                       // 위 전극 홀더
-    cyl(0.012, 0.016, 0.04, M.copper, 0, 0.13, 0, g);                  // 위 전극 캡 (끝 = TCP)
-    box(0.05, 0.3, 0.05, M.arm, -0.26, 0.2, 0, g);                     // C암 등 (툴 축 옆)
-    box(0.29, 0.045, 0.05, M.arm, -0.125, 0.33, 0, g);                 // 아래 턱 (판 밑으로)
-    cyl(0.016, 0.012, 0.05, M.copper, 0, 0.215, 0, g).rotation.x = 0;  // 아래 전극 캡 (끝 y 0.19 — 위를 봄)
-    cyl(0.022, 0.022, 0.09, M.arm, 0, 0.285, 0, g);                    // 아래 전극 홀더
+    box(0.14, 0.05, 0.14, M.arm, 0, 0.025, 0, g).name = 'GunAdapter';                  // 플랜지 어댑터
+    box(0.22, 0.1, 0.2, M.body, -0.1, 0.045, 0, g).name = 'GunTransformer';            // 변압기·서보 모터 (아랫면이 위 전극 끝보다 5cm 위 — 판 윗면에 닿지 않게)
+    box(0.02, 0.1, 0.12, M.blue, -0.215, 0.07, 0, g).name = 'GunTimerBox';             // 용접 타이머 케이블 박스
+    cyl(0.03, 0.03, 0.06, M.arm, 0, 0.11, 0, g).name = 'GunUpperHolder';               // 위 전극 홀더
+    cyl(0.012, 0.016, 0.04, M.copper, 0, 0.13, 0, g).name = 'GunUpperTip';             // 위 전극 캡 (끝 = TCP)
+    box(0.05, 0.36, 0.05, M.arm, -0.26, 0.2, 0, g).name = 'GunCArm';                   // C암 등 (툴 축 옆)
+    const low = new THREE.Group(); low.name = 'GunLower'; g.add(low);
+    box(0.29, 0.045, 0.05, M.arm, -0.125, 0.33, 0, low).name = 'GunLowerJaw';           // 아래 턱 (판 밑으로)
+    cyl(0.016, 0.012, 0.05, M.copper, 0, 0.215, 0, low).name = 'GunLowerTip';            // 아래 전극 캡 (끝 y 0.19 — 위를 봄)
+    cyl(0.022, 0.022, 0.09, M.arm, 0, 0.285, 0, low).name = 'GunLowerHolder';           // 아래 전극 홀더
+    g.userData.setGap = (gap, close = 0) => { low.position.y = gap + (1 - close) * 0.03 - 0.04; };
+    g.userData.setGap(0.04, 0);
   });
 }
 
