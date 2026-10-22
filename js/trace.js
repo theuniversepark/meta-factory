@@ -8,7 +8,8 @@
 // ④ 내려받기: 사례 하나 / 전체 — EPCIS 2.0 JSON-LD 이벤트 · ISA-95 계보 JSON · 학습용 특징 표(CSV, 제품 1행) · 환경 시계열(CSV) · 인과 그래프 · 8D 기록 · LLM 분석 프롬프트
 // 시뮬레이션 난수(sim.rand)를 쓰지 않는다 — 환경·측정값은 별도 난수라 기존 생산 흐름이 그대로다. 헤드리스에서도 같은 흐름으로 동작한다.
 
-import { serialEpcis, serialsCSV } from './serial.js';
+import { serialsCSV } from './serial.js';
+import { serialEpcis } from './epcis.js';
 
 const mulberry = (a) => () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 const gaussOf = (r) => () => { let u = 0, v = 0; while (!u) u = r(); while (!v) v = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };

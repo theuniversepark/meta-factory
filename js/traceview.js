@@ -14,7 +14,7 @@ const HOLD_KO = (h) => (!h ? '' : h === 'sample' ? '샘플 판정 대기' : h ==
 const idOf = (u) => u.serial ?? u.wip;
 const CAPA_ST = { open: ['진행 중', 'info'], approval: ['정책 결정 대기', 'warn'], verify: ['효과 검증 중', 'info'], closed: ['종결', 'good'], held: ['보류 종결', 'muted'] };
 const TABS = { trace: '🔖 제품 추적', serial: '🏷 시리얼·출하', hold: '🧯 봉쇄·처분', ng: '✖ 불량 분석', comm: '📡 보고·통신', capa: '🧭 8D 흐름', policy: '📜 운영 정책', std: '📚 표준·솔루션' };
-export const traceState = { tab: 'ng', serial: null, caseId: null, capaId: null, q: '', sid: null, zf: 'all' };
+export const traceState = { tab: 'ng', serial: null, caseId: null, capaId: null, q: '', sid: null, zf: 'all', epcis: null };
 
 const chip = (t, tone = '') => `<b class="qt-chip ${tone}">${t}</b>`;
 const envChips = (e) => ENV_KEYS.map((k) => { const S = ENV_SPEC[k], v = e?.[k]; const bad = v != null && ((S.hi != null && v > S.hi) || (S.lo != null && v < S.lo)); return `<span class="qt-env ${bad ? 'bad' : ''}" title="${S.label} (기준 ${S.hi != null ? `≤${S.hi}` : `≥${S.lo}`}${S.unit})">${S.label.replace(/ .*/, '')} <b>${v ?? '-'}</b>${S.unit}</span>`; }).join('');
@@ -103,9 +103,22 @@ function unitHTML(sim, u) {
   const disp = u.disp ? `<p class="qt-ins">처분: <b>${u.disp.d === 'rework' ? `재작업${u.disp.done ? ' → 재검 합격 (시리얼 유지)' : ' 중'}` : '폐기 (시리얼 폐기 기록 · 재사용 금지)'}</b> — ${esc(u.disp.why)} · ${clk(u.disp.t)}</p>` : '';
   return `<div class="qt-gen"><h4>${u.serial ?? '시리얼 미발행'} ${stateChip(u)} <small>WIP ${u.wip} · ${ZONE_KO[u.zone]} ${P?.label ?? ''} · ${clk(u.t0)} 투입${u.zone === 'main' ? ` <button data-qt-goto="${idOf(u)}" class="qt-link">계보 보기 ›</button>` : ''}</small></h4>
     <div class="qt-unit">${code}${kv}</div>
+    ${u.epc ? `<div class="qt-dl"><button data-qt-epcis="${esc(u.epc)}">🔎 EPCIS 저장소에서 조회</button>${u.ship?.truck ? `<button data-qt-ship="${esc(u.ship.truck)}">🚚 이 트럭 리콜 범위 (${esc(u.ship.truck)})</button>` : ''}</div>${epcisHTML(u)}` : ''}
     <p class="qt-ins">출하: ${shipLine}${u.sampled ? ` · 정밀검사 샘플 ${u.sampled}` : ''}${u.recall ? ` · <em class="dn">유출 의심 — 로트 ${u.recall} 회수 대상</em>` : ''}</p>${disp}
     <h5 class="qt-h">공정 이력 (WIP ID → 시리얼)</h5><ol class="qt-steps">${steps || '<li>아직 셀에 들어가지 않음</li>'}</ol>
     <p class="vla-note">2단 ID: 투입 WIP ID로 공정 이력을 쌓고, 최종 검사 합격 순간 중앙 발행기가 GTIN별 순차 시리얼(GS1 AI 21)을 발행해 마킹 직후 100% 판독 검증합니다. 출하 팔레트는 SSCC로 시리얼을 묶습니다 (EPCIS 2.0 — 불량 분석 탭 전체 묶음의 serial_events.jsonld).</p></div>`;
+}
+
+// EPCIS 저장소 조회 결과 (main.js가 앱 내장 저장소 · 브라우저 메모리에서 받아 traceState.epcis에 둔다)
+const BIZ_KO = { commissioning: '시리얼 발행', storing: '적재 (출하 대기)', packing: '팔레트 묶음', shipping: '출하', holding: '출하 보류·격리', inspecting: '검사·보류 해제', repairing: '재작업', decommissioning: '폐기', encoding: '라벨 재부착' };
+function epcisHTML(u) {
+  const E = traceState.epcis; if (!E || (E.key !== u.epc && E.key !== u.ship?.truck)) return '';
+  if (E.loading) return '<p class="vla-note">EPCIS 저장소 조회 중…</p>';
+  if (E.error) return `<p class="vla-note"><em class="dn">조회 실패 — ${esc(E.error)}</em></p>`;
+  if (E.kind === 'ship') { const D = E.data; return `<div class="qt-epcis"><h5>🚚 ${esc(D.truck)} 리콜 범위 <small>${esc(E.src)} · 출하 이벤트(bizTransaction bol) → 팔레트 SSCC ${D.pallets.length}개 → 시리얼 ${D.serials.length}개</small></h5><div class="qt-chips">${D.serials.slice(0, 64).map((x) => `<span class="uidc">${esc(x.split('.').slice(2).join('.'))}</span>`).join(' ')}${D.serials.length > 64 ? ` … 외 ${D.serials.length - 64}개` : ''}</div></div>`; }
+  const ev = E.data?.events ?? [];
+  const rows = ev.map((e) => { const b = String(e.bizStep ?? ''); return `<tr><td>${esc(String(e.eventTime).slice(11, 19))}</td><td>${esc(e.type.replace('Event', ''))}</td><td><b>${esc(BIZ_KO[b] ?? b)}</b> <small>${esc(b)} · ${esc(e.disposition ?? '')}</small></td><td><small>${esc((e.readPoint?.id ?? '').split('.').pop())}</small></td><td><small>${esc(e['mf:sscc'] ? `SSCC ${e['mf:sscc']}` : e['mf:truck'] ? e['mf:truck'] : e['mf:lot'] ? `로트 ${e['mf:lot']}` : e['mf:verifyGrade'] ? `판독 등급 ${e['mf:verifyGrade']}${e['mf:wip'] ? ` · ${e['mf:wip']}` : ''}` : '')}</small></td></tr>`; }).join('');
+  return `<div class="qt-epcis"><h5>🔎 EPCIS 추적 사슬 <small>${esc(E.src)} · 이벤트 ${ev.length}건 (시리얼 + 묶인 팔레트)</small></h5>${ev.length ? `<table class="vla-t"><thead><tr><th>시각(UTC)</th><th>유형</th><th>업무 단계</th><th>위치</th><th>비고</th></tr></thead><tbody>${rows}</tbody></table>` : '<p class="vla-note">아직 저장소에 이벤트가 없습니다 — 저장소로 보내는 주기는 5초입니다.</p>'}</div>`;
 }
 
 // ── 봉쇄·처분 (정밀검사 샘플 로트 · NG 봉쇄 · MRB · 확장 Zone 간이 8D) ─────────────────
@@ -249,6 +262,8 @@ export function traceClick(sim, e) {
   if ((b = g('[data-qt-serial]'))) { st.serial = b.dataset.qtSerial; return true; }
   if ((b = g('[data-qt-sid]'))) { st.sid = b.dataset.qtSid; if (st.tab !== 'serial') { st.tab = 'serial'; st.q = ''; } return true; }
   if ((b = g('[data-qt-zf]'))) { st.zf = b.dataset.qtZf; st.sid = null; return true; }
+  if ((b = g('[data-qt-epcis]'))) return { epcis: b.dataset.qtEpcis };
+  if ((b = g('[data-qt-ship]'))) return { ship: b.dataset.qtShip };
   if ((b = g('[data-qt-case]'))) { st.caseId = b.dataset.qtCase; return true; }
   if ((b = g('[data-qt-approve]'))) { C?.approve(b.dataset.qtApprove); return true; }
   if ((b = g('[data-qt-hold]'))) { C?.hold(b.dataset.qtHold); return true; }

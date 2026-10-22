@@ -66,7 +66,7 @@ export class SerialHub {
     this.ymd = sim.trace?.ymd ?? (() => { const d = new Date(); return `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`; })();
     this.wipSeq = {}; this.serSeq = {}; this.palSeq = 0; this.lotSeq = 0; this.caseSeq = 0;
     this.units = []; this.byId = new Map(); this.fg = {}; this.lots = []; this.cases = []; this.pallets = []; this.events = []; this.jobs = [];
-    this.byCell = {}; this.tight = {}; this.fix = {}; this.lastSample = {};
+    this.byCell = {}; this.tight = {}; this.fix = {}; this.lastSample = {}; this.feed = []; this.feedOn = false;
     this.stats = { wip: 0, issued: 0, byZone: { main: 0, flex: 0, adapt: 0 }, relabel: 0, markNg: 0, shipped: 0, pallets: 0, lots: 0, held: 0, released: 0, sorted: 0, caught: 0, rework: 0, scrap: 0, recall: 0, cases: 0 };
     sim.serials = this;
   }
@@ -74,7 +74,9 @@ export class SerialHub {
   now() { return this.sim.time ?? 0; }
   later(dt, fn) { this.jobs.push({ at: this.now() + dt, fn }); }
   update() { if (!this.jobs.length) return; const t = this.now(), due = this.jobs.filter((j) => j.at <= t); if (!due.length) return; this.jobs = this.jobs.filter((j) => j.at > t); for (const j of due) j.fn(); }
-  ev(e) { this.events.push({ t: this.now(), ...e }); if (this.events.length > 4000) this.events.shift(); }
+  // 기록 하나 (EPCIS 이벤트 ID urn:uuid 포함) — feed: 화면이 가져가 EPCIS 저장소(앱 내장 · 브라우저 메모리)로 보낸다 (js/epcis.js)
+  ev(e) { const r = { t: this.now(), uid: uid(), ...e }; this.events.push(r); if (this.events.length > 4000) this.events.shift(); if (this.feedOn) { this.feed.push(r); if (this.feed.length > 20000) this.feed.shift(); } }
+  drain() { const f = this.feed; this.feed = []; return f; }
   log(lv, title, x) { if (!this.sim.quiet) this.sim.log?.(lv, title, x); }
   idOf(u) { return u.serial ?? u.wip; }
 
@@ -141,6 +143,7 @@ export class SerialHub {
     const u = item?.wip || item?.serial ? this.unitOf(item) : item; if (!u || u.loc === 'fg') return u;
     if (u.zone !== 'main') { u.status = 'ok'; u.tEnd = this.now(); }
     u.loc = 'fg'; (this.fg[u.product] ??= []).push(u);
+    if (u.serial) this.ev({ type: 'store', id: u.serial, zone: u.zone });
     if (u.scrapPending) { const why = u.scrapPending; delete u.scrapPending; this.later(0, () => this.scrap(u, why)); }   // 다음 갱신에 (적재 수량이 먼저 올라간 뒤 뺀다)
     return u;
   }
@@ -189,7 +192,7 @@ export class SerialHub {
     const lot = { id: req.id, zone: req.zone, product: req.product, sample: this.idOf(s), members: lotU.map((u) => this.idOf(u)), shippedBefore: shipped, t: this.now(), status: 'hold', result: null, tEnd: null, extra: [], recall: [], sorted: null };
     this.lots.unshift(lot); if (this.lots.length > 200) this.lots.pop();
     this.stats.lots++; this.stats.held += lotU.length + 1;
-    this.ev({ type: 'hold', id: req.id, zone: req.zone, n: lotU.length + 1 });
+    this.ev({ type: 'hold', id: req.id, zone: req.zone, n: lotU.length + 1, ids: [s, ...lotU].map((u) => this.idOf(u)) });
     this.fosNote(req.zone, 'quality.hold', `샘플 ${req.id} 로트 출하 보류 ${lotU.length + 1}개 — ${PRODUCTS[req.product]?.label} (판정 전 출하 금지)`, { lot: req.id, n: lotU.length + 1 });
     return s;
   }
@@ -201,6 +204,7 @@ export class SerialHub {
     if (res !== 'ng') {
       const n = this.releaseLot(lot); if (s && s.hold === 'sample') { s.hold = null; s.loc = s.loc === 'insp' ? 'fg' : s.loc; }
       lot.status = 'released'; lot.tEnd = this.now(); this.stats.released += n + (s ? 1 : 0);
+      this.ev({ type: 'release', id: lot.id, zone: lot.zone, result: 'OK', ids: [lot.sample, ...lot.members] });
       if (T > 0) { this.tight[lot.zone] = T - 1; if (T === 1) { this.log('info', `${ZONE_KO[lot.zone]} 샘플링 정상 복귀`, { obs: `강화 검사 ${TIGHT_N}회 연속 OK`, act: '샘플링 주기 원래대로' }); this.closeCases(lot.zone); } }
       return;
     }
@@ -212,6 +216,7 @@ export class SerialHub {
     lot.recall = this.units.filter((u) => u.zone === lot.zone && u.product === lot.product && u.loc === 'shipped' && (u.tSerial ?? 0) > ts - WINDOW_S && (u.tSerial ?? 0) <= ts + WINDOW_S).map((u) => this.idOf(u));
     for (const id of lot.recall) { const u = this.byId.get(id); if (u && !u.recall) { u.recall = lot.id; this.stats.recall++; } }
     this.stats.held += lot.extra.length;
+    if (lot.extra.length) this.ev({ type: 'hold', id: lot.id, zone: lot.zone, n: lot.extra.length, ids: lot.extra, why: `샘플 ${lot.sample} NG — 같은 시간대 ±10분 봉쇄` });
     this.fosNote(lot.zone, 'quality.hold', `샘플 ${lot.id} NG — 봉쇄 ${lot.members.length + lot.extra.length + 1}개 (±10분 ${lot.extra.length}개 추가) · 유출 의심 ${lot.recall.length}개 회수 대상`, { lot: lot.id, n: lot.members.length + lot.extra.length + 1, recall: lot.recall.length });
     if (lot.zone !== 'main') this.openCase(lot, s);
     // 처분 판정(MRB) → 샘플 처분 · 로트 선별검사
@@ -224,15 +229,16 @@ export class SerialHub {
     const us = this.units.filter((u) => u.hold === `lot:${lot.id}`), dt = us.length * SORT_T[this.mode];
     lot.status = 'sorting'; lot.sortEnd = this.now() + dt;
     this.later(dt, () => {
-      let ok = 0, bad = 0;
+      let ok = 0, bad = 0; const okIds = [];
       for (const u of us) {
         if (u.hold !== `lot:${lot.id}`) continue;
         const defect = u.zone === 'main' ? u.status === 'escaped' : this.r() < LOT_DEFECT;
-        if (!defect) { u.hold = null; ok++; continue; }
+        if (!defect) { u.hold = null; ok++; okIds.push(this.idOf(u)); continue; }
         bad++; this.stats.caught++;
         if (u.zone === 'main') this.catchEscaped(u, lot); else this.dispose(u, lot, '선별검사 불량');
       }
       this.stats.sorted += us.length; this.stats.released += ok;
+      if (okIds.length) this.ev({ type: 'release', id: lot.id, zone: lot.zone, result: '선별검사 양품', ids: okIds });
       lot.sorted = { n: us.length, ok, bad, t: this.now() }; lot.status = 'done'; lot.tEnd = this.now();
       this.fosNote(lot.zone, 'quality.disposition', `로트 ${lot.id} 선별검사 ${us.length}개 — 양품 ${ok} 해제 · 불량 ${bad}`, { lot: lot.id, ok, bad });
       const c = this.cases.find((x) => x.lot === lot.id); if (c) this.step(c, 'D3', `선별검사 완료 — ${us.length}개 중 양품 ${ok}개 출하 보류 해제 · 불량 ${bad}개 처분`);
@@ -325,24 +331,9 @@ export class SerialHub {
   }
   cellSummary(zone, cell) { return this.byCell[`${zone}:${cell}`] ?? null; }
 }
+const uid = () => (globalThis.crypto?.randomUUID ? `urn:uuid:${globalThis.crypto.randomUUID()}` : `urn:uuid:${'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => ((Math.random() * 16) | 0).toString(16))}`);   // EPCIS eventID — 시뮬레이션 난수와 무관
 const clk = (t) => { const s = Math.floor(t) + 8 * 3600; return `${String(Math.floor(s / 3600) % 24).padStart(2, '0')}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 
-// EPCIS 2.0 이벤트 (시리얼 발행 · 포장 묶음 · 출하 · 보류·재작업·폐기) — 내려받기 묶음에 들어간다
-const CBV = 'https://ref.gs1.org/cbv/';
-export function serialEpcis(H, iso) {
-  const epc = (id) => H.byId.get(id)?.epc ?? `urn:mf:wip:${id}`, loc = (id) => `urn:epc:id:sgln:${GS1_PREFIX}.00001.${id}`, out = [];
-  for (const e of H.events.slice(-1500)) {
-    const base = { eventTime: iso(e.t), eventTimeZoneOffset: '+09:00' };
-    if (e.type === 'commission') out.push({ type: 'ObjectEvent', ...base, epcList: [epc(e.id)], action: 'ADD', bizStep: `${CBV}BizStep-commissioning`, disposition: `${CBV}Disp-active`, readPoint: { id: loc(`${e.zone}.${e.cell}`) }, 'mf:wip': e.wip, 'mf:symbol': e.symbol === 'DM' ? 'GS1 DataMatrix (DPM)' : 'QR (GS1 Digital Link)', 'mf:verifyGrade': e.grade });
-    else if (e.type === 'aggregate') out.push({ type: 'AggregationEvent', ...base, parentID: `urn:epc:id:sscc:${GS1_PREFIX}.${e.id[0]}${e.id.slice(8, 17)}`, 'mf:sscc': e.id, childEPCs: e.children.map(epc), action: 'ADD', bizStep: `${CBV}BizStep-packing` });
-    else if (e.type === 'ship') out.push({ type: 'ObjectEvent', ...base, epcList: [], 'mf:sscc': e.id, action: 'OBSERVE', bizStep: `${CBV}BizStep-shipping`, disposition: `${CBV}Disp-in_transit`, 'mf:truck': e.truck, 'mf:quantity': e.n });
-    else if (e.type === 'hold') out.push({ type: 'ObjectEvent', ...base, epcList: [], 'mf:lot': e.id, action: 'OBSERVE', bizStep: `${CBV}BizStep-holding`, disposition: `${CBV}Disp-sellable_not_accessible`, 'mf:quantity': e.n });
-    else if (e.type === 'decommission') out.push({ type: 'ObjectEvent', ...base, epcList: [epc(e.id)], action: 'DELETE', bizStep: `${CBV}BizStep-decommissioning`, disposition: `${CBV}Disp-destroyed`, 'mf:reason': e.why });
-    else if (e.type === 'rework' || e.type === 'quarantine') out.push({ type: 'ObjectEvent', ...base, epcList: [epc(e.id)], action: 'OBSERVE', bizStep: `${CBV}BizStep-${e.type === 'rework' ? 'repairing' : 'holding'}`, disposition: `${CBV}Disp-non_conformant`, 'mf:lot': e.lot });
-    else if (e.type === 'recheck') out.push({ type: 'ObjectEvent', ...base, epcList: [epc(e.id)], action: 'OBSERVE', bizStep: `${CBV}BizStep-inspecting`, disposition: `${CBV}Disp-conformant` });
-  }
-  return { '@context': ['https://ref.gs1.org/standards/epcis/2.0.0/epcis-context.jsonld', { mf: 'https://meta-factory.example/epcis/ext#' }], type: 'EPCISDocument', schemaVersion: '2.0', creationDate: iso(H.now()), epcisBody: { eventList: out } };
-}
 export function serialsCSV(H) {
   const head = ['wip_id', 'serial', 'zone', 'product', 'gtin', 'lot', 'status', 'location', 'hold', 'symbol', 'mark_cell', 'verify_grade', 'mark_tries', 'serial_time_s', 'sscc', 'truck', 'disposition'];
   const cell = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };

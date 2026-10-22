@@ -40,6 +40,7 @@ import { AI_MODELS } from './cctv.js';
 import { NR, STACK, LAT, UE_LOAD, maxRobots } from './net5g.js';
 import { setAasVersion, AAS_VERSIONS, toXML, toTurtle } from './aas.js';
 import { OrchView } from './orchview.js';
+import { EpcisStore, epcisEvent, epcisDocument } from './epcis.js';
 import { FLEET_RANGE, FLEET_NAMES, SHARED_SPACE_LIMIT, fleetAdvice, predictFleet, predictFleetCounts, ZONE_FLEETS, isAmrFleet } from './fleet.js';
 import { SEC_LAYERS, SEC_KPI, SEC_THREATS, SEC_LANES, SEC_STAGES, SEC_ACTORS } from './security.js';
 import { DEFAULT_LINE, normalizeLine, cloneLine, zoneLine, isZone, ZONE_CELLS, ZONE_PRODUCTS, ZONE_MIXES, ZONE_NAME } from './line.js';
@@ -110,6 +111,49 @@ const xzones = new ExtraZones(scene);   // 정밀조립Zone 뒤 유연생산Zone
 const insp = new InspZone(xzones.root); xzones.insp = insp;   // 정밀검사존 (오른쪽 세로 통로와 오른쪽 벽 사이 · inspzone.js) — 세 생산 Zone 샘플링 검사
 view.xzones = xzones;   // 확장 Zone 셀 로봇·운반 AMR 클릭 · 텔레메트리 (factory.js cellRobot · pickTargets)
 const hub = new DataHub();
+// ── EPCIS 저장소 (GS1 EPCIS 2.0) ─────────────────
+// 시리얼 서비스(js/serial.js) 이벤트 → 표준 이벤트(js/epcis.js) → 5초마다 앱 내장 저장소(서버 /api/epcis/v1 — 파일에 계속 보관 · 외부 저장소 전송 선택)
+// 서버가 없는 화면(GitHub Pages · 공유 아티팩트)은 브라우저 메모리 저장소 (새로고침 시 초기화). 조회는 품질 추적 「🏷 시리얼·출하」
+// 시리얼 번호는 단계를 바꿔 시뮬레이션을 새로 만들어도 이어진다 (SERIAL_SEQ 공유) · 앱은 시작 때 저장소에 남은 오늘 마지막 번호를 받아 그 뒤부터 (재사용 금지)
+const SERIAL_SEQ = {}, WIP_SEQ = {}, epcisLocal = new EpcisStore({ max: 60000 });
+const epcisSt = { retry: [], sent: 0, failed: 0, lastError: null, server: null, busy: false };
+let serialBaseAsked = false;
+function epcisCollect() {
+  const H = sim?.serials; if (!H) return;
+  const evs = H.drain().map((e) => epcisEvent(H, e, (t) => hub.iso(t))).filter(Boolean);   // 지금 실행의 기준 시계로 (단계 전환 전에 먼저 거둔다)
+  if (!evs.length) return;
+  if (hub.noServer) { epcisLocal.capture(evs); epcisSt.sent += evs.length; return; }
+  epcisSt.retry.push(...evs); if (epcisSt.retry.length > 50000) epcisSt.retry.splice(0, epcisSt.retry.length - 50000);
+}
+async function epcisPump() {
+  epcisCollect();
+  if (hub.noServer || epcisSt.busy || !epcisSt.retry.length) return;
+  epcisSt.busy = true; const batch = epcisSt.retry.slice(0, 2000);
+  try {
+    const r = await fetch('/api/epcis/v1/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(epcisDocument(batch, hub.iso())) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    epcisSt.retry.splice(0, batch.length); epcisSt.sent += batch.length; epcisSt.lastError = null;
+  } catch (e) { epcisSt.failed++; epcisSt.lastError = e.message; }   // 서버가 잠시 안 되면 다음 주기에 다시 (eventID로 중복 없이)
+  finally { epcisSt.busy = false; }
+}
+setInterval(() => { epcisPump(); }, 5000);
+function epcisAttach() {
+  const H = sim?.serials; if (!H) return;
+  H.serSeq = SERIAL_SEQ; H.wipSeq = WIP_SEQ; H.feedOn = true;
+  if (!hub.noServer && !serialBaseAsked) {
+    serialBaseAsked = true;
+    fetch(`/api/epcis/v1/serial-base?ymd=${H.ymd}`).then((r) => r.json()).then((j) => { for (const [c, n] of Object.entries(j.base ?? {})) SERIAL_SEQ[c] = Math.max(SERIAL_SEQ[c] ?? 0, n); }).catch(() => { serialBaseAsked = false; });
+  }
+}
+// 조회: 앱 = 내장 저장소 · 웹 = 브라우저 메모리
+async function epcisQuery(kind, key) {
+  if (hub.noServer) return kind === 'trace' ? { events: epcisLocal.trace(key) } : epcisLocal.shipmentOf(key);
+  epcisCollect(); await epcisPump();   // 방금 생긴 이벤트까지 보낸 뒤 조회
+  const r = await fetch(kind === 'trace' ? `/api/epcis/v1/trace?epc=${encodeURIComponent(key)}` : `/api/epcis/v1/shipment?truck=${encodeURIComponent(key)}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+async function epcisServerStatus() { if (hub.noServer) return; try { epcisSt.server = await (await fetch('/api/epcis/v1/status')).json(); } catch { epcisSt.server = null; } }
 const camWall = new RobotCamWall(scene, renderer);   // 로봇 비전 관제 디스플레이 (피지컬AI 단계)
 const zoneWalls = [...['flex', 'adapt'].map((k) => new ZoneCamWall(scene, renderer, k)), new InspCamWall(scene, renderer, insp.Z.cams)];   // + 정밀검사Zone (오른쪽 벽 전광판 왼쪽)   // 확장 Zone 로봇 비전 관제 디스플레이 — 각 Zone 전광판 오른쪽 (robotcam.js ZoneCamWall)
 const cctvView = new CCTVView(scene, () => camWall.renderer, scene);   // CCTV 전체 분할 영상(녹화·AI 분석) · CCTV 영상 창
@@ -252,6 +296,7 @@ function setRender(style) {
 
 function start(key) {
   const prev = sim ? gpuRefs(scene) : null;   // 전환 전 GPU 자원 (아래 releaseOrphans)
+  epcisCollect();   // 이전 실행의 EPCIS 이벤트를 그 실행 기준 시계로 먼저 거둔다
   modeKey = key;
   sim = new Simulation(key, SEED, { line: currentLine });
   applyFleetCfg();   // AMR·AGV 관제 설정은 단계·라인을 바꿔도 유지
@@ -265,6 +310,7 @@ function start(key) {
   if (sim.sensors) { sim.sensors.setEpoch(hub.epochMs); sim.sensors.run = hub.runId;   /* 이번 실행 ID (epRec.attach 전이라 epRec.runId는 이전 실행 것) */ sim.sensors.publish = !hub.noServer; }   // 센서망: 같은 기준 시계 · 서버가 있으면 공장 중앙 MQTT로 발행 → 센서 서버
   buildSensor3d();
   if (sim.machmon) sim.machmon.onItem = machmonPcap;   // 가공기 감시 MQTT → 전체 캡처 · 그 가공기 개별 캡처
+  epcisAttach();   // 시리얼 번호 이어 받기 · EPCIS 이벤트 대기열 켜기
   if (sim.qcomm) { sim.qcomm.setEpoch(hub.epochMs); sim.qcomm.mirror = () => hub.pcap; sim.qcomm.live = !hub.noServer; }   // 품질 통신: 기준 시계 · 전체 캡처에 함께 기록 · 실제 RCA 서버(앱 서버)에도 전송
   camWall.setup(sim, view); for (const w of zoneWalls) w.setup(sim, view);
   cctvView.setup(sim, view); for (const b of cctvBoards) b.setup(sim);
@@ -820,6 +866,21 @@ function pcapVideoTick(rdt) {
     pr?.then((bytes) => bytes && pcapPublishFrame(ca ? ca.id : f.ref.stationId ?? 'Cell', ue ? '5g' : 'lan', `Robot_${ca ? ca.id : `${f.ref.stationId}_${f.ref.idx ?? 0}`}`, 160, 120, bytes, simT, {}, ca ? hub.ipOf(ca) : null));
   }
 }
+// EPCIS 저장소 칸: 앱 = 내장 저장소(파일 보관) + 외부 저장소 전송(선택) · 웹 = 브라우저 메모리
+let epcisNote = '';
+function epcisHtml() {
+  const L = epcisSt, S = L.server, F = S?.forward;
+  if (hub.noServer) return `<div class="grid2"><span>저장소</span><b>브라우저 메모리 저장소 — 이 브라우저 안에서만 보관 (새로고침 시 초기화)</b>
+      <span>저장된 이벤트</span><b>${epcisLocal.count.toLocaleString()}건 · 중복 제외 ${epcisLocal.stats.duplicate}</b></div>
+    <div class="dh-note">조회: 품질 추적 「🏷 시리얼·출하」에서 제품을 고른 뒤 「🔎 EPCIS 저장소에서 조회」. 파일: 불량 분석 「⬇ 전체 데이터셋」의 serial_events.jsonld. 외부 EPCIS 저장소(OpenEPCIS · 사내 · 고객사)로 보내기는 맥 앱 · 윈도우 앱에서 할 수 있습니다.</div>`;
+  return `<div class="grid2"><span>앱 내장 저장소</span><b>${S ? `<b class="ok">동작 중</b> · 저장 ${S.events.toLocaleString()}건 · 파일 ${kb(S.file)} (데이터 폴더/epcis/events.jsonl · 앱을 다시 켜도 보관)` : '확인 중…'}</b>
+      <span>이번 실행 보냄</span><b>${L.sent.toLocaleString()}건${L.retry.length ? ` · 대기 ${L.retry.length}` : ''}${L.lastError ? ` · <b class="bad">${escH(L.lastError)}</b>` : ''}</b>
+      <span>외부 저장소 주소</span><b><input id="epUrl" class="ep-in" placeholder="예: http://127.0.0.1:8080 (OpenEPCIS) — 비우면 보내지 않음" value="${escH(F?.url ?? '')}" /></b>
+      <span>인증 토큰 (선택)</span><b><input id="epKey" class="ep-in" type="password" placeholder="${F?.apiKey ? '저장됨 — 바꿀 때만 입력' : 'Bearer 토큰 — 필요한 저장소만'}" autocomplete="off" /></b>
+      <span>외부 전송</span><b><label class="chk"><input type="checkbox" id="epOn" ${F?.enabled ? 'checked' : ''}/> 켜기</label> <button class="ep-btn" data-epcis="test">연결 시험</button> <button class="ep-btn" data-epcis="save">저장</button> <button class="ep-btn" data-epcis="resend" title="외부 저장소에 처음부터 다시 보냅니다 (eventID가 같아 저장소가 중복을 거릅니다)">처음부터 다시 보내기</button>
+        ${F && !F.enabled ? ' · 꺼짐 (앱 내장 저장소에만 보관)' : ''}${F?.enabled ? ` · 보냄 ${F.sent.toLocaleString()} · 대기 ${F.pending.toLocaleString()}${F.lastError ? ` · <b class="bad">실패: ${escH(F.lastError)}${F.nextRetryMs ? ` (${Math.ceil(F.nextRetryMs / 1000)}초 뒤 다시)` : ''}</b>` : F.lastOk ? ` · 최근 성공 ${F.lastOk.slice(11, 19)} UTC` : ''}` : ''}</b></div>
+    <div class="dh-note">${escH(epcisNote) || '설치 없이 앱 안 저장소에 쌓입니다. 외부 저장소는 전문 실증·고객사 연계 때만 — 주소를 넣고 「연결 시험」 → 「켜기」 → 「저장」. 연결이 끊겨도 앱은 그대로 돌고, 다시 연결되면 밀린 것부터 보냅니다.'}</div>`;
+}
 function renderData() {
   const st = hub.stats(), mq = hub.mqtt, ms = mq.status;
   const kinds = hub.assets.reduce((m, a) => ((m[a.kind] = (m[a.kind] ?? 0) + 1), m), {});
@@ -851,6 +912,7 @@ function renderData() {
         <span>상위 명령</span><b><code>opcua/json/data/${PUBLISHER_ID}/${WRITER_GROUP}/Commands</code> (명령 상태가 바뀔 때마다: 전송 · 수신 확인 · 실행 · 완료/거부)</b>
         <span>이벤트 · AAS 모델</span><b><code>opcua/json/data/${PUBLISHER_ID}/${WRITER_GROUP}/Events</code> · <code>aas/${PUBLISHER_ID}/environment</code> (retain)</b></div>
         <details><summary>마지막 NetworkMessage — <code>${escH(hub.lastMsg?.topic ?? '')}</code></summary><pre class="dh-pre">${escH(preview)}</pre></details></section>
+      <section class="span2"><h4>🗂 EPCIS 저장소 (GS1 EPCIS 2.0 — 시리얼·포장 묶음·출하·보류·처분 이벤트)</h4>${epcisHtml()}</section>
       <section class="span2"><h4>📦 패킷 덤프 (pcap · Wireshark)</h4>${pcapHtml()}</section>
       <section class="span2"><h4>💾 저장 (현재까지 수집한 데이터)</h4>
         <div class="dh-ver">AAS 메타모델 버전 <select id="dhVer" title="XML·RDF 네임스페이스 — 3.1: BaSyx SDK 2.x 등 최신 도구 · 3.0: 구버전 도구">${Object.keys(AAS_VERSIONS).map((v) => `<option value="${v}" ${aasVer() === v ? 'selected' : ''}>v${v}${v === '3.1' ? ' (기본)' : ' (구버전 호환)'}</option>`).join('')}</select></div>
@@ -863,8 +925,8 @@ function renderData() {
 }
 document.getElementById('btnData').addEventListener('click', () => {
   dataModal.classList.remove('hidden'); dataNote = '';
-  hub.refreshStatus().then(renderData); renderData();
-  clearInterval(dataTimer); dataTimer = setInterval(() => { hub.refreshStatus().then(() => { if (!dataModal.classList.contains('hidden') && !dataBody.contains(document.activeElement)) renderData(); }); }, 1500);
+  Promise.all([hub.refreshStatus(), epcisServerStatus()]).then(renderData); renderData();
+  clearInterval(dataTimer); dataTimer = setInterval(() => { Promise.all([hub.refreshStatus(), epcisServerStatus()]).then(() => { if (!dataModal.classList.contains('hidden') && !dataBody.contains(document.activeElement)) renderData(); }); }, 1500);
 });
 document.getElementById('closeData').addEventListener('click', () => { dataModal.classList.add('hidden'); clearInterval(dataTimer); });
 dataBody.addEventListener('change', (e) => {
@@ -872,6 +934,16 @@ dataBody.addEventListener('change', (e) => {
   if (e.target.id === 'dhPub') { hub.publishOn = e.target.checked; e.target.blur(); renderData(); }
 });
 dataBody.addEventListener('click', (e) => {
+  const eb = e.target.closest('button[data-epcis]');
+  if (eb) {
+    const a = eb.dataset.epcis, url = document.getElementById('epUrl')?.value.trim() ?? '', key = document.getElementById('epKey')?.value ?? '', on = !!document.getElementById('epOn')?.checked;
+    const post = (p, b) => fetch(`/api/epcis/v1/${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then((r) => r.json());
+    epcisNote = a === 'test' ? '연결 시험 중…' : '저장 중…'; renderData();
+    (a === 'test' ? post('forward/test', { url }).then((r) => { epcisNote = r.ok ? `연결 성공 — ${url} (HTTP ${r.status}). 「켜기」를 체크하고 「저장」하면 보내기 시작합니다.` : `연결 실패 — ${r.error ?? ''}`; })
+      : post('config', { url, enabled: on, ...(key ? { apiKey: key } : {}), ...(a === 'resend' ? { fromStart: true } : {}) }).then((r) => { epcisNote = r.error ? `저장 실패 — ${r.error}` : a === 'resend' ? '처음부터 다시 보냅니다.' : `저장했습니다 — 외부 전송 ${r.enabled ? '켜짐' : '꺼짐'}${r.url ? ` · ${r.url}` : ''}`; }))
+      .catch((err) => { epcisNote = `실패 — ${err.message}`; }).finally(() => epcisServerStatus().then(renderData));
+    return;
+  }
   const pb = e.target.closest('button[data-pcap]');
   if (pb) {
     const P = hub.pcap, a = pb.dataset.pcap;
@@ -1694,6 +1766,13 @@ document.getElementById('closeTrace').addEventListener('click', () => traceModal
 traceModal.addEventListener('click', (e) => { if (e.target === traceModal) traceModal.classList.add('hidden'); });
 traceBody.addEventListener('click', (e) => {
   const r = traceClick(sim, e); if (!r) return;
+  if (r.epcis || r.ship) {   // 「EPCIS 저장소에서 조회」 · 「이 트럭 리콜 범위」 — 앱 내장 저장소 / 웹 브라우저 메모리
+    const key = r.epcis ?? r.ship, kind = r.epcis ? 'trace' : 'ship';
+    traceState.epcis = { kind, key, loading: true }; renderTrace(true);
+    epcisQuery(kind, key).then((d) => { if (traceState.epcis?.key === key) traceState.epcis = { kind, key, data: d, src: hub.noServer ? '브라우저 메모리 저장소' : '앱 내장 EPCIS 저장소' }; })
+      .catch((err) => { if (traceState.epcis?.key === key) traceState.epcis = { kind, key, error: err.message }; }).finally(() => renderTrace(true));
+    return;
+  }
   if (r.dl) {
     const T = sim.trace, c = T.cases.find((x) => x.id === r.caseId), iso = (t) => hub.iso(t);
     if (r.dl === 'case' && !c) return;
@@ -2144,4 +2223,4 @@ fcBody.addEventListener('click', (e) => {
   const sf = e.target.closest('[data-sec-flow]'); if (sf) { secFlowSel = +sf.dataset.secFlow; renderFacosView(true); }
 });
 
-window.__twin = { insp, cctvBoards, zoneWalls, xzones, flyTo, primKey, setRender, RENDER, openGnb: (id) => openGnb(id), cctvRec, robotRec, cctvView, epRec, get sim() { return sim; }, get agent() { return agent; }, view, ui, hub, camWall, orchView, persp, ctlP, llm };
+window.__twin = { epcisSt, epcisLocal, epcisQuery, insp, cctvBoards, zoneWalls, xzones, flyTo, primKey, setRender, RENDER, openGnb: (id) => openGnb(id), cctvRec, robotRec, cctvView, epRec, get sim() { return sim; }, get agent() { return agent; }, view, ui, hub, camWall, orchView, persp, ctlP, llm };

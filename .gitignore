@@ -5,3 +5,4 @@ dist/
 data/
 outputs/
 analysis/rca/rca_results/
+tests/.cache/
