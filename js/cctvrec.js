@@ -46,8 +46,8 @@ export class CCTVRecorder {
   }
   // 운전 시작·단계 전환 때: 지금 녹화 중인 구간을 닫고 새로 시작
   attach(sim, runId, iso) {
+    if (this.rec) this.stopSegment();   // 이전 실행의 시계로 먼저 닫는다 (새 시뮬레이션을 붙인 뒤 닫으면 종료 시각이 0초 근처로 찍혀 길이가 음수가 됐다)
     this.sim = sim; this.runId = runId; this.iso = iso;
-    if (this.rec) this.stopSegment();
     this.on = recSupported() && !globalThis.window?.METAFACTORY_SHARED;   // 공유 페이지(아티팩트)는 파일 저장이 막혀 있어 녹화하지 않는다
     this.cv.recording = this.on;
     this.acc = 1e9;
@@ -105,7 +105,7 @@ export class CCTVRecorder {
   }
   stopSegment() {
     if (!this.rec) return;
-    this.seg.t1 = this.sim.time; this.seg.iso1 = this.iso(this.sim.time); this.seg.realS = (performance.now() - this.seg.real0) / 1000;
+    this.seg.t1 = this.sim.time; this.seg.iso1 = new Date(Date.parse(this.seg.iso0) + (this.seg.t1 - this.seg.t0) * 1000).toISOString(); this.seg.realS = (performance.now() - this.seg.real0) / 1000;
     try { this.rec.stop(); } catch { /* 이미 멈춤 */ }
     this.rec = null; this.seg = null; this.track = null;
   }
@@ -120,8 +120,8 @@ export class CCTVRecorder {
     if (this.server && blob.size) {
       try {
         const r = await fetch(`/api/cctv?id=${encodeURIComponent(seg.id)}&ext=webm`, { method: 'POST', body: blob });
-        await fetch(`/api/cctv?id=${encodeURIComponent(seg.id)}&ext=json`, { method: 'POST', body: JSON.stringify(meta, null, 1) });
-        if (r.ok) { this.saved++; this.bytes += blob.size; seg.stored = true; } else this.failed++;
+        const rj = await fetch(`/api/cctv?id=${encodeURIComponent(seg.id)}&ext=json`, { method: 'POST', body: JSON.stringify(meta, null, 1) });
+        if (r.ok && rj.ok) { this.saved++; this.bytes += blob.size; seg.stored = true; } else this.failed++;   // 영상·색인 둘 다 저장돼야 성공 (색인이 없으면 MP4 변환·AAS 링크가 안 됨)
       } catch { this.failed++; }
     }
   }

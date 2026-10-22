@@ -121,12 +121,16 @@ function videoStatus(kind) {
   return { dir: path.join(DATA_DIR(), kind), count: segs.length, mp4Count: segs.filter((s) => s.hasMp4).length, noMp4: segs.filter((s) => !s.hasMp4).length, camFiles: segs.reduce((a, s) => a + s.camFiles, 0),
     bytes: webm + mp4 + cam, webmBytes: webm, mp4Bytes: mp4, camBytes: cam, keep: L.keep, mp4Keep: L.mp4Keep, maxBytes: L.maxBytes, oldest: segs[0]?.t ?? null, newest: segs.at(-1)?.t ?? null };
 }
-// 시작 때: MP4가 없는 구간(변환 기능 이전 녹화 등)을 차례로 변환하고 한도 정리
+// 시작 때: 한도 정리 후, MP4 보관 대상(최신 mp4Keep 구간) 중 MP4가 없는 것만 최신부터 변환
+// (예전에는 MP4 없는 구간 전부를 오래된 것부터 변환해, 보관 한도 밖 구간은 변환하자마자 지우기를 시작할 때마다 되풀이했다 —
+//  CPU를 오래 잡고 사용자 저장 변환도 같은 대기열 뒤에서 기다렸다. 최종으로 남는 MP4는 같다)
 export function backfillVideos() {
   for (const kind of ['cctv', 'robotcam']) {
     const dir = path.join(DATA_DIR(), kind);
-    if (ffmpegInfo().available) for (const s of videoSegments(kind)) if (!s.hasMp4 && fs.existsSync(path.join(dir, `${s.id}.webm`)) && fs.existsSync(path.join(dir, `${s.id}.json`))) queueConvert(dir, s.id).then(() => pruneVideos(kind)).catch(() => {});
     pruneVideos(kind);
+    if (!ffmpegInfo().available) continue;
+    const L = VIDEO_LIMITS()[kind];
+    for (const s of videoSegments(kind).slice(-L.mp4Keep).reverse()) if (!s.hasMp4 && fs.existsSync(path.join(dir, `${s.id}.webm`)) && fs.existsSync(path.join(dir, `${s.id}.json`))) queueConvert(dir, s.id).then(() => pruneVideos(kind)).catch(() => {});
   }
 }
 function dropSegment(dir, id) {
@@ -140,13 +144,20 @@ async function convertApi(res, url) {
   if (!ffmpegInfo().available) return send(res, 503, { error: 'ffmpeg 없음' });
   try { return send(res, 200, await queueConvert(path.join(DATA_DIR(), kind), id)); } catch (e) { return send(res, 500, { error: e.message }); }
 }
+// VLA 에피소드 영상 변환은 동시에 2개까지 (여러 로봇이 한꺼번에 끝나도 ffmpeg가 몰리지 않게) — 녹화 구간 변환 대기열과는 따로 두어 짧은 에피소드가 긴 구간 변환 뒤에서 기다리지 않음
+let vlaActive = 0; const vlaWait = [];
+async function vlaSlot(fn) {
+  if (vlaActive >= 2) await new Promise((r) => vlaWait.push(r));
+  vlaActive++;
+  try { return await fn(); } finally { vlaActive--; vlaWait.shift()?.(); }
+}
 // POST /api/frames-mp4?fps=5 (본문: 무압축 zip — frame_*.jpg + durations.json[초]) → MP4 (VLA 에피소드 카메라 영상)
 async function framesMp4(req, res, url) {
   if (!ffmpegInfo().available) return send(res, 503, { error: 'ffmpeg 없음' });
   try {
     const z = readStoredZip(await readRaw(req, 64 * 1024 * 1024)), durs = JSON.parse(z.get('durations.json')?.toString() ?? '[]');
     const names = [...z.keys()].filter((n) => /^frame_\d+\.jpg$/.test(n)).sort();
-    const mp4 = await framesToMp4(names.map((n, i) => ({ name: n, data: z.get(n), dur: durs[i] ?? 0.2 })), Math.min(30, Math.max(1, Number(url.searchParams.get('fps')) || 5)));
+    const mp4 = await vlaSlot(() => framesToMp4(names.map((n, i) => ({ name: n, data: z.get(n), dur: durs[i] ?? 0.2 })), Math.min(30, Math.max(1, Number(url.searchParams.get('fps')) || 5))));
     res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': mp4.length }); res.end(mp4);
   } catch (e) { return send(res, 500, { error: e.message }); }
 }
@@ -189,9 +200,10 @@ function serveVideo(res, url) {
   const m = url.pathname.match(/^\/videos\/(cctv|robotcam)\/(?:([A-Za-z0-9_.-]{1,64})\/)?([A-Za-z0-9_.-]{1,80})\.(webm|json|mp4)$/);
   if (!m || (m[2] && !SAFE.test(m[2])) || !/^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/.test(m[3]) || m[3].includes('..')) return send(res, 404, { error: 'not found' });
   const f = path.join(DATA_DIR(), m[1], ...(m[2] ? [m[2]] : []), `${m[3]}.${m[4]}`);
-  if (!fs.existsSync(f)) return send(res, 404, { error: 'not found' });
-  res.writeHead(200, { 'Content-Type': { webm: 'video/webm', mp4: 'video/mp4', json: 'application/json' }[m[4]], 'Content-Length': fs.statSync(f).size, 'Cache-Control': 'no-store' });
-  fs.createReadStream(f).pipe(res);
+  // 확인과 읽기 사이에 보관 정리로 지워질 수 있다 — 크기 확인 실패는 404, 읽기 오류는 연결만 끊는다 (처리 안 된 오류로 앱 메인 프로세스가 죽지 않게)
+  let size; try { size = fs.statSync(f).size; } catch { return send(res, 404, { error: 'not found' }); }
+  res.writeHead(200, { 'Content-Type': { webm: 'video/webm', mp4: 'video/mp4', json: 'application/json' }[m[4]], 'Content-Length': size, 'Cache-Control': 'no-store' });
+  fs.createReadStream(f).on('error', () => res.destroy()).pipe(res);
 }
 // GET /api/cctv → 저장된 녹화 구간 수·용량
 function listCctv(res) { return send(res, 200, videoStatus('cctv')); }
@@ -415,10 +427,14 @@ export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
       } catch (e) { return send(res, 400, { error: e.message }); }
     }
 
-    const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
-    if (!PUBLIC.some((p) => rel === p || rel.startsWith(p))) return send(res, 404, 'Not found', 'text/plain');
+    // 경로를 먼저 정리(.. 제거)한 뒤 공개 폴더인지 본다 — 정리 전에 보면 /assets/..%2f.env 같은 주소가 공개 폴더 검사를 지나 비공개 파일로 풀렸다
+    let dec; try { dec = decodeURIComponent(url.pathname); } catch { return send(res, 400, 'Bad request', 'text/plain'); }
+    if (dec.includes('\\') || dec.includes('\0')) return send(res, 404, 'Not found', 'text/plain');   // 윈도우 경로 구분자·NUL은 받지 않음
+    const rel = path.posix.normalize(dec).replace(/^\/+/, '') || 'index.html';
+    const pub = (r) => PUBLIC.some((p) => r === p || r.startsWith(p));
+    if (!pub(rel)) return send(res, 404, 'Not found', 'text/plain');
     const file = path.join(ROOT, rel);
-    if (!file.startsWith(ROOT + path.sep)) return send(res, 403, 'Forbidden', 'text/plain');
+    if (!file.startsWith(ROOT + path.sep) || !pub(path.relative(ROOT, file).split(path.sep).join('/'))) return send(res, 403, 'Forbidden', 'text/plain');
     fs.readFile(file, (err, data) => {
       if (err) return send(res, 404, 'Not found', 'text/plain');
       send(res, 200, data, MIME[path.extname(file)] ?? 'application/octet-stream');

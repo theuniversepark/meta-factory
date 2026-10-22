@@ -16,8 +16,8 @@ export class RobotVideoRecorder {
     this.canvas = document.createElement('canvas'); this.ctx = this.canvas.getContext('2d');
   }
   attach(sim, runId, iso) {
+    if (this.rec) this.stopSegment();   // 이전 실행의 시계로 먼저 닫는다 (새 시뮬레이션을 붙인 뒤 닫으면 종료 시각이 0초 근처로 찍혀 길이가 음수가 됐다)
     this.sim = sim; this.runId = runId; this.iso = iso;
-    if (this.rec) this.stopSegment();
     this.on = recSupported() && !globalThis.window?.METAFACTORY_SHARED;
     this.acc = 1e9;
   }
@@ -48,7 +48,7 @@ export class RobotVideoRecorder {
   }
   stopSegment() {
     if (!this.rec) return null;
-    const seg = this.seg; seg.t1 = this.sim.time; seg.iso1 = this.iso(this.sim.time); seg.realS = (performance.now() - seg.real0) / 1000;
+    const seg = this.seg; seg.t1 = this.sim.time; seg.iso1 = new Date(Date.parse(seg.iso0) + (seg.t1 - seg.t0) * 1000).toISOString(); seg.realS = (performance.now() - seg.real0) / 1000;
     try { this.rec.stop(); } catch { seg.resolve(); }
     this.rec = null; this.seg = null;
     return seg;
@@ -63,8 +63,8 @@ export class RobotVideoRecorder {
     if (this.server && blob.size) {
       try {
         const r = await fetch(`/api/robotcam?id=${encodeURIComponent(seg.id)}&ext=webm`, { method: 'POST', body: blob });
-        await fetch(`/api/robotcam?id=${encodeURIComponent(seg.id)}&ext=json`, { method: 'POST', body: JSON.stringify(seg.meta, null, 1) });
-        if (r.ok) { this.saved++; this.bytes += blob.size; seg.stored = true; } else this.failed++;
+        const rj = await fetch(`/api/robotcam?id=${encodeURIComponent(seg.id)}&ext=json`, { method: 'POST', body: JSON.stringify(seg.meta, null, 1) });
+        if (r.ok && rj.ok) { this.saved++; this.bytes += blob.size; seg.stored = true; } else this.failed++;   // 영상·색인 둘 다 저장돼야 성공 (색인이 없으면 MP4 변환·AAS 링크가 안 됨)
       } catch { this.failed++; }
     }
     seg.resolve();

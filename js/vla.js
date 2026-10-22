@@ -198,17 +198,19 @@ export class EpisodeRecorder {
     };
     if (ep.length < 3) return;
     ep.frameCount = rec.frames.length;
+    const sim = this.sim, runId = this.runId, byRobot = this.byRobot;   // 영상 변환을 기다리는 동안 단계가 바뀌어도(attach) 이 에피소드는 원래 실행에 남긴다
     if (this.video && this.server) await this.toVideos(ep, rec.mobile ? VIDEO_FPS.mobile : VIDEO_FPS.cell);   // 카메라별 MP4 (실패하면 사진 그대로)
-    const arr = this.byRobot.get(rec.uid) ?? []; arr.push(ep); if (arr.length > KEEP) arr.shift(); this.byRobot.set(rec.uid, arr);
-    this.total++;
+    const same = this.sim === sim;
+    const arr = byRobot.get(rec.uid) ?? []; arr.push(ep); if (arr.length > KEEP) arr.shift(); byRobot.set(rec.uid, arr);
+    if (same) this.total++;
     this.dataBytes = (this.dataBytes ?? 0) + JSON.stringify(ep.steps).length + (ep.videos ? Object.values(ep.videos).reduce((a, v) => a + v.data.length, 0) : ep.frames.length * 6000);   // 관절·동작 기록 + 카메라 영상(MP4) 또는 프레임(160×120 JPEG 약 6KB)
-    this.sim.vla?.onEpisode(ep);
+    if (same) this.sim.vla?.onEpisode(ep);   // 새 실행의 학습 상태에는 넣지 않는다
     // 서버 저장 (맥 앱·npm start) — 에피소드 하나를 zip으로
     if (this.server) {
       try {
-        const zip = await buildEpisodesZip(rec.uid, [ep], this.runId);
-        const r = await fetch(`/api/episodes?robot=${encodeURIComponent(rec.uid)}&id=${encodeURIComponent(`${this.runId}_${ep.id}`)}`, { method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: zip });
-        if (r.ok) { this.uploaded++; this.bytes += zip.length; ep.stored = true; }
+        const zip = await buildEpisodesZip(rec.uid, [ep], runId);
+        const r = await fetch(`/api/episodes?robot=${encodeURIComponent(rec.uid)}&id=${encodeURIComponent(`${runId}_${ep.id}`)}`, { method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: zip });
+        if (r.ok) { if (same) { this.uploaded++; this.bytes += zip.length; } ep.stored = true; }
       } catch { /* 서버 저장 실패해도 브라우저 보관본은 유지 */ }
     } else { ep.stored = false; }
   }

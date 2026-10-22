@@ -203,18 +203,41 @@ function applyLook() {
   document.body.dataset.mode = modeKey;
 }
 
+// ── 모드·라인·렌더 전환 때 GPU 자원 정리 ─────────────────
+// 씬을 다시 만들면 예전 객체는 씬에서 빠지지만 형상·재질·텍스처의 GPU 메모리는 남는다(three.js는 dispose 해야 해제) — 전환마다 수천 개씩 쌓여 오래 쓰면 앱이 죽을 수 있다
+// 전환 전 씬이 쓰던 자원 중 새 씬에서 안 쓰는 것만 해제한다. 공유 자원(Blender 원본·도형 라이브러리)은 새 씬이 쓰므로 그대로이고,
+// 해제한 자원이 나중에 다시 쓰이면 three.js가 자동으로 다시 올린다. 렌더 타깃 텍스처(카메라 화면·환경맵)는 렌더 타깃 소유라 건드리지 않는다
+function gpuRefs(root) {
+  const g = new Set(), m = new Set(), t = new Set();
+  root.traverse((o) => {
+    if (o.geometry) g.add(o.geometry);
+    for (const mat of [o.material].flat()) if (mat) { m.add(mat); for (const v of Object.values(mat)) if (v?.isTexture) t.add(v); for (const u of Object.values(mat.uniforms ?? {})) if (u?.value?.isTexture) t.add(u.value); }
+  });
+  return { g, m, t };
+}
+function releaseOrphans(prev) {
+  if (!prev) return 0;
+  const live = gpuRefs(scene); let n = 0;
+  for (const x of prev.g) if (!live.g.has(x)) { x.dispose(); n++; }
+  for (const x of prev.m) if (!live.m.has(x)) { x.dispose(); n++; }
+  for (const x of prev.t) if (!live.t.has(x) && !x.isRenderTargetTexture && !x.userData?.keep) { x.dispose(); n++; }
+  return n;
+}
+
 // ── 렌더: Blender 모델(기본) ─────────────────
 // Blender에서 모델링한 glTF 모델로 그린다. setRender('3d')는 개발 확인용(window.__twin) — 화면만 다시 만들고 시뮬레이션은 그대로 이어감
 function setRender(style) {
   RENDER.style = style; document.body.dataset.render = style;
   if (!sim) return;
+  const prev = gpuRefs(scene);
   view.setup(sim, labelsOn, changedIds); view.selected = null; view.selectRobot(null);
   xzones.setup(sim, labelsOn); insp.setup(sim, xzones, labelsOn);
   camWall.setup(sim, view); for (const w of zoneWalls) w.setup(sim, view); cctvView.setup(sim, view); for (const b of cctvBoards) b.setup(sim);
-  applyLook(); RENDER.swapped = 0; blenderize(scene);
+  applyLook(); RENDER.swapped = 0; blenderize(scene); releaseOrphans(prev);
 }
 
 function start(key) {
+  const prev = sim ? gpuRefs(scene) : null;   // 전환 전 GPU 자원 (아래 releaseOrphans)
   modeKey = key;
   sim = new Simulation(key, SEED, { line: currentLine });
   applyFleetCfg();   // AMR·AGV 관제 설정은 단계·라인을 바꿔도 유지
@@ -225,7 +248,7 @@ function start(key) {
   xzones.setup(sim, labelsOn); insp.setup(sim, xzones, labelsOn);
   view.selected = null;
   hub.reset(sim, view, xzones);
-  if (sim.sensors) { sim.sensors.setEpoch(hub.epochMs); sim.sensors.run = epRec.runId; sim.sensors.publish = !hub.noServer; }   // 센서망: 같은 기준 시계 · 서버가 있으면 공장 중앙 MQTT로 발행 → 센서 서버
+  if (sim.sensors) { sim.sensors.setEpoch(hub.epochMs); sim.sensors.run = hub.runId;   /* 이번 실행 ID (epRec.attach 전이라 epRec.runId는 이전 실행 것) */ sim.sensors.publish = !hub.noServer; }   // 센서망: 같은 기준 시계 · 서버가 있으면 공장 중앙 MQTT로 발행 → 센서 서버
   buildSensor3d();
   if (sim.machmon) sim.machmon.onItem = machmonPcap;   // 가공기 감시 MQTT → 전체 캡처 · 그 가공기 개별 캡처
   if (sim.qcomm) { sim.qcomm.setEpoch(hub.epochMs); sim.qcomm.mirror = () => hub.pcap; sim.qcomm.live = !hub.noServer; }   // 품질 통신: 기준 시계 · 전체 캡처에 함께 기록 · 실제 RCA 서버(앱 서버)에도 전송
@@ -238,7 +261,7 @@ function start(key) {
   window.__cctvRefresh?.();
   window.__netRefresh?.();   // 라인·단계가 바뀌면 CCTV 배치 요약도 다시
   if (typeof designer !== 'undefined' && designer) designer.render();   // AMMR 선택 가능 여부가 단계마다 다르다
-  applyLook(); blenderize(scene);
+  applyLook(); blenderize(scene); releaseOrphans(prev);
   llm.attach(sim, agent);
   ui.reset(sim, agent);
   ui.hideDetail();
@@ -1665,7 +1688,7 @@ async function sensorFlush() {
   const N = sim.sensors; if (!N?.publish || sensorBusy || !N.pending()) return;
   const batch = N.take(600); sensorBusy = true;
   if (hub.pcap?.on) for (const m of batch) hub.pcap.publish({ key: m.src.id, kind: 'lan', ip: m.src.ip, topic: m.topic, payload: m.payload, tMs: m.tMs ?? hub.epochMs + sim.time * 1000, retain: m.retain, subs: [] });
-  try { await fetch('/api/mqtt/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: batch.map(({ topic, payload, retain }) => ({ topic, payload, retain })) }) }); }
+  try { const r = await fetch('/api/mqtt/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: batch.map(({ topic, payload, retain }) => ({ topic, payload, retain })) }) }); if (!r.ok) N.stats.dropped += batch.length; }   // 서버 오류(HTTP 500 등)도 유실로 센다
   catch { N.stats.dropped += batch.length; } finally { sensorBusy = false; }
 }
 // 3D: 센서 위치 표시 (반투명 · 셀 위 3m — 설비·이동체와 겹쳐도 간섭 점검 대상이 아님)
