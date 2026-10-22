@@ -1,6 +1,6 @@
 # 피지컬AI 실증 메타팩토리 사용자 가이드
 
-2026-10-23 · 대상 버전 1.0.27 (맥 앱 Meta-Factory.app · 윈도우 앱 Meta-Factory.exe · `npm start` 브라우저 실행 · 웹 버전 · claude.ai 공유 아티팩트) · 작성 Jin Park
+2026-10-23 · 대상 버전 1.0.28 (맥 앱 Meta-Factory.app · 윈도우 앱 Meta-Factory.exe · `npm start` 브라우저 실행 · 웹 버전 · claude.ai 공유 아티팩트) · 작성 Jin Park
 
 > 이 문서는 메타팩토리 시뮬레이터를 처음 쓰는 사람이 설치부터 화면 조작, 운영 시나리오 실습, 데이터 내려받기까지 혼자 따라 할 수 있도록 정리한 사용 설명서임. 화면 문구는 프로그램에 표시되는 그대로 「」로 표기함. 그림은 1920×1080 창에서 공장 시간 약 15분을 진행한 뒤 캡처한 화면임.
 
@@ -835,3 +835,466 @@ FAC 기록 · 공장 오더 · 품질 기록(정밀검사 판정 · 부적합 ·
 | RCA · 8D | 불량 근본 원인 분석 · 8단계 품질 문제 해결 절차 |
 | 미니로드 AS/RS · 스태커 크레인 | 두 줄 선반 사이 통로를 크레인이 오가며 토트(소형 상자)를 넣고 꺼내는 자동창고 · 그 크레인 |
 | 디지털트윈 검증 | 개선안을 같은 조건의 가상 공장에서 먼저 돌려 효과를 확인하는 것 |
+
+---
+
+## [부록 C] 기술 구조서
+
+이 부록은 「Meta-Factory 기술 구조서」를 옮긴 것임. 지금까지 구현한 기능, 사용한 오픈소스·표준·라이브러리, 동작 원리, 에이전트 구성과 관계, 온톨로지 관점의 개념 정의를 담음. 사용법은 본문 0~8장을, 내부 구조와 근거는 이 부록을 봄. 도식의 색은 데이터·검증 흐름 = 청록, 명령·통제 흐름 = 보조 네이비, 주황 테두리 = 직접 작성한 핵심 영역임.
+
+### C.1 요약 (Executive Summary)
+
+- **정의**: 4개 Zone(정밀조립·유연생산·적응가공·정밀검사)과 공용 물류를 가진 가상 공장을 결정론적 시뮬레이션 엔진 위에서 레거시 → 자동화 → 피지컬AI 자율공장 3단계로 운영하고, 단계별 UPH·OEE·WIP·전력·불량을 같은 조건에서 비교하는 디지털트윈(Digital Twin) 플랫폼임.
+- **운영 판단**: FACOS(공장 운영 시스템) 4계층(공장 → 존 → 셀 → 엣지) 오케스트레이터와 존별 도메인 에이전트 약 35종이 정책 기반(명시적 운영 정책 — 조건·기준값)으로 판단함. 학습 모델이 아니라 정해 둔 기준으로 판단하고, 기준값은 AIOS·KPI 개선 제안이 디지털트윈 검증을 거쳐 조정함. LLM(Claude)은 자연어 지시 해석과 공정 설계 초안에만 쓰고, 결과는 같은 제약 코드로 다시 검증한 뒤 사람이 적용함.
+- **데이터**: 자산은 AAS(Asset Administration Shell) v3.1, 실시간 값은 OPC UA PubSub JSON over MQTT, 제품 추적은 GS1 EPCIS 2.0, 업무 전표는 ERPNext v16(선택)으로 내보냄. 모든 시각은 하나의 기준 시계(µs)를 씀.
+- **구현 원칙**: 운영 로직(오케스트레이터·에이전트·게이트·RCA·센서망·5G·CCTV·QR/DataMatrix 인코더·pcap 생성기)은 외부 프레임워크(ROS 2·Open-RMF·Eclipse BaSyx·Node-RED) 없이 직접 작성함. 오픈소스 라이브러리는 3D 렌더링·앱 셸·MQTT 전송·Claude 호출·첨부 파일 읽기에만 씀.
+- **배포**: 맥·윈도우 앱(Electron, 서버 자동 구동), 브라우저 + 로컬 서버(`npm start`), 서버 없는 웹 공유본(GitHub Pages·Claude 아티팩트) 3형태로 배포함.
+
+### C.2 구현 기능 (Implemented Features)
+
+기능은 7개 묶음 26개 영역으로 정리함. "도입" 열은 해당 기능이 커밋된 프로그램 버전이며, 1.0.x 이전 기능은 "기반"으로 표기함.
+
+| # | 기능 영역 | 핵심 내용 | 주요 모듈 | 도입 |
+|---|---|---|---|---|
+| **A. 디지털트윈·시뮬레이션** |  |  |  |  |
+| F1 | 3D 디지털트윈 | Blender로 만든 GLB 모델(로봇·설비·트럭·드론), 실제 링크 길이 역기구학(IK), 손끝이 대상물에 닿는 접촉 작업(체결·압입 로봇당 2~4점, 스크류 점당 비트 3회), OBB 분리축 간섭 점검 | `factory.js` `blender.js` `payload-robots.js` `endeffectors.js` | 기반 |
+| F2 | 시뮬레이션 엔진 | 0.1초 고정 간격, 시드 난수 1개, DOM 없는 헤드리스 실행(Node 테스트·트윈 검증 공용), 배속·일시정지 | `sim.js` | 기반 |
+| F3 | 3단계 운영 모드 | 레거시(작업자·사후보전) · 자동화(로봇·AGV·예지정비) · 피지컬AI(휴머노이드·사족보행·드론·혼합형 에이전트) 파라미터 세트, 8시간 비교 화면 | `sim.js MODES` `concept.js` | 기반 |
+| F4 | 4개 Zone 흐름 | 정밀조립(도어트림·e-axle 혼류 6셀) · 유연생산(후드·도어, C01~C10 스폿용접·실링·헤밍) · 적응가공(유압블록·리어커버 6셀, 5축 가공·CMM) · 정밀검사(샘플링 검사 비전·3D 스캔·UT·O-INSPECT·ATOS) | `zones.js` `inspzone.js` `zonedefs.js` | 기반 ~ 1.0.12 |
+| F5 | 물류 | 입고 트럭·지게차, 미니로드 AS/RS(스태커 크레인 2대), AGV 자재 공급, 출하 트럭 야드, AMR·AGV 관제(속도 배율 50~150%, 정지/시작, 트윈 예측) | `receiving.js` `shipping.js` `fleet.js` | 기반 ~ 1.0.3 |
+| **B. 운영 AI·에이전트** |  |  |  |  |
+| F6 | FACOS 계층 | 공장·존·셀·엣지 오케스트레이터, Agent Gateway(권한표·등록부·라우팅), 존 간 A2A 메시지 기록 | `factoryos.js` `fosview.js` | 기반 |
+| F7 | 자율 운영 에이전트 | 단일 에이전트(6모듈 순차) ⇄ 혼합형 다중(반사 계층 + 정비·품질·흐름 + 메인 조정자), 트윈 비교 | `agent.js` `multiagent.js` `agentinfo.js` | 기반 |
+| F8 | 대화 기반 운영 | 한국어 지시 내장 해석기 → 미해석 문장만 Claude 도구 호출, 지시 게이트(해석→대상→안전→실행 가능성→영향→판정), 4개 Zone 모두 적용 | `dialog.js` `zonedialog.js` `gate.js` `llm.js` `agentcore.js` | 기반 ~ 1.0.9 |
+| F9 | 공정 설계 | 정밀조립 라인 편집, Zone 셀 레시피(사이클·로봇 종류·대수), 자연어 설계 초안, 예상 병목·UPH 미리보기 | `designer.js` `line.js` `zonerecipe.js` | 기반 |
+| F10 | 명령·인시던트 | 비상정지·보호정지·안전 감속·대피·사이클 정지 등 14종 명령(전송→ACK→실행→완료), 인시던트 7단계 스윔레인, 제어 흐름 분석 | `commands.js` `orchestrator.js` `orchview.js` | 기반 |
+| F11 | KPI 영향·개선 | 원인별 OEE 손실 분해(손실 합 + OEE = 100%), 개선안 → 트윈 검증(30분 × 시드 3) → 적용 → 실측 → 되돌리기 | `impact.js` `impactview.js` | 기반 |
+| F12 | VLA·AIOS 학습 파이프라인 | VLA 에피소드(관절·TCP 5Hz, 카메라 JPEG, 지시·결과 라벨) zip, 학습 → 성공률 게이트 → 카나리 → OTA; AIOS 운영 데이터 10초 샘플 → 정책 헤드 학습 → 트윈 검증 → 배포 (운영 정책 기준값 탐색, 신경망 아님) | `vla.js` `aios.js` | 기반 |
+| **C. 품질·추적** |  |  |  |  |
+| F13 | 제품 추적·RCA·8D | 셀 통과 계보(ISA-95 Actual 용어), 계보 기반 베이즈 원인 분해, 8D CAPA(D0~D8) 자동 진행, DoWhy·PyRCA 노트북 | `trace.js` `capa.js` `analysis/rca` | 기반 |
+| F14 | 불량 보고 통신·RCA 서버 | 검사셀 엣지 → MQTT → 메인 서버 → HTTP → RCA 서버 → 결과·봉쇄·종결 5단계, 품질 통신 pcap | `qcomm.js` `rcacore.js` `server/rca-api.mjs` | 기반 |
+| F15 | 시리얼·마킹·출하 추적 | WIP ID / 제품 시리얼 2단 ID, QR(GS1 Digital Link) · GS1 DataMatrix 직접 인코딩, 판독 검증(등급 C 이상), 출하 SSCC, 샘플 NG 봉쇄·처분(MRB) | `serial.js` `codes.js` `traceview.js` | 1.0.18 |
+| F16 | EPCIS 2.0 저장소 | 앱 내장 저장소(설치 없음), 웹은 브라우저 메모리, 외부 OpenEPCIS 등으로 선택 전송 | `epcis.js` `server/epcis-api.mjs` | 1.0.19 |
+| **D. 데이터·통신·센서** |  |  |  |  |
+| F17 | 데이터 연동 | AAS v3.1(기본)·v3.0 JSON·XML·RDF(Turtle)·AASX·CSV·AutomationML, OPC UA PubSub JSON, 내장 MQTT 브로커, 전체·자산별 pcap | `datahub.js` `aas.js` `aasx.js` `pcap.js` | 기반 |
+| F18 | 환경·설비 센서망 | 센서 30종 139개(설계서 기준), 센서 → 셀 엣지 → 게이트웨이 → 존 서버 → 중앙 → 센서 서버(별도 프로세스·SQLite), PTP 시간 동기 | `sensors.js` `server/sensor-server.mjs` | 기반 |
+| F19 | 가공기 상태 감시·엣지 AI 예지보전 | 주축 부하·진동 RMS·첨도·AE·베어링 온도·공구 마모(VB) 감시, 1초 이상 점수(0 정상 · 1 경고선 · 2 경보선), 공구 잔여 수명(RUL), MQTT·pcap·AAS 저장 | `machmon.js` `machmonview.js` | 1.0.12 |
+| F20 | Private 5G·CCTV | 기지국·CCTV 음영 없는 배치(탐욕적 집합 덮개), PCI·핸드오버·DAPS, 5G 지연 10ms(p99) 모델, CCTV AI 오버레이(탐지·추적·분할·연기) | `net5g.js` `cctv.js` `cctvview.js` | 기반 |
+| F21 | 영상 녹화·변환 | 로봇 카메라 8분할·CCTV 전광판 자동 녹화(WebM 5분 구간) → ffmpeg MP4·카메라별 분할, AAS 영상 링크 서브모델 | `robotcam.js` `robotrec.js` `cctvrec.js` `server/video-convert.mjs` | 기반 |
+| F22 | 보안 시뮬레이션 | DID/VC 신원·최소 권한·OTAC·DPI·동형암호 연합학습·ZKML·eVDI 반출 통제 흐름 재현(실제 암호 연산 없음) | `security.js` | 기반 |
+| **E. 외부 시스템 연동 (선택·앱 전용)** |  |  |  |  |
+| F23 | ERPNext 연동 | 2단계: FAC 업무 기록·공장 오더 → ERPNext v16 전표 / 3단계: 정밀검사 판정·부적합·처분(MRB)·8D → 품질 모듈 | `server/erpnext-bridge.mjs` `server/fac-api.mjs` | 1.0.20 ~ 21 |
+| F24 | 설비 대시보드 | 앱 MQTT → Telegraf → InfluxDB 2 → Grafana를 Docker로 켜고 끔, Docker 엔진이 꺼져 있으면 Colima 자동 시작 | `server/monitor-api.mjs` `monitoring/` | 1.0.22 ~ 23 |
+| **F. 분석·대시보드** |  |  |  |  |
+| F25 | Zone 대시보드 | 실시간 모니터링 · OEE(ISO 22400-2)·6대 손실·NG 파레토 · 관리도(X̄-R / I-MR, Western Electric 규칙 1~4)·산점도·회귀, 그래프 자동 해석(판정·근거·권장 조치) | `zonekpi.js` `zonedash.js` | 1.0.22 ~ 25 |
+| **G. 배포·문서** |  |  |  |  |
+| F26 | 배포·사용자 가이드 | 맥(arm64)·윈도우(x64) 앱 패키징, 웹 버전에서만 앱 내려받기, 사용자 가이드 Word·PDF 내려받기, 포트 충돌 시 빈 포트 대체 | `electron/` `tools/guide-pdf.cjs` | 기반 ~ 1.0.17 |
+
+### C.3 시스템 아키텍처 (System Architecture)
+
+판단·시뮬레이션·3D는 모두 화면 프로세스(Electron 렌더러 또는 브라우저)에서 돌고, 앱 서버는 브로커·저장·변환·외부 연동 창구만 맡음. 웹 공유본은 왼쪽 열만 동작하고 서버 기능은 같은 코드(`rcacore.js`, `epcis.js`)를 화면 안에서 돌려 재현함.
+
+![[그림 36] 실행 구성도 (맥·윈도우 앱 기준)](guide-images/tech_01.png)
+
+화면의 각 모듈은 앱 서버의 창구 하나와 짝을 이루고, 앱 서버만 외부와 연결됨. Claude API 키는 앱 서버 프로세스에만 있고 렌더러로 보내지 않음(safeStorage: 맥 키체인·윈도우 DPAPI). (범례: 데이터·검증 흐름 · 명령·통제 흐름 · 구독(선택 구성) · 직접 작성한 FACOS 핵심 영역)
+
+| 배포 형태 | 동작 범위 | 실행 |
+|---|---|---|
+| 맥·윈도우 앱 | 전체 — 앱 서버·브로커·센서 서버·RCA·EPCIS·파일 저장·Agent·선택 연동 | `npm run package` / `package:win` |
+| 브라우저 + 로컬 서버 | 앱과 같음 | `npm start` → localhost:8780 |
+| 웹 공유본 | 화면·시뮬레이션만. RCA·EPCIS는 화면 안 메모리, Agent는 입력한 API 키로 브라우저 직접 호출 | GitHub Pages · Claude 아티팩트 |
+
+### C.4 오픈소스·표준·라이브러리 (Open Source, Standards, Libraries)
+
+#### C.4.1 앱에 포함되어 동작하는 라이브러리
+
+| 이름 | 버전 | 라이선스 | 쓰인 곳 · 동작 |
+|---|---|---|---|
+| three.js | 0.186.1 | MIT | 3D 렌더링 전체. OrbitControls(시점), CSS2DRenderer(라벨), EffectComposer·UnrealBloomPass·OutputPass(발광·후처리), GLTFLoader·RoomEnvironment(Blender 모델·PBR 환경광), WebGLRenderTarget·readRenderTargetPixels(로봇 카메라·CCTV 영상) |
+| Electron | 44.5.1 | MIT | 맥·윈도우 앱 셸. 메인 프로세스가 앱 서버·센서 서버를 띄우고, safeStorage로 API 키를 암호화 저장 |
+| @anthropic-ai/sdk | 0.131.0 | MIT | 앱 서버에서 Claude Messages API 호출(도구 사용·구조화 출력) |
+| aedes | 1.2.0 | MIT | 내장 MQTT 브로커(:1885). 공장 UNS 토픽 중계 |
+| MQTT.js (mqtt) | 5.16.0 | MIT | 센서 서버 구독, 외부 브로커 브리지(`MQTT_BRIDGE_URL`) |
+| mammoth | 1.13.0 | BSD-2-Clause | 공정 설계 첨부 Word(.docx) 본문 추출 |
+| SheetJS CE (xlsx) | 0.20.3 | Apache-2.0 | 공정 설계 첨부 Excel → 시트별 CSV |
+| node:sqlite | Node 내장 | — | 센서 서버 시계열 DB(WAL, 원시 48시간 · 1분 집계 30일) |
+
+#### C.4.2 선택형 외부 서비스·컨테이너 (앱에 포함하지 않음)
+
+| 이름 | 연결 방식 | 쓰인 곳 |
+|---|---|---|
+| Anthropic Claude API (`claude-opus-5-5`) | HTTPS · 키 설정 시에만 | 대화 지시 해석, 자연어 공정·Zone 레시피 설계 초안 |
+| ERPNext v16 (GPL-3.0) | REST로만 호출(코드 결합 없음) | 구매·입고·재고 이동·생산 입고·출하·작업지시·설비 자산·품질 문서. v16.52.0(frappe_docker)으로 문서 생성 방식 확인 |
+| OpenEPCIS 등 EPCIS 2.0 저장소 | REST `POST {url}/capture` | 앱 내장 저장소의 이벤트를 외부로 전송(확장 필드 스키마 등록, 202 캡처 작업 확인) |
+| Telegraf 1.34 · InfluxDB 2.7.12 (MIT) · Grafana OSS 12.4.3 (AGPL-3.0, 수정 없이 별도 서비스) | Docker Compose · 127.0.0.1 포트만 | 설비 대시보드. Telegraf가 앱 브로커를 구독 → InfluxDB(보존 7일) → Grafana 기본 대시보드 |
+| Docker Desktop · Colima | CLI 실행 | 모니터링 스택 기동. 엔진이 꺼져 있으면 Colima 자동 시작 |
+| FFmpeg (libx264) | 설치본을 외부 프로그램으로 실행 | WebM → H.264 MP4 변환·카메라별 분할. 없으면 WebM만 저장 |
+| 운영 스택 구성 `deploy/sensors` | Docker Compose (설치 검증 전) | Mosquitto · Telegraf · TimescaleDB · Grafana · Node-RED · linuxptp/chrony 구성 파일 |
+
+#### C.4.3 개발·검증 도구
+
+| 이름 | 쓰인 곳 |
+|---|---|
+| Blender 5.2 | AMR·AGV·지게차·드론·휴머노이드·사족보행·6축 팔·AMMR·트럭·설비 모델링 스크립트(`blender/*.py`) → `assets/blender/*.glb` |
+| @electron/packager 20.3.0 · codesign | 앱 패키징·ad-hoc 서명 |
+| @zxing/library 0.23.0 | 직접 만든 QR·DataMatrix를 실제 디코더로 판독 검증(`tests/serial.mjs`) |
+| ajv · ajv-formats | EPCIS 2.0 JSON 스키마 검증 테스트 |
+| aas-core3.0 (Python) · Eclipse BaSyx Python SDK 2.2 | 내보낸 AAS JSON·XML·AASX의 표준 적합성 엄격 파싱(`tests/aasbasyx.mjs`) |
+| DoWhy (GCM) · PyRCA | RCA 데이터셋 외부 검증 노트북(`analysis/rca`) |
+| Node.js 테스트 스크립트 | 헤드리스 회귀 테스트 45개 파일(`npm test`), Electron 화면 점검·간섭 점검 도구(`tools/`) |
+
+#### C.4.4 준수·참고한 표준 (규격 문서 기준, 구현 코드는 직접 작성)
+
+| 분야 | 표준 | 적용 내용 |
+|---|---|---|
+| 자산 모델 | IDTA AAS Part 1 v3.1(기본)·v3.0 · Part 5 AASX(ISO/IEC 29500-2 OPC) · IDTA 02006 Digital Nameplate · 02003 Technical Data · 02008 Time Series · IEC 62714 AutomationML(CAEX 3.0) · W3C RDF 1.1 Turtle | 설비·로봇 자산 셸과 서브모델, 로봇별 누적 데이터 .aasx, 영상 링크 서브모델 |
+| 통신 | OPC UA Part 14 PubSub(JSON) · OASIS MQTT 3.1.1 · CloudEvents 1.0 · Sparkplug B BIRTH 개념 · libpcap · IETF RFC 791(IPv4) · RFC 9293(TCP) | NetworkMessage, 공장 UNS 토픽, 불량 리포트 봉투, 센서 메타 retain, 패킷 덤프 |
+| 추적·식별 | GS1 EPCIS 2.0 · CBV 2.0 (JSON-LD) · GS1 Digital Link · SGTIN · SSCC · SGLN · ISO/IEC 18004(QR) · ISO/IEC 16022(DataMatrix ECC200) · ISO/IEC 15415 · ISO/IEC TR 29158 · AIAG B-17 · ANSI/ISA-95 | 2단 ID, 라벨·직접 각인, 판독 등급, 출하 팔레트, 계보 용어(Equipment·Personnel·Material Actual) |
+| 품질 | 8D · IATF 16949 10.2.3 · ISO 9001 8.7 · ISO 2859-1 · AIAG-VDA FMEA AP · ISO 22400-2 · Western Electric 규칙 | CAPA, 부적합·MRB, 샘플링 봉쇄, OEE, 관리도 판정 |
+| 안전 | IEC 60204-1 (정지 카테고리 0·2) · ISO/TS 15066 | 비상정지·보호정지, 협동 로봇 안전 감속 |
+| 무선 | 3GPP TR 38.901 InF · TS 38.211 · 38.331 · 38.300 · Rel-16 DAPS · TS 22.104 · TR 38.824 · SON MLB | Private 5G 경로손실·PCI·A3 핸드오버·URLLC 지연 모델·부하 분산 |
+| 시간 | IEEE 1588 PTP (linuxptp 구성) | DataHub 기준 시계를 Grandmaster로 보고 유선 2µs·LoRaWAN 20ms 이내 정렬 |
+| 보안 | W3C DID v1.0 · W3C Verifiable Credentials | 주체 신원·권한·OT 명령 검증 흐름(암호 연산 없음) |
+| 영상 | W3C MediaStream Recording · WebM(VP9/VP8) · H.264 · ISO/IEC 14496-12·14(MP4) | 자동 녹화와 변환 |
+
+#### C.4.5 참고한 AI 알고리즘 (출력 형식만 재현 · 모델·가중치 미포함)
+
+Ultralytics YOLO11(탐지·분할, AGPL-3.0) · ByteTrack(다중 객체 추적, MIT) · D-Fire 데이터셋(연기·화재, CC0-1.0)의 출력 형식(박스·마스크·클래스·추적 ID·신뢰도)을, 장면의 실제 위치·크기를 카메라로 투영해 만들어 냄. 현장 적용 시 YOLO11은 AGPL-3.0 의무 이행 또는 상용 라이선스가 필요함.
+
+### C.5 동작 방식 (How It Works)
+
+#### C.5.1 시뮬레이션 엔진과 3단계 운영 모드
+
+- **고정 간격**: 0.1초마다 한 틱을 진행함. 배속은 화면 한 프레임에 여러 틱을 돌리는 방식으로 만듦.
+- **결정론**: 생산 흐름은 시드 난수 하나만 씀. 환경·센서·품질 측정값은 별도 난수를 써서, 부가 기능을 더해도 기존 KPI가 바뀌지 않음.
+- **헤드리스 분리**: 엔진·에이전트·품질·센서 모듈은 DOM을 쓰지 않아 Node 테스트와 디지털트윈 검증이 같은 코드를 돌림. 확장 Zone 흐름(`zones.js`)·정밀검사(`inspzone.js`)는 아직 화면에서만 돎(설계서 미결 사항).
+- **데이터 주도**: 셀 배치·로봇·사이클·경로·센서 배치·레시피 제약은 정의 데이터(`line.js`, `zonedefs.js`, `zonerecipe.js`, `sensors.js`)에 두고 코드가 읽음.
+
+| 파라미터 (`sim.js MODES`) | 레거시 공장 | 자동화 공장 | 피지컬AI 자율공장 |
+|---|---|---|---|
+| 사이클 배율 · 편차 | 1.22 · 22% | 1.00 · 8% | 0.92 · 4% |
+| 불량 기본률 · 검출률 | 2.8% · 85% | 1.5% · 98% | 0.8% · 99.5% |
+| 수리 시간 · 예지정비 | 160초 · 없음 | 90초 · 건강도 50% | 60초 · 건강도 55% |
+| 운반 · 정비 인력 | 지게차 1 · 사람 2 | AGV 3 · 사람 1 | AGV 4 · 휴머노이드 2(+보충 2), 사족보행 2, 드론 3 |
+| 운영 주체 | 작업반장(수동, 알람 지연 10초) | 단일 자율 에이전트 | 혼합형 다중 에이전트 |
+| 조명 + 공조 | 58 kW | 34 kW | 13 kW |
+
+#### C.5.2 데이터 파이프라인 — AAS → OPC UA → MQTT → 구독자
+
+![[그림 37] 실시간 값이 나가는 경로와 두 갈래 산출물](guide-images/tech_02.png)
+
+한 값이 같은 기준 시계 축으로 AAS 파일·MQTT 메시지·pcap·센서 DB에 동시에 남으므로, 센서 서버 /align으로 같은 순간을 묶어 조회할 수 있음.
+
+- **토픽 체계(UNS)**: `metafactory/{영역}/v1/{존}/{셀}`. 큰 문서는 HTTP REST, 알림·실시간 값은 MQTT로 나눔.
+- **pcap 주소 계획**: 브로커 10.20.0.10, FACOS 10.20.0.20, 유선 설비 10.20.1.x, CCTV 10.20.2.x, 5G 이동 로봇 10.45.x.x(UPF N6 경유). TCP 3-way 핸드셰이크·CONNECT·SUBSCRIBE·PUBLISH(QoS 1, MSS 1460B 분할)·PUBACK·PINGREQ까지 실제 바이트로 만들고 체크섬을 계산함.
+- **AASX**: 무압축 ZIP에 `[Content_Types].xml` → `_rels/.rels` → aasx-origin → aas-spec 파트, 보조 파일은 aas-suppl 관계로 연결함.
+
+#### C.5.3 시리얼·마킹·출하 추적과 EPCIS 2.0
+
+![[그림 38] 제품 한 개의 수명 — 공정 단계 · EPCIS 이벤트 · ERPNext 전표](guide-images/tech_03.png)
+
+공정 중 이력은 WIP ID로 쌓고, 표준 이벤트는 시리얼이 생긴 순간부터 만듦. eventID는 urn:uuid라 재전송해도 한 번만 저장되고, ERPNext 문서는 mf_ref(운전 ID:FAC 번호)로 중복을 막음.
+
+- **2단 ID**: 투입 순간 `WIP-DT-YYMMDD-000123`, 최종 검사 합격 순간 중앙 발행기가 GTIN별 순차 시리얼 `DT-YYMMDD-000045`(GS1 AI 21, 재사용 없음)를 발행함. 발행 셀은 정밀조립 검사·포장셀, 유연생산 C06(재작업품은 C07 재검 합격 때), 적응가공 CMM 셀임.
+- **마킹**: 라벨은 QR + GS1 Digital Link, 금속 직접 각인은 GS1 DataMatrix(FNC1 + AI 원소 문자열). QR은 바이트 모드·오류 정정 M·1~10형, DataMatrix는 ECC200 정사각 10~48로, GF(256) 리드-솔로몬을 직접 구현함. 마킹 직후 100% 판독 검증 — 등급 C 미만이면 1회 재마킹, 다시 실패하면 부적합 처리함.
+- **EPCIS 저장소**: `POST /capture`(202 + captureID, eventID 중복 제거), `GET /events`(MATCH_anyEPC · EQ_bizStep · EQ_action · EQ_readPoint · 시간 범위 · 페이지), `GET /trace?epc=`(발행 → 적재 → 묶음 → 출하 사슬)를 제공함. 위치는 SGLN(`urn:epc:id:sgln:업체코드.00001.FLX-C06`) 형식임.
+
+#### C.5.4 불량 보고 통신 · RCA · 8D
+
+![[그림 39] 불량 사례 하나가 오가는 5단계 메시지](guide-images/tech_04.png)
+
+RCA 서버 처리 로직(rcacore.js)은 앱 서버의 실제 HTTP와 웹 버전의 화면 시뮬레이션이 같은 코드를 씀. 모든 메시지는 품질 통신 pcap으로도 남김.
+
+- **원인 분석**: 계보 기반 베이즈 분해(`Bayes-genealogy RCA v1`). NG 제품들이 공통으로 지난 셀·로봇·설비 건강도·드리프트·환경값을 요인으로 사후 확률을 나눠 원인 후보 Top-8과 신뢰도를 냄. 시뮬레이션 정답(불량이 생긴 셀)은 학습 특징 표에만 두고 사례·리포트에는 넣지 않음(목표 Top-1 적중 90% 이상).
+- **8D 흐름**: D0 NG 판정·격리 → D1 팀 → D2 문제 기술(5W2H) → D3 봉쇄(의심 제품 출하 보류·원인 후보 셀 재보정) → 총괄 보고 → D4 근본 원인 → D5 대책(운영 정책 변경안) → 총괄 승인(사람 결정) → D6 시행·검증 → D7 FMEA AP 갱신·표준화 → D8 종결. 같은 셀 + 요인의 재발은 진행 중인 8D에 묶음.
+- **샘플 NG 봉쇄·처분**: 정밀검사 샘플이 NG면 같은 로트를 출하 보류하고 재검·재작업·격리·폐기로 처분(MRB)함.
+
+#### C.5.5 대화 기반 지시와 LLM 사용 방식
+
+![[그림 40] 운영자 지시 게이트](guide-images/tech_05.png)
+
+내장 해석기가 먼저 문장을 조치로 바꾸고, 해석하지 못한 문장만 Claude가 같은 조치(도구)로 돌려줌. 어느 쪽이든 결과는 같은 게이트를 지나 기존 실행 경로(명령·혼류·투입 간격·긴급 조달·상태 질의)로만 실행됨.
+
+- **Claude 도구 8종** (모두 `strict` JSON 스키마): `schedule_maintenance` · `set_cycle_mode` · `set_release_interval`(5~20초) · `set_release_hold` · `issue_command`(ESTOP~MAINT 14종) · `set_mix` · `zone_command`(유연생산·적응가공·정밀검사) · `expedite_supply`. 설비 ID 목록으로 매 요청마다 enum을 다시 만듦.
+- **이중 검증**: 서버(`agentcore.validate`)가 스냅샷 기준으로 한 번, 브라우저가 실제 적용 직전에 한 번 더 검증함. 공정 설계 초안은 `normalizeLine`·`normalizeRecipe`로 제약 위반을 보정·경고하고 사람이 적용을 누름.
+- **안전 장치**: 첨부 문서·이미지 안의 문장은 지시로 따르지 않음(프롬프트 주입 방지). 호출마다 토큰 비용을 계산해 누적 표시하고, 자동 테스트에서는 LLM을 부르지 않음.
+- **웹 버전**: 서버가 없으면 운영자가 넣은 API 키로 브라우저에서 직접 호출하거나, 공유 아티팩트에서는 Claude 계정 호출을 씀. 프롬프트·도구·검증 코드(`agentcore.js`)는 서버와 공용임.
+
+#### C.5.6 센서망과 시간 동기
+
+![[그림 41] 센서 값이 DB까지 가는 계층](guide-images/tech_06.png)
+
+센서 DB 테이블: sensor(메타) · reading(µs 시각·동기 잔차) · batch(계층별 시각·지연) · agg_1m · alarm. 센서 서버는 앱 서버와 다른 프로세스·다른 DB로 돌아 화면이 멈춰도 적재가 계속됨.
+
+#### C.5.7 KPI 분석과 Zone 대시보드
+
+```
+가동률 A = 가동 가능 시간 ÷ 계획 시간 (계획 시간 = 전체 − 계획 정비, 가동 가능 = 계획 − 고장 − 준비·교체 − 운영 정지)
+성능 P = 처리 수 × 기준 사이클 ÷ 가동 가능 시간 (자재 대기 · 출구 막힘 · 속도 저하가 여기서 빠짐)
+품질 Q = 양품 ÷ 판정 수 → OEE = A × P × Q (ISO 22400-2)
+```
+
+- **셀 시간 분류**: Zone 흐름이 dt마다 가동·고장·계획 정비·준비·교체·운영 정지·자재 대기·출구 막힘으로 알려 주고, 이를 6대 손실(설비 고장·준비·조정·공전·순간정지·속도 저하·공정 불량)로 묶어 파레토를 그림.
+- **관리도**: 제품마다 규격이 다른 품질 특성(도어트림 체결 토크·각도, e-axle 볼트 토크·각도, 유연생산 갭·단차 등)을 섞지 않고 X̄-R 또는 I-MR로 그림. Western Electric 규칙 1~4로 이상을 판정하고, 판정·근거·권장 조치 문장을 자동으로 붙임.
+- **산점도**: 제품 1개 = 표본 1건으로 공정 변수(x)와 품질 특성(y)의 회귀선·상관을 그리고 해석함.
+- **KPI 영향 분석**(`impact.js`): 매 틱 셀마다 "가동하지 못한 시간"을 원인으로 나누고, 상류 정지로 생긴 하류 자재대기는 원인 셀로 넘김. 병목 대비 가중치를 곱해 손실 대수·UPH·OEE 손실(합 + OEE = 100%)을 냄. 개선안은 같은 라인·운영값·현장 이벤트를 재연한 트윈(30분 × 시드 3)에서 현재 vs 제안을 비교한 뒤 적용 여부를 물음.
+- **그리기**: 차트는 라이브러리 없이 SVG 문자열로 만들어 웹 버전·공유 아티팩트에서도 그대로 동작함.
+
+#### C.5.8 CCTV·Private 5G 배치 최적화
+
+| 단계 | CCTV (`cctv.js`) | Private 5G (`net5g.js`) |
+|---|---|---|
+| 격자 | 바닥 1m 점(높이 0.3m에서 판정) | 바닥 2m 점, 천장 후보 4m 격자 |
+| 덮음 판정 | 큰 설비(셀·랙·서버 랙)에 시야가 가리지 않으면 "보임" (돔 반경 9m, 실외 PTZ 20m) | 3GPP TR 38.901 InF 경로손실로 RSRP 계산, 가리면 NLOS 식 · RSRP ≥ −80dBm, 반경 18m 이내 |
+| 선택 | 아직 덮이지 않은 점을 가장 많이 덮는 후보부터 고르는 탐욕적 집합 덮개(Greedy Set Cover) → 동점 처리를 바꿔 여러 번 돌리고, 빼도 음영이 안 생기는 장비를 덜어 최소 대수 배치를 고름 | 〃 |
+| 후처리 | Zone별로 나눠 그 Zone 천장 카메라로만 덮음, 5m 안 근접 쌍 정리 (77대) | PCI = 3·SSS + PSS 고유 배정, A3 이벤트·TTT 핸드오버, Rel-16 DAPS(끊김 0ms), 지연 10ms(p99) 모델·부하 분산 |
+
+#### C.5.9 외부 연동과 영상
+
+**ERPNext 매핑 (server/erpnext-bridge.mjs)**
+
+| FACOS 이벤트 | ERPNext 문서 | 비고 |
+|---|---|---|
+| `po.create` · `receipt.done` | Purchase Order · Purchase Receipt | WMS 재주문점 발주, 트럭 하차 검수 |
+| `internal.done` | Stock Entry (Material Transfer) | 선반 → 투입구·셀 이동 |
+| `production.done` | Stock Entry (Manufacture) | BOM 소비 + 완제품 입고, 열린 작업지시에 먼저 배분 |
+| `delivery.done` | Delivery Note | 시리얼 연결(선택), SSCC 18자리 변환 |
+| `order.assign` · `order.close` | Work Order · 중지(Stopped) | 정밀조립 혼류 제품별 |
+| `mr.create` · `mr.stage` | Asset · Asset Repair · Asset Maintenance Log | 긴급 = 수리, 예방 = 보전 기록 |
+| 정밀검사 판정 · 부적합 · 처분 · 8D | Quality Inspection · Non Conformance · Quality Action | 품질 절차: ISO 2859-1 샘플링, ISO 9001 8.7 MRB, IATF 16949 8D |
+
+- **신뢰성**: 화면 FAC 기록 → 2초마다 `/api/fac/push` → 디스크 대기열(`queue.jsonl`) → REST. ERPNext가 꺼져 있으면 대기열에 두고 다시 보내고, 4xx 검증 오류 전표는 사유를 남기고 건너뜀(한 건 때문에 연동이 멈추지 않음).
+- **설비 대시보드**: `monitoring/` 구성을 데이터 폴더로 복사하고 무작위 토큰·비밀번호 `.env`를 만든 뒤 `docker compose -p metafactory-mon up -d`로 띄움. 컨테이너는 `host.docker.internal`로 앱 브로커에 붙고, 데이터 초기화는 사용자가 확인한 경우에만 함.
+- **영상**: 로봇·CCTV 카메라 시점을 렌더 타깃 칸에 그리고 `canvas.captureStream` + MediaRecorder로 WebM 5분 구간을 녹화함. 구간마다 칸 색인(JSON: 카메라 ID·자산·칸 좌표)을 남겨 ffmpeg가 카메라별 MP4로 자르고, AAS 파일에 그 로봇 영상 링크(VideoRecordings 서브모델)를 넣음.
+
+### C.6 에이전트 (Agents)
+
+에이전트는 FACOS 계층을 따름. **명령은 위 → 아래, 상태는 아래 → 위, 같은 계층(존 ⇄ 존)은 핸드셰이크·알림만** 주고받고, 결정이 필요한 일은 공장으로 올림. 접수 ACK만으로 재개하지 않음. 모든 에이전트 간 메시지는 Agent Gateway가 권한표로 검사하고 A2A 기록으로 남김.
+
+#### C.6.0 정책 기반 판단
+
+**정책 기반(Policy-based)**은 사람이 미리 정한 조건과 기준값으로 판단하는 방식임. 학습된 신경망이나 LLM이 상황마다 판단하지 않음. 앱의 엔진 선택 「정책 기반 | 대화 기반」 중 정책 기반이 이 방식이며, 대화 기반을 골라도 공장 운영 판단은 정책 기반 에이전트가 계속 맡음.
+
+코드에 들어 있는 실제 정책(에이전트별 조건 → 조치 · 기준값 · 코드 위치)은 C.9 운영 정책 표에 모아 둠.
+
+- **정책 기반을 쓰는 이유**: 판단마다 근거(예: 건강도 48% < 기준 55%)가 운영 로그에 남아 설명할 수 있음. 같은 시드면 같은 판단이 나와 단계 비교와 회귀 테스트가 성립함. 매초 판단해도 외부 API 비용이 들지 않음.
+- **학습이 들어가는 곳**: AIOS와 KPI 개선 제안은 정책의 형태는 그대로 두고 기준값만 바꿈. 쌓인 운영 데이터에서 후보 값을 찾고, 디지털트윈에서 현재 값과 비교해 나을 때만 적용함. 실제 적용 예: 피지컬AI 투입 간격 배율 0.98 → 0.94, 자동화 AMR 선행 배차 2대. 자동화 단계의 다른 기준값은 고정임.
+- **용어**: 이 문서와 앱에서 "추론"은 학습된 AI 모델을 실행한다는 뜻(VLA 추론 모델 · 카메라 AI 추론)으로만 씀.
+
+#### C.6.1 에이전트 목록 · 기능 · 역할
+
+| 에이전트 | 기능 | 역할 · 권한 | 구현 |
+|---|---|---|---|
+| **L0 공장 계층** |  |  |  |
+| 공장 오케스트레이터 (FacOS) | 오더 배정·종료(존 증빙 확인), 결정 요청 처리(정비 인력 Zone 간 지원·납기 위험·정책 승인·정밀검사 우선순위·응답 시간 초과), 방송 | [명령·결정] 정책 기반 + 사람 결정(HITL) | `factoryos.js` |
+| 인시던트 오케스트레이터 | 설비 고장·공급 차질·현장 이벤트를 감지 → 셀 자체 조치 → 상위 보고 → 판단 → 명령 → 실행 자원 조치 → 완료 확인으로 처리. 안전 우선순위 P1 화재·인명 → P2 시설 안전 → P3 생산 정지 → P4 생산 차질 → P5 효율, 정비 인력 배정·선점 | [명령] Zone별로 인시던트를 맡음 | `orchestrator.js` |
+| Agent Gateway | 가드레일(계층 권한표) · 탐색(에이전트 등록부·역량) · 라우팅 · A2A 기록 | [차단] 권한표 위반 메시지는 blocked | `factoryos.js allowed()` |
+| 생산·계획 PA Agent | 오더 배정안 · 납기 위험 판단안 | [제안만] | `factoryos.js` |
+| AIOS 운영 정책 모델 | 10초마다 운영 샘플 수집 → 특징 벡터·이벤트·전이(상태·행동·보상) → 정책 헤드(AMR 선행 배차·셀 절전 진입·인시던트 판단 지연) 후보 탐색 → 트윈 검증 → 배포 | [정책 값 제공] 피지컬AI 단계 | `aios.js` |
+| CCTV 에이전트 (공용 인지) | 영상 AI로 현장 이벤트(누유·연기·무단 진입)를 2초 안 감지 → 교차 확인 → 영상 확보 | [보고만] 오케스트레이터에 보고 | `cctv.js` `cctvview.js` |
+| 보안 계층 (가드레일) | DID 서명 · VC 권한 · OTAC 인증 · DPI · 반출 통제 흐름 재현 | [통과·차단 기록] | `security.js` |
+| **L1 정밀조립 Zone** |  |  |  |
+| Manufacturing Agent | 존 에이전트 제안 승인, 수량 정산(고유 투입 = 공정중 + 합격대기 + HOLD·재작업 + 인계완료 + 폐기), 오더 진행·납기 위험 감시, 공장 에스컬레이션 | [승인·에스컬레이션] 로컬 오케스트레이터 | `factoryos.js` |
+| Field Logistics Agent | 운반 AMR 셀 간 이송·대기열·충전, 선행 배차 | [실행] | `sim.js` `fleet.js` |
+| 정비 에이전트 · 5초 | 건강도 < 예지정비 기준이면 예지정비 제안(기준 −7%p 이하는 위급). 근거: 건강도·10분 고장확률·잔여수명, 사족보행 순찰 보고 | [제안만] | `multiagent.js` |
+| 품질 에이전트 · 2초 | 공정능력 Cpk < 재보정 기준이면 재보정 제안(피지컬AI: 셀 자율 보정 · 자동화: 정비원) | [제안만] | `multiagent.js` |
+| 흐름 에이전트 · 3초 | 투입 간격 = 병목 사이클 × 배율, 병목 셀 고속 운전(사이클 10%↓)·해제, 공급 차질 긴급 조달 | [제안만] | `multiagent.js` |
+| 메인 조정자 · 1초 | 제안 큐 정렬 → 정리 → 안전(P1 조회) → 충돌 판정 ①~⑤ → 승인분만 실행, 지연·충돌·보류 기록 | [승인·실행] 목표 충돌(처리량 ⇄ 설비 수명 ⇄ 안전) 조정 | `multiagent.js` |
+| 반사 계층 · 1초 | 자재 보충 배차, 셀 절전(대기전력 70%↓), AGV 충전, 정지 설비 앞 투입 보류(재공 12↑)·재개(7↓) | [바로 실행] 메인이 멈춰도 동작 | `multiagent.js` |
+| 단일 자율 에이전트 (대안 구조) | 물류 → 예지정비 → 품질 → 흐름 → 에너지 → 충전 6모듈을 순서대로 판단·실행. 레거시 모드에서는 '작업반장' 수동 운영을 흉내 냄 | [바로 실행] 자동화 단계 기본 | `agent.js` |
+| **L1 유연생산 Zone** |  |  |  |
+| 전환·흐름 오케스트레이터 | 평소 혼류(지그 ID = 품목 ID로 레시피 자동 선택), 전환 오더 시 셀마다 Wave식 PRELOAD → LAST-JOB → CHANGEOVER → FIRST-ARTICLE → RUN | [승인] thin zone | `factoryos.js FlexOrch` |
+| 전환 계획 에이전트 | 셀별 전환 스케줄, 첫물 불합격 시 롤백 제안 | [제안] | `factoryos.js` `zones.js` |
+| 품질 연계 에이전트 | C06 치수·외관 NG → C07 재작업 → 재검, 첫물 판정, 정밀검사 샘플 요청 | [판정·요청] |  |
+| 지그 풀 물류 에이전트 | 품목별 지그 + 운반 AMR | [실행] |  |
+| 셀 공정관리 에이전트 ×8 | STEP 전이, 셀 전환 실행, 지그·레시피·툴 3중 일치 인터록 | [인터록] |  |
+| **L1 적응가공 Zone** |  |  |  |
+| 적응가공 오케스트레이터 | 공구 교환·조건 변경·제품 분기 승인 (존 ≈ 셀) | [승인] | `factoryos.js AdaptOrch` |
+| 가공 진단 에이전트 | 주축 부하·전류·RPM·진동을 제품·공구 ID와 연결, 이상 시 보류 | [보류 제안] |  |
+| 공구 감시 에이전트 | 정상 신호 범위·누적 이력 비교 → 마모·파손 의심 → 공구 교환 제안(모바일 매니퓰레이터) | [제안] |  |
+| 조건 조정 에이전트 | 절삭 조건 변경안 — 설비 허용 범위·응답속도 확인 뒤 승인·적용, 전/후 기록 | [제안] |  |
+| 제품 분기 에이전트 | CMM 판정: OK → 후공정 · 판정 대기 HOLD · 리워크 적합 → 재가공 · 부적합 → 격리 | [분기] |  |
+| 생산 계획 에이전트 | 정지·공구 교환·보류품을 반영해 작업 순서 조정, 로봇·AMR 목적지 재지시 | [재지시] |  |
+| 가공기 엣지 AI (예지보전) | 가공기 4대 1초 이상 점수 · 공구 RUL · 판단(정상·감시·교체 권고·즉시 교체·주축 점검) → 존 실행·상위 보고 | [판단·보고] | `machmon.js` |
+| **L1 정밀검사 Zone (서비스 Zone)** |  |  |  |
+| 정밀검사 Orchestrator Agent | 샘플 요청 → 검사 Task 분해, 제품별 검사 경로, 재측정·리워크 순서 | [승인] | `factoryos.js InspOrch` `inspzone.js` |
+| Perception Agent | 영상·3D·센서 인식 — 비전 검사(ABIS·AIMAX), 3D 스캔·UT, ATOS Point Cloud | [인식 결과] |  |
+| Handling Agent | 검사 AMR 3대 — 수거·도킹·셀 간 이송·정렬 | [실행] |  |
+| Quality & Recovery Agent | OK · 판정 불확실(O-INSPECT 재측정) · NG(공정 정지·리워크) 판단 | [판정] |  |
+| Asset Management Agent | 검사 장비 가용성·교정 상태 | [감시] |  |
+| Process Agent | 결과를 생산 Zone으로 환류(품질 알림·선행공정 조건 보정) | [알림] |  |
+| Simulation Agent | 검사 경로·대기 사전 검증 | [다음 단계] |  |
+| **L2 셀 · L3 엣지** |  |  |  |
+| 셀 OCS (셀 오케스트레이터) | 셀 상태머신 IDLE · READY · RUN · DONE · HOLD · RECOVER · SAFE-STOP, 정비·보정·현장 명령 검증(승인·거부 사유) | [수신 검증] | `factoryos.js OCS` |
+| 엣지 스킬 | 비전 부품 판별 · 피킹·키팅(VLA) · 협업 조립·압입(Force) · 위치정합(3D Vision–CAD) · 체결 판정(토크·각도) · 포장·라벨(VLA) · 동작 감시 · 설비 LLM(알람 해석, 제어 안 함) · 인터록(규칙) · AMR 도킹·인계 | [실행·감시] | `factoryos.js EDGE_SKILLS` |
+| **현장 이동·대화·학습** |  |  |  |
+| 사족보행 순찰 · 순찰 드론 | 열화상·진동·소음 스캔 → 이상 징후를 정비·품질 에이전트에 보고 / 상공 6m 순회, 사건 현장 우선 출동·중계, 배터리 부족 시 귀환 충전 | [보고] | `sim.js` `drone.js` |
+| 운영자 지시 게이트 · 내장 해석기 | 한국어 지시를 문장 단위 조치로 바꾸고 단계별로 수행·거절 판정 | [수행·거절] | `gate.js` `dialog.js` `zonedialog.js` |
+| Claude 운영 에이전트 | 스냅샷을 보고 도구 8종으로 조치 제안, 2~3문장 요약 응답 | [제안] 게이트·이중 검증 통과분만 실행 | `agentcore.js` `server/llm-agent.mjs` |
+| 공정 설계 에이전트 | 자연어 요청 → 라인·Zone 레시피 초안(구조화 출력) | [초안] 사람이 미리보기 후 적용 | `server/line-designer.mjs` |
+| VLA 학습 파이프라인 | 에피소드 수집 → 학습 → 검증 성공률 게이트 → 카나리 1대 → 전체 OTA | [모델 배포] | `vla.js` |
+| RCA 서버 (더미) | 리포트 접수 → 재발·원인 확정/재검토·우선순위·기한 → 봉쇄·대책안 → 종결 | [분석 결과] 학습 모델 없음 | `rcacore.js` |
+
+#### C.6.2 에이전트 관계도
+
+![[그림 42] FACOS 4계층 에이전트 관계도](guide-images/tech_07.png)
+
+계층을 건너뛰는 메시지는 Agent Gateway가 막음. 존 ⇄ 존은 서비스 요청·인계·품질 알림만 주고받고 명령은 못 함(예: 생산 Zone → 정밀검사 샘플 요청, 정밀검사 → 생산 Zone 품질 알림). 오른쪽 공용 에이전트는 한 Zone에 속하지 않고 공장 오케스트레이터(AIOS·CCTV·보안), 운영자(게이트·Claude·설계), 엣지(VLA) 또는 존 에이전트(드론·사족보행)와 연결됨. (범례: 명령·결정 (위 → 아래) · 상태·제안·결과 (아래 → 위) · 최상위 결정 주체)
+
+#### C.6.3 정밀조립 Zone 혼합형 다중 에이전트 내부
+
+![[그림 43] 제안 → 조정 → 실행 구조](guide-images/tech_08.png)
+
+충돌 규칙: ① 병목 셀 가동 중이면 위급하지 않은 예지정비를 대기 구간까지 미룸 · ② 실효 부하가 병목의 85%를 넘는 셀도 기다림 · ③ 정비 인력 수보다 많은 예지정비를 동시에 걸지 않음 · ④ 건강도가 낮거나 정비 제안이 대기 중인 셀의 고속 운전 거절 · ⑤ 투입 간격을 20초 안에 반대로 되돌리지 않음. 설계 목표: 혼합형 UPH ≥ 단일 −1%.
+
+#### C.6.4 A2A 메시지 권한표 (Agent Gateway)
+
+| 방향 | 허용 메시지 | 예 |
+|---|---|---|
+| 위 → 바로 아래 | command · decision 계열, `order.assign`, `order.close`, `broadcast` | 공장 → 정밀검사 우선순위 결정, Zone → 셀 OCS 정비 명령 |
+| 아래 → 바로 위 | event 계열 — `decision.request`, `status`, `order.ack`, `order.evidence`, `quality.hold`, `quality.disposition` | 정비 인력 Zone 간 지원 요청, 오더 종료 증빙 |
+| 존 ⇄ 존 | handshake · notify — `service.request/accept/result`, `handover.ready/ack`, `quality.alert` | 생산 Zone → 정밀검사 샘플 요청, 정밀검사 → 품질 알림 |
+| 모든 방향 | `ack` (수신 확인) | — |
+| 금지 | 계층 건너뛰기, 존 ⇄ 존 명령, 셀 ⇄ 셀 직접 메시지 | Gateway가 blocked로 기록 |
+
+결정 요청은 응답 기한(기본 120초)을 넘기면 공장 오케스트레이터가 응답 시간 초과로 처리함.
+
+### C.7 온톨로지 (Ontology)
+
+> ※ 이 저장소에는 OWL·RDF 온톨로지 파일이 따로 없음. 이 절은 코드에 내재된 개념(클래스)과 관계를 정리한 개념 모델이며, RDF로 직렬화되는 것은 AAS Turtle 내보내기(`.ttl`)뿐임. 표준 어휘(AAS·ISA-95·EPCIS CBV·ISO 22400)와 맞춘 대응을 함께 적어, 나중에 OWL로 옮길 때 기준으로 쓸 수 있게 함.
+
+#### C.7.1 클래스 정의
+
+구조 · 행위자 · 제품·물류 · 사건 · 데이터 — 도식 색과 같음.
+
+| 클래스 | 정의 | 식별·표현 | 표준 대응 |
+|---|---|---|---|
+| **구조 (Structure)** |  |  |  |
+| 공장 Factory | 4개 Zone과 공용 물류·시설을 포함하는 최상위 운영 단위. 한 실행(run)에서 운영 모드 하나를 가짐 | 운전 ID · `MODES` 키 | ISA-95 Site/Area |
+| 운영 모드 OperatingMode | 공장 전체 파라미터 세트(사이클·불량·정비·운반·인력·에이전트 구조) | `traditional` · `smart` · `dark` | — |
+| 존 Zone | 공정 성격이 같은 셀 묶음이자 오케스트레이터 하나가 관할하는 운영 단위 | `main` · `flex` · `adapt` · `insp` | ISA-95 Work Center / Area |
+| 셀 Cell | 대상물 하나를 받아 정해진 작업을 하는 최소 공정 단위. 셀 OCS 상태머신을 가짐 | `DT_ASSY`, `C03`, `HB_MILL` … | ISA-95 Work Unit |
+| 설비·로봇 Asset | 셀에 배치되거나 공장을 이동하는 물리 자산(6축 로봇·협동로봇·AMMR·가공기·CMM·AMR·AGV·지게차·휴머노이드·사족보행·드론) | 설비 고유 ID · AAS id | ISA-95 Equipment · AAS Asset |
+| 센서 Sensor | 자산·셀·존 환경을 재는 장치. 종류·현장 연결·주기·경보 기준을 가짐 | 센서 ID · BIRTH 메타 | Sparkplug B Device(개념) |
+| **행위자 (Actor)** |  |  |  |
+| 에이전트 Agent | 공장 상태를 관찰하고 조치를 제안하거나 실행하는 판단 주체. 권한(제안만·승인·바로 실행)을 가짐 | 등록부 이름 · 계층 | — |
+| 오케스트레이터 Orchestrator | 한 계층(공장·존·셀)을 관할하며 제안을 승인하고 명령을 내리는 에이전트 (Agent의 하위 클래스) | 엔드포인트 `factory` · `zone:main` · `cell:SORT` | — |
+| 엣지 스킬 Skill | 셀 안에서 자산을 직접 구동·감시하는 실행 능력(VLA 파지, 체결 판정, 인터록 등) | `EDGE_SKILLS` 항목 | Capability(AAS Capability 개념) |
+| 명령 Command | 오케스트레이터가 셀에 내리는 긴급·제어 지시. 전송 → ACK → 실행 → 완료 상태를 가짐 | `ESTOP` … `MAINT` 14종 | IEC 60204-1 정지 카테고리 · OPC UA 명령 메시지 |
+| **제품·물류 (Product & Logistics)** |  |  |  |
+| 오더 Order | 공장이 존에 배정하는 생산 지시(제품·수량·혼류 비중) | 오더 번호 | ISA-95 Production Request · ERPNext Work Order |
+| 공정 중 제품 WIP | 투입부터 최종 검사 합격 전까지의 제품 개체. 셀 통과 계보를 쌓음 | `WIP-DT-YYMMDD-000123` | ISA-95 Material Lot(개체) |
+| 제품 시리얼 Serial | 최종 검사 합격 순간 발행되는 출하 단위 고유 식별자 | `DT-YYMMDD-000045` · SGTIN URN · QR/DataMatrix | GS1 SGTIN · AI 21 |
+| 팔레트 Pallet | 시리얼 제품을 묶은 물류 단위 | SSCC (`urn:epc:id:sscc:…`, 18자리) | GS1 SSCC |
+| 출하 Shipment | 팔레트를 실은 트럭 1회 운송 | bizTransaction `bol` | EPCIS bizTransaction · ERPNext Delivery Note |
+| **사건 (Event)** |  |  |  |
+| 인시던트 Incident | 정상 운영을 방해하는 사건(설비 고장·공급 차질·누유·연기·무단 진입). 안전 우선순위를 가짐 | 인시던트 번호 · P1~P5 | — |
+| EPCIS 이벤트 EPCISEvent | 시리얼·SSCC에 대해 무엇이·언제·어디서·왜 일어났는지 기록한 표준 이벤트 | `eventID urn:uuid` · bizStep · disposition · SGLN | GS1 EPCIS 2.0 · CBV 2.0 |
+| 불량 사례 DefectCase | 검사 NG 판정 1건과 그 원인 분석·조치의 묶음 | 사례 ID · RCA 티켓 | CloudEvents · ERPNext Non Conformance |
+| 8D CAPA | 같은 원인(셀 + 요인)의 불량을 D0~D8 단계로 처리하는 시정·예방 조치 | 8D 번호 · 단계 | 8D · IATF 16949 10.2.3 · ERPNext Quality Action |
+| **데이터 (Data)** |  |  |  |
+| 측정값 Measurement | 센서·자산이 기준 시계 시각에 낸 값(동기 잔차 포함) | (센서 ID, µs 시각, 값) | IDTA 02008 Time Series 레코드 |
+| 자산관리쉘 AAS | 한 자산의 디지털 표현. 서브모델 묶음 | `https://camtic.or.kr/aas/metafactory/…` | IDTA AAS Part 1 v3.1 |
+| 서브모델 Submodel | AAS 안의 주제별 데이터 묶음 | Nameplate · TechnicalData · OperationalData · TimeSeries · VideoRecordings | IDTA 02006 · 02003 · 02008 |
+| ERP 전표 ERPDoc | FACOS 사건을 ERPNext에 남긴 문서 | `mf_ref` = 운전 ID:FAC 번호 | ERPNext DocType |
+| KPI | 셀 시간 분류와 검사 결과를 집계한 성과 지표(OEE·UPH·WIP·kWh/개·불량률) | 지표 이름 · 기간 | ISO 22400-2 |
+| 메시지 Message | 에이전트 간(A2A) 또는 시스템 간(MQTT·HTTP)으로 오가는 기록 단위 | A2A `msgId` · MQTT 토픽 | OPC UA PubSub · MQTT 3.1.1 |
+
+#### C.7.2 관계 정의
+
+| 관계 | 정의역 → 치역 | 의미 | 기수 | 근거 |
+|---|---|---|---|---|
+| **구조 관계** |  |  |  |  |
+| 포함 `hasPart` | Factory → Zone, Zone → Cell | 상위 단위가 하위 단위를 물리·운영적으로 포함함. 하위는 상위 하나에만 속함 | 1 : N | `zonedefs.js` |
+| 배치 `hosts` | Cell → Asset | 셀이 작업에 쓰는 자산을 둠. 이동 자산(AMR·휴머노이드)은 셀에 일시적으로 들어옴 | 1 : N | `line.js` robot |
+| 부착 `hasSensor` | Asset·Cell·Zone → Sensor | 센서가 무엇을 재는지 정함(설비 상태 = 자산, 환경 = 존) | 1 : N | `sensors.js PLACE` |
+| 측정 `produces` | Sensor → Measurement | 센서가 기준 시계 시각으로 값을 냄 | 1 : N | `sensor-server.mjs` |
+| 설정 `configures` | OperatingMode → Factory | 한 실행 동안 공장 전체 파라미터를 정함 | 1 : 1 | `sim.js MODES` |
+| **제어 관계** |  |  |  |  |
+| 관할 `governs` | Orchestrator → Factory · Zone · Cell | 해당 단위의 결정 권한을 가짐. 계층마다 하나 | 1 : 1 | `factoryos.js` |
+| 제안 `proposesTo` | Agent → Orchestrator | 근거를 붙인 조치안을 올림. 실행 권한은 없음 | N : 1 | `multiagent.js` |
+| 발행 `issues` | Orchestrator → Command | 바로 아래 계층에만 명령을 냄(계층 건너뛰기 금지) | 1 : N | `allowed()` |
+| 대상 `targets` | Command → Cell | 명령이 적용되는 셀(또는 Zone 전체). 셀 OCS가 수신 시 검증함 | N : 1..* | `commands.js` |
+| 실행 위임 `delegatesTo` | Command → Skill | 검증을 통과한 명령을 엣지 스킬이 수행함 | N : M | `EDGE_SKILLS` |
+| 구동 `actuates` | Skill → Asset | 스킬이 자산을 움직이거나 감시함 | N : M | `factory.js` IK |
+| 처리 담당 `handledBy` | Incident → Orchestrator | 인시던트는 발생 위치의 Zone 오케스트레이터가 맡고, P1~P5 순으로 처리함 | N : 1 | `orchestrator.js` |
+| 발생 위치 `occursAt` | Incident → Cell · Zone | 사건이 일어난 자리. 진로 위 이벤트면 이동체 우회·대기를 일으킴 | N : 1 | `sim.js` |
+| **제품 흐름 관계** |  |  |  |  |
+| 투입 지시 `releases` | Order → WIP | 오더에 따라 제품 개체가 투입됨 | 1 : N | `factoryos.js` |
+| 통과 `passesThrough` | WIP → Cell | 순서가 있는 셀 통과 기록(계보). 단계마다 로봇·설비 건강도·측정값·환경값을 남김 | N : M (순서) | `trace.js` |
+| 발행 `commissionedAs` | WIP → Serial | 최종 검사 합격 순간 시리얼이 생김. 불합격·폐기 WIP는 시리얼이 없음 | 1 : 0..1 | `serial.js` |
+| 묶음 `aggregatedInto` | Serial → Pallet | 팔레트 하나에 여러 시리얼이 묶임(AggregationEvent) | N : 1 | `epcis.js` |
+| 적재 `loadedOn` | Pallet → Shipment | 트럭 1회 운송에 팔레트가 실림 | N : 1 | `shipping.js` |
+| **데이터 · 기록 관계** |  |  |  |  |
+| 기술 `describes` | AAS → Asset | 자산 하나를 디지털로 표현함 | 1 : 1 | `aas.js` |
+| 구성 `hasSubmodel` | AAS → Submodel | 명판·기술 데이터·운영 값·시계열·영상 링크로 나눠 담음 | 1 : N | `aas.js` |
+| 담김 `recordedIn` | Measurement → Submodel(TimeSeries) | 수집 값이 시계열 서브모델의 세그먼트로 들어감 | N : 1 | `datahub.js` |
+| 기록 `recordedAs` | Serial · Pallet · Shipment → EPCISEvent | 수명 단계마다 표준 이벤트가 남음(eventID로 멱등) | 1 : N | `epcis.js` |
+| 대상 제품 `concerns` | DefectCase → WIP · Serial | 불량 사례가 가리키는 제품(샘플 NG면 같은 로트 전체가 봉쇄 범위) | 1 : N | `trace.js` `serial.js` |
+| 원인 후보 `attributedTo` | DefectCase → Cell(+ 요인) | 계보 베이즈 분해의 사후 확률로 원인 셀·요인을 순위 매김 | 1 : N (점수) | `trace.js` |
+| 처리 `resolvedBy` | DefectCase → CAPA(8D) | 같은 셀 + 요인의 사례는 진행 중인 8D 하나에 묶임 | N : 1 | `capa.js` |
+| 전표화 `mappedTo` | Order · Shipment · DefectCase · CAPA · FAC 이벤트 → ERPDoc | 사건 1건이 ERPNext 문서 1건이 됨(`mf_ref`로 멱등) | 1 : 0..1 | `erpnext-bridge.mjs` |
+| 집계 `aggregates` | KPI → Cell 시간 분류 · 검사 결과 · Measurement | OEE = A × P × Q 등 지표를 구간별로 계산함 | 1 : N | `zonekpi.js` `impact.js` |
+| 전달 `carries` | Message → Command · Measurement · DefectCase | 메시지가 실어 나르는 내용. 토픽·스키마 버전을 가짐 | 1 : 1 | `datahub.js` `qcomm.js` |
+
+#### C.7.3 온톨로지 관계도
+
+![[그림 44] 메타팩토리 개념 모델 (주요 관계)](guide-images/tech_09.png)
+
+왼쪽 두 열은 "누가 무엇을 움직이는가"(구조·제어), 오른쪽 두 열은 "무엇이 만들어지고 어떻게 기록되는가"(제품·사건)임. 두 세계를 잇는 다리는 WIP의 셀 통과(계보), 인시던트의 처리 담당, 측정값의 KPI 집계 세 관계임. 그 밖의 관계(원인 후보, 발생 위치, 전달 등)는 C.7.2 표에 있음. (범례: 구조 · 행위자 · 제품·물류 · 사건 · 데이터)
+
+#### C.7.4 관계 의미 해석 규칙
+
+- **권한은 관계로 정해짐**: Agent는 `proposesTo`만 가지고, `issues`는 Orchestrator만 가짐. 그래서 도메인 에이전트가 직접 셀을 움직이는 경로는 모델에 존재하지 않음(반사 계층은 운영 정책으로 정의된 예외).
+- **정체성은 단계별로 바뀜**: 같은 물리 제품이 WIP → Serial → (Pallet 안의 원소) 순으로 다른 식별자를 가짐. `commissionedAs`가 두 식별자를 잇고, EPCIS 발행 이벤트의 `mf:wip`가 그 연결을 기록함.
+- **시간은 하나의 축**: Measurement · EPCISEvent · Message · A2A 기록은 모두 같은 기준 시계 시각을 가지므로, "같은 순간"이라는 관계를 별도 매핑 없이 조인으로 구할 수 있음.
+- **정답 라벨은 모델 밖**: 시뮬레이션이 아는 진짜 불량 원인은 학습 특징 표에만 있고 DefectCase의 속성이 아님. `attributedTo`는 언제나 추정 결과(점수)임.
+- **멱등 식별**: EPCISEvent(`eventID`), RCA 티켓(`caseId`), ERPDoc(`mf_ref`)은 재전송해도 한 번만 생기도록 식별자로 같음을 판정함.
+
+### C.8 근거 파일 (Sources)
+
+| 내용 | 파일 |
+|---|---|
+| 요구·아키텍처·데이터·인터페이스·보안·테스트 설계 | `docs/DESIGN.md` |
+| 오픈소스·표준·외부 서비스 고지 | `OPEN_SOURCE.md` |
+| 에이전트 목록·구성 화면 | `js/factoryos.js` `js/multiagent.js` `js/agentinfo.js` `js/agent.js` |
+| LLM 도구·검증 | `js/agentcore.js` `server/llm-agent.mjs` `server/line-designer.mjs` |
+| 시리얼·EPCIS·ERPNext | `js/serial.js` `js/codes.js` `js/epcis.js` `server/epcis-api.mjs` `server/erpnext-bridge.mjs` |
+| KPI·대시보드·모니터링 | `js/zonekpi.js` `js/zonedash.js` `js/impact.js` `server/monitor-api.mjs` `monitoring/compose.yml` |
+| 운영 모드 파라미터 | `js/sim.js` (MODES) |
+
+### C.9 운영 정책 표 (Operating Policies)
+
+C.6의 에이전트가 실제로 쓰는 정책을 코드에서 그대로 옮김. 기준값은 운영 모드별 설정(`sim.js MODES`)에 있고, 모드를 적지 않은 값은 모드와 관계없이 같음. 레거시 단계는 자재 보충 배차만 같은 정책으로 돌고(작업반장이 25초 늦게 지게차 배차), 정비·품질·흐름 판단은 하지 않음. 설비 고장은 알람이 사람에게 발견된 뒤(10초) 대응함.
+
+| 에이전트 · 주기 | 정책 | 조건 → 조치 | 기준값 | 코드 |
+|---|---|---|---|---|
+| **정밀조립 Zone — 도메인 에이전트 (제안만 함)** |  |  |  |  |
+| 정비 에이전트 · 5초 | 예지정비 | 건강도 < 기준 → 예지정비 제안. 기준보다 7%p 이상 낮으면 위급으로 표시 (근거: 건강도 · 10분 고장확률 · 잔여수명) | 자동화 50% · 피지컬AI 55% | `multiagent.js` |
+| 품질 에이전트 · 2초 | 공정 재보정 | 공정능력 Cpk < 기준 → 재보정 제안. 피지컬AI는 셀 자율 보정(10초), 자동화는 정비원 재보정 | Cpk 1.15 | `multiagent.js` |
+| 흐름 에이전트 · 3초 | 투입 간격 | 목표 = 병목 사이클 × 배율. 지금 간격과 0.15초 넘게 다르면 변경 제안 | 배율 0.98 · 피지컬AI 0.94 | `multiagent.js` |
+|  | 병목 고속 운전 | 이용률 85% 초과 · 대기열 3개 이상 · 건강도 60% 초과인 셀 → 사이클 10% 단축 제안. 건강도가 55% 아래로 떨어지면 해제 | 이용률 0.85 · 대기 3 | `multiagent.js` |
+|  | 공급 차질 대응 | 창고 출고 중단 → 안전재고 긴급 운송 + 대체 발주 제안 (차질 기간 30% 단축) | 남은 기간 × 0.7 | `agent.js expedite` |
+| **정밀조립 Zone — 반사 계층 · 1초 (메인 조정자를 거치지 않고 바로 실행)** |  |  |  |  |
+| 반사 계층 | 자재 보충 배차 | 투입구 예상 재고 ≤ 재주문점 → 배터리·거리 기준으로 AGV 배차 | 레거시 3개(25초 지연) · 자동화 12개 · 피지컬AI 14개 | `agent.js` |
+|  | 투입 보류·재개 | 정지 설비가 있고 재공 12개 이상 → 투입 보류. 정지 설비가 없거나 재공 7개 미만 → 재개 | 12개 / 7개 | `multiagent.js wipReflex` |
+|  | 셀 절전 | 자재대기가 25초 넘게 이어진 셀 → 절전 모드 (대기전력 70% 절감) | 25초 | `agent.js energy` |
+|  | AGV 충전 | 쉬고 있는 AGV 배터리 < 충전 기준 → 충전 지시 | 자동화 30% · 피지컬AI 55% | `agent.js fleet` |
+| **정밀조립 Zone — 메인 조정자 · 1초 (제안을 승인·보류·거절)** |  |  |  |  |
+| 메인 조정자 | 정렬·정리 | 우선순위(P4 → P5) 순, 같으면 건강도 낮은 셀 먼저. 이미 처리됐거나 60초 지난 제안은 버림 | 60초 | `multiagent.js arbitrate` |
+|  | 안전 우선 | 대응 로봇이 아직 정해지지 않은 P1(화재·인명) 인시던트가 있으면 예지정비 보류. 재보정은 자동화 단계에서만 보류 | P1 |  |
+|  | 가동 중 정비 유예 | 작업 중(BUSY)인 셀의 예지정비는 위급하지 않으면 대기 구간까지 미룸. 사족보행 순찰 보고로 올라온 정비는 미루지 않음 | — |  |
+|  | 정비 인력 한도 | 동시에 거는 예지정비 ≤ 정밀조립 정비 인력 수 (위급은 예외) | 인력 수 |  |
+|  | 정비 ⇄ 고속 운전 | 건강도 < 예지정비 기준 + 5%p이거나 정비 제안이 대기 중인 셀은 고속 운전 거절 | 기준 + 5%p |  |
+|  | 진동 방지 | 투입 간격을 20초 안에 반대 방향으로 되돌리지 않음 (차이 0.6초 이상이면 예외) | 20초 · 0.6초 |  |
+| **공장 계층 · 셀 계층** |  |  |  |  |
+| 인시던트 오케스트레이터 | 안전 우선순위 | P1 화재·인명 → P2 시설·작업 안전(누유·이물질·보안 위협) → P3 설비 고장 → P4 공급 차질·결품·운영 명령 → P5 예지정비·재보정·품질 순으로 처리. P1은 판단 대기를 25%, P2는 50%로 줄임 | P1~P5 | `orchestrator.js` |
+| Agent Gateway | 계층 권한 | 명령·결정은 바로 아래 계층으로만, 존끼리는 서비스 요청·인계·품질 알림만 허용. 어기면 차단(blocked) | 권한표 | `factoryos.js allowed` |
+| 셀 OCS | 명령 수신 검증 | 비상정지 중에는 리셋 외 명령 거부. Zone 전체 비상정지 중에는 셀 단위 리셋 거부 | — | `commands.js availability` |
+| **확장 Zone** |  |  |  |  |
+| 적응가공 공구 감시 · 조건 조정 | 조건 조정 | 공구 마모 60% 이상 → 이송 92%로 조건 변경(사이클 +6%, 마모 속도 −20%). 셀이 복구 중이면 거부 | 마모 0.60 | `factoryos.js AdaptOrch` |
+|  | 공구 교환 | 마모 88% 이상 → 계획 교환. 100%면 파손 — 가공품 리워크 + 긴급 교환(교환 시간 2배) | 마모 0.88 · 1.0 |  |
+|  | 공구 재고 | 공구 교환 6회마다 공장에 공구 재고 보충 요청 | 6회 |  |
+| 가공기 엣지 AI · 1초 | 예지보전 판단 | 치핑·플랭크 마모(VB) 경보 → 즉시 교체. VB 경고이거나 잔여 3개 이하 → 교체 권고(마모 72% 이상이면 교체 실행). 마모 55% 이상 → 감시 | 잔여 3개 · 0.72 · 0.55 | `machmon.js` |
+
+※ 작성 기준: 저장소 `main` 커밋 46fce78 (1.0.25, 2026-10-22) · C.6.0과 C.9는 커밋 6921990 (1.0.26) 기준. 센서 수(30종 139개)·CCTV 대수(77대)는 설계서·커밋 기록 기준이며 실행 시 배치 결과에 따라 달라질 수 있음.
