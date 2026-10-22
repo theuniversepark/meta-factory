@@ -131,25 +131,34 @@ export class CCTVRecorder {
     if (document.hidden) return;
     if (!this.rec) this.startSegment();
     if ((performance.now() - this.seg.real0) / 1000 >= REC.segS) { this.stopSegment(); this.startSegment(); }
-    this.acc += rdt; if (this.acc < 1 / REC.fps) return; this.acc = 0;
+    // 녹화 주기는 실제 경과 시간으로 (프레임 시간 rdt는 0.1초로 잘려 들어와, 화면이 느리면 2장/초보다 훨씬 덜 찍혔다)
+    const now = performance.now() / 1000; this.acc += Math.min(1, now - (this.lastNow ?? now)); this.lastNow = now;
+    if (this.acc < 1 / REC.fps) return; this.acc = Math.min(this.acc - 1 / REC.fps, 1 / REC.fps);   // 남은 시간을 넘겨 평균 주기를 맞춤
     this.capture();
   }
+  // 녹화 한 장: 전광판을 합성해 그린 뒤 비동기로 읽어(GPU를 멈추지 않음) 받으면 캔버스에 그린다. 시각·구간 표시는 읽기를 건 시점 값.
+  // 앞 읽기가 아직이면 이번 장은 건너뛴다
   capture() {
+    if (this.reading) return;
     const r = this.getRenderer(), { w, h, head } = this.size(), cv = this.cv;
     if (!this.rt || this.rt.width !== w || this.rt.height !== h) { this.rt?.dispose(); this.rt = new THREE.WebGLRenderTarget(w, h); this.rt.texture.colorSpace = THREE.SRGBColorSpace; this.buf = new Uint8Array(w * h * 4); this.img = new ImageData(w, h); }
     if (this.canvas.width !== w || this.canvas.height !== h + head) { this.stopSegment(); return; }   // 배치가 바뀌면(공정 설계) 새 구간
     if (this.base.material.map !== cv.rt.texture || this.over.material.map !== cv.overTex) { this.base.material.map = cv.rt.texture; this.over.material.map = cv.overTex; this.base.material.needsUpdate = this.over.material.needsUpdate = true; }
     const prev = r.getRenderTarget(), auto = r.shadowMap.autoUpdate; r.shadowMap.autoUpdate = false;
     r.setRenderTarget(this.rt); r.setClearColor(0x05080c, 1); r.clear(); r.render(this.scene, this.cam); r.setRenderTarget(prev); r.shadowMap.autoUpdate = auto;
-    r.readRenderTargetPixels(this.rt, 0, 0, w, h, this.buf);
+    const buf = this.buf, t = this.sim.time, no = this.seg?.no, label = `REC · CCTV ${cv.slots.length}대 전체 · ${this.sim.mode.label} · 피지컬AI 실증 메타팩토리 NVR`;
+    this.reading = true;
+    r.readRenderTargetPixelsAsync(this.rt, 0, 0, w, h, buf).then(() => { this.reading = false; if (this.buf === buf && this.canvas.width === w && this.canvas.height === h + head) this.paint(w, h, head, t, no, label); }, () => { this.reading = false; });
+  }
+  paint(w, h, head, t, no, label) {
     const row = w * 4; for (let y = 0; y < h; y++) this.img.data.set(this.buf.subarray((h - 1 - y) * row, (h - y) * row), y * row);
     const g = this.ctx; g.putImageData(this.img, 0, head);
     // 머리 띠: ● REC · 카메라 수 · 공장 단계 · 시각 · 구간
     g.fillStyle = '#05080c'; g.fillRect(0, 0, w, head);
     g.fillStyle = Math.floor(performance.now() / 600) % 2 ? '#ff4d4d' : '#7a2020'; g.beginPath(); g.arc(18, head / 2, 7, 0, Math.PI * 2); g.fill();
     g.font = `800 18px ${FONT}`; g.fillStyle = '#e8edf2'; g.textBaseline = 'middle';
-    g.fillText(`REC · CCTV ${cv.slots.length}대 전체 · ${this.sim.mode.label} · 피지컬AI 실증 메타팩토리 NVR`, 34, head / 2);
-    g.textAlign = 'right'; g.fillStyle = '#7fb8cc'; g.fillText(`${this.iso(this.sim.time).replace('T', ' ').slice(0, 19)} UTC · 구간 #${this.seg?.no ?? '-'}`, w - 12, head / 2); g.textAlign = 'left';
+    g.fillText(label, 34, head / 2);
+    g.textAlign = 'right'; g.fillStyle = '#7fb8cc'; g.fillText(`${this.iso(t).replace('T', ' ').slice(0, 19)} UTC · 구간 #${no ?? '-'}`, w - 12, head / 2); g.textAlign = 'left';
   }
   stats() {
     const cur = this.seg ? (performance.now() - this.seg.real0) / 1000 : 0;

@@ -92,13 +92,22 @@ export class RobotVideoRecorder {
       r.setRenderTarget(this.rt); r.render(this.cw.scene, this.cams[i]);
     }
     r.setRenderTarget(prev); r.shadowMap.autoUpdate = auto; hide.forEach((o, i) => (o.visible = vis[i]));
-    this.acc += rdt; if (this.acc < 1 / RREC.fps) return; this.acc = 0;
+    // 녹화 주기는 실제 경과 시간으로 (프레임 시간 rdt는 0.1초로 잘려 들어와, 화면이 느리면 2장/초보다 훨씬 덜 찍혔다)
+    const now = performance.now() / 1000; this.acc += Math.min(1, now - (this.lastNow ?? now)); this.lastNow = now;
+    if (this.acc < 1 / RREC.fps) return; this.acc = Math.min(this.acc - 1 / RREC.fps, 1 / RREC.fps);   // 남은 시간을 넘겨 평균 주기를 맞춤
     this.capture();
   }
+  // 녹화 한 장: 칸 렌더 타깃을 비동기로 읽어(GPU를 멈추지 않음 — 지금 내용을 GPU 쪽 버퍼로 복사만 걸어 둠) 받으면 캔버스에 그린다.
+  // 시각·구간 표시는 읽기를 건 시점 값. 앞 읽기가 아직이면 이번 장은 건너뛴다 (그 사이 칸 내용은 다음 장에 담김)
   capture() {
-    const r = this.cw.renderer, W = this.cols * RREC.tw, H = this.rows * RREC.th, g = this.ctx;
-    if (this.canvas.width !== W) return;
-    r.readRenderTargetPixels(this.rt, 0, 0, W, H, this.buf);
+    const r = this.cw.renderer, W = this.cols * RREC.tw, H = this.rows * RREC.th;
+    if (this.canvas.width !== W || this.reading) return;
+    const buf = this.buf, t = this.sim.time, no = this.seg?.no, label = `REC · 로봇 카메라 ${this.tiles.length}대 전체 · ${this.sim.mode.label}`;
+    this.reading = true;
+    r.readRenderTargetPixelsAsync(this.rt, 0, 0, W, H, buf).then(() => { this.reading = false; if (this.buf === buf && this.canvas.width === W) this.paint(W, H, t, no, label); }, () => { this.reading = false; });
+  }
+  paint(W, H, t, no, label) {
+    const g = this.ctx;
     const row = W * 4; for (let y = 0; y < H; y++) this.img.data.set(this.buf.subarray((H - 1 - y) * row, (H - y) * row), y * row);
     g.putImageData(this.img, 0, RREC.head);
     // 칸 라벨: 로봇 · 카메라
@@ -109,8 +118,8 @@ export class RobotVideoRecorder {
     for (let k = 1; k < this.rows; k++) { g.beginPath(); g.moveTo(0, RREC.head + k * RREC.th); g.lineTo(W, RREC.head + k * RREC.th); g.stroke(); }
     g.fillStyle = '#05080c'; g.fillRect(0, 0, W, RREC.head);
     g.fillStyle = Math.floor(performance.now() / 600) % 2 ? '#ff4d4d' : '#7a2020'; g.beginPath(); g.arc(16, RREC.head / 2, 6, 0, Math.PI * 2); g.fill();
-    g.font = `800 16px ${FONT}`; g.fillStyle = '#e8edf2'; g.fillText(`REC · 로봇 카메라 ${this.tiles.length}대 전체 · ${this.sim.mode.label}`, 30, RREC.head / 2);
-    g.textAlign = 'right'; g.fillStyle = '#7fb8cc'; g.fillText(`${this.iso(this.sim.time).replace('T', ' ').slice(0, 19)} UTC · 구간 #${this.seg?.no ?? '-'}`, W - 10, RREC.head / 2); g.textAlign = 'left';
+    g.font = `800 16px ${FONT}`; g.fillStyle = '#e8edf2'; g.fillText(label, 30, RREC.head / 2);
+    g.textAlign = 'right'; g.fillStyle = '#7fb8cc'; g.fillText(`${this.iso(t).replace('T', ' ').slice(0, 19)} UTC · 구간 #${no ?? '-'}`, W - 10, RREC.head / 2); g.textAlign = 'left';
   }
   // AAS 자산 하나가 찍힌 영상 목록 (끝난 구간): 파일 이름 · URL · 로컬 경로 · 카메라 · 칸 · 시각
   videosFor(assetKey) {

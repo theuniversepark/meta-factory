@@ -224,6 +224,20 @@ function releaseOrphans(prev) {
   return n;
 }
 
+// ── 작은 부품은 그림자를 드리우지 않음 ─────────────────
+// 그림자 대상 약 2만 2천 개 중 1만 3천여 개가 반지름 5cm 미만(볼트·LED·라벨 등) — 그림자 지도 해상도보다 작아 화면에 거의 안 남는데(같은 순간 렌더 비교 0.001% 이하)
+// 프레임마다 그림자 지도를 그릴 때 그만큼 그리기 호출이 든다. 전환·Blender 교체 뒤, 그리고 운영 중 새로 생긴 모델은 1.5초마다 함께 정리
+const SHADOW_MIN_R = 0.05;
+function trimShadows(root) {
+  root.updateMatrixWorld();
+  root.traverse((o) => {
+    if (!o.isMesh || !o.castShadow || !o.geometry) return;
+    const g = o.geometry; if (!g.boundingSphere) g.computeBoundingSphere();
+    const e = o.matrixWorld.elements, k = Math.max(Math.hypot(e[0], e[1], e[2]), Math.hypot(e[4], e[5], e[6]), Math.hypot(e[8], e[9], e[10]));
+    if ((g.boundingSphere?.radius ?? 1) * k < SHADOW_MIN_R) o.castShadow = false;
+  });
+}
+
 // ── 렌더: Blender 모델(기본) ─────────────────
 // Blender에서 모델링한 glTF 모델로 그린다. setRender('3d')는 개발 확인용(window.__twin) — 화면만 다시 만들고 시뮬레이션은 그대로 이어감
 function setRender(style) {
@@ -233,7 +247,7 @@ function setRender(style) {
   view.setup(sim, labelsOn, changedIds); view.selected = null; view.selectRobot(null);
   xzones.setup(sim, labelsOn); insp.setup(sim, xzones, labelsOn);
   camWall.setup(sim, view); for (const w of zoneWalls) w.setup(sim, view); cctvView.setup(sim, view); for (const b of cctvBoards) b.setup(sim);
-  applyLook(); RENDER.swapped = 0; blenderize(scene); releaseOrphans(prev);
+  applyLook(); RENDER.swapped = 0; blenderize(scene); trimShadows(scene); releaseOrphans(prev);
 }
 
 function start(key) {
@@ -261,7 +275,7 @@ function start(key) {
   window.__cctvRefresh?.();
   window.__netRefresh?.();   // 라인·단계가 바뀌면 CCTV 배치 요약도 다시
   if (typeof designer !== 'undefined' && designer) designer.render();   // AMMR 선택 가능 여부가 단계마다 다르다
-  applyLook(); blenderize(scene); releaseOrphans(prev);
+  applyLook(); blenderize(scene); trimShadows(scene); releaseOrphans(prev);
   llm.attach(sim, agent);
   ui.reset(sim, agent);
   ui.hideDetail();
@@ -1400,6 +1414,7 @@ let uiTimer = 0, screenTimer = 0, robotTimer = 0, camTimer = 0, vlaTimer = 0;
 const rbCam = { key: null, sel: 'head' };   // 로봇 정보 창 카메라 선택
 document.getElementById('detail').addEventListener('click', (e) => { const b = e.target.closest('[data-rbcam]'); if (b) { rbCam.sel = b.dataset.rbcam; camTimer = 1; } });
 const clockEl = document.getElementById('clock');
+const wallFrustum = new THREE.Frustum(), wallVP = new THREE.Matrix4();
 function frame() {
   requestAnimationFrame(frame);   // 한 프레임에서 예외가 나도 루프는 계속
   const rdt = Math.min(clock.getDelta(), 0.1);
@@ -1413,7 +1428,7 @@ function frame() {
     llm.update();
   }
   hub.tick(rdt);
-  bzT += rdt; if (bzT > 1.5) { bzT = 0; blenderize(scene); }   // Blender 옵션: 운영 중에 새로 생긴 모델(대상물·트럭 등)도 바꿔 끼운다
+  bzT += rdt; if (bzT > 1.5) { bzT = 0; blenderize(scene); trimShadows(scene); }   // Blender 옵션: 운영 중에 새로 생긴 모델(대상물·트럭 등)도 바꿔 끼운다
   pcapVideoTick(rdt);
   facPushTick(rdt);
   view.update(rdt, running, speed);
@@ -1448,10 +1463,17 @@ function frame() {
   cctvT += rdt; if (cctvSel && cctvT > 0.12) { cctvT = 0; renderCctvPanel(); }
   if (!glLost) {
     try {
-      camWall.update(rdt); for (const w of zoneWalls) w.update(rdt);
-      cctvView.update(rdt); for (const b of cctvBoards) b.update(rdt);
-      cctvRec.update(rdt);
-      robotRec.update(rdt);
+      // 보조 화면(전광판·녹화)은 공장 전체를 여러 번 다시 그린다 — 객체 위치(행렬)는 이번 프레임에 한 번만 계산하고 그 값을 함께 쓴다
+      // (그릴 때마다 3만 개 객체의 위치를 처음부터 다시 계산하던 것을 없앰. 메인 화면은 아래 composer.render에서 평소대로 다시 계산)
+      scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;
+      camera.updateMatrixWorld(); wallFrustum.setFromProjectionMatrix(wallVP.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+      for (const w of [camWall, ...zoneWalls]) w.seen = !!w.screen && wallFrustum.intersectsObject(w.screen);   // 시야 밖 전광판은 덜 자주 그림 (robotcam.js)
+      try {
+        camWall.update(rdt); for (const w of zoneWalls) w.update(rdt);
+        cctvView.update(rdt); for (const b of cctvBoards) b.update(rdt);
+        cctvRec.update(rdt);
+        robotRec.update(rdt);
+      } finally { scene.matrixWorldAutoUpdate = true; }
       // 안개는 카메라 거리를 따라 민다 — 줌 아웃해도 공장이 배경색(어두운 색)으로 바래지 않고 밝기를 유지한다 (가까이서는 기존 70~160m 그대로)
       if (scene.fog) { const d = camera.position.distanceTo(controls.target); scene.fog.near = Math.max(70, d + 40); scene.fog.far = Math.max(160, d + 160); }
       composer.render();

@@ -292,13 +292,17 @@ export class RobotCamWall {
     const auto = r.shadowMap.autoUpdate; r.shadowMap.autoUpdate = false;
     const prev = r.getRenderTarget();
     r.setRenderTarget(this.capRT); r.clear(); r.render(this.scene, this.capCam);
-    r.readRenderTargetPixels(this.capRT, 0, 0, w, h, this.capBuf);
+    // 비동기 읽기: 지금 그린 내용을 GPU 쪽 버퍼로 복사만 걸어 두고(다음 렌더와 섞이지 않음) 끝나면 받는다 — 동기 읽기는 GPU 작업이 다 끝날 때까지 화면을 멈췄다
+    const buf = new Uint8Array(w * h * 4), read = r.readRenderTargetPixelsAsync(this.capRT, 0, 0, w, h, buf);
     r.setRenderTarget(prev); r.shadowMap.autoUpdate = auto;
     this.group.visible = vis[0]; if (this.view.selRing) this.view.selRing.visible = vis[1];
-    const img = new ImageData(w, h), row = w * 4;
-    for (let y = 0; y < h; y++) img.data.set(this.capBuf.subarray((h - 1 - y) * row, (h - y) * row), y * row);
-    this.capCanvas.getContext('2d').putImageData(img, 0, 0);
-    return new Promise((res) => this.capCanvas.toBlob((b) => (b ? b.arrayBuffer().then((ab) => res(new Uint8Array(ab))) : res(null)), 'image/jpeg', 0.78));
+    return read.then(() => {
+      const img = new ImageData(w, h), row = w * 4, cv = this.capCanvas;
+      for (let y = 0; y < h; y++) img.data.set(buf.subarray((h - 1 - y) * row, (h - y) * row), y * row);
+      if (cv.width !== w || cv.height !== h) return null;
+      cv.getContext('2d').putImageData(img, 0, 0);
+      return new Promise((res) => cv.toBlob((b) => (b ? b.arrayBuffer().then((ab) => res(new Uint8Array(ab))) : res(null)), 'image/jpeg', 0.78));
+    }, () => null);
   }
 
   setCam(cam, f) {
@@ -315,7 +319,8 @@ export class RobotCamWall {
     this.syncEvents(rdt);
     // 1) 영상: 프레임마다 한 칸 렌더 (6칸이 약 10fps로 돌아가며 갱신) — renderEvery > 1이면 그 프레임 수마다 한 칸 (확장 Zone 디스플레이: GPU 부담 분산)
     this.frameN = (this.frameN ?? 0) + 1;
-    const draw = this.frameN % (this.renderEvery ?? 1) === 0;
+    // 메인 카메라 시야 밖이면(main.js가 seen=false) 4배 드물게 — 화면 표시용 전광판이라 수집 데이터와 무관하고, CCTV 화면에 비칠 수 있어 멈추지는 않는다
+    const draw = this.frameN % ((this.renderEvery ?? 1) * (this.seen === false ? 4 : 1)) === 0;
     const i = this.tile % Math.max(1, this.list.length), f = draw ? this.list[i] : null;
     if (draw) this.tile++;
     if (f) {
