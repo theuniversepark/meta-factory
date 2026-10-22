@@ -78,9 +78,11 @@ check('보관 — raw 7일(compose) · agg_1m 90일 · 1분 평균 작업', /DOC
 
 console.log('== 켜기·끄기 API (가짜 Docker)');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mf-mon-')), dir = path.join(tmp, 'data'), log = path.join(tmp, 'docker.log');
-const fake = path.join(tmp, 'docker');
-fs.writeFileSync(fake, `#!/bin/sh\necho "$*" >> "${log}"\ncase "$*" in\n  --version) echo "Docker version 99.0.0";;\n  "compose version --short") echo "2.99.0";;\n  "info --format {{.ServerVersion}}") echo "99.0.0";;\n  *" ps --format json") echo '{"Service":"grafana","State":"running","Status":"Up"}';;\nesac\nexit 0\n`, { mode: 0o755 });
-process.env.DOCKER_BIN = fake;
+const fake = path.join(tmp, 'docker'), engine = path.join(tmp, 'engine-up'), fakeColima = path.join(tmp, 'colima');
+fs.writeFileSync(engine, '');   // 엔진 켜짐 (뒤에서 끄고 Colima 자동 켜기를 본다)
+fs.writeFileSync(fake, `#!/bin/sh\necho "$*" >> "${log}"\ncase "$*" in\n  --version) echo "Docker version 99.0.0";;\n  "compose version --short") echo "2.99.0";;\n  "info --format {{.ServerVersion}}") [ -f "${engine}" ] || exit 1; echo "99.0.0";;\n  *" ps --format json") echo '{"Service":"grafana","State":"running","Status":"Up"}';;\nesac\nexit 0\n`, { mode: 0o755 });
+fs.writeFileSync(fakeColima, `#!/bin/sh\necho "colima $*" >> "${log}"\n[ "$1" = start ] && : > "${engine}"\nexit 0\n`, { mode: 0o755 });
+process.env.DOCKER_BIN = fake; process.env.COLIMA_BIN = fakeColima;
 const { makeMonitorApi } = await import('../server/monitor-api.mjs');
 let influxAuth = 401;   // 첫 켜기: 기존 저장 공간과 토큰이 어긋난 상황 → 다시 초기화해야 함
 const fetchImpl = async (u, o = {}) => {
@@ -103,6 +105,9 @@ check('다시 켜기 — 토큰 유지 · 토큰 맞으면 초기화 안 함', j
 const st = (await api.route('GET', '/api/monitor/v1/status')).body;
 check('상태 — Docker · 컨테이너 · Grafana/InfluxDB 응답 · 최근 1분 건수(측정별) · 주소', st.docker?.compose === '2.99.0' && st.containers[0]?.service === 'grafana' && st.grafana && st.influx && st.counts?.equipment === 120 && st.counts?.event === 3 && st.url === 'http://127.0.0.1:3300/', JSON.stringify(st.counts));
 check('상태 응답·작업 기록에 토큰·비밀번호 없음', !JSON.stringify(st).includes(tok1) && !JSON.stringify(st).includes(env1.match(/MF_GRAFANA_PASSWORD=(.*)/)[1]));
+fs.writeFileSync(log, ''); fs.rmSync(engine);
+await api.route('POST', '/api/monitor/v1/start'); const j3 = await waitJob();
+check('엔진 꺼짐 + Colima 설치 → colima start로 켠 뒤 계속 진행', j3.ok && j3.colimaStarted === true && fs.readFileSync(log, 'utf8').split('\n').filter((l) => /^colima start$|^compose -p /.test(l)).map((l) => l.replace(/^compose -p metafactory-mon --env-file \.env -f compose\.yml /, '')).join(' | ') === 'colima start | up -d | restart telegraf grafana', j3.error ?? j3.step);
 fs.writeFileSync(log, '');
 const sp = await api.route('POST', '/api/monitor/v1/stop');
 check('끄기 — compose stop (데이터 남김 · down 아님)', sp.body.ok && calls().join() === 'stop');

@@ -3,6 +3,7 @@
 //   POST /api/monitor/v1/start    monitoring/ 구성을 데이터 폴더로 복사 · .env(무작위 토큰·비밀번호, 한 번 만든 것은 유지) · docker compose up -d → 준비될 때까지 확인
 //   POST /api/monitor/v1/stop     docker compose stop (데이터는 남김)
 // Docker 실행 파일: Finder·시작 메뉴로 띄운 앱은 PATH가 짧아 흔한 위치를 직접 찾는다 (Homebrew · Docker Desktop · 윈도우)
+// Docker 엔진이 꺼져 있고 Colima가 설치돼 있으면 「대시보드 켜기」가 colima start로 먼저 켠다 (Docker Desktop은 사용자가 직접 실행)
 // 컨테이너는 host.docker.internal(host-gateway)로 앱 MQTT 브로커(127.0.0.1)에 닿는다 — 브로커를 사내망에 열지 않는다. 접속 포트도 127.0.0.1에만
 import fs from 'node:fs';
 import path from 'node:path';
@@ -12,6 +13,7 @@ import { execFile } from 'node:child_process';
 export const MON_PROJECT = 'metafactory-mon';
 const PORTS = { grafana: 3300, influx: 8186 };
 const DOCKER = [process.env.DOCKER_BIN, 'docker', '/opt/homebrew/bin/docker', '/usr/local/bin/docker', '/Applications/Docker.app/Contents/Resources/bin/docker', 'C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe'].filter(Boolean);
+const COLIMA = [process.env.COLIMA_BIN, 'colima', '/opt/homebrew/bin/colima', '/usr/local/bin/colima'].filter(Boolean);
 const PATH_EXTRA = ['/opt/homebrew/bin', '/usr/local/bin', '/Applications/Docker.app/Contents/Resources/bin'];
 
 function run(bin, args, { cwd, env, timeout = 120000 } = {}) {
@@ -82,8 +84,15 @@ export function makeMonitorApi({ dir, src, mqttPort = () => 1885, fetchImpl = gl
       try {
         if (!(await findDocker(true))) throw new Error('Docker를 찾을 수 없습니다 — Docker Desktop(또는 Colima)을 설치·실행한 뒤 다시 누르세요');
         if (!rt.compose) throw new Error('docker compose가 없습니다 — Docker Desktop을 쓰거나 compose 플러그인을 설치하세요');
-        const info = await run(rt.docker, ['info', '--format', '{{.ServerVersion}}'], { env, timeout: 15000 });
-        if (!info.ok) throw new Error('Docker 엔진이 꺼져 있습니다 — Docker Desktop(또는 colima start)을 먼저 실행하세요');
+        const engineUp = async () => (await run(rt.docker, ['info', '--format', '{{.ServerVersion}}'], { env, timeout: 15000 })).ok;
+        if (!(await engineUp())) {
+          let colima = null; for (const b of COLIMA) if ((await run(b, ['version'], { env, timeout: 8000 })).ok) { colima = b; break; }
+          if (!colima) throw new Error('Docker 엔진이 꺼져 있습니다 — Docker Desktop을 먼저 실행하세요');
+          rt.job.step = 'Docker 엔진 켜기 (colima start · 1분 안팎)';
+          const c = await run(colima, ['start'], { env, timeout: 300000 });
+          if (!c.ok || !(await engineUp())) throw new Error(`Colima를 켜지 못했습니다 — 터미널에서 colima start를 실행해 보세요 (${(c.err || c.out).split('\n').filter(Boolean).slice(-1)[0] ?? '응답 없음'})`);
+          rt.job.colimaStarted = true;
+        }
         rt.job.step = '구성 파일 준비'; copyDir(src, dir); envFile();
         rt.job.step = '컨테이너 시작 (처음이면 이미지 내려받기로 몇 분)';
         const r = await compose(['up', '-d'], 900000); if (!r.ok) throw new Error(`docker compose up 실패 — ${r.err.split('\n').filter(Boolean).slice(-2).join(' / ')}`);
