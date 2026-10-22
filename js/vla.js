@@ -210,7 +210,7 @@ export class EpisodeRecorder {
       try {
         const zip = await buildEpisodesZip(rec.uid, [ep], runId);
         const r = await fetch(`/api/episodes?robot=${encodeURIComponent(rec.uid)}&id=${encodeURIComponent(`${runId}_${ep.id}`)}`, { method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: zip });
-        if (r.ok) { if (same) { this.uploaded++; this.bytes += zip.length; } ep.stored = true; }
+        if (r.ok) { if (this.sim === sim) { this.uploaded++; this.bytes += zip.length; } ep.stored = true; }   // 압축·업로드를 기다리는 동안 단계가 바뀌었으면 새 실행 통계에 더하지 않는다
       } catch { /* 서버 저장 실패해도 브라우저 보관본은 유지 */ }
     } else { ep.stored = false; }
   }
