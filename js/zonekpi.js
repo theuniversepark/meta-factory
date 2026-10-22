@@ -325,14 +325,20 @@ export function interpretControl(c, vals, spec = {}, lead = null) {
     items.push({ k: '공정능력', tone: lv[1], t });
     if (two && c.cp - c.cpk >= 0.2) acts.push(`중심 조정: 목표값 대비 ${sgn(-(c.mean - (usl + lsl) / 2))} ${u} 보정(오프셋)으로 Cpk 개선`);
     if (c.cpk < 1.33 && !(two && c.cp - c.cpk >= 0.2)) acts.push(uniq.size ? '특별 원인을 먼저 없앤 뒤 공정능력을 다시 평가' : '안정하지만 능력 부족 — 설비·조건 개선으로 변동 자체를 줄이거나 규격 타당성 검토');
+  } else if (lsl != null || usl != null) {   // 능력 지수를 못 구해도(산포 0 등) 실제 규격 이탈은 그대로 판정한다
+    const flat = !(c.sigma > 0);
+    items.push({ k: '공정능력', tone: oos ? 'bad' : 'warn', t: `${flat ? '값의 산포가 0이라' : '규격이 한쪽뿐이거나 산포를 구할 수 없어'} Cpk를 계산할 수 없습니다 — 능력이 충분하다고 판단할 근거가 없습니다. 실제 ${V.length}개 중 ${oos}개 규격 밖${oos ? '입니다' : ''}.` });
+    if (flat) acts.push('측정값이 모두 같음 — 측정기·데이터 수집(고정값·포화·통신 끊김)부터 확인');
+    if (oos) acts.push('규격 밖 제품 격리(🔎 품질 추적) 후 원인 조사 · 중심 보정');
   }
   if (moved) acts.push('평균 이동·추세: 신호가 시작된 시점 전후의 공구 교체·마모, 보정값, 자재 로트, 셋업·품목 전환 이력 확인');
   if (by(1).length && !moved) acts.push('돌발 점: 해당 제품 시리얼을 🔎 품질 추적 계보에서 확인(설비·작업자·자재)');
   if (spread) acts.push('산포 증가: 클램핑·지그 고정, 진동, 측정 반복성(게이지 R&R) 점검');
   if (lead && Math.abs(lead.r) >= 0.3) acts.push(`원인 후보: 상관이 가장 큰 공정 변수 「${lead.label}」(r = ${fm(lead.r, 2)}) — 옆 산점도로 확인`);
+  if (oos && !acts.some((a) => a.startsWith('규격 밖'))) acts.unshift(`규격 밖 ${oos}개 — 해당 제품 격리·재검사(🔎 품질 추적)`);
   if (!acts.length) acts.push('현 조건 유지 — 관리도를 계속 감시하고, 신호가 나오면 그 시점부터 원인 조사');
   const tone = worst(items.map((i) => i.tone));
-  const head = uniq.size ? `특별 원인 신호 ${uniq.size}점 — 조사 필요` : tone === 'good' ? '안정 · 능력 충분' : moved ? '관리 한계 안이지만 평균이 움직이는 중' : '관리 상태이지만 개선 여지';
+  const head = uniq.size ? `특별 원인 신호 ${uniq.size}점 — 조사 필요` : oos ? `규격 밖 ${oos}개 / ${V.length}개 — 조치 필요` : tone === 'good' ? '안정 · 능력 충분' : moved ? '관리 한계 안이지만 평균이 움직이는 중' : '관리 상태이지만 개선 여지';
   return { tone, head, items, acts };
 }
 
@@ -351,8 +357,8 @@ export function interpretScatter(units, xk, yk, xl = {}, spec = {}) {
   if (sig && a >= 0.3 && p.b) {
     const span = xmax - xmin || 1, now = xs.at(-1), hits = [[usl, 'USL'], [lsl, 'LSL']].filter(([L]) => L != null).map(([L, nm]) => ({ nm, x: (L - p.a) / p.b })).filter((h) => h.x >= xmin - span && h.x <= xmax + span && (p.b > 0 ? h.nm === 'USL' : h.nm === 'LSL'));
     for (const h of hits) {
-      const left = h.x - now, over = p.b > 0 ? now >= h.x : now <= h.x;
-      items.push({ k: '한계 도달', tone: over ? 'bad' : 'warn', t: `회귀선상 ${XN} ≈ ${fm(h.x)}${xu ? ` ${xu}` : ''}에서 ${josa(YN, '이', '가')} ${h.nm}(${fm(h.nm === 'USL' ? usl : lsl)} ${yu})에 닿습니다. 최근 표본의 ${josa(XN, '은', '는')} ${fm(now)}${over ? ' — 이미 넘었습니다' : ` — ${fm(Math.abs(left))} 남았습니다`}.` });
+      const yNow = p.a + p.b * now, over = h.nm === 'USL' ? yNow >= usl : yNow <= lsl, left = Math.abs(h.x - now);   // 회귀선 예측값을 한계와 직접 비교 (기울기 부호와 무관)
+      items.push({ k: '한계 도달', tone: over ? 'bad' : 'warn', t: `회귀선상 ${XN} ≈ ${fm(h.x)}${xu ? ` ${xu}` : ''}에서 ${josa(YN, '이', '가')} ${h.nm}(${fm(h.nm === 'USL' ? usl : lsl)} ${yu})에 닿습니다. 최근 표본의 ${josa(XN, '은', '는')} ${fm(now)}${over ? ` — 회귀선 예측 ${fm(yNow)} ${yu}로 이미 넘었습니다` : ` — ${fm(left)} 남았습니다`}.` });
       acts.push(`「${XN}」 관리 기준: ${fm(h.x)}${xu ? ` ${xu}` : ''} 전에 교체·보정하도록 기준값으로 검토 (여유를 두려면 더 앞당김)`);
     }
   }

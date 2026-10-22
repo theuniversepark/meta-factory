@@ -28,7 +28,7 @@ export function epcisEvent(H, e, iso) {
     }
     case 'store': { const id = epc(e.id); return id ? base('ObjectEvent', { epcList: [id], action: 'OBSERVE', bizStep: 'storing', disposition: 'sellable_not_accessible', readPoint: { id: sgln(`${zl(e.zone)}-FG`) }, bizLocation: { id: sgln(`${zl(e.zone)}-FG`) } }) : null; }
     case 'aggregate': { const ch = epcs(e.children); return ch.length ? base('AggregationEvent', { parentID: ssccEpc(e.id), childEPCs: ch, action: 'ADD', bizStep: 'packing', disposition: 'container_closed', readPoint: { id: sgln('SHIP-PICK') }, 'mf:sscc': e.id }) : null; }
-    case 'ship': return base('ObjectEvent', { epcList: [ssccEpc(e.id)], action: 'OBSERVE', bizStep: 'shipping', disposition: 'in_transit', readPoint: { id: sgln('SHIP-DOCK') }, bizTransactionList: [{ type: 'bol', bizTransaction: shipment(e.truck) }], 'mf:sscc': e.id, 'mf:truck': e.truck, 'mf:quantity': e.n });
+    case 'ship': return base('ObjectEvent', { epcList: [ssccEpc(e.id)], action: 'OBSERVE', bizStep: 'shipping', disposition: 'in_transit', readPoint: { id: sgln('SHIP-DOCK') }, bizTransactionList: [{ type: 'bol', bizTransaction: shipment(e.shipment ?? e.truck) }], 'mf:sscc': e.id, 'mf:truck': e.truck, 'mf:shipment': e.shipment ?? e.truck, 'mf:quantity': e.n });
     case 'hold': { const ids = epcs(e.ids); return ids.length ? base('ObjectEvent', { epcList: ids, action: 'OBSERVE', bizStep: 'holding', disposition: 'non_sellable_other', readPoint: { id: sgln(`${zl(e.zone)}-FG`) }, 'mf:lot': e.id, 'mf:reason': e.why ?? '정밀검사 샘플 판정 전 출하 보류' }) : null; }
     case 'release': { const ids = epcs(e.ids); return ids.length ? base('ObjectEvent', { epcList: ids, action: 'OBSERVE', bizStep: 'inspecting', disposition: 'sellable_not_accessible', readPoint: { id: sgln(`${zl(e.zone)}-FG`) }, 'mf:lot': e.id, 'mf:result': e.result ?? 'OK' }) : null; }
     case 'decommission': { const id = epc(e.id); return id ? base('ObjectEvent', { epcList: [id], action: 'DELETE', bizStep: 'decommissioning', disposition: 'destroyed', readPoint: { id: sgln('QIS-MRB') }, 'mf:reason': e.why }) : null; }
@@ -115,11 +115,12 @@ export class EpcisStore {
     return this.events.filter((e) => epcsOf(e).some((x) => ids.has(x))).sort((a, b) => Date.parse(a.eventTime) - Date.parse(b.eventTime)).map(({ _seq, ...e }) => e);
   }
   // 트럭(출하 bizTransaction) → 실린 팔레트 SSCC → 시리얼 (리콜 범위)
-  shipmentOf(truck) {
-    const bt = shipment(truck), pals = new Set();
-    for (const e of this.events) if (short(e.bizStep) === 'shipping' && (e.bizTransactionList ?? []).some((b) => b.bizTransaction === bt)) for (const x of e.epcList ?? []) pals.add(x);
+  // shipmentId = 출하 ID(SHP-…) — 예전 기록은 트럭 이름이 곧 출하 ID
+  shipmentOf(shipmentId) {
+    const bt = shipment(shipmentId), pals = new Set(); let truck = null;
+    for (const e of this.events) if (short(e.bizStep) === 'shipping' && (e.bizTransactionList ?? []).some((b) => b.bizTransaction === bt)) { truck ??= e['mf:truck'] ?? null; for (const x of e.epcList ?? []) pals.add(x); }
     const serials = new Set(); for (const e of this.events) if (e.type === 'AggregationEvent' && pals.has(e.parentID)) for (const c of e.childEPCs ?? []) serials.add(c);
-    return { truck, pallets: [...pals], serials: [...serials] };
+    return { shipment: shipmentId, truck: truck ?? shipmentId, pallets: [...pals], serials: [...serials] };
   }
   get(id) { return this.captures.get(String(id)) ?? null; }
 }

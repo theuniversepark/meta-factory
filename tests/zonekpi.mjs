@@ -118,6 +118,16 @@ console.log('== 그래프 해석 (관리도 · 산점도)');
   const U3 = Array.from({ length: 40 }, (_, i) => ({ id: `R${i}`, x: { vb: rnd() * 50 }, y: { bore: gauss() * 3 }, ng: false }));
   const Iw = interpretScatter(U3, 'vb', 'bore', { label: '마모 VB', unit: 'µm' }, SP);
   check('무관한 변수 → 관계 약함 · 다른 변수 확인 조치 · 한계 도달 없음', /관계 약함/.test(Iw.head) && /상관표/.test(Iw.acts.join()) && !Iw.items.some((i) => i.k === '한계 도달'), Iw.head);
+  // Codex 검수 5 — 음의 기울기: x가 커질수록 y가 LSL로 내려감. 한계 전 · 일치 · 후 (양의 기울기 USL도 같은 방식)
+  const lim = (b, xs, L) => interpretScatter(xs.map((x, i) => ({ id: `L${i}`, x: { w: x }, y: { d: b > 0 ? x - 30 + 20 : 50 - x }, ng: false })), 'w', 'd', { label: '마모', unit: 'µm' }, { label: '치수', unit: 'mm', ...L }).items.find((i) => i.k === '한계 도달');
+  const xsTo = (last) => Array.from({ length: 40 }, (_, i) => 1 + (i * (last - 1)) / 39);
+  const nb = [lim(-1, xsTo(25), { lsl: 20 }), lim(-1, xsTo(30), { lsl: 20 }), lim(-1, xsTo(40), { lsl: 20 })], pb = [lim(1, xsTo(25), { usl: 20 }), lim(1, xsTo(40), { usl: 20 })];
+  check('한계 도달 — 음의 기울기 LSL: 전 = 남음 · 일치 · 후 = 이미 넘음 (양의 기울기 USL도)', nb[0]?.tone === 'warn' && /5\.00 남았습니다/.test(nb[0].t) && nb[1]?.tone === 'bad' && nb[2]?.tone === 'bad' && /이미 넘었습니다/.test(nb[2].t) && pb[0]?.tone === 'warn' && pb[1]?.tone === 'bad', [...nb, ...pb].map((x) => x?.t.split('— ')[1]).join(' | '));
+  // Codex 검수 6 — 산포 0인데 전부 규격 밖
+  const flat = Array(40).fill(20), If = interpretControl(controlChart(flat, SP), flat, SP);
+  check('산포 0 · 전부 규격 밖 → bad · 「규격 밖 40개」 · 능력 충분 아님 · 측정기 확인 조치', If.tone === 'bad' && /규격 밖 40개/.test(If.head) && !/능력 충분/.test(txt(If)) && /측정기/.test(If.acts.join()), If.head);
+  const flatIn = Array(40).fill(1), Ifi = interpretControl(controlChart(flatIn, SP), flatIn, SP);
+  check('산포 0 · 규격 안 → 「능력 충분」 단정 안 함 (warn)', Ifi.tone === 'warn' && !/능력 충분/.test(Ifi.head), Ifi.head);
   zdState.tab = 'qa'; zdState.zone = 'main'; const hq = zoneDashHTML(s);
   check('품질·상관 탭 — 관리도·산점도 해석 상자 2개 · NaN/undefined 없음', (hq.match(/class="zd-ins /g) ?? []).length === 2 && /관리도 해석/.test(hq) && /산점도 해석/.test(hq) && !/NaN|undefined|Infinity/.test(hq.replace(/<[^>]+>/g, ' ')));
 }

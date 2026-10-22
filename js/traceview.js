@@ -99,11 +99,11 @@ function unitHTML(sim, u) {
       <tr><td>EPC</td><td><code class="qt-wrap">${esc(u.epc)}</code></td></tr></table>`
     : `<p class="qt-ins">${u.status === 'ng' ? '체결 전수 검사 NG — 시리얼을 발행하지 않고 WIP ID로 배출함 격리' : `아직 최종 검사 전 — WIP ID로 공정 이력을 쌓는 중 (${P?.cells.join('·')} 합격 시 시리얼 발행)`}</p>`;
   const steps = (u.steps ?? []).map((p, i) => `<li class="${p.result === 'NG' ? 'ng' : ''}"><div class="qt-st"><b>${i + 1}. ${esc(p.name)}</b> ${p.result ? chip(`판정 ${p.result}`, p.result === 'NG' ? 'bad' : 'good') : ''}<small>${clk(p.tIn)} → ${clk(p.tOut)}${p.cycle != null ? ` · ${p.cycle}초` : ''}</small></div></li>`).join('');
-  const shipLine = u.ship ? `팔레트 SSCC <code>(00)${u.ship.sscc}</code>${u.ship.truck ? ` → ${esc(u.ship.truck)} · ${clk(u.ship.t)} 출하` : ' · 상차 중'}` : u.loc === 'fg' ? '구분 적재 · 출하 대기' : LOC[u.loc]?.[0] ?? u.loc;
+  const shipLine = u.ship ? `팔레트 SSCC <code>(00)${u.ship.sscc}</code>${u.ship.truck ? ` → ${esc(u.ship.truck)}${u.ship.shipment ? ` (출하 ${esc(u.ship.shipment)})` : ''} · ${clk(u.ship.t)} 출하` : ' · 상차 중'}` : u.loc === 'fg' ? '구분 적재 · 출하 대기' : LOC[u.loc]?.[0] ?? u.loc;
   const disp = u.disp ? `<p class="qt-ins">처분: <b>${u.disp.d === 'rework' ? `재작업${u.disp.done ? ' → 재검 합격 (시리얼 유지)' : ' 중'}` : '폐기 (시리얼 폐기 기록 · 재사용 금지)'}</b> — ${esc(u.disp.why)} · ${clk(u.disp.t)}</p>` : '';
   return `<div class="qt-gen"><h4>${u.serial ?? '시리얼 미발행'} ${stateChip(u)} <small>WIP ${u.wip} · ${ZONE_KO[u.zone]} ${P?.label ?? ''} · ${clk(u.t0)} 투입${u.zone === 'main' ? ` <button data-qt-goto="${idOf(u)}" class="qt-link">계보 보기 ›</button>` : ''}</small></h4>
     <div class="qt-unit">${code}${kv}</div>
-    ${u.epc ? `<div class="qt-dl"><button data-qt-epcis="${esc(u.epc)}">🔎 EPCIS 저장소에서 조회</button>${u.ship?.truck ? `<button data-qt-ship="${esc(u.ship.truck)}">🚚 이 트럭 리콜 범위 (${esc(u.ship.truck)})</button>` : ''}</div>${epcisHTML(u)}` : ''}
+    ${u.epc ? `<div class="qt-dl"><button data-qt-epcis="${esc(u.epc)}">🔎 EPCIS 저장소에서 조회</button>${u.ship?.truck ? `<button data-qt-ship="${esc(u.ship.shipment ?? u.ship.truck)}">🚚 이 출하 리콜 범위 (${esc(u.ship.truck)}${u.ship.shipment ? ` · ${esc(u.ship.shipment)}` : ''})</button>` : ''}</div>${epcisHTML(u)}` : ''}
     <p class="qt-ins">출하: ${shipLine}${u.sampled ? ` · 정밀검사 샘플 ${u.sampled}` : ''}${u.recall ? ` · <em class="dn">유출 의심 — 로트 ${u.recall} 회수 대상</em>` : ''}</p>${disp}
     <h5 class="qt-h">공정 이력 (WIP ID → 시리얼)</h5><ol class="qt-steps">${steps || '<li>아직 셀에 들어가지 않음</li>'}</ol>
     <p class="vla-note">2단 ID: 투입 WIP ID로 공정 이력을 쌓고, 최종 검사 합격 순간 중앙 발행기가 GTIN별 순차 시리얼(GS1 AI 21)을 발행해 마킹 직후 100% 판독 검증합니다. 출하 팔레트는 SSCC로 시리얼을 묶습니다 (EPCIS 2.0 — 불량 분석 탭 전체 묶음의 serial_events.jsonld).</p></div>`;
@@ -112,10 +112,10 @@ function unitHTML(sim, u) {
 // EPCIS 저장소 조회 결과 (main.js가 앱 내장 저장소 · 브라우저 메모리에서 받아 traceState.epcis에 둔다)
 const BIZ_KO = { commissioning: '시리얼 발행', storing: '적재 (출하 대기)', packing: '팔레트 묶음', shipping: '출하', holding: '출하 보류·격리', inspecting: '검사·보류 해제', repairing: '재작업', decommissioning: '폐기', encoding: '라벨 재부착' };
 function epcisHTML(u) {
-  const E = traceState.epcis; if (!E || (E.key !== u.epc && E.key !== u.ship?.truck)) return '';
+  const E = traceState.epcis; if (!E || (E.key !== u.epc && E.key !== (u.ship?.shipment ?? u.ship?.truck))) return '';
   if (E.loading) return '<p class="vla-note">EPCIS 저장소 조회 중…</p>';
   if (E.error) return `<p class="vla-note"><em class="dn">조회 실패 — ${esc(E.error)}</em></p>`;
-  if (E.kind === 'ship') { const D = E.data; return `<div class="qt-epcis"><h5>🚚 ${esc(D.truck)} 리콜 범위 <small>${esc(E.src)} · 출하 이벤트(bizTransaction bol) → 팔레트 SSCC ${D.pallets.length}개 → 시리얼 ${D.serials.length}개</small></h5><div class="qt-chips">${D.serials.slice(0, 64).map((x) => `<span class="uidc">${esc(x.split('.').slice(2).join('.'))}</span>`).join(' ')}${D.serials.length > 64 ? ` … 외 ${D.serials.length - 64}개` : ''}</div></div>`; }
+  if (E.kind === 'ship') { const D = E.data; return `<div class="qt-epcis"><h5>🚚 ${esc(D.truck)}${D.shipment && D.shipment !== D.truck ? ` · ${esc(D.shipment)}` : ''} 리콜 범위 <small>${esc(E.src)} · 출하 이벤트(bizTransaction bol) → 팔레트 SSCC ${D.pallets.length}개 → 시리얼 ${D.serials.length}개</small></h5><div class="qt-chips">${D.serials.slice(0, 64).map((x) => `<span class="uidc">${esc(x.split('.').slice(2).join('.'))}</span>`).join(' ')}${D.serials.length > 64 ? ` … 외 ${D.serials.length - 64}개` : ''}</div></div>`; }
   const ev = E.data?.events ?? [];
   const rows = ev.map((e) => { const b = String(e.bizStep ?? ''); return `<tr><td>${esc(String(e.eventTime).slice(11, 19))}</td><td>${esc(e.type.replace('Event', ''))}</td><td><b>${esc(BIZ_KO[b] ?? b)}</b> <small>${esc(b)} · ${esc(e.disposition ?? '')}</small></td><td><small>${esc((e.readPoint?.id ?? '').split('.').pop())}</small></td><td><small>${esc(e['mf:sscc'] ? `SSCC ${e['mf:sscc']}` : e['mf:truck'] ? e['mf:truck'] : e['mf:lot'] ? `로트 ${e['mf:lot']}` : e['mf:verifyGrade'] ? `판독 등급 ${e['mf:verifyGrade']}${e['mf:wip'] ? ` · ${e['mf:wip']}` : ''}` : '')}</small></td></tr>`; }).join('');
   return `<div class="qt-epcis"><h5>🔎 EPCIS 추적 사슬 <small>${esc(E.src)} · 이벤트 ${ev.length}건 (시리얼 + 묶인 팔레트)</small></h5>${ev.length ? `<table class="vla-t"><thead><tr><th>시각(UTC)</th><th>유형</th><th>업무 단계</th><th>위치</th><th>비고</th></tr></thead><tbody>${rows}</tbody></table>` : '<p class="vla-note">아직 저장소에 이벤트가 없습니다 — 저장소로 보내는 주기는 5초입니다.</p>'}</div>`;

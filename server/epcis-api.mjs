@@ -110,9 +110,12 @@ export function makeEpcisApi({ dir, fetchImpl = globalThis.fetch, interval = 500
     if (p === 'serial-base' && method === 'GET') {
       const ymd = query.get('ymd') ?? '', base = {}, re = new RegExp(`\\.([A-Z]{2})-${ymd.replace(/\D/g, '')}-(\\d{6})$`);
       for (const e of store.events) if (e.bizStep === 'commissioning') for (const x of e.epcList ?? []) { const m = re.exec(x); if (m) base[m[1]] = Math.max(base[m[1]] ?? 0, Number(m[2])); }
-      return { code: 200, body: { ymd, base } };
+      // 팔레트 SSCC 일련번호(날짜 없음 — 저장소 전체 최댓값) · 오늘 출하 ID(SHP-ymd-N) — 앱을 다시 켜도 같은 SSCC·출하 ID를 다시 쓰지 않는다
+      let pal = 0, ship = 0; const reS = new RegExp(`^SHP-${ymd.replace(/\D/g, '')}-(\\d+)$`);
+      for (const e of store.events) { if (/^\d{18}$/.test(e['mf:sscc'] ?? '')) pal = Math.max(pal, Number(e['mf:sscc'].slice(8, 17))); const m = reS.exec(e['mf:shipment'] ?? ''); if (m) ship = Math.max(ship, Number(m[1])); }
+      return { code: 200, body: { ymd, base, pal, ship } };
     }
-    if (p === 'shipment' && method === 'GET') { const t = query.get('truck'); return t ? { code: 200, body: store.shipmentOf(t) } : { code: 400, body: { error: 'truck이 필요합니다' } }; }
+    if (p === 'shipment' && method === 'GET') { const t = query.get('id') ?? query.get('truck'); return t ? { code: 200, body: store.shipmentOf(t) } : { code: 400, body: { error: 'id(출하 ID)가 필요합니다' } }; }   // truck= 은 예전 기록(트럭 이름 = 출하 ID)
     if (p === 'config') {
       if (method === 'POST') {
         let b; try { b = JSON.parse(bodyText || '{}'); } catch { return { code: 400, body: { error: 'JSON이 아닙니다' } }; }

@@ -84,10 +84,10 @@ fs.writeFileSync(fake, `#!/bin/sh\necho "$*" >> "${log}"\ncase "$*" in\n  --vers
 fs.writeFileSync(fakeColima, `#!/bin/sh\necho "colima $*" >> "${log}"\n[ "$1" = start ] && : > "${engine}"\nexit 0\n`, { mode: 0o755 });
 process.env.DOCKER_BIN = fake; process.env.COLIMA_BIN = fakeColima;
 const { makeMonitorApi } = await import('../server/monitor-api.mjs');
-let influxAuth = 401;   // 첫 켜기: 기존 저장 공간과 토큰이 어긋난 상황 → 다시 초기화해야 함
+let influxAuth = 401;   // 첫 켜기: 기존 저장 공간과 토큰이 어긋난 상황 (.env 분실) → 데이터를 지우지 않고 멈춰야 함
 const fetchImpl = async (u, o = {}) => {
   if (/\/api\/health$|\/health$/.test(u)) return { ok: true, status: 200 };
-  if (/\/api\/v2\/buckets/.test(u)) { const st = influxAuth; influxAuth = 200; return { ok: st === 200, status: st }; }
+  if (/\/api\/v2\/buckets/.test(u)) return { ok: influxAuth === 200, status: influxAuth };
   if (/\/api\/v2\/query/.test(u)) return { ok: true, status: 200, text: async () => '#datatype,string,long,string,long\n,result,table,_measurement,_value\n,_result,0,equipment,120\n,_result,1,event,3\n' };
   return { ok: false, status: 404 };
 };
@@ -95,8 +95,14 @@ const api = makeMonitorApi({ dir, src: MON, mqttPort: () => 1999, fetchImpl });
 const waitJob = async () => { for (let k = 0; k < 200 && api._rt.job?.running; k++) await new Promise((r) => setTimeout(r, 20)); return api._rt.job; };
 const r1 = await api.route('POST', '/api/monitor/v1/start'); const j1 = await waitJob();
 const calls = () => fs.readFileSync(log, 'utf8').split('\n').filter((l) => l.startsWith('compose -p')).map((l) => l.replace(/^compose -p metafactory-mon --env-file \.env -f compose\.yml /, ''));
-check('켜기 202 → 완료 · 구성 복사(compose · telegraf · 대시보드 · 초기화 스크립트 실행 권한)', r1.code === 202 && j1.ok === true && fs.existsSync(path.join(dir, 'compose.yml')) && fs.existsSync(path.join(dir, 'grafana/dashboards/mf-machine.json')) && (fs.statSync(path.join(dir, 'influxdb/init/10-downsample.sh')).mode & 0o111) !== 0, j1.error ?? j1.step);
-check('순서 — up -d → restart telegraf grafana → (토큰 401) down -v → up -d · 초기화 표시', calls().join(' | ') === 'up -d | restart telegraf grafana | down -v | up -d' && j1.reset === true, calls().join(' | '));
+check('켜기 202 · 구성 복사(compose · telegraf · 대시보드 · 초기화 스크립트 실행 권한)', r1.code === 202 && fs.existsSync(path.join(dir, 'compose.yml')) && fs.existsSync(path.join(dir, 'grafana/dashboards/mf-machine.json')) && (fs.statSync(path.join(dir, 'influxdb/init/10-downsample.sh')).mode & 0o111) !== 0, j1.error ?? j1.step);
+check('토큰 401 → 실패로 멈춤 · 데이터 볼륨 삭제(down -v) 없음 · 안내 문구 (Codex 검수 1)', j1.ok === false && j1.authMismatch === true && /지우지 않고/.test(j1.error) && calls().join(' | ') === 'up -d | restart telegraf grafana', calls().join(' | '));
+fs.writeFileSync(log, '');
+const rx = await api.route('POST', '/api/monitor/v1/reset');
+check('데이터 초기화 — 확인값 없으면 400 · 아무 명령도 안 보냄', rx.code === 400 && rx.body.ok === false && calls().length === 0);
+influxAuth = 200;   // 볼륨을 지우고 새로 켜면 지금 .env 토큰으로 초기화된다
+const rr = await api.route('POST', '/api/monitor/v1/reset', new URLSearchParams({ confirm: 'metafactory-mon' })); const jr = await waitJob();
+check('데이터 초기화 — 확인값 있으면 down -v → up -d → restart → 완료 · 초기화 표시', rr.code === 202 && jr.ok === true && jr.reset === true && calls().join(' | ') === 'down -v | up -d | restart telegraf grafana', calls().join(' | '));
 const env1 = fs.readFileSync(path.join(dir, '.env'), 'utf8'), tok1 = env1.match(/MF_INFLUX_TOKEN=(.*)/)[1];
 check('.env — 무작위 토큰·비밀번호 · 브로커 포트 반영 · 권한 600', tok1.length >= 40 && /MF_MQTT_PORT=1999/.test(env1) && /MF_GRAFANA_PASSWORD=\S{15,}/.test(env1) && (os.platform() === 'win32' || (fs.statSync(path.join(dir, '.env')).mode & 0o777) === 0o600));
 fs.writeFileSync(log, '');

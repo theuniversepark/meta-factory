@@ -143,7 +143,7 @@ export function planForklift(sim, f) {
     { go: inside, via: [] },
     { wait: m.key === 'traditional' ? 6 : 4, done: () => {
       const k = f.load?.n ?? 0, lot = f.load?.lot; f.load = null;
-      if (t.state === 'dock') { yard.unload(t, k, product); sim.serials?.ship(lot, t.id); }
+      if (t.state === 'dock') { sim.serials?.ship(lot, t); yard.unload(t, k, product); }   // 팔레트 출하 기록을 먼저 — 마지막 팔레트로 트럭이 차면 unload가 FAC 출고 확정(실린 시리얼 포함)을 낸다
       else { if (zfg) zfg[product] += k; else { sim.fgStock += k; if (product) sim.fgBy[product] += k; } t.reserved = 0; sim.serials?.unload(lot); }   // 그 사이 트럭이 떠났으면 되돌린다
     } },
     { go: dock, via: [], rev: true },

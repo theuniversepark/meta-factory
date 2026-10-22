@@ -457,7 +457,7 @@ export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
       } catch (e) { return send(res, 400, { error: e.message }); }
     }
     if (url.pathname.startsWith('/api/monitor/v1')) {
-      try { const r = await monitor.route(req.method, url.pathname); if (r) return send(res, r.code, r.body); }
+      try { const r = await monitor.route(req.method, url.pathname, url.searchParams); if (r) return send(res, r.code, r.body); }
       catch (e) { return send(res, 400, { error: e.message }); }
     }
     if (url.pathname.startsWith('/api/erpnext/v1')) {

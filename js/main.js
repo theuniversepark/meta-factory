@@ -116,7 +116,7 @@ const hub = new DataHub();
 // 시리얼 서비스(js/serial.js) 이벤트 → 표준 이벤트(js/epcis.js) → 5초마다 앱 내장 저장소(서버 /api/epcis/v1 — 파일에 계속 보관 · 외부 저장소 전송 선택)
 // 서버가 없는 화면(GitHub Pages · 공유 아티팩트)은 브라우저 메모리 저장소 (새로고침 시 초기화). 조회는 품질 추적 「🏷 시리얼·출하」
 // 시리얼 번호는 단계를 바꿔 시뮬레이션을 새로 만들어도 이어진다 (SERIAL_SEQ 공유) · 앱은 시작 때 저장소에 남은 오늘 마지막 번호를 받아 그 뒤부터 (재사용 금지)
-const SERIAL_SEQ = {}, WIP_SEQ = {}, epcisLocal = new EpcisStore({ max: 60000 });
+const SERIAL_SEQ = {}, WIP_SEQ = {}, SHIP_CTR = { pal: 0, ship: 0 }, epcisLocal = new EpcisStore({ max: 60000 });
 const epcisSt = { retry: [], sent: 0, failed: 0, lastError: null, server: null, busy: false };
 let serialBaseAsked = false;
 function epcisCollect() {
@@ -148,17 +148,17 @@ setInterval(async () => {
 }, 2000);
 function epcisAttach() {
   const H = sim?.serials; if (!H) return;
-  H.serSeq = SERIAL_SEQ; H.wipSeq = WIP_SEQ; H.feedOn = true;
+  H.serSeq = SERIAL_SEQ; H.wipSeq = WIP_SEQ; H.ctr = SHIP_CTR; H.feedOn = true;   // 팔레트 SSCC · 출하 ID도 이어서
   if (!hub.noServer && !serialBaseAsked) {
     serialBaseAsked = true;
-    fetch(`/api/epcis/v1/serial-base?ymd=${H.ymd}`).then((r) => r.json()).then((j) => { for (const [c, n] of Object.entries(j.base ?? {})) SERIAL_SEQ[c] = Math.max(SERIAL_SEQ[c] ?? 0, n); }).catch(() => { serialBaseAsked = false; });
+    fetch(`/api/epcis/v1/serial-base?ymd=${H.ymd}`).then((r) => r.json()).then((j) => { for (const [c, n] of Object.entries(j.base ?? {})) SERIAL_SEQ[c] = Math.max(SERIAL_SEQ[c] ?? 0, n); SHIP_CTR.pal = Math.max(SHIP_CTR.pal, j.pal ?? 0); SHIP_CTR.ship = Math.max(SHIP_CTR.ship, j.ship ?? 0); }).catch(() => { serialBaseAsked = false; });
   }
 }
 // 조회: 앱 = 내장 저장소 · 웹 = 브라우저 메모리
 async function epcisQuery(kind, key) {
   if (hub.noServer) return kind === 'trace' ? { events: epcisLocal.trace(key) } : epcisLocal.shipmentOf(key);
   epcisCollect(); await epcisPump();   // 방금 생긴 이벤트까지 보낸 뒤 조회
-  const r = await fetch(kind === 'trace' ? `/api/epcis/v1/trace?epc=${encodeURIComponent(key)}` : `/api/epcis/v1/shipment?truck=${encodeURIComponent(key)}`);
+  const r = await fetch(kind === 'trace' ? `/api/epcis/v1/trace?epc=${encodeURIComponent(key)}` : `/api/epcis/v1/shipment?id=${encodeURIComponent(key)}`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
@@ -916,7 +916,7 @@ function pcapVideoTick(rdt) {
   }
 }
 // 설비 대시보드 칸 (4단계 · server/monitor-api.mjs): Docker로 Telegraf → InfluxDB → Grafana 켜기 · 열기 · 끄기
-let monSt = null, monNote = '', monAt = 0;
+let monSt = null, monNote = '', monAt = 0, monAskReset = false;   // 데이터 초기화는 화면 안에서 한 번 더 확인 (쌓인 시계열·Grafana 설정 삭제)
 async function monStatus(force = false) { if (hub.noServer || (!force && Date.now() - monAt < 5000)) return; monAt = Date.now(); try { monSt = await (await fetch('/api/monitor/v1/status')).json(); } catch { monSt = null; } }
 function monHtml() {
   if (hub.noServer) return '<div class="dh-note">설비 대시보드는 맥 앱 · 윈도우 앱 · npm start에서 씁니다 (웹 버전·공유 페이지에는 MQTT 브로커·서버가 없음). 앱에서는 설비 건강도·RUL · 적응가공 가공기 상태 감시 · 환경 센서를 오픈소스 시계열 도구(InfluxDB)에 쌓고 Grafana 대시보드로 봅니다.</div>';
@@ -925,8 +925,9 @@ function monHtml() {
   return `<div class="grid2"><span>Docker</span><b>${!v ? '확인 중…' : v.docker ? `${escH(v.docker.version)}${v.docker.compose ? ` · compose ${escH(v.docker.compose)}` : ' · <b class="bad">compose 없음</b>'}` : '<b class="bad">찾을 수 없음</b> — Docker Desktop(맥·윈도우) 또는 Colima를 설치·실행하세요'}</b>
       <span>대시보드</span><b>${run ? `<b class="ok">실행 중</b> · <a href="${escH(v.url)}" target="_blank" rel="noopener">${escH(v.url)}</a> (이 PC 안에서만 열림)` : (v?.containers ?? []).length ? `준비 중 · ${v.containers.map((c) => `${c.service} ${c.state}`).join(' · ')}` : '꺼짐'}</b>
       <span>최근 1분 수신</span><b>${run ? Object.keys(KO).map((k) => `${KO[k]} ${n(C[k])}`).join(' · ') : '-'} · 앱 브로커 :${v?.mqttPort ?? '-'}</b>
-      <span>조작</span><b><button class="ep-btn" data-mon="start" ${J?.running ? 'disabled' : ''}>${run ? '다시 켜기 (구성 갱신)' : '대시보드 켜기'}</button> <button class="ep-btn" data-mon="open" ${run ? '' : 'disabled'}>대시보드 열기</button> <button class="ep-btn" data-mon="stop" ${run ? '' : 'disabled'}>끄기</button>
-        ${J ? ` · ${J.running ? `진행 중 — ${escH(J.step)}` : J.ok ? `완료${J.reset ? ' (저장 공간 토큰을 다시 맞춤)' : ''}` : `<b class="bad">실패 — ${escH(J.error ?? '')}</b>`}` : ''}</b></div>
+      <span>조작</span><b><button class="ep-btn" data-mon="start" ${J?.running ? 'disabled' : ''}>${run ? '다시 켜기 (구성 갱신)' : '대시보드 켜기'}</button> <button class="ep-btn" data-mon="open" ${run ? '' : 'disabled'}>대시보드 열기</button> <button class="ep-btn" data-mon="stop" ${run ? '' : 'disabled'}>끄기</button> <button class="ep-btn" data-mon="ask-reset" ${J?.running || !v?.docker ? 'disabled' : ''} title="InfluxDB 시계열과 Grafana 저장 설정을 지우고 새로 켭니다">데이터 초기화…</button>
+        ${J ? ` · ${J.running ? `진행 중 — ${escH(J.step)}` : J.ok ? `완료${J.reset ? ' (데이터 초기화)' : ''}` : `<b class="bad">실패 — ${escH(J.error ?? '')}</b>`}` : ''}</b></div>
+    ${monAskReset ? `<div class="dh-note"><b class="bad">대시보드에 쌓인 시계열 데이터(최대 90일)와 Grafana 저장 설정이 모두 지워지고 되돌릴 수 없습니다.</b> 앱 시뮬레이션 데이터·EPCIS·FAC 기록은 그대로입니다. <button class="ep-btn" data-mon="reset">지우고 다시 켜기</button> <button class="ep-btn" data-mon="cancel-reset">취소</button></div>` : ''}
     <div class="dh-note">${escH(monNote) || '처음 켜면 이미지 내려받기로 몇 분 걸립니다 (메모리 약 1GB). 대시보드 5종: Zone 운영 분석(OEE·파레토·관리도·산점도) · 공장 개요 · 설비 건강도·RUL · 적응가공 가공기 상태 감시 · 환경·설비 센서 — 고장·정비·품질 NG 같은 운영 이벤트를 그래프 위에 겹쳐 봅니다. 원시값 7일 · 1분 집계 90일 보관. 끄기는 데이터를 남깁니다.'}</div>`;
 }
 // EPCIS 저장소 칸: 앱 = 내장 저장소(파일 보관) + 외부 저장소 전송(선택) · 웹 = 브라우저 메모리
@@ -1002,11 +1003,13 @@ dataBody.addEventListener('click', (e) => {
   if (mb) {
     const a = mb.dataset.mon;
     if (a === 'open') { if (monSt?.url) window.open(monSt.url, '_blank', 'noopener'); return; }
-    monNote = a === 'start' ? '대시보드 켜는 중… (처음이면 이미지 내려받기로 몇 분)' : '끄는 중…'; renderData();
-    fetch(`/api/monitor/v1/${a}`, { method: 'POST' }).then((r) => r.json()).then((r) => { monNote = a === 'stop' ? (r.ok ? '껐습니다 — 쌓인 데이터는 남아 있어 다시 켜면 이어서 봅니다' : `끄기 실패 — ${r.error ?? ''}`) : ''; })
+    if (a === 'ask-reset' || a === 'cancel-reset') { monAskReset = a === 'ask-reset'; renderData(); return; }
+    monAskReset = false;
+    monNote = a === 'start' ? '대시보드 켜는 중… (처음이면 이미지 내려받기로 몇 분)' : a === 'reset' ? '대시보드 데이터를 지우고 다시 켜는 중…' : '끄는 중…'; renderData();
+    fetch(a === 'reset' ? '/api/monitor/v1/reset?confirm=metafactory-mon' : `/api/monitor/v1/${a}`, { method: 'POST' }).then((r) => r.json()).then((r) => { monNote = a === 'stop' ? (r.ok ? '껐습니다 — 쌓인 데이터는 남아 있어 다시 켜면 이어서 봅니다' : `끄기 실패 — ${r.error ?? ''}`) : ''; })
       .catch((err) => { monNote = `실패 — ${err.message}`; }).finally(() => monStatus(true).then(renderData));
     // 켜는 동안 진행 단계를 따라 보여 준다
-    if (a === 'start') { const iv = setInterval(() => monStatus(true).then(() => { renderData(); if (!monSt?.job?.running) { clearInterval(iv); if (monSt?.job?.ok) monNote = `켰습니다 — 「대시보드 열기」로 ${monSt.url} (데이터는 몇 초 뒤부터 쌓입니다)`; renderData(); } }), 3000); }
+    if (a === 'start' || a === 'reset') { const iv = setInterval(() => monStatus(true).then(() => { renderData(); if (!monSt?.job?.running) { clearInterval(iv); if (monSt?.job?.ok) monNote = `켰습니다 — 「대시보드 열기」로 ${monSt.url} (데이터는 몇 초 뒤부터 쌓입니다)`; renderData(); } }), 3000); }
     return;
   }
   const eb = e.target.closest('button[data-epcis]');

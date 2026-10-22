@@ -64,7 +64,8 @@ export class SerialHub {
   constructor(sim, seed = 1) {
     this.sim = sim; this.r = mulberry((seed * 69069 + 17) >>> 0);
     this.ymd = sim.trace?.ymd ?? (() => { const d = new Date(); return `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`; })();
-    this.wipSeq = {}; this.serSeq = {}; this.palSeq = 0; this.lotSeq = 0; this.caseSeq = 0;
+    this.wipSeq = {}; this.serSeq = {}; this.lotSeq = 0; this.caseSeq = 0;
+    this.ctr = { pal: 0, ship: 0 };   // 팔레트 SSCC · 출하 ID 일련번호 — 앱(main.js)이 실행 사이에 공유하는 객체로 바꿔 끼운다 (단계 전환·리셋해도 재사용 금지)
     this.units = []; this.byId = new Map(); this.fg = {}; this.lots = []; this.cases = []; this.pallets = []; this.events = []; this.jobs = [];
     this.byCell = {}; this.tight = {}; this.fix = {}; this.lastSample = {}; this.feed = []; this.feedOn = false;
     this.stats = { wip: 0, issued: 0, byZone: { main: 0, flex: 0, adapt: 0 }, relabel: 0, markNg: 0, shipped: 0, pallets: 0, lots: 0, held: 0, released: 0, sorted: 0, caught: 0, rework: 0, scrap: 0, recall: 0, cases: 0 };
@@ -155,16 +156,24 @@ export class SerialHub {
   heldIn(p) { return (this.fg[p] ?? []).filter((u) => u.hold).length; }
   take(p, k, by) {
     const us = this.shippableUnits(p).slice(0, k); if (!us.length) return null;
-    const pal = { sscc: ssccOf(++this.palSeq), product: p, units: us.map((u) => this.idOf(u)), t: this.now(), by, truck: null };
+    const pal = { sscc: ssccOf(++this.ctr.pal), product: p, units: us.map((u) => this.idOf(u)), t: this.now(), by, truck: null };
     for (const u of us) { u.loc = 'loading'; this.unFG(u); u.ship = { sscc: pal.sscc }; }
     this.pallets.unshift(pal); if (this.pallets.length > 300) this.pallets.pop();
     this.ev({ type: 'aggregate', id: pal.sscc, children: pal.units });
     return { pal, units: us };
   }
-  ship(lot, truck) {
-    if (!lot) return; lot.pal.truck = truck; lot.pal.tShip = this.now(); this.stats.pallets++;
-    for (const u of lot.units) { u.loc = 'shipped'; u.ship = { sscc: lot.pal.sscc, truck, t: this.now() }; this.stats.shipped++; }
-    this.ev({ type: 'ship', id: lot.pal.sscc, truck, n: lot.units.length });
+  // 출하 ID: 트럭 한 번 출발 = 출하 1건. 트럭 표시 이름(화물트럭-N)은 실행마다 다시 시작하므로 거래 식별자로 쓰지 않는다
+  shipmentId(t) { return (t.shipId ??= `SHP-${this.ymd}-${String(++this.ctr.ship).padStart(5, '0')}`); }
+  ship(lot, t) {
+    if (!lot) return; const truck = t?.id ?? String(t), shipment = typeof t === 'object' ? this.shipmentId(t) : truck;
+    Object.assign(lot.pal, { truck, shipment, tShip: this.now() }); this.stats.pallets++;
+    for (const u of lot.units) { u.loc = 'shipped'; u.ship = { sscc: lot.pal.sscc, truck, shipment, t: this.now() }; this.stats.shipped++; }
+    this.ev({ type: 'ship', id: lot.pal.sscc, truck, shipment, n: lot.units.length });
+  }
+  // 출하 1건에 실린 팔레트 SSCC · 시리얼 — FAC 출고 확정 이벤트에 그대로 싣는다 (EPCIS 업로드 순서와 무관하게 ERPNext 출하 전표에)
+  shipmentContent(shipment) {
+    const P = this.pallets.filter((p) => p.shipment === shipment);
+    return { shipment, truck: P[0]?.truck ?? null, sscc: P.map((p) => p.sscc), serials: P.flatMap((p) => p.units) };
   }
   unload(lot) { if (!lot) return; for (const u of lot.units) { u.loc = 'fg'; u.ship = null; (this.fg[u.product] ??= []).unshift(u); } this.pallets = this.pallets.filter((x) => x !== lot.pal); }
   unFG(u) { const q = this.fg[u.product]; if (!q) return; const i = q.indexOf(u); if (i >= 0) q.splice(i, 1); }

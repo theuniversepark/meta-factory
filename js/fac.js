@@ -176,7 +176,7 @@ export class FacLedger {
   ship(truck, qty, product) {
     if (!this.on || qty <= 0) return;
     let pk = this.byShip.get(truck);
-    if (!pk) { pk = { id: this.db.picking.length + 1, name: this.name('out'), type: 'outgoing', origin: `출하 ${truck.id}`, partner: CUSTOMER, from: 'output', to: 'customer', state: 'assigned', created: this.now(), done: null, truck: truck.id, lines: [] }; this.byShip.set(truck, pk); this.db.picking.unshift(pk); }
+    if (!pk) { pk = { id: this.db.picking.length + 1, name: this.name('out'), type: 'outgoing', origin: `출하 ${truck.id}`, shipment: this.sim.serials?.shipmentId(truck) ?? null, partner: CUSTOMER, from: 'output', to: 'customer', state: 'assigned', created: this.now(), done: null, truck: truck.id, lines: [] }; this.byShip.set(truck, pk); this.db.picking.unshift(pk); }
     const p = product ?? 'doortrim', l = pk.lines.find((x) => x.product === p) ?? (pk.lines.push({ product: p, qty: 0, done: 0, from: 'output', to: 'customer' }), pk.lines.at(-1));
     l.qty += qty; l.done += qty;
   }
@@ -185,7 +185,8 @@ export class FacLedger {
     this.closeWindow();   // 생산 입고를 먼저 확정해야 출고할 재고가 있다
     pk.state = 'done'; pk.done = this.now();
     for (const l of pk.lines) { this.quant.output[l.product] -= l.done; this.quant.customer[l.product] += l.done; }
-    this.emit({ type: 'delivery.done', key: pk.name, partner: CUSTOMER, origin: pk.origin, lines: pk.lines.map(({ product, done }) => ({ product, qty: done, from: 'output', to: 'customer' })) });
+    const C = pk.shipment ? this.sim.serials?.shipmentContent(pk.shipment) : null;   // 실린 팔레트 SSCC · 시리얼 (ERPNext 출하 전표 — EPCIS 업로드를 기다리지 않음)
+    this.emit({ type: 'delivery.done', key: pk.name, partner: CUSTOMER, origin: pk.origin, ...(pk.shipment ? { shipment: pk.shipment, sscc: C?.sscc ?? [], serials: C?.serials ?? [] } : {}), lines: pk.lines.map(({ product, done }) => ({ product, qty: done, from: 'output', to: 'customer' })) });
     this.note('out', `${pk.name} 출고 확정 — ${pk.lines.map((l) => `${FAC_PRODUCTS[l.product].code} ${l.done}`).join(' · ')} → ${truck.id}`);
   }
 

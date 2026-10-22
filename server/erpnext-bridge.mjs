@@ -135,7 +135,8 @@ export function makeErpBridge({ dir, fetchImpl = globalThis.fetch, interval = 15
   const ref = (run, k) => `${run}:${k}`;
   const submitIns = async (dt, doc, what) => { const d = await ins(dt, { ...doc, docstatus: 1 }); note(dt, d.name, doc.mf_ref, what); return d; };
   async function manufacture(run, key, product, qty, wo, tag = '') {
-    const r = ref(run, `${key}:${product}${wo ? `:${wo}` : ''}${tag}`);   // 근거 = 운전:FAC 번호:제품[:작업지시][:over] — 「FAC 번호:제품」으로 이미 처리했는지 찾는다 if (await byRef('Stock Entry', r)) return;
+    const r = ref(run, `${key}:${product}${wo ? `:${wo}` : ''}${tag}`);   // 근거 = 운전:FAC 번호:제품[:작업지시][:over] — 배분 한 줄마다 따로 (일부만 성공하고 끊겨도 나머지만 다시)
+    if (await byRef('Stock Entry', r)) return;
     if (wo) {
       const m = await call('erpnext.manufacturing.doctype.work_order.work_order.make_stock_entry', { work_order_id: wo, purpose: 'Manufacture', qty });
       return submitIns('Stock Entry', { ...m, mf_ref: r }, `생산 입고 ${FAC_PRODUCTS[product]?.name ?? product} ${qty} (작업지시 ${wo})`);
@@ -165,25 +166,40 @@ export function makeErpBridge({ dir, fetchImpl = globalThis.fetch, interval = 15
       const items = e.lines.filter((l) => l.qty > 0 && WH_NAME[l.from] && WH_NAME[l.to]).map((l) => ({ item_code: code(l.product), qty: l.qty, s_warehouse: W(l.from), t_warehouse: W(l.to) }));
       if (items.length) await submitIns('Stock Entry', { stock_entry_type: 'Material Transfer', company: CO(), mf_ref: r, remarks: e.origin ?? '', items }, `재고 이동 ${e.key}`);
     },
+    // 생산 입고: 작업지시 배분을 처음 한 번 정해 상태 파일에 남기고(작업지시 생산 수량도 그때 반영), 배분 줄마다 전표를 낸다.
+    // 일부만 성공하고 ERPNext가 끊기면 다시 보낼 때 남은 줄만 낸다 — 이미 낸 줄은 mf_ref로 확인 (수량이 빠지거나 두 번 들어가지 않음)
     'production.done': async (run, e) => {
+      const A = (st.alloc ??= {});
       for (const l of e.lines.filter((x) => x.qty > 0 && BOMS[x.product])) {
-        if ((await find('Stock Entry', [['mf_ref', 'like', `${ref(run, e.key)}:${l.product}%`]])).length) continue;   // 이미 처리한 생산 입고 (다시 받아도 배분을 새로 하지 않음)
-        let left = l.qty;
-        if (WO_PRODUCTS.includes(l.product)) {
-          const list = Object.values(st.wo).filter((w) => w.run === run && w.product === l.product && !w.stopped);
-          for (const w of list) { const n = Math.min(left, Math.max(0, w.qty - w.produced)); if (!n) continue; await manufacture(run, e.key, l.product, n, w.name); w.produced += n; left -= n; saveSt(); if (!left) break; }
-          const last = list.at(-1);
-          if (left && last) { await manufacture(run, e.key, l.product, left, last.name, ':over'); last.produced += left; left = 0; saveSt(); }   // 초과 생산 (허용 100%)
+        const base = `${ref(run, e.key)}:${l.product}`;
+        if (!A[base]) {
+          // 배분 기록 이전 버전이 이미 낸 생산 입고(전표 있음 · 배분 기록 없음)는 처리한 것으로 본다
+          if ((await find('Stock Entry', [['mf_ref', 'like', `${base}%`]])).length) { A[base] = [{ legacy: true, done: true }]; saveSt(); continue; }
+          const plan = []; let left = l.qty;
+          if (WO_PRODUCTS.includes(l.product)) {
+            const list = Object.values(st.wo).filter((w) => w.run === run && w.product === l.product && !w.stopped);
+            for (const w of list) { const n = Math.min(left, Math.max(0, w.qty - w.produced)); if (!n) continue; plan.push({ wo: w.name, n }); w.produced += n; left -= n; if (!left) break; }
+            const last = list.at(-1);
+            if (left && last) { plan.push({ wo: last.name, n: left, tag: ':over' }); last.produced += left; left = 0; }   // 초과 생산 (허용 100%)
+          }
+          if (left) plan.push({ wo: null, n: left });
+          A[base] = plan; saveSt();
         }
-        if (left) await manufacture(run, e.key, l.product, left, null);
+        for (const a of A[base]) { if (a.done) continue; await manufacture(run, e.key, l.product, a.n, a.wo, a.tag ?? ''); a.done = true; saveSt(); }
       }
     },
     'delivery.done': async (run, e) => {
       const r = ref(run, e.key); if (await byRef('Delivery Note', r)) return;
       const items = e.lines.filter((l) => l.qty > 0).map((l) => ({ item_code: code(l.product), qty: l.qty, rate: FAC_PRODUCTS[l.product]?.price ?? 0, warehouse: W('output') }));
       if (!items.length) return;
-      const truck = String(e.origin ?? '').replace(/^출하\s*/, ''), S = cfg.serials && serialsOf ? serialsOf(truck) : null;
-      await submitIns('Delivery Note', { customer: CUSTOMER, company: CO(), mf_ref: r, mf_shipment: [truck, ...(S?.pallets ?? []).map(ssccOfEpc).map((x) => `SSCC (00)${x}`)].filter(Boolean).join(' · ').slice(0, 140), ...(S?.serials?.length ? { mf_serials: S.serials.map((x) => x.split('.').slice(2).join('.')).join('\n') } : {}), items }, `출하 ${e.key} ${truck}`);
+      // 실린 팔레트 SSCC · 시리얼은 FAC 출고 확정 이벤트에 함께 온다 (EPCIS 업로드보다 먼저 와도 빠지지 않음). 예전 이벤트만 EPCIS 저장소에서 출하 ID(= 트럭 이름)로 찾는다
+      const truck = String(e.origin ?? '').replace(/^출하\s*/, ''), sid = e.shipment ?? truck;
+      let sscc = [], serials = [];
+      if (cfg.serials) {
+        if (Array.isArray(e.serials)) { sscc = e.sscc ?? []; serials = e.serials; }
+        else if (serialsOf) { const S = serialsOf(sid); sscc = (S?.pallets ?? []).map(ssccOfEpc); serials = (S?.serials ?? []).map((x) => x.split('.').slice(2).join('.')); }
+      }
+      await submitIns('Delivery Note', { customer: CUSTOMER, company: CO(), mf_ref: r, mf_shipment: [truck, sid !== truck ? sid : null, ...sscc.map((x) => `SSCC (00)${x}`)].filter(Boolean).join(' · ').slice(0, 140), ...(serials.length ? { mf_serials: serials.join('\n') } : {}), items }, `출하 ${e.key} ${truck}`);
     },
     'order.assign': async (run, e) => {
       for (const p of WO_PRODUCTS) {

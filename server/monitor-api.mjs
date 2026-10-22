@@ -2,6 +2,7 @@
 //   GET  /api/monitor/v1/status   Docker · 컨테이너 · Grafana/InfluxDB 응답 · 최근 1분 수신 건수(측정 종류별) · 주소
 //   POST /api/monitor/v1/start    monitoring/ 구성을 데이터 폴더로 복사 · .env(무작위 토큰·비밀번호, 한 번 만든 것은 유지) · docker compose up -d → 준비될 때까지 확인
 //   POST /api/monitor/v1/stop     docker compose stop (데이터는 남김)
+//   POST /api/monitor/v1/reset?confirm=metafactory-mon   쌓인 데이터(InfluxDB · Grafana 볼륨)를 지우고 다시 켬 — 사용자가 확인한 경우에만 (토큰이 어긋나도 자동으로 지우지 않는다)
 // Docker 실행 파일: Finder·시작 메뉴로 띄운 앱은 PATH가 짧아 흔한 위치를 직접 찾는다 (Homebrew · Docker Desktop · 윈도우)
 // Docker 엔진이 꺼져 있고 Colima가 설치돼 있으면 「대시보드 켜기」가 colima start로 먼저 켠다 (Docker Desktop은 사용자가 직접 실행)
 // 컨테이너는 host.docker.internal(host-gateway)로 앱 MQTT 브로커(127.0.0.1)에 닿는다 — 브로커를 사내망에 열지 않는다. 접속 포트도 127.0.0.1에만
@@ -11,6 +12,7 @@ import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 
 export const MON_PROJECT = 'metafactory-mon';
+export const RESET_CONFIRM = MON_PROJECT;
 const PORTS = { grafana: 3300, influx: 8186 };
 const DOCKER = [process.env.DOCKER_BIN, 'docker', '/opt/homebrew/bin/docker', '/usr/local/bin/docker', '/Applications/Docker.app/Contents/Resources/bin/docker', 'C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe'].filter(Boolean);
 const COLIMA = [process.env.COLIMA_BIN, 'colima', '/opt/homebrew/bin/colima', '/usr/local/bin/colima'].filter(Boolean);
@@ -77,9 +79,9 @@ export function makeMonitorApi({ dir, src, mqttPort = () => 1885, fetchImpl = gl
     return { docker: rt.docker ? { bin: rt.docker, version: rt.version, compose: rt.compose } : null, containers, grafana: g, influx: i, counts: g && i ? await counts() : null,
       url: `http://127.0.0.1:${PORTS.grafana}/`, job: rt.job, mqttPort: mqttPort() };
   }
-  async function start() {
+  async function start({ reset = false } = {}) {
     if (rt.job?.running) return rt.job;
-    rt.job = { running: true, step: 'Docker 확인', t0: new Date().toISOString(), ok: null, error: null };
+    rt.job = { running: true, step: 'Docker 확인', t0: new Date().toISOString(), ok: null, error: null, reset };
     (async () => {
       try {
         if (!(await findDocker(true))) throw new Error('Docker를 찾을 수 없습니다 — Docker Desktop(또는 Colima)을 설치·실행한 뒤 다시 누르세요');
@@ -94,20 +96,23 @@ export function makeMonitorApi({ dir, src, mqttPort = () => 1885, fetchImpl = gl
           rt.job.colimaStarted = true;
         }
         rt.job.step = '구성 파일 준비'; copyDir(src, dir); envFile();
+        if (reset) {   // 사용자가 「데이터 초기화」를 확인한 경우만 — 이 구성의 이름 있는 볼륨(influx-data · grafana-data)을 지운다
+          rt.job.step = '대시보드 데이터 지우기 (사용자 확인)';
+          const d = await compose(['down', '-v'], 300000); if (!d.ok) throw new Error(`docker compose down 실패 — ${d.err.split('\n').filter(Boolean).slice(-2).join(' / ')}`);
+        }
         rt.job.step = '컨테이너 시작 (처음이면 이미지 내려받기로 몇 분)';
         const r = await compose(['up', '-d'], 900000); if (!r.ok) throw new Error(`docker compose up 실패 — ${r.err.split('\n').filter(Boolean).slice(-2).join(' / ')}`);
         await compose(['restart', 'telegraf', 'grafana'], 180000);   // 수집 규칙(telegraf.conf) · 대시보드 JSON이 바뀌었을 수 있다 — 다시 읽게 (Grafana는 처음 등록한 대시보드를 계속 써서 다시 시작해야 새 파일을 반영)
         rt.job.step = 'Grafana · InfluxDB 준비 확인';
         const ready = async () => { for (let k = 0; k < 90; k++) { if ((await up(`http://127.0.0.1:${PORTS.grafana}/api/health`)) && (await up(`http://127.0.0.1:${PORTS.influx}/health`))) return true; await new Promise((res) => setTimeout(res, 2000)); } return false; };
         if (!(await ready())) throw new Error('3분 안에 Grafana·InfluxDB가 응답하지 않습니다 — 「대시보드 켜기」를 한 번 더 누르거나 Docker 상태를 확인하세요');
-        // 토큰 확인: InfluxDB 저장 공간은 처음 켤 때만 초기화된다 — 데이터 폴더의 .env가 새로 만들어졌으면 토큰이 어긋나므로 대시보드 데이터를 비우고 다시 맞춘다
+        // 토큰 확인: InfluxDB 저장 공간은 처음 켤 때만 초기화된다 — 데이터 폴더의 .env가 새로 만들어졌으면 토큰이 어긋난다.
+        // 쌓인 데이터를 자동으로 지우지 않는다: 멈추고 알린다 (.env 복원 또는 사용자가 확인하는 「데이터 초기화」)
         const tok = fs.readFileSync(path.join(dir, '.env'), 'utf8').match(/MF_INFLUX_TOKEN=(.*)/)?.[1];
         const auth = await fetchImpl(`http://127.0.0.1:${PORTS.influx}/api/v2/buckets?org=metafactory`, { headers: { Authorization: `Token ${tok}` }, signal: AbortSignal.timeout(5000) }).then((r) => r.status).catch(() => 0);
         if (auth === 401) {
-          rt.job.step = '저장 공간 토큰이 맞지 않음 — 대시보드 데이터를 비우고 다시 초기화';
-          await compose(['down', '-v'], 300000); const r2 = await compose(['up', '-d'], 900000); if (!r2.ok) throw new Error(`docker compose up 실패 — ${r2.err.split('\n').filter(Boolean).slice(-2).join(' / ')}`);
-          if (!(await ready())) throw new Error('다시 초기화한 뒤 Grafana·InfluxDB가 응답하지 않습니다');
-          rt.job.reset = true;
+          rt.job.authMismatch = true;
+          throw new Error('저장 공간 토큰이 맞지 않습니다 — 쌓인 데이터는 지우지 않고 멈췄습니다. 데이터 폴더의 monitoring/.env를 이전 것으로 되돌리거나, 데이터를 버려도 되면 「데이터 초기화」를 누르세요');
         }
         rt.job = { ...rt.job, running: false, ok: true, step: '완료' }; return;
       } catch (e) { rt.job = { ...rt.job, running: false, ok: false, error: e.message }; }
@@ -118,12 +123,17 @@ export function makeMonitorApi({ dir, src, mqttPort = () => 1885, fetchImpl = gl
     if (!(await findDocker()) || !fs.existsSync(path.join(dir, 'compose.yml'))) return { ok: false, error: '켜진 대시보드가 없습니다' };
     const r = await compose(['stop'], 120000); return r.ok ? { ok: true } : { ok: false, error: r.err.slice(-300) };
   }
-  const route = async (method, pathname) => {
+  async function reset(confirm) {
+    if (confirm !== RESET_CONFIRM) return { ok: false, error: `데이터 초기화는 확인값이 필요합니다 (confirm=${RESET_CONFIRM})` };
+    return start({ reset: true });
+  }
+  const route = async (method, pathname, query = new URLSearchParams()) => {
     const p = pathname.replace(/^\/api\/monitor\/v1\/?/, '');
     if (p === '' || p === 'status') return { code: 200, body: await status() };
     if (p === 'start' && method === 'POST') return { code: 202, body: await start() };
     if (p === 'stop' && method === 'POST') return { code: 200, body: await stop() };
+    if (p === 'reset' && method === 'POST') { const r = await reset(query.get('confirm')); return { code: r.ok === false ? 400 : 202, body: r }; }
     return null;
   };
-  return { route, status, start, stop, envFile, _rt: rt };
+  return { route, status, start, stop, reset, envFile, _rt: rt };
 }
