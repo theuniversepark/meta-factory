@@ -1584,6 +1584,27 @@ if (bridge?.isApp) {
   document.getElementById('keyClear').addEventListener('click', async () => afterChange(await llm.setBrowserKey('', false)));
   document.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); open(); } });
 }
+// ── 사용자 가이드 PDF 내려받기 (상단 📘) ─────────────────
+// assets/docs/USER_GUIDE.pdf (npm run guide:pdf로 docs/USER_GUIDE.docx에서 만든다). 앱·브라우저·GitHub Pages는 바로 내려받고,
+// 공유 아티팩트는 화면 안 파일 내려받기가 막혀 있어 플랫폼 내려받기 기능(보는 사람이 확인하면 저장)을 쓴다 — 지원하지 않는 화면이면 버튼을 숨긴다
+{
+  const btn = document.getElementById('btnGuide'), url = 'assets/docs/USER_GUIDE.pdf', name = '메타팩토리_사용자가이드.pdf';
+  let dl = null;
+  if (window.METAFACTORY_SHARED) { btn.hidden = true; window.claude?.use?.('downloads').then((d) => { dl = d; btn.hidden = !d; }, () => {}); }
+  btn.addEventListener('click', async () => {
+    if (!window.METAFACTORY_SHARED) { const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); return; }
+    if (!dl || btn.disabled) return;
+    btn.disabled = true; const t0 = btn.title; btn.title = '가이드 PDF 준비 중…';
+    try {
+      const r = await fetch(url); if (!r.ok) throw { code: 'fetch', message: `HTTP ${r.status}` };
+      await dl.save({ filename: name, data: await r.blob() }); btn.title = t0;
+    } catch (e) {
+      if (e?.code === 'declined') btn.title = t0;
+      else if (['unavailable', 'not_granted', 'capability_disabled', 'capability_removed'].includes(e?.code)) { btn.hidden = true; }
+      else { btn.title = `가이드 PDF를 내려받지 못했습니다 (${e?.code ?? ''} ${e?.message ?? ''}) — 다시 누르면 재시도`; console.warn('[가이드 PDF]', e); }
+    } finally { btn.disabled = false; }
+  });
+}
 // ── VLA 데이터·학습 파이프라인 창 ─────────────────
 const vlaModal = document.getElementById('vlaModal'), vlaBody = document.getElementById('vlaBody');
 let vlaDir = null;

@@ -21,6 +21,7 @@
     "blender:spot": "blender -b --python blender/import_spot.py",
     "test:spot": "node tests/blender.mjs && electron tools/check-spot.cjs",
     "check:collisions": "electron tools/check-collisions.cjs",
+    "guide:pdf": "node tools/guide-pdf.cjs",
     "rca-server": "node server/rca-server.mjs",
     "sensor-server": "node server/sensor-server.mjs"
   },
