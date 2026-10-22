@@ -40,6 +40,7 @@ export const MSG = {
   'decision.request': { ko: '결정 요청', cls: 'event' }, decision: { ko: '결정', cls: 'decision' }, broadcast: { ko: '방송', cls: 'command' }, command: { ko: '명령', cls: 'command' },
   'service.request': { ko: '서비스 요청', cls: 'handshake' }, 'service.accept': { ko: '수락', cls: 'handshake' }, 'service.result': { ko: '결과', cls: 'handshake' },
   'handover.ready': { ko: '인계 준비', cls: 'handshake' }, 'handover.ack': { ko: '인수 확인', cls: 'handshake' }, 'quality.alert': { ko: '품질 알림', cls: 'notify' },
+  'quality.hold': { ko: '출하 보류·봉쇄', cls: 'event' }, 'quality.disposition': { ko: '처분 결과', cls: 'event' },
   status: { ko: '상태 보고', cls: 'event' }, ack: { ko: '수신 확인', cls: 'event' },
 };
 const layerOf = (ep) => (ep === 'factory' ? 0 : ep.startsWith('zone:') ? 1 : 2);
@@ -109,7 +110,7 @@ export class ManufacturingAgent {
     const rs = orderId ? T.recent.filter((r) => r.order === orderId) : T.recent;
     const o = { input: rs.length, wip: 0, pass: 0, hold: 0, handed: 0, scrap: 0, good: 0 };
     for (const r of rs) {
-      if (r.status === 'ng') o.scrap++;
+      if (r.status === 'ng' || r.status === 'scrap') o.scrap++;   // 체결 NG 격리 · 처분 폐기 (js/serial.js)
       else if (r.hold) o.hold++;
       else if (r.status === 'ok' || r.status === 'escaped') { o.handed++; o.good++; }
       else if (r.inspection?.result === 'OK') o.pass++;
@@ -156,7 +157,8 @@ class ZoneOrch {
   reconcile() {
     const F = this.flow; if (!F?.stats) return null;
     const inflight = (F.carriers ?? []).filter((c) => c.item).length, good = Object.values(F.stats.good ?? {}).reduce((a, b) => a + b, 0);
-    return { input: F.stats.released ?? 0, wip: inflight, pass: 0, hold: 0, handed: good, scrap: 0, good, err: (F.stats.released ?? 0) - inflight - good };
+    const h = this.sim.serials?.zoneCounts(this.key) ?? { hold: 0, scrap: 0 };   // 적재 뒤 출하 보류(샘플 로트·봉쇄·재작업) · 처분 폐기 (js/serial.js)
+    return { input: F.stats.released ?? 0, wip: inflight, pass: 0, hold: h.hold, handed: good - h.hold - h.scrap, scrap: h.scrap, good: good - h.scrap, err: (F.stats.released ?? 0) - inflight - good };
   }
   update() {}
 }
@@ -440,8 +442,9 @@ export class FactoryOS {
 
   // ── 정밀검사 샘플링 핸드셰이크 (inspzone.js — 앱 화면에서만) ─────────────────
   sampleRequest(req) {
-    const zk = req.zone, T = this.sim.trace; let serial = null;
-    if (zk === 'main' && T) { const r = T.recent.findLast((x) => x.status === 'ok' && x.product === req.product && !x.hold && !x.sampled); if (r) { r.sampled = req.id; r.hold = 'sample'; serial = r.serial; } }   // 검사 결과가 올 때까지 HOLD (미수신 자동 OK 금지)
+    const zk = req.zone, T = this.sim.trace, H = this.sim.serials; let serial = null;
+    if (H) { const u = H.sample(req); serial = u ? H.idOf(u) : null; }   // 적재 재고에서 샘플 시리얼 지정 + 그 로트 출하 보류 (검사 결과가 올 때까지 — 미수신 자동 OK 금지)
+    else if (zk === 'main' && T) { const r = T.recent.findLast((x) => x.status === 'ok' && x.product === req.product && !x.hold && !x.sampled); if (r) { r.sampled = req.id; r.hold = 'sample'; serial = r.serial; } }
     req.serial = serial;
     const m = this.bus.send(`zone:${zk}`, 'zone:insp', 'service.request', { subject: { serial, sample: req.id }, body: { service: 'sampling-inspection', product: req.product }, text: `샘플 검사 요청 ${req.id}${serial ? ` · ${serial}` : ''}`, expect: ['service.accept'], timeout: 900, onTimeout: (x) => this.timeout(x) });
     req.msg = m.msgId; this.insp.handled++; this.insp.req++;
@@ -455,8 +458,9 @@ export class FactoryOS {
   sampleResult(it, res) {
     const T = this.sim.trace, r = it.serial ? T?.byId.get(it.serial) : null;
     this.insp.fb++;
+    this.sim.serials?.result(it, res);   // 로트 보류 해제 · NG면 봉쇄·처분(MRB)·선별검사 · 확장 Zone 간이 8D (js/serial.js)
     this.bus.send('zone:insp', `zone:${it.zone}`, 'service.result', { corr: it.msg, subject: { serial: it.serial, sample: it.id }, body: { result: res }, text: `결과 ${res === 'ng' ? 'NG' : 'OK'} — ${it.id}` });
-    if (res !== 'ng') { if (r && r.hold === 'sample') r.hold = null; return; }
+    if (res !== 'ng') { if (r && r.hold === 'sample') r.hold = null; return; }   // (시리얼 서비스가 이미 해제 — 기본 라인 대비)
     const qa = this.bus.send('zone:insp', `zone:${it.zone}`, 'quality.alert', { corr: it.msg, subject: { serial: it.serial, sample: it.id }, body: { result: 'NG', by: 'Quality & Recovery Agent' }, text: `품질 알림 — 샘플 ${it.id} NG (Quality & Recovery Agent)` });
     const z = this.zones[it.zone]; z?.receive(qa);
     if (it.zone === 'main' && r) { r.hold = 'sample-ng'; T.openSampleCase?.(r, it); }

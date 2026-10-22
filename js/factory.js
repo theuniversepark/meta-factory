@@ -1542,7 +1542,10 @@ function buildPack(g, st, sim) {
     for (const z of [-0.85, 0.85]) put(box(0.12, 1.9, 0.12, MAT.steel), 1.45, 1.0, z, g);
     const head = put(box(0.6, 0.45, 1.8, MAT.white), 1.45, 2.0, 0, g);
     put(box(0.62, 0.1, 1.82, MAT.accent), 0, -0.25, 0, head);
-    return { ...gate };
+    // 검사·포장셀: 최종 외관 검사·QR 라벨 판독 카메라 (라벨러 문형 아래 — 마킹·판독 순간 밝아짐, js/serial.js)
+    const markMat = emis(0x37e8ff, 0.35), rd = put(new THREE.Group(), -0.05, -0.36, 0.5, head); rd.name = 'CodeReader';
+    put(box(0.14, 0.12, 0.18, MAT.dark), 0, 0, 0, rd); put(new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.009, 6, 14), markMat), 0, -0.07, 0, rd).rotation.x = Math.PI / 2;
+    return { ...gate, markMat };
   }
   const mag = put(new THREE.Group(), 1.1, 0.15, -1.7, g);
   for (let i = 0; i < 6; i++) put(box(1.0, 0.06, 0.8, MAT.carton), 0, 0.05 + i * 0.07, 0, mag);
@@ -3135,6 +3138,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
         break;
       case 'pack':
       case 'sort': {
+        if (parts.markMat) parts.markMat.emissiveIntensity = st.lastMark && this.sim.time - st.lastMark.t < 1.2 ? 6 : 0.35;   // 시리얼 QR 라벨 판독 순간
         if (!parts.gateSign) break;
         // 대상물이 입구 게이트를 지나는 동안 스캔 → 판별 결과를 표시판·스캔 링 색으로 보여 준다
         const passing = !!st.item && (this.sim.entryK(st) < 1 || (st.itemT ?? 9) < this.sim.entryTime + 0.6);

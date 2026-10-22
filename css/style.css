@@ -1019,6 +1019,20 @@ em.up { color: var(--good); } em.dn { color: var(--bad); } em.mid { color: var(-
 .qt-capa .qt-node { max-height: 90px; }
 .qt-more { font-size: 10px; color: var(--muted); text-align: center; }
 .qt-list td { white-space: nowrap; }
+/* 시리얼·출하 · 봉쇄·처분 탭 (js/serial.js) */
+.qt-zf { margin-bottom: 6px; } .qt-zf button { font-size: 11px; }
+.qt-list tr[data-qt-sid] { cursor: pointer; }
+.qt-unit { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start; margin: 6px 0; }
+.qt-code { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.qt-code-img { background: #fff; border-radius: 6px; padding: 4px; line-height: 0; box-shadow: 0 0 0 1px var(--line); }
+.qt-code-img svg { display: block; width: 168px; height: 168px; } .qt-code-img.dm svg { width: 132px; height: 132px; }
+.qt-code small { color: var(--muted); font-size: 10.5px; text-align: center; max-width: 170px; }
+.qt-kvt td:first-child { color: var(--muted); white-space: nowrap; width: 1%; } .qt-kvt td { vertical-align: top; } .qt-kvt small { color: var(--muted); }
+.qt-wrap { word-break: break-all; white-space: normal; font-size: 11px; }
+.qt-hold { max-height: min(56vh, 600px); overflow: auto; padding-right: 4px; }
+.qt-grid2.qt-g11 { grid-template-columns: 1fr 1fr; }
+.qt-case h5 { margin: 8px 0 4px; font-size: 12.5px; }
+@media (max-width: 900px) { .qt-unit { grid-template-columns: 1fr; } .qt-grid2.qt-g11 { grid-template-columns: 1fr; } }
 
 /* Factory OS 계층 · 존 간 메시지 (fosview.js) */
 .fos-b { flex: 1; min-height: 0; overflow: auto; padding-right: 4px; }

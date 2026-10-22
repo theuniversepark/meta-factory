@@ -2,7 +2,7 @@
 // llm-wiki 「AI정밀검사(QMS) Zone 통합 시나리오 v0.3」(10/6) 기준: 공정 내 전수검사는 각 생산 존이, 샘플링 검사는 정밀검사Zone이 맡는다.
 //  · 셀: 시료 접수·도킹 → ① 로봇형 비전 검사(ABIS 표면결함 · AIMAX Feature) · ② 3D 스캔·초음파 용접검사(ScanBox · UT NDT — 용접부 NDT 필수)
 //        ③ O-INSPECT 정밀 재측정(정반 안착) · ④ ATOS 3D 형상편차(Point Cloud) → ⑤ AI 판정(OK · 판정 불확실 · NG) · 결과 버퍼
-//  · 제품별 검사 경로 — 모든 제품이 같은 장비를 거치지 않는다 (판정 불확실 → ③ 재측정 후 재판정 · NG → 해당 Zone 오케스트레이터에 리워크·공정 보정 요청)
+//  · 제품별 검사 경로 — 모든 제품이 같은 장비를 거치지 않는다 (판정 불확실 → ③ 재측정 후 재판정 · NG → 로트 봉쇄 · 처분(재작업·폐기) · 공정 보정 · 샘플링 강화 — js/serial.js)
 //  · 검사 AMR 3대가 세 생산 Zone 적재장에서 N개마다 1개씩 샘플을 지그째 실어 온다 (공장 통로로 이동 — 시뮬레이션 이동체와 서로 양보)
 // 시계는 정밀조립Zone 시뮬레이션과 같다 (main.js가 step/update를 부른다). 라인 전체 비상정지·보호정지 때 함께 멈춘다.
 import * as THREE from 'three';
@@ -269,7 +269,8 @@ export class InspZone {
     x.fillStyle = '#9fb3c8'; x.fillText('검사 AMR', 30, 460);
     const T = { park: '대기·충전', out: '샘플 수거 이동', load: '샘플 인수', in: '정밀검사Zone으로', queue: '접수 대기', move: '셀 간 이동', work: '검사 중', ready: '다음 셀 대기', home: '스테이션 복귀' };
     this.carriers.forEach((c, i) => { x.fillStyle = '#e6edf3'; x.fillText(`${c.uid} ${T[c.state] ?? c.state}${c.item ? ` · ${zl(c.item.zone)} ${S.products[c.item.product][1]}` : ''}`, 170 + i * 520, 460); });
-    x.fillStyle = '#6b7c8f'; x.font = `600 22px ${F}`; x.fillText(`샘플링: 정밀조립 ${S.sample.main}개 · 유연생산 ${S.sample.flex}개 · 적응가공 ${S.sample.adapt}개마다 1개 · 판정 불확실 → O-INSPECT 재측정 · NG → 해당 Zone 오케스트레이터 리워크·공정 보정`, 30, 500);
+    x.fillStyle = '#6b7c8f'; x.font = `600 22px ${F}`; const ev = (k) => this.sim?.serials?.sampleEvery(k, S.sample[k]) ?? S.sample[k], tg = (k) => (ev(k) !== S.sample[k] ? '(강화)' : '');
+    x.fillText(`샘플링: 정밀조립 ${ev('main')}개${tg('main')} · 유연생산 ${ev('flex')}개${tg('flex')} · 적응가공 ${ev('adapt')}개${tg('adapt')}마다 1개 · 요청 즉시 로트 출하 보류 · NG → 봉쇄 · 처분(재작업·폐기) · 공정 보정`, 30, 500);
     this.wallTex.needsUpdate = true;
   }
   // 새 실행마다 (main.js setup): 단계별 로봇·인력, 검사 AMR, 실적 초기화
@@ -368,8 +369,9 @@ export class InspZone {
       const prev = this.base[zk]?.[p] ?? 0;
       if (n > prev) {
         this.counts[zk] += n - prev; (this.base[zk] ??= {})[p] = n; (this.unsampled[zk] ??= {})[p] = (this.unsampled[zk][p] ?? 0) + n - prev;
-        if (this.counts[zk] >= INSP.sample[zk]) {   // 이번 샘플 제품 = 그 Zone에서 마지막 샘플 뒤로 가장 많이 만든 제품 (혼류 비율대로 고르게)
-          this.counts[zk] -= INSP.sample[zk];
+        const N = this.sim.serials?.sampleEvery(zk, INSP.sample[zk]) ?? INSP.sample[zk];   // NG 뒤 샘플링 강화(N/2) — js/serial.js
+        if (this.counts[zk] >= N) {   // 이번 샘플 제품 = 그 Zone에서 마지막 샘플 뒤로 가장 많이 만든 제품 (혼류 비율대로 고르게)
+          this.counts[zk] -= N;
           const U = this.unsampled[zk], q = Object.keys(U).reduce((a, b) => (U[b] > U[a] ? b : a)); U[q] = 0;
           const req = { id: `QS-${String(++this.seq).padStart(4, '0')}`, zone: zk, product: q, t0: this.time }; this.queue.push(req); this.stats.samples++;
           this.sim.fos?.sampleRequest(req);   // A2A: 생산 Zone → 정밀검사 서비스 요청 (정밀조립은 샘플 시리얼 HOLD)
@@ -480,7 +482,7 @@ export class InspZone {
   // AI 판정: OK · 판정 불확실(→ O-INSPECT 재측정 후 재판정, 한 번만) · NG(→ 해당 Zone 오케스트레이터에 리워크·공정 보정 요청)
   judge(c, cell) {
     const it = c.item, S = INSP, [zk, plabel] = S.products[it.product], r = this.rng(), s = this.stats;
-    const res = !it.rechecked && r < S.judge.uncertain ? 'unc' : r < S.judge.uncertain + S.judge.ng ? 'ng' : 'ok';
+    const res = !it.rechecked && r < S.judge.uncertain ? 'unc' : r < S.judge.uncertain + S.judge.ng * (this.sim.serials?.ngFactor(zk) ?? 1) ? 'ng' : 'ok';   // 공정 보정 중인 Zone은 NG 확률이 낮다 (js/serial.js)
     const by = (s.by[it.product] ??= { ok: 0, unc: 0, ng: 0 });
     if (res === 'unc') {
       s.unc++; by.unc++; it.rechecked = true; it.redo = true; it.done.delete('OINS');
@@ -493,7 +495,7 @@ export class InspZone {
     cell.flash = { col: res === 'ok' ? 0x3ddc84 : 0xff4d4d, t: 2 };
     const sh = cell.parts.shelves[res === 'ok' ? 'ok' : 'ng'], n = res === 'ok' ? s.ok : s.ng; sh.forEach((b, i) => (b.visible = i < Math.min(6, n)));
     if (res === 'ng' && this.mode !== 'traditional') this.spawnPacket(cell.sensor.getWorldPosition(new THREE.Vector3()), 0xff4d4d);   // NG 판정 → 서버 (QMS 저장 · 오케스트레이터 알림)
-    if (res === 'ng') this.sim.log('warn', `정밀검사 NG — ${zl(zk)} ${plabel} ${it.id}`, { obs: `검사 경로 ${S.routes[it.product].map((id) => S.cells[id].label).join(' → ')}${it.rechecked ? ' → O-INSPECT 재측정' : ''}`, dec: 'Quality & Recovery Agent 최종 NG · QMS 저장', act: `${zl(zk)} 오케스트레이터에 리워크 Task · 선행공정 조건 보정 요청` });
+    if (res === 'ng') this.sim.log('warn', `정밀검사 NG — ${zl(zk)} ${plabel} ${it.id}`, { obs: `검사 경로 ${S.routes[it.product].map((id) => S.cells[id].label).join(' → ')}${it.rechecked ? ' → O-INSPECT 재측정' : ''}`, dec: 'Quality & Recovery Agent 최종 NG · QMS 저장', act: `${it.serial ? `${it.serial} · ` : ''}${zl(zk)} 로트 봉쇄(출하 보류) · 처분 판정(재작업·폐기) · 선행공정 보정 · 샘플링 강화` });
     this.detach(c); c.item = null;
   }
   push(it, res) { this.recent.unshift({ id: it.id, zone: it.zone, product: it.product, res, t: this.time }); this.recent.length = Math.min(this.recent.length, 6); }

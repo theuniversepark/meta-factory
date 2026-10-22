@@ -10,6 +10,7 @@ import { PatrolDrone, MISSION_PRIO } from './drone.js';
 import { planCCTV, CCTVAgent } from './cctv.js';
 import { Private5G } from './net5g.js';
 import { ProductTrace } from './trace.js';
+import { SerialHub } from './serial.js';
 import { QualityComm } from './qcomm.js';
 import { SensorNet } from './sensors.js';
 import { MachineMonitor } from './machmon.js';
@@ -646,7 +647,8 @@ export class Simulation {
     this.cctvAgent = new CCTVAgent(this);   // 피지컬AI: CCTV 에이전트 (영상 감시 · 오케스트레이터 보고 · 이벤트 이력)
     this.net = new Private5G(this);   // Private 5G 특화망: 음영 없는 기지국 배치 · 이동 로봇 5G 모뎀 · 핸드오버 · 무손실 업링크 (자동화·피지컬AI)
     this.fac = new FacLedger(this);   // FAC(FACOS 업무 기록): 발주·재고·설비보전 (자동화·피지컬AI)
-    new ProductTrace(this, seed);   // 제품 추적 관리: 시리얼·계보 · 공장 환경 센서 · 불량 사례·AI 원인 분석 (js/trace.js)
+    new ProductTrace(this, seed);   // 제품 추적 관리: 계보 · 공장 환경 센서 · 불량 사례·AI 원인 분석 (js/trace.js)
+    if (this.zone) new SerialHub(this, seed);   // 2단 ID: 투입 WIP ID → 최종 검사 합격 시 제품 시리얼·QR/DataMatrix 마킹 · 출하 SSCC · 샘플 NG 봉쇄·처분 (js/serial.js)
     new CapaManager(this);   // 품질 불량 → Zone·총괄 오케스트레이터 8D CAPA → 운영 정책 반영 (js/capa.js)
     if (!this.quiet || opts.sensors) new SensorNet(this);   // 환경·설비 상태 센서망 — 센서 → 셀 엣지 → 게이트웨이 → 존 서버 → 공장 중앙 (js/sensors.js · 헤드리스 시험·트윈은 opts.sensors일 때만)
     new QualityComm(this);   // 불량 판정 리포트 → 메인 서버 → RCA 서버 통신 · 품질 통신 pcap (js/qcomm.js)
@@ -1125,6 +1127,7 @@ export class Simulation {
     this.cctvAgent?.update(dt);   // 피지컬AI: CCTV 에이전트 — 영상 감시·오케스트레이터 보고·이벤트 이력
     this.updateFieldEvents();
     this.trace?.update(dt);
+    this.serials?.update(dt);
     this.sensors?.tick(dt);
     this.fos?.update(dt);
     this.machmon?.tick(dt);
@@ -1326,6 +1329,7 @@ export class Simulation {
       const nominal = st.fastenPts ? fastenT(F, st.fastenPts) : st.def.cycle;
       const base = nominal * m.cycleMul * st.speedMul * (this.vla?.cycleFactor(st) ?? 1) * (this.trace?.cycleFactor(st) ?? 1);   // 배포된 VLA 모델 버전만큼 사이클 단축 · 환경 인터록 정책(공정 보상)
       st.cycleTime = st.item.scrap ? 0.5 : Math.max(base * 0.6, base * (1 + m.cycleVar * gauss(this.rand)));
+      if (st.def.type === 'pack' && !st.item.scrap && this.serials) st.cycleTime += this.serials.plan(st.item);   // 검사·포장셀: QR 라벨 판독 실패 → 재부착 시간만 더한다 (첫 라벨은 포장과 병렬)
     }
     if (!st.item && cycleStop) { st.state = 'CSTOP'; st.c.stop = (st.c.stop ?? 0) + dt; }
     else if (!st.item) {
@@ -1394,6 +1398,7 @@ export class Simulation {
       const p = (m.defectBase / 4) * (st.def.defectMul ?? 1) * (1 + (100 - st.health) / 50) * (1 + st.drift * 1.5) * (this.vla?.defectFactor(st) ?? 1) * (this.trace?.envMul(st) ?? 1);   // 환경 이상(공정별 민감 요인)도 불량 확률에
       const made = !it.defect && this.rand() < p;
       if (made) { it.defect = true; it.defectBy = st.id; st.c.defects++; }
+      if (st.def.type === 'pack') { const u = this.serials?.issue(it, { cell: st.id, name: st.name }); if (u) st.lastMark = { t: this.time, id: u.serial, grade: u.mark?.grade }; }   // 검사·포장셀 최종 외관·라벨 검사 합격 → 제품 시리얼 발행 · QR 라벨 부착 · 판독 검증
       this.trace?.done(st, it, made, p);
     }
     if (st.def.effect === 'sort') it.sorted = true;

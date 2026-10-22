@@ -111,10 +111,11 @@ export function planForklift(sim, f) {
   let zfg = null;
   if (sim.zone) {
     // 정밀조립 구분 적재장 + 확장 Zone 포장·구분 적재 팔레트 중 적재 한도 대비 가장 많이 찬 쪽부터 (한쪽이 차서 라인이 서지 않게)
-    const zs = sim.zoneFg ?? {}, stock = (k) => (k in sim.fgBy ? sim.fgBy[k] : zs[k]), cap = (k) => (k in sim.fgBy ? FG_ZONE_CAP : ZONE_FG_CAP);
-    const p = [...Object.keys(sim.fgBy), ...Object.keys(zs)].filter((k) => stock(k) >= trigger).sort((a, b) => stock(b) / cap(b) - stock(a) / cap(a))[0];
+    // 출하 가능 = 시리얼 서비스(js/serial.js)가 출하 보류(정밀검사 샘플 로트 · 봉쇄 · 재작업)하지 않은 것만
+    const zs = sim.zoneFg ?? {}, H = sim.serials, stock = (k) => (k in sim.fgBy ? sim.fgBy[k] : zs[k]), ready = (k) => (H ? Math.min(stock(k), H.shippable(k)) : stock(k)), cap = (k) => (k in sim.fgBy ? FG_ZONE_CAP : ZONE_FG_CAP);
+    const p = [...Object.keys(sim.fgBy), ...Object.keys(zs)].filter((k) => ready(k) >= trigger).sort((a, b) => stock(b) / cap(b) - stock(a) / cap(a))[0];
     if (!p) return false;
-    product = p; avail = stock(p); zfg = p in sim.fgBy ? null : zs;
+    product = p; avail = ready(p); zfg = p in sim.fgBy ? null : zs;
   } else {
     if (sim.fgStock < trigger) return false;
     avail = sim.fgStock;
@@ -131,17 +132,19 @@ export function planForklift(sim, f) {
   f.setTask(`${pName} 출하 → ${t.id}`, [
     { go: pick },
     { wait: m.key === 'traditional' ? 8 : 5, done: () => {
-      if (zfg) { const k = Math.min(n, zfg[product]); zfg[product] -= k; f.load = { type: 'fg', n: k, product }; return; }   // 확장 Zone 팔레트
-      const k = Math.min(n, product ? sim.fgBy[product] : sim.fgStock);
+      const H = sim.serials, okN = H && product ? H.shippable(product) : Infinity;   // 집는 순간 다시 확인 (그 사이 보류된 것은 두고 간다)
+      const short = (k) => { if (k < n) t.reserved = Math.max(0, (t.reserved ?? 0) - (n - k)); };   // 예약보다 적게 실으면 남는 예약을 바로 푼다 (트럭이 예약에 묶여 서지 않게)
+      if (zfg) { const k = Math.min(n, zfg[product], okN); short(k); zfg[product] -= k; f.load = { type: 'fg', n: k, product, lot: H?.take(product, k, f.id) ?? null }; return; }   // 확장 Zone 팔레트
+      const k = Math.min(n, product ? sim.fgBy[product] : sim.fgStock, okN); short(k);
       if (product) sim.fgBy[product] -= k;
-      sim.fgStock -= k; f.load = { type: 'fg', n: k, product };
+      sim.fgStock -= k; f.load = { type: 'fg', n: k, product, lot: H && product ? H.take(product, k, f.id) : null };   // 팔레트 SSCC ↔ 시리얼 묶음
     } },
     { go: dock },
     { go: inside, via: [] },
     { wait: m.key === 'traditional' ? 6 : 4, done: () => {
-      const k = f.load?.n ?? 0; f.load = null;
-      if (t.state === 'dock') yard.unload(t, k, product);
-      else { if (zfg) zfg[product] += k; else { sim.fgStock += k; if (product) sim.fgBy[product] += k; } t.reserved = 0; }   // 그 사이 트럭이 떠났으면 되돌린다
+      const k = f.load?.n ?? 0, lot = f.load?.lot; f.load = null;
+      if (t.state === 'dock') { yard.unload(t, k, product); sim.serials?.ship(lot, t.id); }
+      else { if (zfg) zfg[product] += k; else { sim.fgStock += k; if (product) sim.fgBy[product] += k; } t.reserved = 0; sim.serials?.unload(lot); }   // 그 사이 트럭이 떠났으면 되돌린다
     } },
     { go: dock, via: [], rev: true },
     // 복귀: 도크 앞 줄을 따라 곧장 옆의 대기 자리(도크 왼쪽)로 — 통로까지 내려갔다 올라오지 않고 지나쳤다 되돌아오지도 않는다 (서면 벽 쪽을 보고 주차)

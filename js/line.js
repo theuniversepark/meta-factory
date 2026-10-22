@@ -55,7 +55,7 @@ export const DEFAULT_LINE = {
 
 // ── 메타팩토리 테스트베드 정밀조립Zone (혼류 생산) ─────────────────
 // 자재 투입 → 부품분류셀(공동)에서 부품 종류를 판별해 도어트림 라인 / e-axle 라인으로 분기
-// → 각 라인의 조립셀 → 체결셀 → 포장셀(공동)로 합류 → 제품별 포장 후 구분 적재장의 제품별 구역에 적재.
+// → 각 라인의 조립셀 → 체결셀 → 검사·포장셀(공동)로 합류 → 최종 외관·라벨 검사 합격 시 제품 시리얼·QR 라벨(js/serial.js) → 제품별 포장 후 구분 적재장의 제품별 구역에 적재.
 // side -1: 설비 앞면(작업자·AGV 쪽)이 뒤쪽 통로를 향하도록 앞뒤 반전 배치
 export const ZONE_NAME = '정밀조립Zone';
 export const ZONE_PRODUCTS = {
@@ -68,7 +68,7 @@ export const ZONE_CELLS = {
   DT_FAST: { no: '3', type: 'screw',    label: '도어트림 체결셀', product: 'doortrim', use: '도어트림 라인', x: 3.5, z: 4.6 },
   EA_ASSY: { no: '4', type: 'assembly', label: 'e-axle 조립셀',  product: 'eaxle',    use: 'e-axle 라인', x: -7.5, z: -4.6, side: -1 },
   EA_FAST: { no: '5', type: 'fasten',   label: 'e-axle 체결셀',  product: 'eaxle',    use: 'e-axle 라인', x: 3.5, z: -4.6, side: -1 },
-  PACK:    { no: '6', type: 'pack',     label: '포장셀',          product: 'shared',   use: '공동 · 제품별 포장', x: 14, z: 0 },
+  PACK:    { no: '6', type: 'pack',     label: '검사·포장셀',     product: 'shared',   use: '공동 · 최종 검사·시리얼(QR)·제품별 포장', x: 14, z: 0 },
 };
 // 셀 배치 기준: 왼쪽 세로 통로(x −35.5) 바로 오른쪽 AMR 진입로(x −30.6)에 투입구를 맞추고, 셀 중심 간격은 9 ~ 11.5m
 // (셀 4.6m 사이 통로 4.4m 이상 · 대각 이동·합류 대기 차로가 들어가는 거리) — 원래 10 ~ 13m에서 줄여 AMR 운반·복귀 거리를 줄였다
@@ -119,7 +119,7 @@ const ZONE_RECIPES = [
   { id: 'DT_FAST', robot: { kind: 'cobot', count: 2 }, cycle: 23, fasten: { setup: 2, per: 5.5, post: 4.5, min: 2, max: 4, kind: 'screw' }, task: '스크류 자동 체결 (로봇당 2~4점), 토크·각도 전수 판정' },
   { id: 'EA_ASSY', robot: { kind: 'cobot', count: 4 }, cycle: 22, fasten: { setup: 7, per: 5.0, post: 0, min: 2, max: 4, kind: 'press' }, task: '양쪽 협동로봇이 베어링 압입·로터·감속기어 삽입, 하우징 결합 (로봇당 2~4점)' },
   { id: 'EA_FAST', robot: { kind: 'articulated', count: 1 }, cycle: 26.5, fasten: { setup: 2, per: 5.5, post: 8, min: 2, max: 4, kind: 'screw' }, task: '로봇 볼트 체결(2~4점) 뒤 다축 너트러너 하우징 볼트 체결, 토크·각도 전수 판정' },
-  { id: 'PACK', robot: { kind: 'ammr', count: 2 }, cycle: 8, task: 'AMMR 양팔로 옆 선반에서 포장재를 가져와 제품별 포장·라벨' },
+  { id: 'PACK', robot: { kind: 'ammr', count: 2 }, cycle: 8, task: '최종 외관·라벨 검사 → 합격 시 제품 시리얼 발행·QR 라벨 부착·판독 검증 → AMMR 양팔로 옆 선반 포장재를 가져와 제품별 포장' },
 ];
 
 export function zoneLine(mix = '1:1') {
@@ -220,6 +220,8 @@ export function normalizeLine(raw) {
     for (const s of stations) {
       const cell = ZONE_CELLS[s.id];
       if (cell && s.type !== cell.type) { warnings.push(`${cell.label}의 유형은 ${STATION_TYPES[cell.type].label}로 고정 → 되돌림`); s.type = cell.type; }
+      if (cell) s.name = cell.label;   // 셀 이름도 고정 (저장된 예전 이름 — 예: 포장셀 → 검사·포장셀)
+      if (s.id === 'PACK' && s.task === 'AMMR 양팔로 옆 선반에서 포장재를 가져와 제품별 포장·라벨') s.task = ZONE_RECIPES.find((r) => r.id === 'PACK').task;
       const F = ZONE_RECIPES.find((r) => r.id === s.id)?.fasten;   // 체결·압입 점(2~4점) 설정은 셀에 고정 — 저장된 라인·편집 초안에 없어도 되살린다 (빠지면 점마다 선반 왕복 체결이 꺼진다)
       if (F) s.fasten = { ...F };
     }

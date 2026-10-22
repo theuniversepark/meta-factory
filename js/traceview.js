@@ -1,16 +1,20 @@
-// 품질 추적 창 — 제품 추적(시리얼·계보) · 불량 분석(AI 원인 분석 · 데이터 내려받기) · 8D 흐름(Zone·총괄 오케스트레이터 스윔레인) · 운영 정책 · 표준·솔루션
+// 품질 추적 창 — 제품 추적(WIP ID·계보) · 시리얼·출하(QR·DataMatrix · SSCC) · 봉쇄·처분(샘플 NG · MRB) · 불량 분석(AI 원인 분석 · 데이터 내려받기) · 8D 흐름(Zone·총괄 오케스트레이터 스윔레인) · 운영 정책 · 표준·솔루션
 import { ENV_SPEC, ENV_KEYS, ENV_NODES, FACTOR, PARAM_SPEC } from './trace.js';
 import { D8, CAPA_LANES, VERIFY_S } from './capa.js';
 import { QHOST, QTOPIC } from './qcomm.js';
+import { PRODUCTS, ZONE_KO, MARK_INFO, MRB_T, TIGHT_N, matrixOf, codeSVG } from './serial.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const clk = (t) => { if (t == null) return '-'; const s = Math.floor(t) + 8 * 3600; return `${String(Math.floor(s / 3600) % 24).padStart(2, '0')}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const pct = (v, d = 1) => `${((v ?? 0) * 100).toFixed(d)}%`;
-const PRODUCT = { doortrim: '도어트림', eaxle: 'e-axle' };
-const STATUS = { wip: ['생산 중', 'info'], ok: ['양품', 'good'], ng: ['NG 격리', 'bad'], escaped: ['양품 판정(유출)', 'good'] };
+const PRODUCT = Object.fromEntries(Object.entries(PRODUCTS).map(([k, v]) => [k, v.label]));
+const STATUS = { wip: ['생산 중', 'info'], ok: ['양품', 'good'], ng: ['NG 격리', 'bad'], escaped: ['양품 판정(유출)', 'good'], scrap: ['폐기', 'bad'] };
+const LOC = { line: ['공정 중', 'info'], fg: ['출하 대기', 'good'], insp: ['정밀검사 중', 'info'], loading: ['상차 중', 'info'], shipped: ['출하', 'muted'], scrap: ['폐기', 'bad'], quarantine: ['격리', 'bad'] };
+const HOLD_KO = (h) => (!h ? '' : h === 'sample' ? '샘플 판정 대기' : h === 'sample-ng' ? '샘플 NG 격리' : h.startsWith('lot:') ? `로트 보류 ${h.slice(4)}` : h === 'rework' ? '재작업 중' : h === 'mark' ? '판독 불가 — 재마킹 대기' : h.startsWith('containment:') ? `8D 봉쇄 ${h.slice(12)}` : h);
+const idOf = (u) => u.serial ?? u.wip;
 const CAPA_ST = { open: ['진행 중', 'info'], approval: ['정책 결정 대기', 'warn'], verify: ['효과 검증 중', 'info'], closed: ['종결', 'good'], held: ['보류 종결', 'muted'] };
-const TABS = { trace: '🔖 제품 추적', ng: '✖ 불량 분석', comm: '📡 보고·통신', capa: '🧭 8D 흐름', policy: '📜 운영 정책', std: '📚 표준·솔루션' };
-export const traceState = { tab: 'ng', serial: null, caseId: null, capaId: null, q: '' };
+const TABS = { trace: '🔖 제품 추적', serial: '🏷 시리얼·출하', hold: '🧯 봉쇄·처분', ng: '✖ 불량 분석', comm: '📡 보고·통신', capa: '🧭 8D 흐름', policy: '📜 운영 정책', std: '📚 표준·솔루션' };
+export const traceState = { tab: 'ng', serial: null, caseId: null, capaId: null, q: '', sid: null, zf: 'all' };
 
 const chip = (t, tone = '') => `<b class="qt-chip ${tone}">${t}</b>`;
 const envChips = (e) => ENV_KEYS.map((k) => { const S = ENV_SPEC[k], v = e?.[k]; const bad = v != null && ((S.hi != null && v > S.hi) || (S.lo != null && v < S.lo)); return `<span class="qt-env ${bad ? 'bad' : ''}" title="${S.label} (기준 ${S.hi != null ? `≤${S.hi}` : `≥${S.lo}`}${S.unit})">${S.label.replace(/ .*/, '')} <b>${v ?? '-'}</b>${S.unit}</span>`; }).join('');
@@ -19,13 +23,13 @@ export function traceHTML(sim) {
   const T = sim.trace, C = sim.capa; if (!T) return '<p class="vla-note">제품 추적이 없습니다.</p>';
   const st = traceState, S = T.stats, A = T.env.avg(), E = T.env.exc;
   const tiles = `<div class="imp-tiles qt-tiles">
-    ${tile('투입 (시리얼 부여)', S.released.toLocaleString('ko-KR'), `양품 ${S.ok} · 생산 중 ${S.released - S.ok - S.ng - S.escaped}`)}
+    ${sim.serials ? (() => { const H = sim.serials, B = H.stats.byZone; return tile('시리얼 발행 (3 Zone)', H.stats.issued.toLocaleString('ko-KR'), `정밀조립 ${B.main} · 유연생산 ${B.flex} · 적응가공 ${B.adapt} · 출하 보류 ${['main', 'flex', 'adapt'].reduce((a, z) => a + H.zoneCounts(z).hold, 0)}`); })() : tile('투입 (시리얼 부여)', S.released.toLocaleString('ko-KR'), `양품 ${S.ok} · 생산 중 ${S.released - S.ok - S.ng - S.escaped}`)}
     ${tile('불량 판정 (NG)', S.ng, `유출 ${S.escaped} · 최근 1시간 불량률 ${pct(T.ngRate(sim.time - 3600), 2)}`)}
     ${tile('AI 원인 분석 적중', S.cases ? pct(S.top1 / S.cases, 0) : '-', `1순위 셀 = 정답 ${S.top1}/${S.cases} · 3순위 내 ${S.top3}`)}
     ${tile('8D CAPA', C?.open.length ?? 0, `정책 결정 대기 ${C?.pending.length ?? 0} · 종결 ${C?.list.filter((k) => k.status === 'closed').length ?? 0}`)}
     ${tile('정밀조립 환경 (평균)', `${A.temp}°C · ${A.rh}%`, E ? `<em class="dn">⚠ ${esc(E.label)} (${E.id})</em>` : `진동 ${A.vib}mm/s · PM2.5 ${A.pm} · ${A.lux}lx`)}</div>`;
   const tabs = `<div class="seg qt-tabs">${Object.entries(TABS).map(([k, l]) => `<button data-qt-tab="${k}" class="${st.tab === k ? 'on' : ''}">${l}${k === 'capa' && C?.pending.length ? ` <i class="qt-badge">${C.pending.length}</i>` : ''}</button>`).join('')}</div>`;
-  const body = st.tab === 'trace' ? traceTab(sim) : st.tab === 'ng' ? ngTab(sim) : st.tab === 'comm' ? commTab(sim) : st.tab === 'capa' ? capaTab(sim) : st.tab === 'policy' ? policyTab(sim) : stdTab();
+  const body = st.tab === 'trace' ? traceTab(sim) : st.tab === 'serial' ? serialTab(sim) : st.tab === 'hold' ? holdTab(sim) : st.tab === 'ng' ? ngTab(sim) : st.tab === 'comm' ? commTab(sim) : st.tab === 'capa' ? capaTab(sim) : st.tab === 'policy' ? policyTab(sim) : stdTab();
   return `${tiles}${tabs}${body}`;
 }
 const tile = (k, v, sub) => `<div class="imp-tile"><span>${k}</span><b>${v}</b><small>${sub}</small></div>`;
@@ -33,16 +37,16 @@ const tile = (k, v, sub) => `<div class="imp-tile"><span>${k}</span><b>${v}</b><
 // ── 제품 추적 ─────────────────
 function traceTab(sim) {
   const T = sim.trace, st = traceState, q = st.q.trim().toUpperCase();
-  const list = (q ? T.recent.filter((r) => r.serial.includes(q) || r.epc.toUpperCase().includes(q) || (r.amr ?? '').includes(q) || r.lot.includes(q)) : T.recent).slice(-40).reverse();
+  const list = (q ? T.recent.filter((r) => (r.serial ?? '').includes(q) || (r.wip ?? '').includes(q) || (r.epc ?? '').toUpperCase().includes(q) || (r.amr ?? '').includes(q) || r.lot.includes(q)) : T.recent).slice(-40).reverse();
   const sel = (st.serial && T.byId.get(st.serial)) || list.find((r) => r.status !== 'wip') || list[0];   // 기본 = 가장 최근 완료 제품 (계보가 다 찬)
-  const rows = list.map((r) => { const [l, tone] = STATUS[r.status]; return `<tr data-qt-serial="${r.serial}" class="${sel === r ? 'sel' : ''}"><td><b class="uidc">${r.serial}</b></td><td>${PRODUCT[r.product] ?? r.product ?? '-'}</td><td>${chip(l, tone)}</td><td>${clk(r.t0)}</td><td>${r.tEnd != null ? `${Math.round(r.tEnd - r.t0)}초` : '-'}</td><td>${r.amr ?? '-'}</td><td title="${r.lot}">…${r.lot.slice(-10)}</td></tr>`; }).join('');
+  const rows = list.map((r) => { const [l, tone] = STATUS[r.status] ?? [r.status, '']; return `<tr data-qt-serial="${idOf(r)}" class="${sel === r ? 'sel' : ''}"><td><b class="uidc" title="${r.wip ? `WIP ${r.wip}` : ''}">${idOf(r)}</b></td><td>${PRODUCT[r.product] ?? r.product ?? '-'}</td><td>${chip(l, tone)}</td><td>${clk(r.t0)}</td><td>${r.tEnd != null ? `${Math.round(r.tEnd - r.t0)}초` : '-'}</td><td>${r.amr ?? '-'}</td><td title="${r.lot}">…${r.lot.slice(-10)}</td></tr>`; }).join('');
   return `<div class="qt-split">
-    <div><div class="qt-search"><input id="qtSearch" type="search" placeholder="시리얼 · EPC · AMR · 로트 검색 (예: DT-, AM-03)" value="${esc(st.q)}" /></div>
-      <table class="vla-t qt-list"><thead><tr><th>시리얼</th><th>제품</th><th>상태</th><th>투입</th><th>리드타임</th><th>AMR</th><th>원자재 로트</th></tr></thead><tbody>${rows || '<tr><td colspan="7">해당 제품 없음</td></tr>'}</tbody></table></div>
+    <div><div class="qt-search"><input id="qtSearch" type="search" placeholder="시리얼 · WIP ID · EPC · AMR · 로트 검색 (예: DT-, WIP-EA, AM-03)" value="${esc(st.q)}" /></div>
+      <table class="vla-t qt-list"><thead><tr><th>시리얼 (미발행 = WIP ID)</th><th>제품</th><th>상태</th><th>투입</th><th>리드타임</th><th>AMR</th><th>원자재 로트</th></tr></thead><tbody>${rows || '<tr><td colspan="7">해당 제품 없음</td></tr>'}</tbody></table></div>
     <div>${sel ? genealogyHTML(sim, sel) : '<p class="vla-note">제품이 아직 없습니다.</p>'}</div></div>`;
 }
 function genealogyHTML(sim, r) {
-  const [l, tone] = STATUS[r.status], ins = r.inspection;
+  const [l, tone] = STATUS[r.status] ?? [r.status, ''], ins = r.inspection;
   const steps = r.steps.map((p, i) => {
     const params = Object.entries(p.params).map(([k, v]) => { const S = (PARAM_SPEC[p.type] ?? {})[k] ?? PARAM_SPEC.fasten[k]; const out = S && ((S.lsl != null && v < S.lsl) || (S.usl != null && v > S.usl)); return `<span class="${out ? 'bad' : ''}">${S?.label ?? k} <b>${v}</b>${S?.unit ?? ''}</span>`; }).join('');
     return `<li class="${p.result === 'NG' ? 'ng' : ''}"><div class="qt-st"><b>${i + 1}. ${esc(p.name)}</b> <i class="uidc">${p.st}</i> ${p.result ? chip(`판정 ${p.result}`, p.result === 'NG' ? 'bad' : 'good') : ''}<small>${clk(p.tIn)} → ${clk(p.tOut)} · 사이클 ${p.cycle ?? '-'}초</small></div>
@@ -50,10 +54,76 @@ function genealogyHTML(sim, r) {
         <span>운반 <b>${p.amr ?? '컨베이어'}</b>${p.amrBattery != null ? ` (${p.amrBattery}%)` : ''}</span><span>건강도 <b>${p.health}%</b></span><span>드리프트 <b>${(p.drift * 100).toFixed(1)}%</b></span><span>Cpk <b>${p.cpk}</b></span></div>
       <div class="qt-kv qt-par">${params}</div><div class="qt-envs">${p.env.node} ${envChips(p.env)}</div></li>`;
   }).join('');
-  return `<div class="qt-gen"><h4>${r.serial} ${chip(l, tone)} <small>${PRODUCT[r.product] ?? ''} · EPC ${r.epc} · 원자재 ${r.lot} · 운반 ${r.amr ?? '컨베이어'} · ${clk(r.t0)} 투입</small></h4>
+  return `<div class="qt-gen"><h4>${r.serial ?? r.wip} ${chip(l, tone)} <small>${r.wip ? `WIP ${r.wip} · ` : ''}${PRODUCT[r.product] ?? ''} · ${r.epc ? `EPC ${r.epc}` : '시리얼 미발행 (검사·포장셀 전 · 또는 체결 NG)'} · 원자재 ${r.lot} · 운반 ${r.amr ?? '컨베이어'} · ${clk(r.t0)} 투입</small></h4>
     ${ins ? `<p class="qt-ins">체결 전수 검사 <b>${ins.result}</b> — 토크 ${ins.torque} N·m (규격 ${ins.spec.torque.join('~')}) · 각도 ${ins.angle}° (규격 ${ins.spec.angle.join('~')})${ins.mode ? ` · <em class="dn">${esc(ins.mode)}</em>` : ''}</p>` : ''}
     <ol class="qt-steps">${steps || '<li>아직 셀에 들어가지 않음</li>'}</ol>
     <p class="vla-note">계보 = ISA-95 Equipment · Personnel · Material Actual. 단계마다 그 순간 설비·로봇·운반 AMR·환경(가장 가까운 환경 센서)을 남깁니다. 전체 이벤트는 불량 분석 탭에서 EPCIS 2.0 JSON-LD로 내려받습니다.</p></div>`;
+}
+
+// ── 시리얼·출하 (2단 ID · QR / DataMatrix · SSCC) ─────────────────
+const codeCache = new Map();
+function codeOf(u) {
+  const k = u.serial; if (codeCache.has(k)) return codeCache.get(k);
+  if (codeCache.size > 60) codeCache.delete(codeCache.keys().next().value);
+  let svg; try { svg = codeSVG(matrixOf(u), u.mark?.symbol === 'DM' ? 6 : 3); } catch { svg = ''; }
+  codeCache.set(k, svg); return svg;
+}
+const stateChip = (u) => {
+  const [l, tone] = u.status === 'scrap' ? STATUS.scrap : u.status === 'ng' ? STATUS.ng : LOC[u.loc] ?? [u.loc, ''];
+  return `${chip(l, tone)}${u.hold ? ` ${chip(HOLD_KO(u.hold), 'warn')}` : ''}${u.recall ? ` ${chip('회수 대상', 'bad')}` : ''}`;
+};
+function serialTab(sim) {
+  const H = sim.serials; if (!H) return '<p class="vla-note">시리얼 서비스는 메타팩토리(정밀조립Zone) 레이아웃에서 동작합니다.</p>';
+  const st = traceState, q = st.q.trim().toUpperCase(), zf = st.zf;
+  let us = zf === 'all' ? H.units : H.units.filter((u) => u.zone === zf);
+  if (q) us = us.filter((u) => (u.serial ?? '').includes(q) || u.wip.includes(q) || (u.ship?.sscc ?? '').includes(q) || String(u.ship?.truck ?? '').toUpperCase().includes(q));
+  const list = us.slice(-60).reverse(), sel = (st.sid && H.byId.get(st.sid)) || list.find((u) => u.serial) || list[0];
+  const zbtn = ['all', 'main', 'flex', 'adapt'].map((k) => `<button data-qt-zf="${k}" class="${zf === k ? 'on' : ''}">${k === 'all' ? '전체' : ZONE_KO[k]} ${k === 'all' ? H.stats.issued : H.stats.byZone[k]}</button>`).join('');
+  const rows = list.map((u) => `<tr data-qt-sid="${idOf(u)}" class="${sel === u ? 'sel' : ''}"><td><b class="uidc" title="WIP ${u.wip}">${idOf(u)}</b></td><td>${ZONE_KO[u.zone]}</td><td>${PRODUCT[u.product] ?? u.product}</td><td>${stateChip(u)}</td><td>${u.mark ? `${u.mark.symbol === 'DM' ? 'DataMatrix' : 'QR'} ${u.mark.grade}${u.mark.tries > 1 ? ' ↻' : ''}` : '-'}</td><td>${u.ship?.truck ?? (u.ship?.sscc ? '상차 중' : '-')}</td></tr>`).join('');
+  const S = H.stats;
+  return `<div class="qt-split">
+    <div><div class="seg qt-zf">${zbtn}</div><div class="qt-search"><input id="qtSearch" type="search" placeholder="시리얼 · WIP ID · SSCC · 트럭 검색 (예: HD-, WIP-HB, 0880)" value="${esc(st.q)}" /></div>
+      <p class="vla-note">발행 ${S.issued} · 재마킹 ${S.relabel} · 판독 불가 ${S.markNg} · 출하 ${S.shipped}개 (팔레트 ${S.pallets}) · WIP ${S.wip}</p>
+      <table class="vla-t qt-list"><thead><tr><th>시리얼 (미발행 = WIP ID)</th><th>Zone</th><th>제품</th><th>상태</th><th>마킹</th><th>트럭</th></tr></thead><tbody>${rows || '<tr><td colspan="6">해당 제품 없음</td></tr>'}</tbody></table></div>
+    <div>${sel ? unitHTML(sim, sel) : '<p class="vla-note">아직 투입된 제품이 없습니다.</p>'}</div></div>`;
+}
+function unitHTML(sim, u) {
+  const m = u.mark, P = PRODUCTS[u.product], I = m ? MARK_INFO[m.symbol] : null;
+  const code = m ? `<div class="qt-code"><div class="qt-code-img ${m.symbol === 'DM' ? 'dm' : ''}">${codeOf(u)}</div><small>${m.symbol === 'DM' ? 'GS1 DataMatrix (금속 레이저 각인)' : 'QR · GS1 Digital Link (라벨)'}</small></div>` : '';
+  const kv = m ? `<table class="vla-t qt-kvt">
+      <tr><td>마킹</td><td><b>${esc(I.name)}</b><br><small>${esc(I.std)}</small></td></tr>
+      <tr><td>GS1 AI</td><td><code>${esc(m.hri)}</code></td></tr>
+      <tr><td>${m.symbol === 'DM' ? '각인 내용' : 'QR 내용'}</td><td><code class="qt-wrap">${esc(m.symbol === 'DM' ? m.data.replace(/è/, '[FNC1]').replace(/\u001d/g, '[GS]') : m.data)}</code></td></tr>
+      <tr><td>발행·마킹 셀</td><td>${ZONE_KO[u.zone]} ${esc(m.atName)} · ${clk(m.t)} (${esc(I.how)} · 판정과 병렬)</td></tr>
+      <tr><td>판독 검증</td><td>등급 ${m.grades.map((g, i) => `<b class="${'DF'.includes(g) ? 'dn' : ''}">${g}</b>${i === 0 && m.grades.length > 1 ? ` → 재${m.symbol === 'DM' ? '각인' : '부착'} → ` : ''}`).join('')} (합격 C 이상)${m.manual ? ' · 수작업 재부착' : ''}${m.ok ? '' : ' · <em class="dn">판독 불가 — 부적합</em>'}</td></tr>
+      <tr><td>EPC</td><td><code class="qt-wrap">${esc(u.epc)}</code></td></tr></table>`
+    : `<p class="qt-ins">${u.status === 'ng' ? '체결 전수 검사 NG — 시리얼을 발행하지 않고 WIP ID로 배출함 격리' : `아직 최종 검사 전 — WIP ID로 공정 이력을 쌓는 중 (${P?.cells.join('·')} 합격 시 시리얼 발행)`}</p>`;
+  const steps = (u.steps ?? []).map((p, i) => `<li class="${p.result === 'NG' ? 'ng' : ''}"><div class="qt-st"><b>${i + 1}. ${esc(p.name)}</b> ${p.result ? chip(`판정 ${p.result}`, p.result === 'NG' ? 'bad' : 'good') : ''}<small>${clk(p.tIn)} → ${clk(p.tOut)}${p.cycle != null ? ` · ${p.cycle}초` : ''}</small></div></li>`).join('');
+  const shipLine = u.ship ? `팔레트 SSCC <code>(00)${u.ship.sscc}</code>${u.ship.truck ? ` → ${esc(u.ship.truck)} · ${clk(u.ship.t)} 출하` : ' · 상차 중'}` : u.loc === 'fg' ? '구분 적재 · 출하 대기' : LOC[u.loc]?.[0] ?? u.loc;
+  const disp = u.disp ? `<p class="qt-ins">처분: <b>${u.disp.d === 'rework' ? `재작업${u.disp.done ? ' → 재검 합격 (시리얼 유지)' : ' 중'}` : '폐기 (시리얼 폐기 기록 · 재사용 금지)'}</b> — ${esc(u.disp.why)} · ${clk(u.disp.t)}</p>` : '';
+  return `<div class="qt-gen"><h4>${u.serial ?? '시리얼 미발행'} ${stateChip(u)} <small>WIP ${u.wip} · ${ZONE_KO[u.zone]} ${P?.label ?? ''} · ${clk(u.t0)} 투입${u.zone === 'main' ? ` <button data-qt-goto="${idOf(u)}" class="qt-link">계보 보기 ›</button>` : ''}</small></h4>
+    <div class="qt-unit">${code}${kv}</div>
+    <p class="qt-ins">출하: ${shipLine}${u.sampled ? ` · 정밀검사 샘플 ${u.sampled}` : ''}${u.recall ? ` · <em class="dn">유출 의심 — 로트 ${u.recall} 회수 대상</em>` : ''}</p>${disp}
+    <h5 class="qt-h">공정 이력 (WIP ID → 시리얼)</h5><ol class="qt-steps">${steps || '<li>아직 셀에 들어가지 않음</li>'}</ol>
+    <p class="vla-note">2단 ID: 투입 WIP ID로 공정 이력을 쌓고, 최종 검사 합격 순간 중앙 발행기가 GTIN별 순차 시리얼(GS1 AI 21)을 발행해 마킹 직후 100% 판독 검증합니다. 출하 팔레트는 SSCC로 시리얼을 묶습니다 (EPCIS 2.0 — 불량 분석 탭 전체 묶음의 serial_events.jsonld).</p></div>`;
+}
+
+// ── 봉쇄·처분 (정밀검사 샘플 로트 · NG 봉쇄 · MRB · 확장 Zone 간이 8D) ─────────────────
+const LOT_ST = { hold: ['판정 대기 (출하 보류)', 'warn'], released: ['OK — 보류 해제', 'good'], contain: ['NG — 봉쇄 · 처분 판정 대기', 'bad'], sorting: ['선별검사 중', 'warn'], done: ['처분 완료', 'muted'] };
+const ZQ_ST = { open: ['진행 중', 'info'], verify: ['효과 검증 (강화 샘플링)', 'warn'], closed: ['종결', 'good'] };
+function holdTab(sim) {
+  const H = sim.serials; if (!H) return '<p class="vla-note">시리얼 서비스는 메타팩토리(정밀조립Zone) 레이아웃에서 동작합니다.</p>';
+  const S = H.stats, mode = sim.mode?.key ?? 'smart', held = ['main', 'flex', 'adapt'].map((z) => [z, H.zoneCounts(z)]);
+  const tight = Object.entries(H.tight).filter(([, v]) => v > 0).map(([z, v]) => `${ZONE_KO[z]} (남은 ${v}회)`).join(' · ');
+  const tiles = `<div class="imp-tiles">${tile('샘플 로트', S.lots, `출하 보류 누적 ${S.held}개 · 해제 ${S.released}`)}${tile('지금 출하 보류', held.reduce((a, [, c]) => a + c.hold, 0), held.map(([z, c]) => `${ZONE_KO[z]} ${c.hold}`).join(' · '))}${tile('처분', `재작업 ${S.rework} · 폐기 ${S.scrap}`, `선별검사 ${S.sorted}개 · 불량 ${S.caught}`)}${tile('유출 의심 (회수 대상)', S.recall, 'NG 판정 전에 이미 출하된 같은 시간대 시리얼')}${tile('샘플링 강화', tight || '없음', `NG 뒤 ${TIGHT_N}회 N/2 · 연속 OK면 복귀`)}</div>`;
+  const lots = H.lots.slice(0, 30).map((l) => { const [lb, tone] = LOT_ST[l.status] ?? [l.status, '']; return `<tr><td><b>${l.id}</b></td><td>${ZONE_KO[l.zone]}</td><td>${PRODUCT[l.product]}</td><td class="uidc">${l.sample}</td><td>${l.members.length + 1}${l.extra.length ? ` + ±10분 ${l.extra.length}` : ''}</td><td>${chip(lb, tone)}</td><td>${l.sorted ? `${l.sorted.n}개 → 양품 ${l.sorted.ok} · 불량 ${l.sorted.bad}` : l.status === 'sorting' ? `~${clk(l.sortEnd)}` : '-'}</td><td>${l.recall.length || '-'}</td><td>${clk(l.t)}</td></tr>`; }).join('');
+  const cases = H.cases.slice(0, 8).map((c) => { const [lb, tone] = ZQ_ST[c.status] ?? [c.status, '']; return `<div class="qt-case"><h5>${c.id} · ${ZONE_KO[c.zone]} ${PRODUCT[c.product]} · 샘플 <span class="uidc">${c.sample}</span> ${chip(lb, tone)} <small>${clk(c.t)} · 원인 후보 ${esc(c.cause?.name ?? '-')}</small></h5><ol class="qt-why">${c.steps.map((x) => `<li><b>${x.d}</b> ${clk(x.t)} — ${esc(x.text)}</li>`).join('')}</ol></div>`; }).join('');
+  const disp = H.units.filter((u) => u.disp).slice(-20).reverse().map((u) => `<tr data-qt-sid="${idOf(u)}"><td class="uidc">${idOf(u)}</td><td>${ZONE_KO[u.zone]}</td><td>${PRODUCT[u.product]}</td><td>${u.disp.d === 'rework' ? chip(u.disp.done ? '재작업 → 재검 합격' : '재작업 중', u.disp.done ? 'good' : 'warn') : chip('폐기', 'bad')}</td><td>${esc(u.disp.why)}</td><td>${clk(u.disp.t)}</td></tr>`).join('');
+  return `${tiles}<div class="qt-hold">
+    <p class="vla-note">정밀검사 샘플을 요청하는 순간 그 로트(직전 샘플 이후 같은 제품)를 출하 보류 → OK면 해제 · NG면 같은 시간대 ±10분까지 봉쇄, 이미 출하된 것은 유출 의심(회수 대상) → 처분 판정(MRB ${Math.round(MRB_T[mode] / 60)}분 · ${({ traditional: '품질 회의', smart: 'MES 규칙', dark: 'Quality & Recovery Agent' })[mode]}) → 샘플 재작업·폐기 · 로트 선별검사(전수) → 공정 보정 · 샘플링 강화. 근거: ISO 9001 8.7 부적합 출력물 관리 · IATF 16949 10.2.3 문제 해결 · ISO 2859-1 까다로운 검사.</p>
+    <h4 class="qt-h">샘플 로트</h4><table class="vla-t qt-list"><thead><tr><th>로트(샘플 요청)</th><th>Zone</th><th>제품</th><th>샘플 시리얼</th><th>보류 수</th><th>상태</th><th>선별검사</th><th>유출 의심</th><th>요청</th></tr></thead><tbody>${lots || '<tr><td colspan="9">아직 샘플 요청이 없습니다 (정밀검사Zone이 생산 Zone 양품 N개마다 1개씩 요청)</td></tr>'}</tbody></table>
+    <div class="qt-grid2 qt-g11"><div><h4 class="qt-h">확장 Zone 간이 8D (유연생산 · 적응가공)</h4>${cases || '<p class="vla-note">아직 확장 Zone 샘플 NG가 없습니다. 정밀조립 샘플 NG는 「🧭 8D 흐름」 탭에서 처리합니다.</p>'}</div>
+      <div><h4 class="qt-h">처분 기록 (MRB)</h4><table class="vla-t qt-list"><thead><tr><th>시리얼</th><th>Zone</th><th>제품</th><th>처분</th><th>사유</th><th>시각</th></tr></thead><tbody>${disp || '<tr><td colspan="6">아직 처분이 없습니다</td></tr>'}</tbody></table></div></div></div>`;
 }
 
 // ── 보고·통신 (불량 판정 리포트 → 메인 서버 → RCA 서버 · pcap) ─────────────────
@@ -149,6 +219,11 @@ function stdTab() {
   const row = (a, b, c, d) => `<tr><td><b>${a}</b></td><td>${b}</td><td>${c}</td><td>${d}</td></tr>`;
   return `<div class="qt-std"><table class="vla-t"><thead><tr><th>영역</th><th>표준·오픈소스</th><th>이 시뮬레이터 적용</th><th>비고</th></tr></thead><tbody>
     ${row('제품 ID · 추적 이벤트', 'GS1 EPCIS 2.0 / CBV 2.0 (2022, JSON-LD · REST)', '시리얼 + SGTIN EPC · ObjectEvent(bizStep commissioning·sorting·assembling·inspecting·packing·storing, disposition non_conformant) · sensorElementList(온도·습도·조도·진동·PM2.5)', '검증: OpenEPCIS (Apache-2.0)')}
+    ${row('2단 ID · 시리얼', 'GS1 일반 규격 (GTIN + AI 21 시리얼 · AI 10 로트 · AI 11 생산일)', '투입 WIP ID → 최종 검사 합격 때 중앙 발행기가 GTIN별 순차 시리얼 (재사용 금지) — 정밀조립 검사·포장셀 · 유연생산 C06(C07) · 적응가공 CMM', '가상 업체코드 880 0000')}
+    ${row('라벨 · 직접 각인', 'QR ISO/IEC 18004 + GS1 Digital Link · GS1 DataMatrix ISO/IEC 16022 · AIAG B-17', '라벨(유연생산·정밀조립) = QR · 금속 각인(적응가공) = DataMatrix — 앱 안 인코더로 실제 판독 가능한 코드 생성', 'ZXing 판독 시험')}
+    ${row('판독 검증', 'ISO/IEC 15415 (라벨 인쇄 품질) · ISO/IEC TR 29158 (DPM 판독)', '마킹 직후 100% 판독 — C 이상 합격 · 실패 시 1회 재마킹 · 다시 실패하면 부적합 (라벨 수작업 재부착 · 각인 폐기)', '')}
+    ${row('출하 단위', 'SSCC (AI 00) · GS1-128 · ISO 15394 운송 라벨', '팔레트마다 SSCC — 시리얼 묶음(AggregationEvent) · 트럭 · 출하 시각', '')}
+    ${row('부적합품 처리 · 샘플링', 'ISO 9001 8.7 · IATF 16949 10.2.3 · ISO 2859-1', '샘플 요청 즉시 로트 출하 보류 · NG 봉쇄(±10분) · MRB 재작업/폐기 · 선별검사 · 샘플링 강화', '')}
     ${row('계보 데이터 구조', 'ISA-95 / IEC 62264 · OPC 10031-4 ISA-95 Job Control', 'Equipment · Personnel · Material Actual, Material Lot', '용어·구조만 차용')}
     ${row('추적 요구사항', 'ISO 9001 8.5.2 · IATF 16949 8.5.2.1', '부적합품 식별·격리 · 봉쇄 범위(의심 제품) · 기록 보존', '')}
     ${row('문제 해결 · CAPA', '8D (VDA · AIAG CQI-20 유사) · AIAG-VDA FMEA(2019) AP', 'D0~D8 상태 흐름 · D7에서 FMEA 발생도·AP 갱신 · 관리계획(정책) 반영', '단계 이름만 사용 (원문 유료)')}
@@ -172,6 +247,8 @@ export function traceClick(sim, e) {
   if ((b = g('[data-qt-tab]'))) { st.tab = b.dataset.qtTab; return true; }
   if ((b = g('[data-qt-goto]'))) { st.tab = 'trace'; st.serial = b.dataset.qtGoto; st.q = ''; return true; }
   if ((b = g('[data-qt-serial]'))) { st.serial = b.dataset.qtSerial; return true; }
+  if ((b = g('[data-qt-sid]'))) { st.sid = b.dataset.qtSid; if (st.tab !== 'serial') { st.tab = 'serial'; st.q = ''; } return true; }
+  if ((b = g('[data-qt-zf]'))) { st.zf = b.dataset.qtZf; st.sid = null; return true; }
   if ((b = g('[data-qt-case]'))) { st.caseId = b.dataset.qtCase; return true; }
   if ((b = g('[data-qt-approve]'))) { C?.approve(b.dataset.qtApprove); return true; }
   if ((b = g('[data-qt-hold]'))) { C?.hold(b.dataset.qtHold); return true; }

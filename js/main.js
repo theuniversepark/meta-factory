@@ -450,10 +450,11 @@ xzCard?.addEventListener('click', (e) => { const b = e.target.closest('button[da
 function updateXzCard() {
   if (!xzCard) return;
   const row = (key, name, prods, s) => `<div class="xz-row"><div class="xz-h"><b>${name}</b><button type="button" class="xz-go" data-view="${key}">보기 ▸</button></div><div class="xz-s">${prods} · ${s}</div></div>`;
-  const zrow = (z) => row(z.key, z.name, Object.entries(z.products).map(([k, v]) => `${v.label} <b>${z.byProduct[k] ?? 0}</b>`).join(' · '), `UPH <b>${z.uph}</b> · 가동 셀 <b>${z.busy}/${z.cells}</b>${z.key === 'flex' ? ` · NG <b>${z.ng}</b>` : ` · 리워크 <b>${z.rework}</b>`}`);
+  const hz = (k) => { const c = sim.serials?.zoneCounts(k); return c && (c.hold || c.scrap) ? ` · 보류 <b>${c.hold}</b>${c.scrap ? ` · 폐기 <b>${c.scrap}</b>` : ''}` : ''; };   // 출하 보류(샘플 로트·봉쇄·재작업) · 처분 폐기 (js/serial.js)
+  const zrow = (z) => row(z.key, z.name, Object.entries(z.products).map(([k, v]) => `${v.label} <b>${z.byProduct[k] ?? 0}</b>`).join(' · '), `UPH <b>${z.uph}</b> · 가동 셀 <b>${z.busy}/${z.cells}</b>${z.key === 'flex' ? ` · NG <b>${z.ng}</b>` : ` · 리워크 <b>${z.rework}</b>`}${hz(z.key)}`);
   // 정밀조립Zone (메인 시뮬레이션): 제품별 양품 · UPH · 가동 셀 · 불량 배출 — 확장 Zone 행과 같은 꼴
   const P = sim.processing.filter((st) => !st.standby), pg = sim.stats.goodBy ?? {};
-  const prow = row('precision', '정밀조립Zone', `도어트림 <b>${pg.doortrim ?? 0}</b> · e-axle <b>${pg.eaxle ?? 0}</b>`, `UPH <b>${Math.round(sim.kpi().uphRecent || 0)}</b> · 가동 셀 <b>${P.filter((st) => st.state === 'BUSY').length}/${P.length}</b> · 불량 <b>${sim.stats.rejected ?? 0}</b>`);
+  const prow = row('precision', '정밀조립Zone', `도어트림 <b>${pg.doortrim ?? 0}</b> · e-axle <b>${pg.eaxle ?? 0}</b>`, `UPH <b>${Math.round(sim.kpi().uphRecent || 0)}</b> · 가동 셀 <b>${P.filter((st) => st.state === 'BUSY').length}/${P.length}</b> · 불량 <b>${sim.stats.rejected ?? 0}</b>${hz('main')}`);
   const qs = insp.stats, irow = row('insp', '정밀검사Zone', `샘플 <b>${qs.samples}</b> · 판정 <b>${qs.done}</b> · OK율 <b>${qs.done ? ((qs.ok / qs.done) * 100).toFixed(1) : '0.0'}%</b>`, `가동 셀 <b>${insp.order.filter((c) => c.state === 'BUSY').length}/${insp.order.length}</b> · NG <b>${qs.ng}</b> · 대기 <b>${insp.queue.length}</b>`);
   const zs = xzones.summary(), rows = [...zs.filter((z) => z.key === 'flex').map(zrow), prow, ...zs.filter((z) => z.key !== 'flex').map(zrow), irow].join('');   // 위 유연생산 · 가운데 정밀조립 · 아래 적응가공 · 오른쪽 정밀검사   // 위 유연생산 · 가운데 정밀조립 · 아래 적응가공
   const html = `<div class="zc-h"><b>메타팩토리 4 Zone</b></div>`
@@ -530,7 +531,7 @@ zoneCard.addEventListener('click', (e) => {
     const w = ZONE_MIXES[currentLine.mix];
     sim.log('act', `혼류 비율 변경 · 도어트림 : e-axle = ${w.label}`, {
       obs: `투입 순서를 비율에 맞춰 평준화 (도어트림 ${w.w.doortrim} : e-axle ${w.w.eaxle})`,
-      dec: '1.부품분류셀이 부품 종류를 판별해 제품별 라인으로 분기, 6.포장셀에서 합류',
+      dec: '1.부품분류셀이 부품 종류를 판별해 제품별 라인으로 분기, 6.검사·포장셀에서 합류 (최종 검사 합격 시 시리얼·QR)',
       act: '시뮬레이션 재시작',
     });
     return;

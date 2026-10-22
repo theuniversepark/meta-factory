@@ -1,11 +1,14 @@
 // 제품 추적 관리 (Product Traceability) · 공장 환경 · 불량 원인 분석(RCA) 데이터
-// ① 제품 ID: 투입 순간 제품마다 시리얼(DT-YYMMDD-000123)과 GS1 EPC URN(SGTIN)을 붙이고, 셀을 지날 때마다 계보(genealogy) 단계를 남긴다
+// ① 제품 ID (2단 · js/serial.js): 투입 순간 WIP ID(WIP-DT-YYMMDD-000123)를 붙이고 셀을 지날 때마다 계보(genealogy) 단계를 남긴다 →
+//    검사·포장셀 최종 검사 합격 때 제품 시리얼(DT-YYMMDD-000045)·GS1 EPC URN(SGTIN)을 발행해 QR 라벨(GS1 Digital Link)로 붙인다
 //    단계 = 셀 · 셀 로봇 ID · (레거시) 작업자 · 운반 AMR · 설비 건강도·드리프트·Cpk · VLA 모델 · 공정 측정값 · 그 자리 환경값 — ISA-95 Equipment/Personnel/Material Actual 용어
 // ② 공장 환경: 정밀조립Zone 환경 센서 4대(온도·습도·바닥 진동·미세먼지·소음·조도) — 하루 변동 + 임의 보행 + 가끔 공조·진동·분진 이상(excursion)
 //    환경 이상은 그 환경에 민감한 공정의 불량 확률을 올린다 (도어트림 조립 = 습도 · e-axle 조립 = 온도 · 부품분류 = 분진·조도) — 평소에는 영향 없음
 // ③ 불량 판정(체결셀 토크·각도 전수 검사 NG) → 불량 사례: 계보 + 앞뒤 환경 + 설비·로봇·AMR 상태 + 같은 셀 경유 의심 제품(봉쇄 범위) + AI 원인 분석 순위
 // ④ 내려받기: 사례 하나 / 전체 — EPCIS 2.0 JSON-LD 이벤트 · ISA-95 계보 JSON · 학습용 특징 표(CSV, 제품 1행) · 환경 시계열(CSV) · 인과 그래프 · 8D 기록 · LLM 분석 프롬프트
 // 시뮬레이션 난수(sim.rand)를 쓰지 않는다 — 환경·측정값은 별도 난수라 기존 생산 흐름이 그대로다. 헤드리스에서도 같은 흐름으로 동작한다.
+
+import { serialEpcis, serialsCSV } from './serial.js';
 
 const mulberry = (a) => () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 const gaussOf = (r) => () => { let u = 0, v = 0; while (!u) u = r(); while (!v) v = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
@@ -113,7 +116,7 @@ export const PARAM_SPEC = {
   assembly: { pressForce: { label: '압입·안착 하중', unit: 'kN', lsl: 2.2, usl: 3.4 }, seatDepth: { label: '안착 깊이', unit: 'mm', lsl: 11.6, usl: 12.4 } },
   screw: { torque: { label: '체결 토크', unit: 'N·m', lsl: 4.0, usl: 5.0 }, angle: { label: '체결 각도', unit: '°', lsl: 20, usl: 40 } },
   fasten: { torque: { label: '체결 토크', unit: 'N·m', lsl: 78, usl: 92 }, angle: { label: '체결 각도', unit: '°', lsl: 30, usl: 60 } },
-  pack: { labelGrade: { label: '라벨 인쇄 등급', unit: '', lsl: 3 } },
+  pack: { labelGrade: { label: 'QR 판독 등급 (A4~F0)', unit: '', lsl: 2 } },   // ISO/IEC 15415 — C(2) 이상 합격
 };
 const NOMINAL = { visionScore: 0.97, pickForce: 15, pressForce: 2.8, seatDepth: 12.0, torque: null, angle: null, labelGrade: 4 };
 
@@ -148,16 +151,18 @@ export class ProductTrace {
     const c = productCode(product), n = (this.seq[c] = (this.seq[c] ?? 0) + 1);
     return { serial: `${c}-${this.ymd}-${String(n).padStart(6, '0')}`, epc: `urn:epc:id:sgtin:${GS1_PREFIX}.${c === 'DT' ? '100001' : c === 'EA' ? '100002' : '100009'}.${n}` };
   }
-  rec(item) { return item?.serial ? this.byId.get(item.serial) : null; }
+  rec(item) { const k = item?.wip ?? item?.serial; return k ? this.byId.get(k) ?? null : null; }
   // 투입: 시리얼 부여 · 원자재 로트(투입 40개마다 새 로트)
+  // 투입: WIP ID 부여 (시리얼 서비스가 없으면 — 기본 라인 — 예전처럼 투입 때 시리얼) · 원자재 로트(투입 40개마다 새 로트)
   release(item, car) {
-    const { serial, epc } = this.serialOf(item.product);
     if (++this.rawLotN > 40) { this.rawLot++; this.rawLotN = 1; }
-    item.serial = serial;
-    const s = this.sim, r = { serial, epc, item: item.id, product: item.product, t0: s.time, tEnd: null, status: 'wip', amr: car?.uid ?? null, lot: `RM-${this.ymd}-${String(this.rawLot).padStart(3, '0')}`, mode: s.mode.key, steps: [], inspection: null, truth: null };
-    this.byId.set(serial, r); this.recent.push(r); this.stats.released++;
+    const s = this.sim, H = s.serials, id = H ? { wip: H.wipId(item.product), serial: null, epc: null } : { wip: null, ...this.serialOf(item.product) };
+    if (H) item.wip = id.wip; else item.serial = id.serial;
+    const r = { ...id, item: item.id, product: item.product, t0: s.time, tEnd: null, status: 'wip', amr: car?.uid ?? null, lot: `RM-${this.ymd}-${String(this.rawLot).padStart(3, '0')}`, mode: s.mode.key, steps: [], inspection: null, truth: null };
+    H?.adopt(r, 'main');
+    this.byId.set(id.wip ?? id.serial, r); this.recent.push(r); this.stats.released++;
     s.fos?.orderFor(r);   // 공장 오케스트레이터 오더 (불량 보충 투입은 같은 오더)
-    if (this.recent.length > 3000) { const old = this.recent.shift(); if (!this.cases.some((c) => c.serial === old.serial)) this.byId.delete(old.serial); }
+    if (this.recent.length > 3000) { const old = this.recent.shift(); if (!this.cases.some((c) => c.wip === old.wip && c.serial === (old.serial ?? old.wip))) { this.byId.delete(old.wip); if (old.serial) this.byId.delete(old.serial); } }
     return r;
   }
   // 셀 투입 (sim.updateStation) — 그 순간 설비·로봇·AMR·환경
@@ -187,6 +192,7 @@ export class ProductTrace {
       if (k === 'visionScore') v = Math.min(0.999, v);
       p.params[k] = r2(v, k === 'visionScore' ? 3 : 2);
     }
+    if (st.type === 'pack' && r.mark) p.params.labelGrade = { A: 4, B: 3, C: 2, D: 1, F: 0 }[r.mark.grade];   // 실제 판독 검증 등급 (js/serial.js)
   }
   // 체결셀 토크·각도 전수 판정 (sim.completeCycle inspect) — result: OK · NG (잡힌 불량) · MISS (못 잡은 불량 — 결과는 OK로 보이고 정답 라벨만 남음)
   inspect(st, item, result) {
@@ -201,13 +207,14 @@ export class ProductTrace {
     const ins = { st: st.uid ?? st.id, name: st.name, t: this.sim.time, result: result === 'NG' ? 'NG' : 'OK', torque: r2(torque, 2), angle: r2(angle, 1), spec: { torque: [T.lsl, T.usl], angle: [A.lsl, A.usl] }, mode };
     r.inspection = ins; r.truth = origin;
     if (p) { p.tOut = this.sim.time; p.cycle = r2(p.tOut - p.tIn, 1); p.params = { torque: ins.torque, angle: ins.angle }; p.result = ins.result; }
-    if (result === 'NG') { r.status = 'ng'; r.tEnd = this.sim.time; this.stats.ng++; return this.openCase(r, st); }
+    if (result === 'NG') { r.status = 'ng'; r.tEnd = this.sim.time; r.loc = 'quarantine'; this.stats.ng++; return this.openCase(r, st); }   // 시리얼 없이 WIP ID로 배출함 격리
     return null;
   }
   // 적재장 도착 (출하 대기) — 못 잡은 불량은 유출
   finish(item) {
     const r = this.rec(item); if (!r || r.status !== 'wip') return;
     r.tEnd = this.sim.time; if (item.defect) { r.status = 'escaped'; this.stats.escaped++; } else { r.status = 'ok'; this.stats.ok++; }
+    this.sim.serials?.toFG(r);   // 구분 적재장 = 출하 대기 재고 (시리얼 단위)
   }
 
   // ── 불량 사례 ─────────────────
@@ -221,7 +228,7 @@ export class ProductTrace {
     const s = this.sim, id = `NG-${this.ymd}-${String(++this.caseSeq).padStart(4, '0')}`;
     const t0 = r.t0 - 120, t1 = s.time + 60;
     const c = {
-      id, kind, serial: r.serial, product: r.product, order: r.order ?? null, t: s.time, detectedAt: st.uid ?? st.id, detectedName: st.name, mode: s.mode.key, inspection: kind === 'sample' ? { ...r.inspection, result: 'NG', mode: '정밀검사 샘플 NG (Quality & Recovery Agent)', sample: r.inspection2 } : r.inspection,
+      id, kind, serial: r.serial ?? r.wip, wip: r.wip ?? null, product: r.product, order: r.order ?? null, t: s.time, detectedAt: st.uid ?? st.id, detectedName: st.name, mode: s.mode.key, inspection: kind === 'sample' ? { ...r.inspection, result: 'NG', mode: '정밀검사 샘플 NG (Quality & Recovery Agent)', sample: r.inspection2 } : r.inspection,
       equipment: s.processing.map((x) => ({ st: x.uid ?? x.id, id: x.id, name: x.name, state: x.state, health: r2(x.health, 1), drift: r2(x.drift, 3), cpk: r2(s.assess(x).cpk, 2), processed: x.c.processed, defects: x.c.defects, fails: x.c.fails })),
       envWindow: { t0, t1 }, excursions: this.env.excLog.filter((e) => e.t0 <= t1 && (e.ended ?? s.time) >= t0).map((e) => ({ id: e.id, kind: e.kind, label: e.label, node: ENV_NODES[e.node].id, t0: e.t0, t1: e.t1 })),
       suspects: this.suspects(r), rca: null, capa: null,
@@ -236,7 +243,7 @@ export class ProductTrace {
   // 봉쇄 범위: 원인 후보 셀을 같은 시간대(앞뒤 10분)에 지난 다른 제품 — 출하 보류·재검 대상
   suspects(r) {
     const ids = new Set(r.steps.filter((p) => p.result == null && p.type !== 'pack').map((p) => p.id)), t = r.t0;
-    return this.recent.filter((x) => x !== r && Math.abs(x.t0 - t) < 600 && x.steps.some((p) => ids.has(p.id))).slice(-30).map((x) => ({ serial: x.serial, status: x.status, via: x.steps.filter((p) => ids.has(p.id)).map((p) => p.st) }));
+    return this.recent.filter((x) => x !== r && Math.abs(x.t0 - t) < 600 && x.steps.some((p) => ids.has(p.id))).slice(-30).map((x) => ({ serial: x.serial ?? x.wip, status: x.status, via: x.steps.filter((p) => ids.has(p.id)).map((p) => p.st) }));
   }
   ngRate(t0, t1 = this.sim.time) { const xs = this.recent.filter((x) => x.tEnd != null && x.tEnd >= t0 && x.tEnd <= t1); return xs.length ? xs.filter((x) => x.status === 'ng' || x.status === 'escaped').length / xs.length : 0; }
 }
@@ -316,11 +323,15 @@ export function epcisDoc(T, recs, iso) {
   const ev = [];
   const loc = (id) => `urn:epc:id:sgln:${GS1_PREFIX}.00001.${id}`;
   for (const r of recs) {
-    ev.push({ type: 'ObjectEvent', eventTime: iso(r.t0), eventTimeZoneOffset: '+09:00', epcList: [r.epc], action: 'ADD', bizStep: `${CBV}BizStep-commissioning`, disposition: `${CBV}Disp-active`, readPoint: { id: loc('AS-01') },
-      'mf:serial': r.serial, 'mf:product': r.product, 'mf:materialLot': r.lot, 'mf:carrier': r.amr });
+    // 2단 ID: 시리얼 발행 전 단계는 WIP ID(사내 URI), 발행 뒤는 SGTIN EPC — 발행 순간 commissioning(WIP ↔ 시리얼 연결)
+    const wipUri = r.wip ? `urn:mf:wip:${r.wip}` : r.epc, idAt = (t) => (r.epc && (r.tSerial == null || t >= r.tSerial) ? r.epc : wipUri);
+    ev.push({ type: 'ObjectEvent', eventTime: iso(r.t0), eventTimeZoneOffset: '+09:00', epcList: [wipUri], action: 'ADD', bizStep: `${CBV}BizStep-${r.wip ? 'creating_class_instance' : 'commissioning'}`, disposition: `${CBV}Disp-active`, readPoint: { id: loc('AS-01') },
+      'mf:wip': r.wip ?? null, 'mf:product': r.product, 'mf:materialLot': r.lot, 'mf:carrier': r.amr });
+    if (r.wip && r.epc) ev.push({ type: 'ObjectEvent', eventTime: iso(r.tSerial), eventTimeZoneOffset: '+09:00', epcList: [r.epc], action: 'ADD', bizStep: `${CBV}BizStep-commissioning`, disposition: `${CBV}Disp-active`, readPoint: { id: loc(r.mark?.at ?? 'PACK') },
+      'mf:wip': r.wip, 'mf:serial': r.serial, 'mf:symbol': 'QR (GS1 Digital Link)', 'mf:verifyGrade': r.mark?.grade ?? null, 'mf:digitalLink': r.mark?.data ?? null });
     for (const p of r.steps) {
       const bs = STEP_BIZ[p.type] ?? 'assembling';
-      const e = { type: 'ObjectEvent', eventTime: iso(p.tOut ?? p.tIn), eventTimeZoneOffset: '+09:00', epcList: [r.epc], action: 'OBSERVE', bizStep: `${CBV}BizStep-${bs}`,
+      const e = { type: 'ObjectEvent', eventTime: iso(p.tOut ?? p.tIn), eventTimeZoneOffset: '+09:00', epcList: [idAt(p.tOut ?? p.tIn)], action: 'OBSERVE', bizStep: `${CBV}BizStep-${bs}`,
         disposition: p.result === 'NG' ? `${CBV}Disp-non_conformant` : `${CBV}Disp-in_progress`, readPoint: { id: loc(p.st) }, bizLocation: { id: loc('ZONE-MAIN') },
         sensorElementList: [{ sensorMetadata: { time: iso(p.tIn), deviceID: `urn:epc:id:giai:${GS1_PREFIX}.${p.env.node}` }, sensorReport: [
           { type: 'gs1:Temperature', value: p.env.temp, uom: 'CEL' }, { type: 'gs1:AbsoluteHumidity', value: p.env.rh, uom: 'A93', 'mf:relativeHumidity': true },
@@ -329,15 +340,15 @@ export function epcisDoc(T, recs, iso) {
         'mf:cycleTime': p.cycle, 'mf:processParameters': p.params };
       ev.push(e);
     }
-    if (r.status === 'ok' || r.status === 'escaped') ev.push({ type: 'ObjectEvent', eventTime: iso(r.tEnd), eventTimeZoneOffset: '+09:00', epcList: [r.epc], action: 'OBSERVE', bizStep: `${CBV}BizStep-storing`, disposition: `${CBV}Disp-sellable_not_accessible`, readPoint: { id: loc('PL-01') } });
+    if (r.status === 'ok' || r.status === 'escaped') ev.push({ type: 'ObjectEvent', eventTime: iso(r.tEnd), eventTimeZoneOffset: '+09:00', epcList: [idAt(r.tEnd)], action: 'OBSERVE', bizStep: `${CBV}BizStep-storing`, disposition: `${CBV}Disp-sellable_not_accessible`, readPoint: { id: loc('PL-01') } });
   }
   return { '@context': ['https://ref.gs1.org/standards/epcis/2.0.0/epcis-context.jsonld', { mf: 'https://meta-factory.example/epcis/ext#' }], type: 'EPCISDocument', schemaVersion: '2.0', creationDate: iso(T.sim.time), epcisBody: { eventList: ev } };
 }
 // ISA-95 계보 (Material/Equipment/Personnel Actual)
 export function genealogy(r, iso) {
-  return { productSerial: r.serial, epc: r.epc, materialDefinition: r.product, materialLot: r.lot, startTime: iso(r.t0), endTime: r.tEnd != null ? iso(r.tEnd) : null, status: r.status,
+  return { productSerial: r.serial ?? null, wipId: r.wip ?? null, epc: r.epc ?? null, mark: r.mark ? { symbol: r.mark.symbol, cell: r.mark.at, grade: r.mark.grade, tries: r.mark.tries, digitalLink: r.mark.data } : null, materialDefinition: r.product, materialLot: r.lot, startTime: iso(r.t0), endTime: r.tEnd != null ? iso(r.tEnd) : null, status: r.status,
     segments: r.steps.map((p) => ({ processSegment: p.name, equipmentActual: [{ id: p.st, health: p.health, drift: p.drift, cpk: p.cpk }, ...p.robots.map((u) => ({ id: u, class: p.robotKind, vlaModel: p.vla }))],
-      personnelActual: p.operators.map((o) => ({ id: o })), materialActual: [{ id: r.serial, use: 'Produced' }, { id: r.lot, use: 'Consumed' }], carrier: p.amr, start: iso(p.tIn), end: p.tOut != null ? iso(p.tOut) : null,
+      personnelActual: p.operators.map((o) => ({ id: o })), materialActual: [{ id: r.serial ?? r.wip, use: 'Produced' }, { id: r.lot, use: 'Consumed' }], carrier: p.amr, start: iso(p.tIn), end: p.tOut != null ? iso(p.tOut) : null,
       parameters: p.params, environment: p.env, result: p.result ?? null })), inspection: r.inspection };
 }
 // 학습용 특징 표: 제품 1행 — 셀마다 건강도·드리프트·Cpk·사이클·측정값·환경, 운반 AMR, 로트, 라벨(ng · 원인 셀 정답)
@@ -345,11 +356,11 @@ export function featuresCSV(T, recs) {
   const ids = [...new Set(recs.flatMap((r) => r.steps.map((p) => p.id)))];
   const pk = {}; for (const r of recs) for (const p of r.steps) for (const k of Object.keys(p.params)) (pk[p.id] ??= new Set()).add(k);
   const sk = {}; for (const r of recs) for (const p of r.steps) for (const k of Object.keys(p.sensors ?? {})) (sk[p.id] ??= new Set()).add(k);   // 셀 센서 값 열 (센서망이 있을 때)
-  const head = ['serial', 'product', 'mode', 'material_lot', 'amr', 't_release_s', 'lead_time_s', 'status', 'label_ng', 'label_root_cause_station', 'inspect_torque', 'inspect_angle',
+  const head = ['serial', 'wip_id', 'product', 'mode', 'material_lot', 'amr', 't_release_s', 'lead_time_s', 'status', 'label_ng', 'label_root_cause_station', 'inspect_torque', 'inspect_angle',
     ...ids.flatMap((id) => [`${id}_health`, `${id}_drift`, `${id}_cpk`, `${id}_cycle_s`, `${id}_vla`, ...ENV_KEYS.map((k) => `${id}_env_${k}`), ...[...(pk[id] ?? [])].map((k) => `${id}_${k}`), ...[...(sk[id] ?? [])].map((k) => `${id}_sns_${k}`)])];
   const rows = recs.filter((r) => r.status !== 'wip').map((r) => {
     const by = Object.fromEntries(r.steps.map((p) => [p.id, p]));
-    return [r.serial, r.product, r.mode, r.lot, r.amr ?? '', r2(r.t0, 1), r.tEnd != null ? r2(r.tEnd - r.t0, 1) : '', r.status, r.status === 'ng' || r.status === 'escaped' ? 1 : 0, r.truth ?? '', r.inspection?.torque ?? '', r.inspection?.angle ?? '',
+    return [r.serial ?? '', r.wip ?? '', r.product, r.mode, r.lot, r.amr ?? '', r2(r.t0, 1), r.tEnd != null ? r2(r.tEnd - r.t0, 1) : '', r.status, r.status === 'ng' || r.status === 'escaped' ? 1 : 0, r.truth ?? '', r.inspection?.torque ?? '', r.inspection?.angle ?? '',
       ...ids.flatMap((id) => { const p = by[id]; return p ? [p.health, p.drift, p.cpk, p.cycle ?? '', p.vla ?? '', ...ENV_KEYS.map((k) => p.env[k]), ...[...(pk[id] ?? [])].map((k) => p.params[k] ?? ''), ...[...(sk[id] ?? [])].map((k) => p.sensors?.[k] ?? '')] : Array(5 + ENV_KEYS.length + (pk[id]?.size ?? 0) + (sk[id]?.size ?? 0)).fill(''); })];
   });
   return [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\n');
@@ -383,7 +394,7 @@ export function rcaPrompt(c) {
 `;
 }
 export function caseFiles(T, c, iso) {
-  const r = T.byId.get(c.serial), near = T.recent.filter((x) => x.status !== 'wip' && Math.abs(x.t0 - (r?.t0 ?? c.t)) < 3600);
+  const r = T.byId.get(c.wip ?? c.serial), near = T.recent.filter((x) => x.status !== 'wip' && Math.abs(x.t0 - (r?.t0 ?? c.t)) < 3600);
   const eq = ['st,name,state,health,drift,cpk,processed,defects,fails', ...c.equipment.map((e) => [e.st, e.name, e.state, e.health, e.drift, e.cpk, e.processed, e.defects, e.fails].map(csvCell).join(','))].join('\n');
   const manifest = { schema: 'meta-factory/rca-case/1.0', case: c.id, serial: c.serial, created: iso(T.sim.time), mode: c.mode, standards: ['GS1 EPCIS 2.0 / CBV 2.0 (JSON-LD)', 'ISA-95 (IEC 62264) Material/Equipment/Personnel Actual', '8D problem solving', 'AIAG-VDA FMEA Action Priority (D7)'],
     files: ['case.json', 'genealogy_isa95.json', 'epcis_events.jsonld', 'features.csv', 'environment.csv', 'equipment.csv', 'causal_graph.json', 'capa_8d.json', 'prompt_rca.md', 'README.md'] };
@@ -412,6 +423,7 @@ export function allFiles(T, iso) {
     { path: 'capa_8d.json', data: JSON.stringify((T.sim.capa?.list ?? []).map(capaJSON), null, 2) },
     { path: 'policies.json', data: JSON.stringify(T.sim.capa?.policies ?? [], null, 2) },
     { path: 'causal_graph.json', data: JSON.stringify(CAUSAL_GRAPH, null, 2) },
+    ...(T.sim.serials ? [{ path: 'serial_events.jsonld', data: JSON.stringify(serialEpcis(T.sim.serials, iso)) }, { path: 'serials.csv', data: serialsCSV(T.sim.serials) }] : []),
     { path: 'README.md', data: README },
   ];
 }
@@ -437,5 +449,7 @@ const README = `# 메타팩토리 불량 원인 분석(RCA) 데이터
 - LLM: prompt_rca.md와 case.json · features.csv를 함께 첨부
 - EPCIS 검증: OpenEPCIS 도구로 epcis_events.jsonld 스키마 확인
 
-시리얼 형식: 제품코드(DT 도어트림 · EA e-axle)-YYMMDD-일련번호. EPC는 가상 GS1 업체코드(${GS1_PREFIX}) SGTIN입니다. 측정값·환경값은 시뮬레이션 값입니다.
+ID 2단: 투입 = WIP ID(WIP-DT-YYMMDD-일련번호) · 검사·포장셀 합격 = 제품 시리얼(제품코드 DT 도어트림 · EA e-axle-YYMMDD-일련번호, GS1 AI 21). 체결 검사 NG품은 시리얼 없이 WIP ID로 남습니다(features.csv serial 빈칸 · wip_id).
+EPC는 가상 GS1 업체코드(${GS1_PREFIX}) SGTIN이고, 시리얼 발행 전 이벤트는 사내 URI(urn:mf:wip:…)를 씁니다. serial_events.jsonld · serials.csv = 세 Zone 시리얼 발행·포장(SSCC)·출하·보류·처분 이벤트. 측정값·환경값은 시뮬레이션 값입니다.
+
 `;

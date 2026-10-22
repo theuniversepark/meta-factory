@@ -164,7 +164,7 @@ export class CapaManager {
     const T = this.sim.trace, out = { ok: 0, caught: 0, serials: [] };
     for (const r of T?.recent ?? []) {
       if (r.hold !== `containment:${k.id}`) continue;
-      if (r.status === 'escaped') { r.status = 'ng'; r.recovered = k.id; r.hold = null; T.stats.escaped--; T.stats.ng++; T.stats.recovered = (T.stats.recovered ?? 0) + 1; out.caught++; out.serials.push(r.serial); }
+      if (r.status === 'escaped') { this.sim.serials?.dropStock(r); if (r.loc === 'fg') r.loc = 'quarantine'; r.status = 'ng'; r.recovered = k.id; r.hold = null; T.stats.escaped--; T.stats.ng++; T.stats.recovered = (T.stats.recovered ?? 0) + 1; out.caught++; out.serials.push(r.serial); }
       else if (r.status !== 'wip') { r.hold = null; out.ok++; }
     }
     return out;

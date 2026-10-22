@@ -307,6 +307,12 @@ export class UI {
     }
   }
 
+  // 시리얼 발행·마킹 셀 (js/serial.js): 발행 수 · 마킹 방식 · 판독 등급 분포 · 재마킹 · 최근 시리얼
+  markLine(zone, cell) {
+    const H = this.sim.serials; if (!H?.isMarkCell(zone, cell)) return '';
+    const S = H.cellSummary(zone, cell), sym = zone === 'adapt' ? 'GS1 DataMatrix 레이저 각인' : 'QR 라벨 (GS1 Digital Link)', g = S?.grades ?? {};
+    return `<div class="note">🏷 시리얼 발행·마킹 — ${sym} · 발행 <b>${S?.n ?? 0}</b>개 · 판독 등급 ${['A', 'B', 'C', 'D', 'F'].map((k) => `${k} ${g[k] ?? 0}`).join(' · ')} · 재마킹 ${S?.relabel ?? 0}${S?.ng ? ` · 판독 불가 ${S.ng}` : ''}${S?.last?.serial ? `<br>최근 <b>${esc(S.last.serial)}</b> (등급 ${S.last.mark?.grade ?? '-'}) — 품질 추적 「🏷 시리얼·출하」에서 코드 확인` : ''}</div>`;
+  }
   // FAC 설비보전: 이 설비의 정비요청 이력 (설비 등록 일련번호 · 진행 중 요청 · 최근 요청)
   facLine(st) {
     const E = this.sim.fac; if (!E?.on) return '';
@@ -362,6 +368,7 @@ export class UI {
       </div>
       ${sim.mode.key === 'traditional' ? '<div class="note">※ 레거시 공장에는 센서가 없어 건강도·RUL은 현장에서 보이지 않는 시뮬레이션 내부값입니다.</div>' : ''}
       ${this.facLine(st)}
+      ${this.sim.zone ? this.markLine('main', st.id) : ''}
       <div class="btns"><button data-act="fault">⚡ 고장 주입</button><button data-act="pm">🔧 정비 지시</button></div>
       <div class="pcap-box" id="pcapBox"></div>`;
     this.onDetailRendered?.();
@@ -444,6 +451,7 @@ export class UI {
       </div>
       ${m.key === 'traditional' ? '<div class="note">※ 레거시 공장에는 센서가 없어 건강도·RUL은 현장에서 보이지 않는 시뮬레이션 내부값입니다.</div>' : ''}
       ${this.facLine(st)}
+      ${this.markLine(st.zone, st.cellId)}
       <div class="btns"><button data-act="fault">⚡ 고장 주입</button><button data-act="pm">🔧 정비 지시</button></div>
       </div>${mm ? `<div class="zc-col">${mm}</div>` : ''}</div>
       <div class="pcap-box" id="pcapBox"></div>`;

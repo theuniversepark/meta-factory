@@ -12,8 +12,9 @@ const iso = (t) => new Date(Date.UTC(2026, 9, 15) + t * 1000).toISOString();
 console.log('== 제품 추적 (자동화 · 3시간)');
 const s = new Simulation('smart', 3, { line: zoneLine(), quiet: true }), ag = new FactoryAgent(s), T = s.trace;
 run(s, ag, 10800);   // 3시간 — 체결 셀 사이클이 실제 작업 시간(로봇당 2~4점)이라 라인 속도가 느려 NG 사례·CAPA가 2시간으로는 모자란다
-{ const serials = T.recent.map((r) => r.serial);
-  check('투입 제품마다 고유 시리얼 · EPC (DT/EA-YYMMDD-일련번호)', new Set(serials).size === serials.length && T.recent.every((r) => /^(DT|EA)-\d{6}-\d{6}$/.test(r.serial) && r.epc.startsWith('urn:epc:id:sgtin:')), `${serials.length}개`);
+{ const wips = T.recent.map((r) => r.wip), packed = T.recent.filter((r) => r.steps.some((p) => p.id === 'PACK' && p.tOut != null)), serials = packed.map((r) => r.serial);
+  check('2단 ID: 투입 제품마다 고유 WIP ID (WIP-DT/EA-YYMMDD-일련번호)', new Set(wips).size === wips.length && T.recent.every((r) => /^WIP-(DT|EA)-\d{6}-\d{6}$/.test(r.wip)), `${wips.length}개`);
+  check('2단 ID: 검사·포장셀 통과품만 제품 시리얼 · SGTIN EPC · QR (체결 NG품은 시리얼 없음)', packed.length > 300 && new Set(serials).size === serials.length && packed.every((r) => /^(DT|EA)-\d{6}-\d{6}$/.test(r.serial) && r.epc.startsWith('urn:epc:id:sgtin:') && r.mark?.symbol === 'QR' && r.mark.at === 'PACK') && T.recent.filter((r) => r.status === 'ng' && !r.recovered).every((r) => !r.serial), `${serials.length}개`);
   const done = T.recent.filter((r) => r.status === 'ok' || r.status === 'escaped');
   const route = { doortrim: ['SORT', 'DT_ASSY', 'DT_FAST', 'PACK'], eaxle: ['SORT', 'EA_ASSY', 'EA_FAST', 'PACK'] };
   check('완료 제품 계보 = 제품별 경로 셀 전부 (셀·로봇·AMR·건강도·환경)', done.length > 300 && done.every((r) => r.steps.map((p) => p.id).join() === route[r.product].join() && r.steps.every((p) => p.tOut != null && p.robots.length && p.amr && ENV_KEYS.every((k) => p.env[k] != null))), `${done.length}개`);

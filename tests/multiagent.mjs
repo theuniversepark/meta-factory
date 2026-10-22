@@ -14,7 +14,13 @@ console.log('== 혼합형 다중 에이전트');
   const s2 = new Simulation('smart', 19, { line: zoneLine(), quiet: true }), ag2 = new HybridAgent(s2);
   for (let t = 0; t < 3600; t += 0.1) { s2.step(0.1); ag2.update(0.1); }
   const H2 = ag2.status(), conf = H.conflicts + H2.conflicts, defer = H.deferred + H2.deferred;
-  check('메인 조정: 충돌 판정·보류 · 제안 → 실행 지연 기록 (시드 2개)', conf > 0 && defer > 0 && H.avgLat >= 0 && Math.max(H.latMax, H2.latMax) < 120, `충돌 ${conf} · 보류 ${defer} · 평균 ${((H.avgLat + H2.avgLat) / 2).toFixed(2)}초 · 최대 ${Math.max(H.latMax, H2.latMax).toFixed(0)}초`);
+  // 시드 두 개 모두 고장·정비 시점이 안 겹쳐 0일 수 있다 (생산 타이밍이 조금만 바뀌어도 달라짐) — 병목 셀이 가동 중일 때 정비 제안을 직접 넣어 충돌 판정·보류를 한 번 더 확인
+  const m2 = s2.mode; let bott = null, bc = 0; for (const st of s2.processing) { const c = st.def.cycle * m2.cycleMul * st.speedMul * (st.def.share ?? 1); if (c > bc) { bc = c; bott = st; } }
+  for (let i = 0; i < 3000 && (bott.state !== 'BUSY' || bott.request); i++) { s2.step(0.1); ag2.update(0.1); }
+  const c0 = ag2.ma.conflicts, d0 = ag2.ma.deferred;
+  ag2.queue.push({ kind: 'pm', st: bott, t0: s2.time, prio: 3, why: '시험: 병목 셀 가동 중 예지정비 제안' }); ag2.arbitrate();
+  const forced = ag2.ma.conflicts > c0 && ag2.ma.deferred > d0;
+  check('메인 조정: 충돌 판정·보류 · 제안 → 실행 지연 기록 (시드 2개 + 병목 가동 중 정비 제안)', (conf > 0 || forced) && (defer > 0 || forced) && H.avgLat >= 0 && Math.max(H.latMax, H2.latMax) < 120, `시드 충돌 ${conf} · 보류 ${defer} · 병목(${bott.name}) 가동 중 제안 → ${forced ? '충돌·보류' : '판정 안 됨'} · 평균 ${((H.avgLat + H2.avgLat) / 2).toFixed(2)}초 · 최대 ${Math.max(H.latMax, H2.latMax).toFixed(0)}초`);
   check('반사 계층은 바로 실행 (자재 배차 · 충전)', ag.history.some((h) => /자재 보충 배차|충전 지시/.test(h.title)));
   check('정비 인력 수보다 많은 예지정비를 한꺼번에 걸지 않음', s.requests.filter((r) => r.kind === 'pm').length <= s.techs.length + 1); }
 { const s = new Simulation('smart', 9, { line: zoneLine(), quiet: true }), ag = new HybridAgent(s);

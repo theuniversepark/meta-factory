@@ -346,7 +346,29 @@ function addCMSensors(g, def, parts) {
   return M;
 }
 const CM_TYPES = new Set(['mill5', 'turn', 'deburr']);
-const BUILD = { kit: buildKit, locate: buildLocate, spot: buildSpot, seal: buildSeal, hem: buildHem, mount: buildMount, vision: (g) => buildVision(g), rework: buildRework, mill5: buildMill5, turn: buildTurn, deburr: buildDeburr, matid: buildMatId, cmm: buildCMM };
+// 시리얼 마킹 장비 (js/serial.js) — 마킹 순간 표시등(markMat)이 밝아진다
+//  label: 라벨 프린터·부착기(탬프 패드) + 2D 코드 판독기 — 문형 빔(셀 로컬 x · y)에 매단다 / laser: CMM 브리지 캐리지 옆 레이저 각인 헤드 + 판독기
+const MARK_MAT = () => emis(0x37e8ff, 0.35);
+function addLabeler(parent, x, y, zPrint, zRead) {
+  const markMat = MARK_MAT();
+  const pr = put(new THREE.Group(), x, y, zPrint, parent); pr.name = 'LabelPrintApply';
+  put(box(0.28, 0.26, 0.3, MAT.white), 0, 0, 0, pr); put(box(0.2, 0.03, 0.01, markMat, false), 0, 0.05, 0.155, pr);
+  put(cyl(0.015, 0.015, 0.18, MAT.steel, 8), 0, -0.22, 0, pr); put(box(0.12, 0.02, 0.09, MAT.dark), 0, -0.32, 0, pr);   // 탬프 실린더 · 패드
+  const rd = put(new THREE.Group(), x, y, zRead, parent); rd.name = 'CodeReader';
+  put(box(0.12, 0.1, 0.16, MAT.dark), 0, 0, 0, rd); put(new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.008, 6, 14), markMat), 0, -0.06, 0, rd).rotation.x = Math.PI / 2;
+  return markMat;
+}
+function addLaser(car) {
+  const markMat = emis(0xff3b3b, 0.35);
+  const lz = put(new THREE.Group(), 0.24, -0.06, 0, car); lz.name = 'LaserMarker';
+  put(box(0.12, 0.2, 0.12, MAT.dark), 0, 0, 0, lz); put(cyl(0.025, 0.025, 0.04, MAT.steel, 10), 0, -0.12, 0, lz); put(box(0.04, 0.01, 0.04, markMat, false), 0, -0.145, 0, lz);
+  return markMat;
+}
+const BUILD = { kit: buildKit, locate: buildLocate, spot: buildSpot, seal: buildSeal, hem: buildHem, mount: buildMount,
+  vision: (g) => { const P = buildVision(g); return { ...P, markMat: addLabeler(P.auto, 0, 2.17, -0.72, 0.72) }; },   // C06 치수·외관검사 — 합격 즉시 QR 라벨
+  rework: (g) => { const P = buildRework(g); return { ...P, markMat: addLabeler(g, 1.25, 1.79, -0.62, 0.55) }; },   // C07 재작업·재검 — 재검 합격 시 QR 라벨
+  mill5: buildMill5, turn: buildTurn, deburr: buildDeburr, matid: buildMatId,
+  cmm: (g) => { const P = buildCMM(g); return { ...P, markMat: addLaser(P.car) }; } };   // CMM 합격 즉시 DataMatrix 레이저 각인
 
 // 투입 스테이션(AS/RS 출고 포트) · 구분 적재장 — 두 Zone 공통 간이 형상
 // 자재 투입존 (정밀조립Zone 투입 스테이션과 같은 구성): 혼류 제품별로 양쪽에 따로 보관 (첫 제품 +z · 둘째 제품 −z) — 판넬(후드·도어)은 빗살 거치대에 세워 2열 × 10장,
@@ -888,8 +910,11 @@ class ExtraZone {
       c.busy += dt; c.progress = Math.min(1, c.progress + dt / c.cur);
       if (c.progress >= 1) {
         const it = c.item; it.done.add(c.id); c.done++;
-        if (Z.ng && c.id === Z.ng.at && !it.ng && this.rng() < Z.ng.rate) { it.ng = true; it.ngNext = true; this.stats.ng++; }
+        if (Z.ng && c.id === Z.ng.at && !it.ng && this.rng() < Z.ng.rate * (this.sim?.serials?.inlineMul(Z.key) ?? 1)) { it.ng = true; it.ngNext = true; this.stats.ng++; }   // 정밀검사 NG 공정 보정 중이면 검사 기준 강화 (js/serial.js)
         else it.ngNext = false;
+        // 2단 ID: 최종 검사 합격 → 제품 시리얼 발행 · 마킹(유연생산 C06·C07 QR 라벨 · 적응가공 CMM DataMatrix 각인) · 판독 검증 (js/serial.js)
+        const H = this.sim?.serials;
+        if (H) { H.extDone(it, c.id, Z.ng && c.id === Z.ng.at ? (it.ngNext ? 'NG' : 'OK') : null); if (H.isMarkCell(Z.key, c.id) && !it.ngNext && H.issue(it, { cell: c.id, name: Z.cells[c.id]?.label ?? c.id })?.mark) c.markT = this.time; }
         const O = this.sim?.fos?.[Z.key];
         if (O && Z.key === 'flex' && c.id === Z.ng?.at) O.onFirstArticle(it, !it.ngNext);   // 첫물 판정 (치수·외관검사)
         if (O && Z.key === 'adapt') { O.afterCell(c, it, this.rng); if (c.id === Z.rework?.at) O.onBranch(it.rework || it.toolBreak ? 'rework' : this.rng() < 0.02 ? 'hold' : 'ok'); }   // 공구 감시·조건 조정 · CMM 제품 분기
@@ -941,6 +966,7 @@ class ExtraZone {
           const p = this.nextProduct();
           c.item = { id: `${Z.code}-${String(++this.seq).padStart(4, '0')}`, product: p, done: new Set(), ng: false, t0: this.time };
           this.stats.released++; this.attachItem(c);
+          this.sim?.serials?.extRelease(Z.key, c.item, c.uid ?? c.id);   // 1단: WIP ID
           c.at = 'SRC'; c.state = 'ready';
         }
         break;
@@ -983,6 +1009,8 @@ class ExtraZone {
         const rw = Z.rework && cell.id === Z.rework.at && this.rng() < Z.rework.rate;
         if (rw) { c.item.rework = true; this.stats.rework++; }
         Object.assign(cell, { state: 'BUSY', progress: 0, item: c.item, cur: cell.cycle * (rw ? 1.6 : 1) * (0.92 + this.rng() * 0.16) });
+        const SH = this.sim?.serials;   // 공정 이력 (WIP ID) · 마킹 셀은 판독 실패 시 재마킹 시간만 더한다 (첫 마킹은 판정과 병렬)
+        if (SH) { SH.extEnter(c.item, cell.id, Z.cells[cell.id]?.label ?? cell.id); if (SH.isMarkCell(Z.key, cell.id) && (cell.id !== Z.ng?.to || c.item.ng)) cell.cur += SH.plan(c.item); }
         // Zone 오케스트레이터 (factoryos.js): 유연생산 = 새 품목 지그면 CHANGEOVER (전환 오더 중) · 적응가공 = 공구 교환 중이면 대기 · 절삭 조건 조정 사이클 배율
         const O = this.sim?.fos?.[Z.key];
         if (O && Z.key === 'flex') { const co = O.onCellStart(cell, c.item); if (co > 0) { cell.holdT = co; cell.hold = '품목 전환 (CHANGEOVER)'; } }
@@ -1001,6 +1029,7 @@ class ExtraZone {
           if (this.sim?.zoneFg) this.sim.zoneFg[p] = (this.sim.zoneFg[p] ?? 0) + 1; else (this.fgLocal ??= {})[p] = (this.fgLocal[p] ?? 0) + 1;
           this.sim?.fac?.produced(p);   // FAC: 생산 입고 (확장 Zone 완제품 → 출하 대기)
           this.stats.good[p] = (this.stats.good[p] ?? 0) + 1;
+          this.sim?.serials?.toFG(c.item);   // 시리얼 단위 출하 대기 재고
           this.detachItem(c); c.item = null; this.sink.occ = null;
           this.go(c, this.st ? this.returnPath(c) : this.retPath, 'return', this.st ? 'PARK' : 'Q');
           break;
@@ -1008,6 +1037,7 @@ class ExtraZone {
         c.timer -= dt;
         if (c.timer <= 0) {
           const p = c.item.product; this.stats.good[p] = (this.stats.good[p] ?? 0) + 1;
+          this.sim?.serials?.toFG(c.item);
           this.detachItem(c); c.item = null; this.sink.occ = null;
           this.go(c, this.st ? this.returnPath(c) : this.retPath, 'return', this.st ? 'PARK' : 'Q');
         }
@@ -1295,6 +1325,7 @@ class ExtraZone {
       const text = !it ? '대기 중' : ty === 'cmm' ? `${it.id} · ${this.Z.products[it.product].label} · ${it.rework ? '리워크 후 재측정' : p < 0.9 ? '측정 중' : '합격'}` : `${it.id} → ${this.Z.products[it.product].label} 라인`;
       drawGate(P.gateSign, P.gateTitle, text, it ? hex(it.rework && ty === 'cmm' ? 0xf5b82e : PC[it.product]) : '#e6edf3');
     }
+    if (P.markMat) P.markMat.emissiveIntensity = c.markT != null && this.time - c.markT < 1.2 ? 6 : 0.35;   // 시리얼 마킹·판독 순간
     if (ty === 'hem' && P.machine && c.robots.some((r) => r.tool)) { if (!c.halt && !this.halted) this.hemPress(c, busy && !c.fault, p, dts); return; }
     if (P.machine) { P.machine.update({ busy, progress: p, time: t, rdt, dts, frozen: !!c.halt || this.halted, fault: !!c.fault, open: c.robots.some((r) => r.tendInside) || undefined }); return; }   // 팔이 기계 안에 있으면 문을 열어 둔다
     switch (ty) {
@@ -1364,7 +1395,7 @@ class ExtraZone {
     this.sink.chip.textContent = this.Z.pack ? `${this.sinkFull ? '적재 공간 대기 · ' : ''}${ps.map(([k, v]) => `${v.label} 팔레트 ${this.fgOf(k)}/${ZONE_FG_CAP}`).join(' · ')}` : ps.map(([k, v]) => `${v.label} ${g[k] ?? 0}`).join(' · ');
     if (this.Z.pack && this.sinkFull) this.sink.chip.className = 'chip s-BLOCKED';
     const s = this.summary();
-    this.boardEl.innerHTML = `<b>${this.Z.name}</b><span>${ps.map(([k, v]) => `${v.label} <i>${g[k] ?? 0}</i>`).join(' · ')} · UPH <i>${s.uph}</i> · 가동 셀 <i>${s.busy}/${this.order.length}</i>${this.Z.ng ? ` · NG <i>${this.stats.ng}</i>` : ''}${this.Z.rework ? ` · 리워크 <i>${this.stats.rework}</i>` : ''}</span>`;
+    this.boardEl.innerHTML = `<b>${this.Z.name}</b><span>${ps.map(([k, v]) => `${v.label} <i>${g[k] ?? 0}</i>`).join(' · ')} · UPH <i>${s.uph}</i> · 가동 셀 <i>${s.busy}/${this.order.length}</i>${this.Z.ng ? ` · NG <i>${this.stats.ng}</i>` : ''}${this.Z.rework ? ` · 리워크 <i>${this.stats.rework}</i>` : ''}${(() => { const H = this.sim?.serials; if (!H) return ''; const k = H.zoneCounts(this.Z.key); return ` · 시리얼 <i>${H.stats.byZone[this.Z.key] ?? 0}</i>${k.hold ? ` · 출하 보류 <i>${k.hold}</i>` : ''}${k.scrap ? ` · 폐기 <i>${k.scrap}</i>` : ''}`; })()}</span>`;
   }
   summary() {
     const good = Object.values(this.stats.good).reduce((a, b) => a + b, 0);
