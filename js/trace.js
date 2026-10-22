@@ -238,6 +238,7 @@ export class ProductTrace {
     const top = c.rca.causes[0];
     if (kind === 'inline') { this.stats.cases++; if (top?.station === r.truth) this.stats.top1++; if (c.rca.causes.slice(0, 3).some((x) => x.station === r.truth)) this.stats.top3++; } else this.stats.sampleNg = (this.stats.sampleNg ?? 0) + 1;
     this.cases.unshift(c); if (this.cases.length > 200) this.cases.pop();
+    if (kind === 'inline') this.sim.fac?.qual?.('q.ng', { key: c.id, serial: c.serial, product: c.product, station: c.detectedName, mode: c.inspection?.mode ?? '', torque: c.inspection?.torque ?? null, angle: c.inspection?.angle ?? null });   // 체결 전수 검사 NG → (앱) ERPNext 부적합
     s.capa?.onDefect(c, r);
     return c;
   }

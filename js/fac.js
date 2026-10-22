@@ -105,6 +105,8 @@ export class FacLedger {
   // ── 공장 오더 (FacOS → 정밀조립) — ERPNext 작업지시(Work Order) 연동용 (server/erpnext-bridge.mjs) ─────────────────
   // 배정: 양품 목표 · 혼류 비중 · 납기 / 종료: 제품별 양품 · 폐기 · 고유 투입 (정산 오차 0으로 닫힌 오더만)
   order(type, o, extra = {}) { this.emit({ type, key: o.id, target: o.target, due: o.due, ...extra }); }
+  // 품질 기록 (js/serial.js · capa.js · trace.js) — ERPNext 품질 모듈 연동용 (3단계): 샘플 꺼냄 · 판정 · 처분 · 로트 선별 · 체결 NG · 8D
+  qual(type, payload) { this.emit({ type, ...payload }); }
 
   // ── 발주 · 입고 ─────────────────
   // WMS 발주 (receiving.js) → 구매오더 확정 + 입고 예정 전표

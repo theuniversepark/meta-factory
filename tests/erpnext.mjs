@@ -19,10 +19,10 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── 가짜 ERPNext (Frappe REST) ─────────────────
 const db = {}, seq = {}, F = { setup: 0, auth: null, reject: null, calls: 0 };
-const PREFIX = { 'Purchase Order': 'PUR-ORD', 'Purchase Receipt': 'MAT-PRE', 'Stock Entry': 'MAT-STE', 'Delivery Note': 'MAT-DN', 'Work Order': 'MFG-WO', BOM: 'BOM', Asset: 'ACC-ASS', 'Asset Repair': 'ACC-ASR', 'Asset Maintenance Log': 'ACC-AML' };
+const PREFIX = { 'Quality Inspection': 'MAT-QA', 'Non Conformance': 'QA-NC', 'Quality Action': 'QA-ACT', 'Purchase Order': 'PUR-ORD', 'Purchase Receipt': 'MAT-PRE', 'Stock Entry': 'MAT-STE', 'Delivery Note': 'MAT-DN', 'Work Order': 'MFG-WO', BOM: 'BOM', Asset: 'ACC-ASS', 'Asset Repair': 'ACC-ASR', 'Asset Maintenance Log': 'ACC-AML' };
 const coll = (dt) => (db[dt] ??= []);
 const put = (dt, doc) => {
-  const nameKey = { Item: 'item_code', 'Item Group': 'item_group_name', Supplier: 'supplier_name', Customer: 'customer_name', Workstation: 'workstation_name', Location: 'location_name', 'Asset Category': 'asset_category_name', 'Asset Maintenance Team': 'maintenance_team_name', User: 'email' }[dt];
+  const nameKey = { Item: 'item_code', 'Item Group': 'item_group_name', Supplier: 'supplier_name', Customer: 'customer_name', Workstation: 'workstation_name', Location: 'location_name', 'Asset Category': 'asset_category_name', 'Quality Procedure': 'quality_procedure_name', 'Quality Inspection Parameter': 'parameter', 'Asset Maintenance Team': 'maintenance_team_name', User: 'email' }[dt];
   const name = PREFIX[dt] ? `${PREFIX[dt]}-${String((seq[dt] = (seq[dt] ?? 0) + 1)).padStart(5, '0')}` : dt === 'Warehouse' ? `${doc.warehouse_name} - MF` : dt === 'Custom Field' ? `${doc.dt}-${doc.fieldname}` : dt === 'Asset Maintenance' ? doc.asset_name : doc[nameKey] ?? `${dt}-${coll(dt).length + 1}`;
   const d = { ...doc, name, doctype: dt, docstatus: doc.docstatus ?? 0 }; coll(dt).push(d); return d;
 };
@@ -55,9 +55,14 @@ const handler = (req, res) => { let b = ''; req.on('data', (c) => (b += c)); req
   }
   const r = u.pathname.match(/^\/api\/resource\/([^/]+)(?:\/(.+))?$/); if (!r) return ERR(res, 404, 'Not Found');
   const dt = decodeURIComponent(r[1]), nm = r[2] ? decodeURIComponent(r[2]) : null;
+  if (req.method === 'GET' && nm) { const d = coll(dt).find((x) => x.name === nm); return d ? OK(res, { data: d }) : ERR(res, 404, `${dt} ${nm} not found`); }
   if (req.method === 'GET') { const fl = JSON.parse(u.searchParams.get('filters') ?? '[]'), fields = JSON.parse(u.searchParams.get('fields') ?? '["name"]'); return OK(res, { data: coll(dt).filter((d) => fl.every((f) => match(d, f))).map((d) => Object.fromEntries(fields.map((k) => [k, d[k]]))) }); }
-  if (req.method === 'PUT') { let d = coll(dt).find((x) => x.name === nm); if (!d && dt.endsWith('Settings')) { d = { name: dt, doctype: dt }; coll(dt).push(d); } if (!d) return ERR(res, 404, `${dt} ${nm} not found`); Object.assign(d, body); return OK(res, { data: d }); }   // 설정 문서는 단일 문서 (항상 있음)
+  const qaStatus = (b2) => { if (dt === 'Quality Action' && Array.isArray(b2.resolutions)) b2.status = b2.resolutions.some((x) => x.status === 'Open') ? 'Open' : 'Completed'; };   // ERPNext: 해결 항목이 모두 완료면 Completed
+  if (req.method === 'PUT') { qaStatus(body); let d = coll(dt).find((x) => x.name === nm); if (!d && dt.endsWith('Settings')) { d = { name: dt, doctype: dt }; coll(dt).push(d); } if (!d) return ERR(res, 404, `${dt} ${nm} not found`); Object.assign(d, body); return OK(res, { data: d }); }   // 설정 문서는 단일 문서 (항상 있음)
   if (F.reject === dt) return ERR(res, 417, `${dt} 검증 실패 (시험)`);
+  if (dt === 'Quality Inspection' && coll(dt).some((x) => x.reference_name === body.reference_name && x.item_code === body.item_code)) return ERR(res, 417, `Every row of Item ${body.item_code} in Stock Entry ${body.reference_name} already has a Quality Inspection`);
+  if ((dt === 'Non Conformance' || dt === 'Quality Action') && !coll('Quality Procedure').some((x) => x.name === body.procedure)) return ERR(res, 417, 'Procedure is required');
+  qaStatus(body);
   if (dt === 'Asset' && !body.net_purchase_amount) return ERR(res, 417, 'Net Purchase Amount is mandatory');
   if (dt === 'Customer' && !coll('Customer Group').find((g) => g.name === body.customer_group && !g.is_group)) return ERR(res, 417, 'Cannot select a Group type Customer Group');
   if (dt === 'Asset Maintenance' && !body.maintenance_team) return ERR(res, 417, 'Maintenance Team missing');
@@ -76,9 +81,9 @@ const t1 = await R('POST', 'test');
 check('연결 시험: 로그인 · 초기 설정 전 · 회사 없음', t1.ok && t1.user === 'Administrator' && !t1.setupComplete && t1.companies.length === 0 && F.auth === 'token k1:s1', JSON.stringify(t1));
 await R('POST', 'prepare'); for (let i = 0; i < 100 && (await R('GET', 'status')).prepare.running; i++) await wait(50);
 const P = (await R('GET', 'status')).prepare;
-check('「ERPNext 준비」: 초기 설정(회사 · KRW) → mf_ref 필드 8종 · 품목 · 창고 · 거래처 · BOM 6 · 작업장 · 자산 분류 · 정비팀', P.ok && F.setup === 1 && coll('Custom Field').filter((c) => c.fieldname === 'mf_ref').length === 8 && Object.values(FAC_PRODUCTS).every((p) => coll('Item').some((i) => i.name === p.code)) && Object.values(WH_NAME).every((w) => coll('Warehouse').some((x) => x.name === `${w} - MF`)) && coll('BOM').filter((b) => b.docstatus === 1).length === Object.keys(BOMS).length && coll('Customer').length === 1 && coll('Asset Category').length === 1 && coll('Asset Maintenance Team').length === 1, `${P.step} · 요청 ${F.calls}회`);
+check('「ERPNext 준비」: 초기 설정(회사 · KRW) → mf_ref 필드 11종 · 품질 절차 3 · 검사 항목 · 품목 · 창고 · 거래처 · BOM 6 · 작업장 · 자산 분류 · 정비팀', P.ok && F.setup === 1 && coll('Custom Field').filter((c) => c.fieldname === 'mf_ref').length === 11 && coll('Quality Procedure').length === 3 && coll('Quality Inspection Parameter').length === 1 && Object.values(FAC_PRODUCTS).every((p) => coll('Item').some((i) => i.name === p.code)) && Object.values(WH_NAME).every((w) => coll('Warehouse').some((x) => x.name === `${w} - MF`)) && coll('BOM').filter((b) => b.docstatus === 1).length === Object.keys(BOMS).length && coll('Customer').length === 1 && coll('Asset Category').length === 1 && coll('Asset Maintenance Team').length === 1, `${P.step} · 요청 ${F.calls}회`);
 const calls0 = F.calls; await R('POST', 'prepare'); for (let i = 0; i < 100 && (await R('GET', 'status')).prepare.running; i++) await wait(50);
-check('다시 준비해도 이미 있는 것은 건너뜀 (중복 생성 없음)', coll('Item').length === Object.keys(FAC_PRODUCTS).length + 1 && coll('BOM').length === Object.keys(BOMS).length && coll('Custom Field').length === 10, `추가 요청 ${F.calls - calls0}회 · 품목 ${coll('Item').length}`);
+check('다시 준비해도 이미 있는 것은 건너뜀 (중복 생성 없음)', coll('Item').length === Object.keys(FAC_PRODUCTS).length + 1 && coll('BOM').length === Object.keys(BOMS).length && coll('Custom Field').length === 13, `추가 요청 ${F.calls - calls0}회 · 품목 ${coll('Item').length}`);
 const st0 = await R('GET', 'status');
 check('키·비밀 키는 응답에 나오지 않음 (여부만)', st0.apiKey === true && st0.apiSecret === true && !JSON.stringify(st0).includes('s1') && !JSON.stringify(st0).includes('"k1"'));
 
@@ -104,6 +109,31 @@ const fg = (code) => mf.flatMap((d) => d.items).filter((i) => i.is_finished_item
 check('완제품 재고 (생산 입고 − 출하) = FAC 구분 적재장', ['doortrim', 'eaxle'].every((p) => fg(FAC_PRODUCTS[p].code) === E.quant.output[p]), ['doortrim', 'eaxle'].map((p) => `${p} ${fg(FAC_PRODUCTS[p].code)}/${E.quant.output[p]}`).join(' · '));
 const cor = ty('mr.create').filter((e) => e.mtype === 'corrective').length, pre = ty('mr.create').filter((e) => e.mtype !== 'corrective').length;
 check('정비요청: 설비 → Asset(처음이면 등록) · 긴급 → Asset Repair · 예방 → Asset Maintenance Log · 완료 단계 반영', ref('Asset Repair').length + coll('Asset Repair').filter((d) => !d.mf_ref.startsWith(E.run)).length >= cor && ref('Asset Maintenance Log').length === pre && coll('Asset').length > 0 && coll('Asset').every((a) => a.net_purchase_amount && a.docstatus === 1) && ref('Asset Maintenance Log').filter((d) => d.maintenance_status === 'Completed').length > 0, `설비 자산 ${coll('Asset').length} · 긴급 ${ref('Asset Repair').length} · 예방 ${ref('Asset Maintenance Log').length} (완료 ${ref('Asset Maintenance Log').filter((d) => d.maintenance_status === 'Completed').length})`);
+
+console.log('== 품질 (3단계): 정밀검사 샘플 · 처분(MRB) · 체결 NG · 8D');
+{ const run = 'runQ', Q = (evs) => B.enqueue(run, evs), drain = async () => { for (let i = 0; i < 300 && (await R('GET', 'status')).queued; i++) await wait(50); };
+  Q([{ type: 'q.sample.req', key: 'QS-1', zone: 'main', product: 'doortrim', serial: 'DT-1' }, { type: 'q.sample', key: 'QS-1', zone: 'main', product: 'doortrim', serial: 'DT-1', result: 'OK', lot: 4 },
+     { type: 'q.sample.req', key: 'QS-2', zone: 'flex', product: 'hood', serial: 'HD-9' }, { type: 'q.sample', key: 'QS-2', zone: 'flex', product: 'hood', serial: 'HD-9', result: 'NG', lot: 10 }]);
+  await drain();
+  const qi = coll('Quality Inspection').filter((d) => d.mf_ref?.startsWith(run)), mv = (k) => coll('Stock Entry').find((d) => d.mf_ref === `${run}:${k}`);
+  check('샘플 꺼냄 → 정밀검사 샘플 창고 이동 · 품질검사(제출 · 그 이동 전표에 연결) · OK면 적재장으로 되돌림', qi.length === 2 && qi.every((d) => d.docstatus === 1 && d.reference_type === 'Stock Entry') && qi.find((d) => d.mf_ref === `${run}:QS-1`).status === 'Accepted' && qi.find((d) => d.mf_ref === `${run}:QS-2`).status === 'Rejected' && mv('QS-1:out')?.items[0].t_warehouse === '정밀검사-샘플 - MF' && mv('QS-1:back')?.items[0].t_warehouse === '구분적재장 - MF' && !mv('QS-2:back'), qi.map((d) => `${d.mf_ref.split(':')[1]} ${d.status} ← ${d.reference_name}`).join(' · '));
+  const nc = coll('Non Conformance').find((d) => d.mf_ref === `${run}:QS-2`), mrb = () => coll('Quality Action').find((d) => d.mf_ref === `${run}:QS-2:mrb`);
+  check('샘플 NG → 부적합(Open · 샘플링 절차) + 처분 판정(MRB) 품질 조치', nc?.status === 'Open' && nc.procedure.startsWith('정밀검사 샘플링') && mrb()?.procedure.startsWith('부적합품 처리'));
+  Q([{ type: 'q.disp', key: 'HD-9', lot: 'QS-2', zone: 'flex', product: 'hood', d: 'rework', why: '샘플 — 용접부 보수', sample: true }, { type: 'q.disp', key: 'HD-5', lot: 'QS-2', zone: 'flex', product: 'hood', d: 'scrap', why: '선별검사 불량 — 재작업 불가', sample: false }]);
+  await drain();
+  check('처분: 재작업 → 미완료 항목(품질 조치 Open) · 폐기 → 재고 출고(Material Issue, 구분 적재장)', mrb().status === 'Open' && mrb().resolutions.some((x) => x.problem === 'HD-9 처분' && x.status === 'Open') && coll('Stock Entry').find((d) => d.mf_ref === `${run}:HD-5:scrap`)?.stock_entry_type === 'Material Issue');
+  Q([{ type: 'q.lot', key: 'QS-2', zone: 'flex', product: 'hood', sorted: { n: 12, ok: 10, bad: 2 }, extra: 3, recall: 1 }, { type: 'q.disp', key: 'HD-9', lot: 'QS-2', zone: 'flex', product: 'hood', d: 'rework.done', why: '재검 합격', sample: true }]);
+  await drain();
+  check('로트 선별검사 끝 → 부적합 Resolved · 재작업 재검 합격 → 샘플 적재장 복귀 · MRB 품질 조치 Completed', nc.status === 'Resolved' && /선별검사 12개/.test(nc.corrective_action) && mv('HD-9:back')?.items[0].s_warehouse === '정밀검사-샘플 - MF' && mrb().status === 'Completed', `MRB 항목 ${mrb().resolutions.length}`);
+  Q([{ type: 'q.ng', key: 'NG-1', serial: 'WIP-EA-1', product: 'eaxle', station: 'e-axle 체결셀', mode: '체결 토크 하한 미달', torque: 74, angle: 41 },
+     { type: 'q.capa', key: 'CAPA-1', kind: 'main', title: 'e-axle 체결셀 NG', status: 'approval', stage: 'D5', cases: ['NG-1'], steps: [{ d: 'D0', lane: 'field', text: 'NG 판정' }, { d: 'D5', lane: 'zone', text: '대책 선정' }] }]);
+  await drain();
+  const qa = () => coll('Quality Action').find((d) => d.mf_ref === `${run}:CAPA-1`), ncg = coll('Non Conformance').find((d) => d.mf_ref === `${run}:NG-1`);
+  check('체결 NG → 부적합(8D 절차) · 진행 중 8D → 품질 조치 Open (현재 단계 미완료 항목)', ncg?.status === 'Open' && ncg.procedure.startsWith('8D') && qa()?.status === 'Open' && qa().resolutions.at(-1).problem.startsWith('진행 중'), qa()?.resolutions.map((x) => x.problem).join(' / '));
+  Q([{ type: 'q.capa', key: 'CAPA-1', kind: 'main', title: 'e-axle 체결셀 NG', status: 'closed', stage: 'D8', cases: ['NG-1'], steps: [{ d: 'D0', lane: 'field', text: 'NG 판정' }, { d: 'D5', lane: 'zone', text: '대책 선정' }, { d: 'D8', lane: 'hq', text: '종결' }] }]);
+  await drain();
+  check('8D 종결 → 품질 조치 Completed(D0~D8 덮어쓰기) · 그 사례 부적합 Resolved', qa().status === 'Completed' && qa().resolutions.length === 3 && ncg.status === 'Resolved');
+}
 
 console.log('== 중복 방지 · 끊김 · 검증 오류');
 { const before = Object.fromEntries(Object.entries(db).map(([k, v]) => [k, v.length]));

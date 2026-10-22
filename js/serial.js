@@ -79,6 +79,7 @@ export class SerialHub {
   drain() { const f = this.feed; this.feed = []; return f; }
   log(lv, title, x) { if (!this.sim.quiet) this.sim.log?.(lv, title, x); }
   idOf(u) { return u.serial ?? u.wip; }
+  q(type, payload) { this.sim.fac?.qual?.(type, payload); }   // 품질 기록 → FAC 이벤트 → (앱) ERPNext 품질 모듈 (server/erpnext-bridge.mjs)
 
   // ── 1단: WIP ID (투입) ─────────────────
   wipId(product) { const c = PRODUCTS[product]?.code ?? 'WP', n = (this.wipSeq[c] = (this.wipSeq[c] ?? 0) + 1); this.stats.wip++; return `WIP-${c}-${this.ymd}-${String(n).padStart(6, '0')}`; }
@@ -193,6 +194,7 @@ export class SerialHub {
     this.lots.unshift(lot); if (this.lots.length > 200) this.lots.pop();
     this.stats.lots++; this.stats.held += lotU.length + 1;
     this.ev({ type: 'hold', id: req.id, zone: req.zone, n: lotU.length + 1, ids: [s, ...lotU].map((u) => this.idOf(u)) });
+    this.q('q.sample.req', { key: req.id, zone: req.zone, product: req.product, serial: this.idOf(s) });   // 샘플 꺼냄 (구분 적재장 → 정밀검사)
     this.fosNote(req.zone, 'quality.hold', `샘플 ${req.id} 로트 출하 보류 ${lotU.length + 1}개 — ${PRODUCTS[req.product]?.label} (판정 전 출하 금지)`, { lot: req.id, n: lotU.length + 1 });
     return s;
   }
@@ -201,6 +203,7 @@ export class SerialHub {
   result(req, res) {
     const lot = this.lotOf(req.id), s = lot ? this.byId.get(lot.sample) : null; if (!lot || lot.result) return;
     lot.result = res; const T = this.tight[lot.zone] ?? 0;
+    this.q('q.sample', { key: lot.id, zone: lot.zone, product: lot.product, serial: lot.sample, result: res === 'ng' ? 'NG' : 'OK', lot: lot.members.length + 1 });
     if (res !== 'ng') {
       const n = this.releaseLot(lot); if (s && s.hold === 'sample') { s.hold = null; s.loc = s.loc === 'insp' ? 'fg' : s.loc; }
       lot.status = 'released'; lot.tEnd = this.now(); this.stats.released += n + (s ? 1 : 0);
@@ -240,6 +243,7 @@ export class SerialHub {
       this.stats.sorted += us.length; this.stats.released += ok;
       if (okIds.length) this.ev({ type: 'release', id: lot.id, zone: lot.zone, result: '선별검사 양품', ids: okIds });
       lot.sorted = { n: us.length, ok, bad, t: this.now() }; lot.status = 'done'; lot.tEnd = this.now();
+      this.q('q.lot', { key: lot.id, zone: lot.zone, product: lot.product, sorted: lot.sorted, extra: lot.extra.length, recall: lot.recall.length });
       this.fosNote(lot.zone, 'quality.disposition', `로트 ${lot.id} 선별검사 ${us.length}개 — 양품 ${ok} 해제 · 불량 ${bad}`, { lot: lot.id, ok, bad });
       const c = this.cases.find((x) => x.lot === lot.id); if (c) this.step(c, 'D3', `선별검사 완료 — ${us.length}개 중 양품 ${ok}개 출하 보류 해제 · 불량 ${bad}개 처분`);
     });
@@ -250,12 +254,15 @@ export class SerialHub {
     u.status = 'ng'; u.recovered = lot.id; u.hold = null; u.loc = 'quarantine';
     if (T) { T.stats.escaped--; T.stats.ng++; T.stats.recovered = (T.stats.recovered ?? 0) + 1; }
     this.ev({ type: 'quarantine', id: this.idOf(u), lot: lot.id });
+    this.q('q.disp', { key: this.idOf(u), lot: lot.id, zone: u.zone, product: u.product, d: 'scrap', why: '선별검사 — 유출 불량 회수 (격리)', sample: false });
   }
   // 처분 판정 (MRB): 재작업 → 재검 합격 시 시리얼 유지 · 폐기 → 시리얼 폐기(재사용 금지)
   dispose(u, lot, why) {
     const rw = this.r() < (REWORK_RATE[u.zone] ?? 0.5), how = { main: '분해·부품 교체', flex: '용접부 보수·재도포', adapt: '재가공 (치수 여유)' }[u.zone];
-    if (!rw) { this.scrap(u, `${why} — 재작업 불가`); lot && this.caseOf(lot)?.disp.push({ id: this.idOf(u), d: 'scrap' }); return; }
+    const isSample = lot?.sample === this.idOf(u);
+    if (!rw) { this.scrap(u, `${why} — 재작업 불가`, lot, isSample); lot && this.caseOf(lot)?.disp.push({ id: this.idOf(u), d: 'scrap' }); return; }
     u.hold = 'rework'; u.disp = { d: 'rework', why, t: this.now() }; this.stats.rework++;
+    this.q('q.disp', { key: this.idOf(u), lot: lot?.id ?? null, zone: u.zone, product: u.product, d: 'rework', why: `${why} — ${how}`, sample: isSample });
     lot && this.caseOf(lot)?.disp.push({ id: this.idOf(u), d: 'rework' });
     this.ev({ type: 'rework', id: this.idOf(u), lot: lot?.id });
     this.later(REWORK_T[this.mode], () => {
@@ -263,10 +270,13 @@ export class SerialHub {
       u.hold = null; u.disp.done = this.now(); if (u.loc === 'insp') u.loc = 'fg';
       if (u.zone === 'main' && u.status === 'escaped') { u.status = 'ok'; }   // 재작업으로 고쳤다 (정답 라벨 유지 — RCA 통계는 그대로)
       this.ev({ type: 'recheck', id: this.idOf(u), result: 'OK' });
+      this.q('q.disp', { key: this.idOf(u), lot: lot?.id ?? null, zone: u.zone, product: u.product, d: 'rework.done', why: `재작업(${how}) → 재검 합격 · 시리얼 유지`, sample: isSample });
       this.fosNote(u.zone, 'quality.disposition', `재작업 ${this.idOf(u)} (${how}) → 재검 합격 · 시리얼 유지 · 출하 보류 해제`, { id: this.idOf(u), d: 'rework' });
     });
   }
-  scrap(u, why) {
+  scrap(u, why, lot = null, isSample = false) {
+    const from = u.loc;   // 폐기 전 위치 — ERPNext 재고 출고 창고 (구분 적재장 · 정밀검사 샘플)
+    if (from === 'fg' || from === 'insp') this.q('q.disp', { key: this.idOf(u), lot: lot?.id ?? null, zone: u.zone, product: u.product, d: 'scrap', why, sample: isSample || from === 'insp' });
     this.dropStock(u); if (u.loc !== 'shipped') u.loc = 'scrap';
     u.status = 'scrap'; u.hold = null; u.disp = { d: 'scrap', why, t: this.now() }; this.stats.scrap++;
     this.ev({ type: 'decommission', id: this.idOf(u), why });
@@ -277,7 +287,7 @@ export class SerialHub {
 
   // ── 확장 Zone 간이 8D (D0~D8) ─────────────────
   caseOf(lot) { return this.cases.find((c) => c.lot === lot.id) ?? null; }
-  step(c, d, text) { c.steps.push({ t: this.now(), d, text }); c.stage = d; }
+  step(c, d, text) { c.steps.push({ t: this.now(), d, text }); c.stage = d; this.q('q.capa', { key: c.id, kind: 'zone', zone: c.zone, product: c.product, lot: c.lot, title: `${ZONE_KO[c.zone]} 샘플 ${c.sample} NG — 간이 8D`, status: c.status, stage: d, cause: c.cause?.name ?? null, steps: c.steps.map((x) => ({ d: x.d, text: x.text })) }); }
   openCase(lot, s) {
     const sim = this.sim, zone = lot.zone, P = PRODUCTS[lot.product];
     const c = { id: `ZQ-${this.ymd}-${String(++this.caseSeq).padStart(3, '0')}`, zone, product: lot.product, lot: lot.id, sample: lot.sample, t: this.now(), steps: [], stage: 'D0', status: 'open', cause: null, actions: [], disp: [] };
@@ -314,7 +324,7 @@ export class SerialHub {
   }
   closeCases(zone) {
     for (const c of this.cases) if (c.zone === zone && (c.status === 'open' || c.status === 'verify')) {
-      c.status = 'closed'; c.tEnd = this.now();
+      c.status = 'closed'; c.tEnd = this.now();   // (종결 단계 기록이 상태와 함께 ERPNext 품질 조치로 간다)
       this.step(c, 'D7', `재발 방지: 강화 샘플링 ${TIGHT_N}회 연속 OK — 관리계획에 "${c.actions[0] ?? '공정 보정'}" 등록`);
       this.step(c, 'D8', `종결 — 처분 ${c.disp.length}건 (재작업 ${c.disp.filter((x) => x.d === 'rework').length} · 폐기 ${c.disp.filter((x) => x.d === 'scrap').length})`);
     }

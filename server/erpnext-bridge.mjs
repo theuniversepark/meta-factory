@@ -14,7 +14,10 @@ import path from 'node:path';
 import { FAC_PRODUCTS, SUPPLIER, CUSTOMER } from '../js/fac.js';
 import { gs1Check } from '../js/serial.js';
 
-export const WH_NAME = { rackRaw: '물류선반-원자재', rackParts: '물류선반-부품', rackX: '확장선반', feeder: '정밀조립-투입구', cells: '정밀조립-셀', feederA1: '유연생산-투입구', feederA2: '적응가공-투입구', output: '구분적재장' };
+export const WH_NAME = { rackRaw: '물류선반-원자재', rackParts: '물류선반-부품', rackX: '확장선반', feeder: '정밀조립-투입구', cells: '정밀조립-셀', feederA1: '유연생산-투입구', feederA2: '적응가공-투입구', output: '구분적재장', qis: '정밀검사-샘플' };
+// 품질 (3단계): 검사 항목 · 품질 절차 (Non Conformance · Quality Action은 절차를 반드시 지정)
+export const Q_PARAM = 'AI 판정 (정밀검사)';
+export const Q_PROC = { sample: '정밀검사 샘플링 · 봉쇄 (ISO 2859-1)', mrb: '부적합품 처리 · MRB (ISO 9001 8.7)', d8: '8D 문제 해결 (IATF 16949 10.2.3)' };
 // 완제품 BOM (원자재 1 + 부품 키트 1 — 설계 가정) · 원천 창고
 export const BOMS = {
   doortrim: [['raw', 'feeder'], ['parts', 'cells']], eaxle: [['raw', 'feeder'], ['parts', 'cells']],
@@ -22,7 +25,7 @@ export const BOMS = {
   hblock: [['adapt:raw', 'feederA2'], ['adapt:parts', 'feederA2']], rcover: [['adapt:raw', 'feederA2'], ['adapt:parts', 'feederA2']],
 };
 const WO_PRODUCTS = ['doortrim', 'eaxle'];   // 공장 오더(정밀조립 혼류)가 있는 제품
-const REF_DOCTYPES = ['Purchase Order', 'Purchase Receipt', 'Stock Entry', 'Delivery Note', 'Work Order', 'Asset', 'Asset Repair', 'Asset Maintenance Log'];
+const REF_DOCTYPES = ['Purchase Order', 'Purchase Receipt', 'Stock Entry', 'Delivery Note', 'Work Order', 'Asset', 'Asset Repair', 'Asset Maintenance Log', 'Quality Inspection', 'Non Conformance', 'Quality Action'];
 // SSCC EPC (urn:epc:id:sscc:업체코드.확장자리+일련) → 18자리 SSCC (확장 1 + 업체코드 + 일련 + 검사 숫자)
 const ssccOfEpc = (epc) => { const [cp, rest] = String(epc).split(':').pop().split('.'); const b = `${rest[0]}${cp}${rest.slice(1)}`; return b + gs1Check(b); };
 const rackOf = (p) => (p === 'raw' ? 'rackRaw' : p === 'parts' ? 'rackParts' : 'rackX');
@@ -117,6 +120,10 @@ export function makeErpBridge({ dir, fetchImpl = globalThis.fetch, interval = 15
         const tech = users[0] ?? (await ins('User', { email: 'maint@meta-factory.example', first_name: '메타팩토리 정비', send_welcome_email: 0, user_type: 'System User', roles: [{ role: 'Maintenance Manager' }, { role: 'Maintenance User' }] })).name;
         st.prepared.tech = tech;
         await ensure('Asset Maintenance Team', [['name', '=', '메타팩토리 정비팀']], { maintenance_team_name: '메타팩토리 정비팀', maintenance_manager: tech, company: CO(), maintenance_team_members: [{ team_member: tech, maintenance_role: 'Maintenance Manager' }] });
+        S('품질 — 검사 항목 · 품질 절차');
+        await ensure('Quality Inspection Parameter', [['name', '=', Q_PARAM]], { parameter: Q_PARAM, description: '정밀검사Zone AI 판정 (OK · 판정 불확실 → O-INSPECT 재측정 · NG)' });
+        const PROC_STEPS = { sample: ['샘플 요청 즉시 로트 출하 보류', '샘플 → 정밀검사 (판정)', 'OK → 보류 해제 · NG → 봉쇄(±10분) · 유출 의심 회수 대상', '샘플링 강화 (N/2, 3회 연속 OK면 복귀)'], mrb: ['식별 · 격리', '처분 판정 (재작업 · 폐기 · 특채)', '재작업 → 재검 합격 시 시리얼 유지 · 폐기 → 시리얼 폐기 기록', '처분 결과 기록'], d8: ['D0 NG 판정·격리', 'D1 팀 구성', 'D2 문제 기술', 'D3 봉쇄', 'D4 근본 원인', 'D5 대책', 'D6 시행·검증', 'D7 재발 방지', 'D8 종결'] };
+        for (const [k, n] of Object.entries(Q_PROC)) await ensure('Quality Procedure', [['name', '=', n]], { quality_procedure_name: n, process_owner: tech, processes: PROC_STEPS[k].map((x) => ({ process_description: x })) });
         st.prepared.at = new Date().toISOString(); saveSt();
         rt.prep = { ...rt.prep, running: false, step: '완료', ok: true };
       } catch (e) { rt.prep = { ...rt.prep, running: false, ok: false, error: e.message }; }
@@ -213,6 +220,62 @@ export function makeErpBridge({ dir, fetchImpl = globalThis.fetch, interval = 15
       if (log) { const d = await upd('Asset Maintenance Log', log, { maintenance_status: 'Completed', completion_date: now().slice(0, 10), actions_performed: `정비 완료 (${Math.round((e.duration ?? 0) * 60)}분)` }); await call('frappe.client.submit', { doc: { ...d, doctype: 'Asset Maintenance Log' } }); note('Asset Maintenance Log', log, r, `예지·예방 정비 완료 ${e.key}`); }
     },
   };
+  // ── 품질 (3단계) ─────────────────
+  const today = () => now().slice(0, 10);
+  const PN = (p) => FAC_PRODUCTS[p]?.name ?? p;
+  const move1 = (r, p, from, to, what) => submitIns('Stock Entry', { stock_entry_type: 'Material Transfer', company: CO(), mf_ref: r, items: [{ item_code: code(p), qty: 1, s_warehouse: W(from), t_warehouse: W(to) }] }, what);
+  // 품질 조치(Quality Action) 해결 항목 표 덮어쓰기 · 한 줄 더하기
+  async function qaUpsert(r, { procedure, rows, status, append = false, what }) {
+    const name = await byRef('Quality Action', r);
+    if (!name) { const d = await ins('Quality Action', { corrective_preventive: 'Corrective', procedure, status, date: today(), mf_ref: r, resolutions: rows }); note('Quality Action', d.name, r, what); return d.name; }
+    const cur = append ? (await api('GET', `/api/resource/Quality%20Action/${encodeURIComponent(name)}`)).data.resolutions.map(({ name: n, problem, resolution, status: s2 }) => ({ name: n, problem, resolution, status: s2 })) : [];
+    const all = [...cur, ...rows];
+    await upd('Quality Action', name, { status: status ?? (all.some((x) => x.status === 'Open') ? 'Open' : 'Completed'), resolutions: all }); return name;
+  }
+  const ncResolve = async (r, text) => { const n = await byRef('Non Conformance', r); if (n) await upd('Non Conformance', n, { status: 'Resolved', ...(text ? { corrective_action: text } : {}) }); return n; };
+  Object.assign(H, {
+    'q.sample.req': async (run, e) => { const r = ref(run, `${e.key}:out`); if (!(await byRef('Stock Entry', r))) await move1(r, e.product, 'output', 'qis', `정밀검사 샘플 ${e.key} ${e.serial} → 정밀검사`); },
+    'q.sample': async (run, e) => {
+      const r = ref(run, e.key); let se = await byRef('Stock Entry', ref(run, `${e.key}:out`));
+      if (!se) se = (await move1(ref(run, `${e.key}:out`), e.product, 'output', 'qis', `정밀검사 샘플 ${e.key} ${e.serial} → 정밀검사`)).name;
+      if (!(await byRef('Quality Inspection', r))) await submitIns('Quality Inspection', { company: CO(), report_date: today(), inspection_type: 'In Process', reference_type: 'Stock Entry', reference_name: se, item_code: code(e.product), sample_size: 1, inspected_by: st.prepared?.tech, status: e.result === 'NG' ? 'Rejected' : 'Accepted', manual_inspection: 1, remarks: `정밀검사Zone 샘플 ${e.key} · 시리얼 ${e.serial} · 로트 ${e.lot}개`, mf_ref: r, readings: [{ specification: Q_PARAM, status: e.result === 'NG' ? 'Rejected' : 'Accepted', manual_inspection: 1, value: e.result, reading_value: e.result }] }, `품질검사 ${e.key} ${PN(e.product)} ${e.result}`);
+      if (e.result !== 'NG') { const b = ref(run, `${e.key}:back`); if (!(await byRef('Stock Entry', b))) await move1(b, e.product, 'qis', 'output', `정밀검사 샘플 ${e.key} OK → 구분 적재장`); return; }
+      if (!(await byRef('Non Conformance', r))) { const d = await ins('Non Conformance', { subject: `정밀검사 샘플 ${e.key} NG — ${PN(e.product)} ${e.serial}`.slice(0, 140), procedure: Q_PROC.sample, process_owner: st.prepared?.tech, status: 'Open', details: `<p>샘플 ${e.serial} AI 판정 NG · 로트 ${e.lot}개 출하 보류 · 같은 시간대 ±10분 봉쇄 · 처분 판정(MRB) 대기</p>`, mf_ref: r }); note('Non Conformance', d.name, r, `부적합 ${e.key} 샘플 NG`); }
+      await qaUpsert(ref(run, `${e.key}:mrb`), { procedure: Q_PROC.mrb, status: 'Open', what: `처분 판정(MRB) ${e.key}`, rows: [{ problem: `샘플 ${e.key} NG — 로트 봉쇄`, resolution: `로트 ${e.lot}개 출하 보류 · 처분 판정 대기`, status: 'Completed' }] });
+    },
+    'q.disp': async (run, e) => {
+      const r = ref(run, `${e.key}:${e.d}`);
+      if (e.d === 'scrap' && !(await byRef('Stock Entry', r))) await submitIns('Stock Entry', { stock_entry_type: 'Material Issue', company: CO(), mf_ref: r, remarks: e.why, items: [{ item_code: code(e.product), qty: 1, s_warehouse: W(e.sample ? 'qis' : 'output') }] }, `폐기 출고 ${e.key} — ${e.why}`);
+      if (e.d === 'rework.done' && e.sample) { const b = ref(run, `${e.key}:back`); if (!(await byRef('Stock Entry', b))) await move1(b, e.product, 'qis', 'output', `재작업 ${e.key} 재검 합격 → 구분 적재장`); }
+      if (!e.lot) return;
+      const row = { problem: `${e.key} 처분`, resolution: e.d === 'scrap' ? `폐기 — ${e.why}` : e.d === 'rework' ? `재작업 — ${e.why}` : e.why, status: e.d === 'rework' ? 'Open' : 'Completed' };
+      if (e.d === 'rework.done') {   // 재작업 줄을 완료로
+        const name = await byRef('Quality Action', ref(run, `${e.lot}:mrb`)); if (!name) return;
+        const rows = (await api('GET', `/api/resource/Quality%20Action/${encodeURIComponent(name)}`)).data.resolutions.map(({ name: n, problem, resolution, status: s2 }) => (problem === `${e.key} 처분` ? { name: n, problem, resolution: `${resolution}<br>${e.why}`, status: 'Completed' } : { name: n, problem, resolution, status: s2 }));
+        await upd('Quality Action', name, { resolutions: rows, status: rows.some((x) => x.status === 'Open') ? 'Open' : 'Completed' }); return;
+      }
+      await qaUpsert(ref(run, `${e.lot}:mrb`), { procedure: Q_PROC.mrb, append: true, what: `처분 판정(MRB) ${e.lot}`, rows: [row] });
+    },
+    'q.lot': async (run, e) => {
+      const S = e.sorted ?? {}, text = `<p>선별검사 ${S.n ?? 0}개 → 양품 ${S.ok ?? 0} 보류 해제 · 불량 ${S.bad ?? 0} 처분 · ±10분 추가 봉쇄 ${e.extra} · 유출 의심(회수 대상) ${e.recall}</p>`;
+      await ncResolve(ref(run, e.key), text);
+      await qaUpsert(ref(run, `${e.key}:mrb`), { procedure: Q_PROC.mrb, append: true, what: `처분 판정(MRB) ${e.key}`, rows: [{ problem: `로트 ${e.key} 선별검사(전수)`, resolution: text, status: 'Completed' }] });
+    },
+    'q.ng': async (run, e) => {
+      const r = ref(run, e.key); if (await byRef('Non Conformance', r)) return;
+      const d = await ins('Non Conformance', { subject: `${e.station} 전수 검사 NG ${e.key} — ${PN(e.product)} ${e.serial}`.slice(0, 140), procedure: Q_PROC.d8, process_owner: st.prepared?.tech, status: 'Open', details: `<p>${e.mode} (토크 ${e.torque ?? '-'} N·m · 각도 ${e.angle ?? '-'}°) · 시리얼 없이 WIP ID로 배출함 격리 · 8D 진행</p>`, mf_ref: r });
+      note('Non Conformance', d.name, r, `부적합 ${e.key} 체결 NG`);
+    },
+    'q.capa': async (run, e) => {
+      const done = e.status === 'closed' || e.status === 'held';
+      const LANE = { field: '현장', zone: 'Zone 오케스트레이터', hq: '공장 오케스트레이터', policy: '운영 정책' };
+      const rows = (e.steps ?? []).map((x) => ({ problem: `${x.d}${x.lane ? ` · ${LANE[x.lane] ?? x.lane}` : ''}`, resolution: String(x.text ?? '').slice(0, 2000), status: 'Completed' }));
+      // ERPNext는 해결 항목이 모두 완료면 품질 조치를 Completed로 바꾼다 — 진행 중인 8D는 현재 단계를 미완료 항목으로 남긴다
+      if (!done) rows.push({ problem: `진행 중 — ${e.stage ?? ''}`, resolution: e.status === 'approval' ? '정책 반영 결정 대기 (사람 결정 — 공장 오케스트레이터)' : e.status === 'verify' ? '효과 검증 중' : '다음 단계 진행 중', status: 'Open' });
+      await qaUpsert(ref(run, e.key), { procedure: Q_PROC.d8, status: done ? 'Completed' : 'Open', what: `8D ${e.key} ${e.title ?? ''}`.slice(0, 120), rows });
+      if (done) { const text = `<p>${e.key} ${e.status === 'held' ? '보류 종결' : '종결'} — 원인 ${e.cause ?? '-'}</p>`; for (const c of e.kind === 'main' ? e.cases ?? [] : [e.lot]) if (c) await ncResolve(ref(run, c), text); }
+    },
+  });
   const now = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 19).replace('T', ' ');   // ERPNext 시각 (Asia/Seoul)
   const equipName = {};   // 설비 일련번호 → 이름 (master)
   async function assetOf(serial, run) {

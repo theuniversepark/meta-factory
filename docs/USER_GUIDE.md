@@ -1,6 +1,6 @@
 # 피지컬AI 실증 메타팩토리 사용자 가이드
 
-2026-10-22 · 대상 버전 1.0.20 (맥 앱 Meta-Factory.app · 윈도우 앱 Meta-Factory.exe · `npm start` 브라우저 실행 · 웹 버전 · claude.ai 공유 아티팩트) · 작성 Jin Park
+2026-10-22 · 대상 버전 1.0.21 (맥 앱 Meta-Factory.app · 윈도우 앱 Meta-Factory.exe · `npm start` 브라우저 실행 · 웹 버전 · claude.ai 공유 아티팩트) · 작성 Jin Park
 
 > 이 문서는 메타팩토리 시뮬레이터를 처음 쓰는 사람이 설치부터 화면 조작, 운영 시나리오 실습, 데이터 내려받기까지 혼자 따라 할 수 있도록 정리한 사용 설명서임. 화면 문구는 프로그램에 표시되는 그대로 「」로 표기함. 그림은 1920×1080 창에서 공장 시간 약 15분을 진행한 뒤 캡처한 화면임.
 
@@ -560,7 +560,7 @@ npm start          # → http://localhost:8780  (포트 변경: PORT=9000 npm st
 
 **ERPNext 연동 (선택 · 맥 앱·윈도우 앱·npm start)**
 
-FAC 기록과 공장 오더를 오픈소스 ERP인 ERPNext(v16, GPL-3.0 — 앱은 REST로 호출만 함)에 실제 전표로 남김. 웹 버전·공유 아티팩트에서는 안내만 표시됨.
+FAC 기록 · 공장 오더 · 품질 기록(정밀검사 판정 · 부적합 · 처분 · 8D)을 오픈소스 ERP인 ERPNext(v16, GPL-3.0 — 앱은 REST로 호출만 함)에 실제 전표로 남김. 웹 버전·공유 아티팩트에서는 안내만 표시됨.
 
 | FACOS 기록 | ERPNext 문서 |
 |---|---|
@@ -569,10 +569,13 @@ FAC 기록과 공장 오더를 오픈소스 ERP인 ERPNext(v16, GPL-3.0 — 앱�
 | 출고 | Delivery Note (선택: 트럭 · 팔레트 SSCC · 시리얼 목록) |
 | 공장 오더 (정밀조립 혼류 양품 100) | Work Order — 도어트림·e-axle 제품별, 생산 입고를 열린 작업지시에 배분, 오더 종료 때 덜 만든 작업지시는 중지 |
 | 정비요청 | 설비를 Asset으로 등록(처음 한 번) → 긴급 = Asset Repair · 예방 = Asset Maintenance Log, 완료 단계 반영 |
+| 정밀검사 샘플 꺼냄 · 판정 | 구분 적재장 → 「정밀검사-샘플」 창고 이동(Stock Entry) + Quality Inspection(OK = Accepted · NG = Rejected, 그 이동 전표에 연결) · OK면 적재장으로 되돌림 |
+| 샘플 NG · 처분 | Non Conformance(정밀검사 샘플링 절차, 로트 선별검사 끝나면 Resolved) + 처분 판정(MRB) Quality Action — 재작업·폐기 항목, 폐기는 재고 출고(Material Issue) |
+| 체결 전수 검사 NG · 8D | Non Conformance(8D 절차) + Quality Action(D0~D8 단계, 8D 종결 때 Completed · 그 사례 부적합 Resolved) — 정밀조립 8D와 확장 Zone 간이 8D 모두 |
 
 1. **ERPNext 준비 (한 번)**: 사내·클라우드 ERPNext 주소를 쓰거나, 시연용으로 Docker가 있는 PC에서 공식 체험 구성(github.com/frappe/frappe_docker의 `pwd.yml`, 메모리 약 2~4GB)을 실행함.
 2. **API 키 발급 (한 번)**: ERPNext 사용자 설정 → API Access → Generate Keys (비밀 키는 발급할 때 한 번만 보임).
-3. **「🏭 ERPNext 연동」 탭**: 주소 · API 키 · 비밀 키(회사는 선택) → 「연결 시험」 → 「ERPNext 준비」(초기 설정 · 품목 · 창고 · 거래처 · BOM · 작업장 · 설비 자산 분류 · 정비팀 · mf_ref 필드를 자동으로 만들고, 이미 있으면 건너뜀) → 「연동 켜기」 체크 → 「저장」.
+3. **「🏭 ERPNext 연동」 탭**: 주소 · API 키 · 비밀 키(회사는 선택) → 「연결 시험」 → 「ERPNext 준비」(초기 설정 · 품목 · 창고 · 거래처 · BOM · 작업장 · 설비 자산 분류 · 정비팀 · 품질 절차 3종(샘플링·봉쇄 · 부적합품 처리 MRB · 8D) · 검사 항목 · mf_ref 필드를 자동으로 만들고, 이미 있으면 건너뜀) → 「연동 켜기」 체크 → 「저장」.
 4. 이후 전표가 자동으로 쌓이며, 탭의 문서 번호를 누르면 ERPNext 화면이 열림. 작업지시 표에서 오더별 계획·생산 수량을 확인함.
 
 - **중복 없음**: 문서마다 mf_ref(운전 ID:FAC 번호)를 남겨 다시 보내도 한 번만 만들어짐.

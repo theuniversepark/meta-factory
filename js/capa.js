@@ -53,7 +53,11 @@ export class CapaManager {
   get gap() { return GAP[this.sim.mode.key] ?? 8; }
   get open() { return this.list.filter((k) => k.status !== 'closed' && k.status !== 'held'); }
   get pending() { return this.list.filter((k) => k.status === 'approval'); }
-  step(k, lane, d, text, extra = {}) { k.steps.push({ t: this.sim.time, lane, d, text, ...extra }); }
+  step(k, lane, d, text, extra = {}) {
+    k.steps.push({ t: this.sim.time, lane, d, text, ...extra });
+    // 8D 진행 → (앱) ERPNext 품질 조치(Quality Action) — 단계마다 전체 기록을 보내 덮어쓴다 (server/erpnext-bridge.mjs)
+    this.sim.fac?.qual?.('q.capa', { key: k.id, kind: 'main', zone: 'main', title: k.title, status: k.status, stage: k.stage, cause: k.cause?.label ?? null, cases: [...k.cases], steps: k.steps.map((x) => ({ d: x.d, lane: x.lane, text: x.text })) });
+  }
   later(dt, fn) { this.sim.orch.later(dt, fn); }
 
   // 불량 사례 하나 (trace.js openCase)
@@ -164,7 +168,7 @@ export class CapaManager {
     const T = this.sim.trace, out = { ok: 0, caught: 0, serials: [] };
     for (const r of T?.recent ?? []) {
       if (r.hold !== `containment:${k.id}`) continue;
-      if (r.status === 'escaped') { this.sim.serials?.dropStock(r); if (r.loc === 'fg') r.loc = 'quarantine'; r.status = 'ng'; r.recovered = k.id; r.hold = null; T.stats.escaped--; T.stats.ng++; T.stats.recovered = (T.stats.recovered ?? 0) + 1; out.caught++; out.serials.push(r.serial); }
+      if (r.status === 'escaped') { if (r.loc === 'fg') this.sim.fac?.qual?.('q.disp', { key: r.serial ?? r.wip, lot: null, zone: 'main', product: r.product, d: 'scrap', why: `${k.id} 봉쇄 재검 — 유출 불량 회수 (격리)`, sample: false }); this.sim.serials?.dropStock(r); if (r.loc === 'fg') r.loc = 'quarantine'; r.status = 'ng'; r.recovered = k.id; r.hold = null; T.stats.escaped--; T.stats.ng++; T.stats.recovered = (T.stats.recovered ?? 0) + 1; out.caught++; out.serials.push(r.serial); }
       else if (r.status !== 'wip') { r.hold = null; out.ok++; }
     }
     return out;
