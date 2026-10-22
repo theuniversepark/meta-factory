@@ -57,6 +57,7 @@
       </div>
       <div class="clock" id="clock">08:00:00</div>
       <button id="btnGuide" class="icon" title="사용자 가이드 (PDF) 내려받기">📘</button>
+      <button id="btnApps" class="icon" hidden title="맥·윈도우 앱 내려받기 (웹 버전에서만)">⬇</button>
       <button id="btnSettings" class="icon app-only" title="Agent API 키 설정 (⌘,)">⚙</button>
     </div>
   </header>
@@ -249,6 +250,21 @@
       <div class="modal-h"><h2>운영자 지시 게이트 <small id="gateSub"></small></h2><button data-close-gate>✕</button></div>
       <p class="g-intro">대화 기반으로 입력한 지시는 조치마다 <b>해석 → 대상 확인 → 안전 규칙 → 실행 가능성 → 영향 평가</b>를 거쳐 판정됩니다. 통과하면 수행(명령 전송 → 셀 수신 확인 → 완료), 한 단계라도 막히면 거절하고 사유와 대안을 돌려줍니다.</p>
       <div id="gateBody"></div>
+    </div>
+  </div>
+  <!-- 맥·윈도우 앱 내려받기: 웹 버전(GitHub Pages · claude.ai 공유 아티팩트)에서만 보인다 — 맥·윈도우 앱과 npm start에는 없음 (main.js) -->
+  <div class="modal hidden" id="appsModal">
+    <div class="modal-card small apps-card">
+      <div class="modal-h"><h2>⬇ 앱 내려받기 <small>전체 기능(서버 저장 · MQTT · 녹화 MP4 · 공정 설계 Agent 등)은 앱에서 씁니다. 최신 릴리스 파일을 GitHub에서 내려받습니다.</small></h2><button id="closeApps">✕</button></div>
+      <div class="apps-row">
+        <a class="apps-dl" href="https://github.com/theuniversepark/meta-factory/releases/latest/download/Meta-Factory-darwin-arm64.zip" target="_blank" rel="noopener"><b>🍎 맥 앱</b><small>Apple Silicon(M 시리즈) Mac · Meta-Factory-darwin-arm64.zip</small></a>
+        <a class="apps-dl" href="https://github.com/theuniversepark/meta-factory/releases/latest/download/Meta-Factory-win32-x64.zip" target="_blank" rel="noopener"><b>🪟 윈도우 앱</b><small>64비트 윈도우 10·11 · Meta-Factory-win32-x64.zip</small></a>
+      </div>
+      <ul class="apps-note">
+        <li><b>맥</b>: 압축을 풀어 Meta-Factory.app을 응용 프로그램 폴더로 옮김 → 처음 한 번 <b>우클릭 → 열기</b>. 열리지 않으면 시스템 설정 › 개인정보 보호 및 보안에서 「그래도 열기」.</li>
+        <li><b>윈도우</b>: 압축을 풀고 폴더째 원하는 곳에 둠 → Meta-Factory.exe 실행 → 「Windows의 PC 보호」 창이 뜨면 <b>추가 정보 → 실행</b>.</li>
+        <li>코드 서명 인증서가 없는 배포본이라 처음 실행할 때 위 확인이 필요함. 릴리스 노트·이전 버전: <a href="https://github.com/theuniversepark/meta-factory/releases" target="_blank" rel="noopener">GitHub 릴리스</a></li>
+      </ul>
     </div>
   </div>
   <div class="modal hidden" id="settings">

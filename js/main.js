@@ -1605,6 +1605,17 @@ if (bridge?.isApp) {
     } finally { btn.disabled = false; }
   });
 }
+// ── 맥·윈도우 앱 내려받기 (상단 ⬇) — 웹 버전(GitHub Pages · claude.ai 공유 아티팩트)에서만 ─────────────────
+// 맥·윈도우 앱과 npm start(로컬 서버)에는 보이지 않는다. 링크는 GitHub 최신 릴리스 파일(latest/download)이라 릴리스마다 두 zip을 함께 올린다
+{
+  const web = !bridge?.isApp && !!(window.METAFACTORY_SHARED || window.METAFACTORY_NO_SERVER);
+  const btn = document.getElementById('btnApps'), modal = document.getElementById('appsModal');
+  btn.hidden = !web;
+  if (web) {
+    btn.addEventListener('click', () => modal.classList.remove('hidden'));
+    document.getElementById('closeApps').addEventListener('click', () => modal.classList.add('hidden'));
+  } else modal.remove();
+}
 // ── VLA 데이터·학습 파이프라인 창 ─────────────────
 const vlaModal = document.getElementById('vlaModal'), vlaBody = document.getElementById('vlaBody');
 let vlaDir = null;

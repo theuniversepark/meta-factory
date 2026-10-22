@@ -1145,3 +1145,13 @@ details.zone-agent:not([open]) { padding-bottom: 7px; } details.zone-agent:not([
   .detail.machine .mm > h4, .detail.machine .mm > .mm-dec, .detail.machine .mm > .mm-tool { order: 0; }
   .detail.machine .mm > .rb-save { order: 1; margin: 2px 0 8px; padding: 0 0 8px; border-top: 0; border-bottom: 1px solid var(--line); }
 }
+
+/* 웹 버전 전용 앱 내려받기 창 */
+.apps-card .apps-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 4px 0 12px; }
+.apps-dl { display: flex; flex-direction: column; gap: 4px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, 0.04); color: var(--ink); text-decoration: none; }
+.apps-dl:hover { border-color: var(--accent); background: rgba(80, 160, 255, 0.08); }
+.apps-dl b { font-size: 15px; }
+.apps-dl small { color: var(--ink2); font-size: 11.5px; word-break: break-all; }
+.apps-note { margin: 0; padding-left: 18px; font-size: 12px; color: var(--ink2); display: grid; gap: 5px; }
+.apps-note a { color: var(--accent); }
+@media (max-width: 560px) { .apps-card .apps-row { grid-template-columns: 1fr; } }
