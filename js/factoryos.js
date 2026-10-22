@@ -421,7 +421,7 @@ export class FactoryOS {
 
   // ── 1초마다 ─────────────────
   update(dt) {
-    this.acc += dt; if (this.acc < 1) return; this.acc = 0;
+    this.acc += dt; if (this.acc < 1 - 1e-9) return; this.acc = 0;   // 0.1초 × 10 = 0.9999… (여유 없이 비교하면 1.1초마다)
     const s = this.sim;
     this.bus.update();
     if (s.xzones && !this.flex.autoIssued && s.time > 600) { this.flex.autoIssued = true; this.flex.changeoverOrder(undefined, '생산·계획 PA Agent'); }   // 유연생산 전환 오더 (앱 화면 흐름이 있을 때 · 10분 뒤 1회 — 더 보내려면 Factory OS 탭 버튼)

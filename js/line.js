@@ -175,6 +175,9 @@ export function effCycle(s, modeKey = 'smart') {
 const TYPE_ALIASES = { 분류: 'sort', 압입: 'pressfit', 스크류: 'screw', 나사: 'screw', 체결: 'fasten', 가공: 'cnc', 절삭: 'cnc', 프레스: 'press', 레이저: 'laser', 용접: 'weld', 조립: 'assembly', 도장: 'paint', 비전: 'vision', 검사: 'vision', 시험: 'test', 포장: 'pack' };
 
 // 입력(사용자 편집·Claude 응답)을 검증·보정한다. errors가 있으면 적용 불가.
+// 이름·하는 일은 화면에 그대로 나가는 글자 — 사람이 쓰거나 Agent가 첨부 문서를 읽고 정한 값이라 태그를 만들 수 있는 글자(< > " `)는 뺀다
+export const plainText = (v, n) => String(v ?? '').replace(/[<>"`]/g, '').trim().slice(0, n);
+
 export function normalizeLine(raw) {
   const errors = [], warnings = [];
   const src = Array.isArray(raw?.stations) ? raw.stations : [];
@@ -198,8 +201,8 @@ export function normalizeLine(raw) {
     let cycle = Number(s.cycle ?? s.cycle_s);
     if (!(cycle > 0)) cycle = T.cycle;
     if (cycle < 2 || cycle > 40) { warnings.push(`${i + 1}번 공정: 사이클 ${cycle}초 → 2~40초로 조정`); cycle = Math.min(40, Math.max(2, cycle)); }
-    const name = String(s.name ?? '').trim().slice(0, 20) || T.label;
-    const task = String(s.task ?? '').trim().slice(0, 60) || T.task;
+    const name = plainText(s.name, 20) || T.label;
+    const task = plainText(s.task, 60) || T.task;
     let id = String(s.id ?? '').toUpperCase().replace(/[^A-Z0-9_]/g, '').slice(0, 10) || type.toUpperCase();
     if (['SRC', 'SINK'].includes(id)) id = type.toUpperCase();
     let uid = id, k = 2;
@@ -209,7 +212,7 @@ export function normalizeLine(raw) {
   });
   if (!stations.some((s) => STATION_TYPES[s.type].effect === 'inspect' || STATION_TYPES[s.type].verify)) warnings.push('검사 공정이 없어 불량이 모두 출하됩니다.');
   let layout = String(raw?.layout ?? 'straight').toLowerCase();
-  const out = { name: String(raw?.name ?? '').trim().slice(0, 40) || '사용자 정의 라인', layout, stations };
+  const out = { name: plainText(raw?.name, 40) || '사용자 정의 라인', layout, stations };
   if (layout === 'zone') {
     // 셀은 바닥에 고정 배치되어 있으므로 셀 구성·순서·유형은 바꿀 수 없고 레시피만 바꾼다
     out.mix = ZONE_MIXES[raw?.mix] ? raw.mix : '1:1';

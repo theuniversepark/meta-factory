@@ -14,6 +14,7 @@ import { makeRcaApi } from './rca-api.mjs';
 import { makeEpcisApi } from './epcis-api.mjs';
 import { makeErpBridge } from './erpnext-bridge.mjs';
 import { makeMonitorApi } from './monitor-api.mjs';
+import { guard, isLoopbackHost } from './http-guard.mjs';
 import { fork } from 'node:child_process';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -401,7 +402,9 @@ export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
     child.on('exit', (code) => { sensor.port = null; sensor.error ??= `센서 서버 종료 (코드 ${code})`; });
     process.on('exit', () => child.kill());
   } catch (e) { sensor.error = e.message; }
+  const loopback = isLoopbackHost(host);   // 루프백에 열면 Host도 루프백 이름만 (DNS 리바인딩 차단)
   const server = http.createServer(async (req, res) => {
+    if (guard(req, res, { loopback })) return;   // 다른 웹페이지가 보낸 요청 거부 (server/http-guard.mjs)
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname === '/api/status') return send(res, 200, { llm: hasApiKey(), model: MODEL, episodes: true, aios: true, cctv: true, robotcam: true, dataDir: DATA_DIR(), ffmpeg: ffmpegInfo() });
     if (url.pathname === '/api/cctv' && req.method === 'POST') return saveCctv(req, res, url);

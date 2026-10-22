@@ -7,7 +7,7 @@
 // 4) 트윈 검증: 같은 라인·조건의 디지털트윈 시뮬레이션 두 벌(현재 정책 vs 후보 정책)을 실제로 돌려 생산량·에너지를 비교한다.
 // 5) 배포: 오케스트레이터에 섀도 모드(추천만) → 적용 → 실측 효과 확인, 나빠지면 자동 롤백.
 // 학습은 규칙 기반 정책 탐색이고(신경망 아님), 트윈 검증과 배포 후 효과는 시뮬레이션에서 실제로 측정한 값이다.
-import { Simulation } from './sim.js';
+import { Simulation, mulberry32 } from './sim.js';
 import { FactoryAgent } from './agent.js';
 
 export const SAMPLE_S = 10;            // 샘플 주기 (시뮬레이션 초)
@@ -40,6 +40,7 @@ const r1 = (v) => Math.round(v * 10) / 10, r3 = (v) => Math.round(v * 1000) / 10
 export class AIOSPipeline {
   constructor(sim) {
     this.sim = sim; sim.aios = this;
+    this.rng = mulberry32(((sim.seed ?? 1) * 2654435761 + 7) >>> 0);   // 학습 곡선 흔들림 — 생산 흐름 난수(sim.rand)를 쓰면 학습이 시작된 뒤 고장·불량 결과가 바뀐다
     this.on = sim.mode.key === 'dark' && !sim.twin;
     this.policy = Object.fromEntries(HEADS.map((h) => [h.key, h.base]));
     if (this.on) this.apply(this.policy);   // 트윈은 검증할 정책을 따로 넣는다
@@ -176,7 +177,7 @@ export class AIOSPipeline {
     const j = this.job;
     if (j.phase === 'train') {
       const ep = Math.min(j.epochs, Math.floor((s.time - j.t0) / 5));
-      while (j.loss.length < ep) { const e = j.loss.length + 1; j.loss.push(r3(0.08 + 0.6 * Math.exp(-e / (2.2 + j.samples / 200)) + (s.rand() - 0.5) * 0.01)); }
+      while (j.loss.length < ep) { const e = j.loss.length + 1; j.loss.push(r3(0.08 + 0.6 * Math.exp(-e / (2.2 + j.samples / 200)) + (this.rng() - 0.5) * 0.01)); }
       j.epoch = ep;
       if (ep >= j.epochs) {
         if (!j.why.length) { j.phase = 'rejected'; j.reason = '데이터에서 개선할 정책을 찾지 못함 (현재 정책 유지)'; this.finishReject(j); return; }

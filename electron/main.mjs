@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startServer, setApiKey, hasApiKey } from '../server/app-server.mjs';
+import { setSecretCodec } from '../server/secrets.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP_NAME = 'Meta-Factory';
@@ -137,7 +138,9 @@ async function createWindow() {
   win.once('ready-to-show', () => win.show());
   // 내장 서버 밖으로의 이동은 막고, 외부 링크는 기본 브라우저로 연다.
   win.webContents.on('will-navigate', (e, url) => {
-    if (!url.startsWith(origin)) { e.preventDefault(); if (/^https?:/.test(url)) shell.openExternal(url); }
+    // 문자열 앞부분이 아니라 출처로 비교 — http://127.0.0.1:포트@다른호스트/ 처럼 앞이 같아도 다른 호스트로 가는 주소가 있다
+    let same = false; try { same = new URL(url).origin === origin; } catch { /* 잘못된 주소 */ }
+    if (!same) { e.preventDefault(); if (/^https?:/.test(url)) shell.openExternal(url); }
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url);
@@ -164,6 +167,8 @@ app.whenReady().then(async () => {
   });
   try {
     process.env.METAFACTORY_DATA_DIR ??= path.join(app.getPath('userData'), 'data');   // VLA 에피소드 저장 위치
+    // 외부 연동 키(EPCIS 전송 · ERPNext)도 API 키와 같은 safeStorage로 암호화해 설정 파일에 둔다 (server/secrets.mjs)
+    if (safeStorage.isEncryptionAvailable()) setSecretCodec({ encrypt: (t) => safeStorage.encryptString(t).toString('base64'), decrypt: (b) => safeStorage.decryptString(Buffer.from(b, 'base64')) });
     // 고정 포트를 먼저 쓴다 — AAS에 넣은 영상 링크(http://127.0.0.1:47625/videos/…)가 앱을 다시 켜도 그대로 열리게. 이미 쓰이고 있으면 빈 포트
     const { port } = await startServer({ port: 47625, host: '127.0.0.1' }).catch(() => startServer({ port: 0, host: '127.0.0.1' }));
     origin = `http://127.0.0.1:${port}`;

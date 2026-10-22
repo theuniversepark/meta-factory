@@ -6,6 +6,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { Simulation, MODES, ST_LABEL } from './sim.js';
+import { StepInterp } from './stepinterp.js';
 import { FactoryAgent } from './agent.js';
 import { HybridAgent, compareArchitecturesAsync } from './multiagent.js';
 import { agentStructureHTML } from './agentinfo.js';
@@ -1017,7 +1018,7 @@ dataBody.addEventListener('click', (e) => {
     const a = eb.dataset.epcis, url = document.getElementById('epUrl')?.value.trim() ?? '', key = document.getElementById('epKey')?.value ?? '', on = !!document.getElementById('epOn')?.checked;
     const post = (p, b) => fetch(`/api/epcis/v1/${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then((r) => r.json());
     epcisNote = a === 'test' ? '연결 시험 중…' : '저장 중…'; renderData();
-    (a === 'test' ? post('forward/test', { url }).then((r) => { epcisNote = r.ok ? `연결 성공 — ${url} (HTTP ${r.status}). 「켜기」를 체크하고 「저장」하면 보내기 시작합니다.` : `연결 실패 — ${r.error ?? ''}`; })
+    (a === 'test' ? post('forward/test', { url, ...(key ? { apiKey: key } : {}) }).then((r) => { epcisNote = r.ok ? `연결 성공 — ${url} (HTTP ${r.status}). 「켜기」를 체크하고 「저장」하면 보내기 시작합니다.` : `연결 실패 — ${r.error ?? ''}`; })
       : post('config', { url, enabled: on, ...(key ? { apiKey: key } : {}), ...(a === 'resend' ? { fromStart: true } : {}) }).then((r) => { epcisNote = r.error ? `저장 실패 — ${r.error}` : a === 'resend' ? '처음부터 다시 보냅니다.' : `저장했습니다 — 외부 전송 ${r.enabled ? '켜짐' : '꺼짐'}${r.url ? ` · ${r.url}` : ''}`; }))
       .catch((err) => { epcisNote = `실패 — ${err.message}`; }).finally(() => epcisServerStatus().then(renderData));
     return;
@@ -1563,6 +1564,11 @@ document.addEventListener('visibilitychange', () => {
 
 // ── 루프 ─────────────────────────────
 const clock = new THREE.Clock();
+const SIM_DT = 0.1, interp = new StepInterp();
+let stepAcc = 0;
+// 보간 대상: 이동체(차량·지게차·AMR·정비·보충·사족보행·드론·작업자·트럭) · 셀 진행률(로봇 팔 자세) — 확장 Zone·정밀검사의 AMR·셀 포함
+const interpTargets = () => [sim.vehicles, sim.forklifts, sim.carriers, sim.techs, sim.helpers, sim.quads, sim.drones, sim.workers, sim.yard?.trucks, sim.inbound?.trucks, sim.stations,
+  ...(xzones.zones ?? []).flatMap((z) => [z.carriers, z.order]), insp.carriers, insp.order].flatMap((a) => a ?? []);
 let uiTimer = 0, screenTimer = 0, robotTimer = 0, camTimer = 0, vlaTimer = 0, zdTimer = 0;
 const rbCam = { key: null, sel: 'head' };   // 로봇 정보 창 카메라 선택
 document.getElementById('detail').addEventListener('click', (e) => { const b = e.target.closest('[data-rbcam]'); if (b) { rbCam.sel = b.dataset.rbcam; camTimer = 1; } });
@@ -1571,21 +1577,26 @@ const wallFrustum = new THREE.Frustum(), wallVP = new THREE.Matrix4();
 function frame() {
   requestAnimationFrame(frame);   // 한 프레임에서 예외가 나도 루프는 계속
   const rdt = Math.min(clock.getDelta(), 0.1);
+  // 시뮬레이션은 0.1초 고정 간격으로만 진행한다 (헤드리스 테스트·디지털트윈과 같은 간격) — 프레임 시간으로 나눠 진행하면 화면 주사율에 따라 결과가 달라졌다
+  // 남은 시간은 다음 프레임으로 넘기고, 그 사이 프레임은 화면 보간(js/stepinterp.js)으로 부드럽게 그린다
   if (running && !llm.holdSim) {
-    let left = rdt * speed;
-    while (left > 1e-6) {
-      const h = Math.min(0.1, left);
-      sim.step(h); agent.update(h); xzones.step(h, sim); insp.step(h, !!xzones.halted);
-      left -= h;
+    stepAcc += rdt * speed;
+    const n = Math.floor(stepAcc / SIM_DT + 1e-9);
+    for (let i = 0; i < n; i++) {
+      if (i === n - 1) interp.capture(interpTargets());
+      sim.step(SIM_DT); agent.update(SIM_DT); xzones.step(SIM_DT, sim); insp.step(SIM_DT, !!xzones.halted);
     }
+    stepAcc = Math.max(0, stepAcc - n * SIM_DT);
     llm.update();
   }
   hub.tick(rdt);
   bzT += rdt; if (bzT > 1.5) { bzT = 0; blenderize(scene); trimShadows(scene); }   // Blender 옵션: 운영 중에 새로 생긴 모델(대상물·트럭 등)도 바꿔 끼운다
   pcapVideoTick(rdt);
   facPushTick(rdt);
+  interp.apply(interpTargets(), stepAcc / SIM_DT);   // 그리는 동안만 위치·진행률을 직전 간격과 섞는다
   view.update(rdt, running, speed);
   xzones.update(rdt, running && !llm.holdSim, speed); insp.update(rdt, running && !llm.holdSim, speed);
+  interp.restore();
   keyPan(rdt, shiftHeld);
   netT += rdt; if (netT > 1 && !netCard.hidden) { netT = 0; renderNetCard(); }
   gnbT += rdt; if (gnbT > 1 && gnbSel) { gnbT = 0; renderGnb(); }

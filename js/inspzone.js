@@ -483,7 +483,9 @@ export class InspZone {
   // AI 판정: OK · 판정 불확실(→ O-INSPECT 재측정 후 재판정, 한 번만) · NG(→ 해당 Zone 오케스트레이터에 리워크·공정 보정 요청)
   judge(c, cell) {
     const it = c.item, S = INSP, [zk, plabel] = S.products[it.product], r = this.rng(), s = this.stats;
-    const res = !it.rechecked && r < S.judge.uncertain ? 'unc' : r < S.judge.uncertain + S.judge.ng * (this.sim.serials?.ngFactor(zk) ?? 1) ? 'ng' : 'ok';   // 공정 보정 중인 Zone은 NG 확률이 낮다 (js/serial.js)
+    // 공정 보정 중인 Zone은 NG 확률이 낮다 (js/serial.js) · 재측정한 시료는 '판정 불확실'이 없고 NG 확률만 그대로 (불확실 구간이 NG로 떨어지면 재검 NG가 4% → 10%로 부풀었다)
+    const ngP = S.judge.ng * (this.sim.serials?.ngFactor(zk) ?? 1);
+    const res = it.rechecked ? (r < ngP ? 'ng' : 'ok') : r < S.judge.uncertain ? 'unc' : r < S.judge.uncertain + ngP ? 'ng' : 'ok';
     const by = (s.by[it.product] ??= { ok: 0, unc: 0, ng: 0 });
     if (res === 'unc') {
       s.unc++; by.unc++; it.rechecked = true; it.redo = true; it.done.delete('OINS');

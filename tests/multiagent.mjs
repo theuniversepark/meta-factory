@@ -27,7 +27,8 @@ console.log('== 혼합형 다중 에이전트');
   for (let t = 0; t < 600; t += 0.1) { s.step(0.1); ag.update(0.1); }
   const ev = s.injectFieldEvent('smoke', 0, 8.2); s.detectFieldEvent(ev, '시험', 0.9);
   const st = s.processing.find((x) => !x.request && x.state !== 'DOWN'); st.health = 20;
-  for (let t = 0; t < 3; t += 0.1) { s.step(0.1); ag.update(0.1); }
+  // 정비 에이전트 주기(5초)를 한 번은 넘겨 기다린다 — 3초만 보면 주기 위상에 따라 제안 전에 판정했다 (에이전트 1초 주기가 1.1초로 밀려 있을 때만 우연히 맞았음)
+  for (let t = 0; t < 6; t += 0.1) { s.step(0.1); ag.update(0.1); }
   check('안전 우선: P1(화재 의심) 대응 중 예지정비 제안 보류', s.orch.urgentOpen(1).length > 0 && st.request?.kind !== 'pm' && ag.queue.some((q) => q.kind === 'pm' && q.st === st), `${st.name} 건강도 20% · P1 ${s.orch.urgentOpen(1).length}건`); }
 console.log('== 피지컬AI 기본 = 혼합형 · 사족보행 순찰 보고 → 정비·품질 에이전트 제안');
 { const { MODES } = await import('../js/sim.js');

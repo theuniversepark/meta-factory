@@ -212,7 +212,7 @@ export class CCTVAgent {
   }
   update(dt) {
     if (!this.on) return;
-    this.t += dt; if (this.t < 0.5) return; this.t = 0;
+    this.t += dt; if (this.t < 0.5 - 1e-9) return; this.t = 0;
     const s = this.sim, plan = s.cctv;
     // 1) 현장 이벤트: 영상 AI로 감지 → 메인 오케스트레이터에 보고 (2초 확인 후)
     for (const ev of s.fieldEvents ?? []) {

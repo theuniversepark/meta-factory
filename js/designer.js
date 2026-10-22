@@ -312,7 +312,7 @@ export class LineDesigner {
     $('dockMetrics').innerHTML = `
       <div><span>${isZone(line) ? '셀' : '공정'}</span>${arrow(a.stations, b.stations)}</div>
       <div><span>로봇</span>${arrow(a.robots, b.robots)}</div>
-      <div><span>병목</span>${arrow(a.bottleneck?.name ?? '-', b.bottleneck?.name ?? '-')}</div>
+      <div><span>병목</span>${arrow(esc(a.bottleneck?.name ?? '-'), esc(b.bottleneck?.name ?? '-'))}</div>
       <div><span>이론 UPH</span>${arrow(a.uph, b.uph, (v) => Math.round(v))}</div>`;
     const n = this.note ?? {};
     const allErrors = [...(n.errors ?? []), ...errors.filter((e) => !(n.errors ?? []).includes(e))];
@@ -336,7 +336,7 @@ export class LineDesigner {
     recipe.cells.forEach((c, i) => { const el = document.querySelector(`[data-eff="${i}"]`); if (el) { el.textContent = `실효 ${recipeEff(c, mode).toFixed(1)}초${c.id === bn ? ' · 병목' : ''}`; el.classList.toggle('bn', c.id === bn); } });
     const arrow = (x, y, f = (v) => v) => (f(x) === f(y) ? `<b>${f(y)}</b>` : `${f(x)} → <b>${f(y)}</b>`);
     $('dockMetrics').innerHTML = `<div><span>셀</span><b>${b.cells}</b></div><div><span>로봇</span>${arrow(a.robots, b.robots)}</div>
-      <div><span>병목</span>${arrow(a.bottleneck?.name ?? '-', b.bottleneck?.name ?? '-')}</div><div><span>이론 UPH</span>${arrow(a.uph, b.uph, (v) => Math.round(v))}</div>`;
+      <div><span>병목</span>${arrow(esc(a.bottleneck?.name ?? '-'), esc(b.bottleneck?.name ?? '-'))}</div><div><span>이론 UPH</span>${arrow(a.uph, b.uph, (v) => Math.round(v))}</div>`;
     const n = this.note ?? {}, allErr = [...(n.errors ?? []), ...errors], allWarn = [...new Set([...(n.warnings ?? []), ...warnings])];
     $('dockSummary').innerHTML = [
       `<div class="muted">대상: <b>${esc(recipe.name)}</b> — 왼쪽 Zone 카드에서 고른 Zone. 셀 배치·흐름은 고정, 로봇 대수는 기본 대수 대비 병렬 이득(+70%/대)으로 사이클에 반영됩니다.</div>`,

@@ -71,7 +71,7 @@ export class FactoryEnv {
     return Math.max(0, Math.min(1, a / 120, b >= 0 ? 1 : 1 + b / 180));
   }
   update(dt) {
-    this.acc += dt; if (this.acc < 1) return;
+    this.acc += dt; if (this.acc < 1 - 1e-9) return;   // 0.1초 × 10 = 0.9999… (여유 없이 비교하면 1.1초마다)
     const step = this.acc; this.acc = 0; this.tick(step);
     this.sampleAcc += step;
     if (this.sampleAcc >= 10) { this.sampleAcc = 0; this.series.push({ t: this.sim.time, nodes: this.now.map((v) => ({ ...v })) }); if (this.series.length > 2160) this.series.shift(); }   // 10초 · 6시간

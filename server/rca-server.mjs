@@ -3,11 +3,13 @@
 // 앱(맥 앱 · npm start)에서는 같은 API가 앱 서버의 /api/rca/v1/로 함께 열린다.
 import http from 'node:http';
 import { makeRcaApi } from './rca-api.mjs';
+import { guard, isLoopbackHost } from './http-guard.mjs';
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
 const port = Number(arg('port', process.env.RCA_PORT || 8790)), host = arg('host', process.env.RCA_HOST || '127.0.0.1');
 const { route } = makeRcaApi();
 http.createServer((req, res) => {
+  if (guard(req, res, { loopback: isLoopbackHost(host) })) return;   // 다른 웹페이지가 보낸 요청 거부
   const url = new URL(req.url, 'http://localhost'); let body = '';
   req.on('data', (c) => { body += c; if (body.length > 16 * 1024 * 1024) req.destroy(); });
   req.on('end', () => {

@@ -9,6 +9,9 @@ const STATUS = { new: '결정 대기', verifying: '트윈 검증 중', verified:
 const REC = { apply: ['적용 권장', 'good'], neutral: ['효과 미미', 'mid'], hold: ['보류 권장', 'bad'] };
 const delta = (a, b, d = 0, inv = false) => { const x = b - a, good = inv ? x < 0 : x > 0; return `<em class="${Math.abs(x) < 1e-9 ? '' : good ? 'up' : 'dn'}">${x >= 0 ? '+' : ''}${x.toFixed(d)}</em>`; };
 
+// 표시 문구는 모두 글자로 넣는다 — 원인 위치·제안 제목에 셀 이름(사용자·Agent가 정한 값)이 들어간다
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
 export const impactState = { window: 1800 };
 
 export function impactHTML(sim) {
@@ -36,7 +39,7 @@ export function impactHTML(sim) {
       ${tile('최대 적재율', `<em class="${lvl(O.peak, 0.67, 0.8)}">${pct(O.peak, 0)}</em>`, `${FG_LABEL[O.peakKey] ?? O.peakKey ?? '-'} · 80% 이상 ${pct(O.hiShare, 0)} 시간`)}
       ${tile('트럭 교대 공백', `<em class="${lvl(O.noTruckShare, 0.1, 0.15)}">${pct(O.noTruckShare, 0)}</em>`, '실을 팔레트 있는데 도크에 트럭 없음')}
       ${tile('출하로 인한 손실', `<em class="${shipPts >= 0.1 ? 'dn' : 'up'}">${shipPts >= 0.005 ? '−' : ''}${shipPts.toFixed(2)}%p</em>`, '적재장 가득 참 → 라인 막힘 (OEE)')}</div>
-    <p class="imp-note">💬 의견: ${(() => { const a = outboundAdvice(sim, R, shipPts); return a.length ? a.map((p) => `<b>${p.title}</b> — ${p.expect}`).join('<br>') : '출하 여유 충분 — 적재장·지게차·트럭이 생산을 막지 않습니다.'; })()}</p>` : '';
+    <p class="imp-note">💬 의견: ${(() => { const a = outboundAdvice(sim, R, shipPts); return a.length ? a.map((p) => `<b>${esc(p.title)}</b> — ${esc(p.expect)}`).join('<br>') : '출하 여유 충분 — 적재장·지게차·트럭이 생산을 막지 않습니다.'; })()}</p>` : '';
   // 존 간 협력: 존마다 자원이 모자란 시간(대기)과 남는 시간(유휴)을 나란히 — 한쪽이 기다릴 때 다른 쪽이 놀고 있으면 나눠 쓸 여지
   const C = R.collab, v = (x, f) => (x == null ? '<span class="muted">-</span>' : f(x));
   const cbHTML = C ? `<table class="imp-t"><thead><tr><th>Zone</th><th>정비 배정 대기</th><th>정비 인력 유휴</th><th>지원 보냄 · 받음</th><th>대기 주차 AMR</th><th>자재 결품 (창고 빔)</th><th>물류 차량 유휴</th><th>정밀검사 대기</th></tr></thead><tbody>
@@ -49,16 +52,16 @@ export function impactHTML(sim) {
       <td>${v(r.vehIdle, (x) => pct(x, 0))}</td>
       <td>${v(r.inspWait, (x) => `<em class="${lvl(x, 180, 300)}">${n0(x)}초/샘플</em>`)}</td></tr>`).join('')}</tbody></table>
     <p class="imp-note">존 간 정비 지원 요청 ${C.supportReq}건 · 파견 ${C.techBorrow}건 (자기 존 인력이 모두 바쁘면 긴급수리 20초 · 정비·보정 60초 뒤 가까운 존에 요청). 대기 주차 AMR·정밀검사 대기는 확장 Zone·정밀검사 화면이 돌 때 집계됩니다.<br>
-    💬 의견: ${(() => { const a = collabAdvice(sim, R); return a.length ? a.map((p) => `<b>${p.title}</b> — ${p.expect}`).join('<br>') : '지금은 한 존이 자원을 기다리는 동안 다른 존이 같은 자원을 놀리는 구간이 기준(정비 대기 60초/시간 · 투입 AMR 부족 2% · 결품 1% · 검사 대기 300초)을 넘지 않습니다 — 존 간 협력으로 더 얻을 여지는 작습니다.'; })()}</p>` : '';
+    💬 의견: ${(() => { const a = collabAdvice(sim, R); return a.length ? a.map((p) => `<b>${esc(p.title)}</b> — ${esc(p.expect)}`).join('<br>') : '지금은 한 존이 자원을 기다리는 동안 다른 존이 같은 자원을 놀리는 구간이 기준(정비 대기 60초/시간 · 투입 AMR 부족 2% · 결품 1% · 검사 대기 300초)을 넘지 않습니다 — 존 간 협력으로 더 얻을 여지는 작습니다.'; })()}</p>` : '';
   const evs = R.events.slice(0, 10);
   const evT = `<table class="imp-t ev"><thead><tr><th>시각</th><th>원인</th><th>위치</th><th>지속</th><th>손실 대수</th><th>영향 로봇</th></tr></thead><tbody>
-    ${evs.map((e) => `<tr><td>${hm(e.t0)}</td><td><b class="dot" style="background:${COLORS[e.cause]}"></b>${CAUSES[e.cause].label}</td><td>${e.where}</td><td>${Math.round(e.dur)}초${e.open ? ' <em class="dn">진행 중</em>' : ''}</td><td>${n1(e.units)}</td><td>${e.affected || '-'}</td></tr>`).join('') || '<tr><td colspan="6">이 구간에 이벤트 없음</td></tr>'}</tbody></table>`;
+    ${evs.map((e) => `<tr><td>${hm(e.t0)}</td><td><b class="dot" style="background:${COLORS[e.cause]}"></b>${CAUSES[e.cause].label}</td><td>${esc(e.where)}</td><td>${Math.round(e.dur)}초${e.open ? ' <em class="dn">진행 중</em>' : ''}</td><td>${n1(e.units)}</td><td>${e.affected || '-'}</td></tr>`).join('') || '<tr><td colspan="6">이 구간에 이벤트 없음</td></tr>'}</tbody></table>`;
   // 효과 순: 결정 대기 중 트윈 검증에서 개선이 큰 것부터 → 검증 전 → 적용됨 → 보류·되돌림
   const gain = (p) => p.twin ? (p.twin.uphCand - p.twin.uphCur) / Math.max(1, p.twin.uphCur) + (p.twin.oeeCand - p.twin.oeeCur) - 0.5 * (p.twin.kwhCand - p.twin.kwhCur) / Math.max(1e-6, p.twin.kwhCur) : -1;
   const rank = (p) => ({ verified: 0, verifying: 1, new: 1, applied: 2, held: 3, reverted: 3 })[p.status];
   const list = [...A.items].sort((a, b) => rank(a) - rank(b) || gain(b) - gain(a));
   const cards = list.filter((p) => p.status !== 'held' || sim.time - p.t < 3600).map((p) => propCard(sim, p)).join('') || '<p class="imp-note">현재 기준(원인별 OEE 손실 · 전력 낭비 · 재공)을 넘는 손실이 없어 제안이 없습니다. 운영 5분 뒤부터 1분마다 다시 분석합니다.</p>';
-  const logs = A.log.slice(0, 8).map((x) => `<li>${hm(x.t)} · <b>${x.act}</b> · ${x.title}${x.change ? ` (${x.change})` : ''}</li>`).join('');
+  const logs = A.log.slice(0, 8).map((x) => `<li>${hm(x.t)} · <b>${esc(x.act)}</b> · ${esc(x.title)}${x.change ? ` (${esc(x.change)})` : ''}</li>`).join('');
   return `<div class="imp-head"><div class="seg imp-win">${win}</div><button data-imp-md class="imp-md">📄 리포트 저장 (.md)</button></div>
     ${tiles}
     <h3>OEE 손실 분해 — 이벤트·문제가 UPH · OEE · WIP · POWER에 미친 영향</h3>${bar}${table}
@@ -69,7 +72,7 @@ export function impactHTML(sim) {
     ${logs ? `<h3>의사결정 이력</h3><ul class="imp-log">${logs}</ul>` : ''}`;
 }
 
-const expl = (title, lines, cls = '') => `<ul class="imp-expl ${cls}"><b>🔎 ${title}</b>${lines.map((l) => { const i = l.indexOf(': '); return `<li>${i > 0 && i < 24 ? `<b>${l.slice(0, i)}</b>: ${l.slice(i + 2)}` : l}</li>`; }).join('')}</ul>`;
+const expl = (title, lines, cls = '') => `<ul class="imp-expl ${cls}"><b>🔎 ${esc(title)}</b>${lines.map((l) => { const i = l.indexOf(': '); return `<li>${i > 0 && i < 24 ? `<b>${esc(l.slice(0, i))}</b>: ${esc(l.slice(i + 2))}` : esc(l)}</li>`; }).join('')}</ul>`;
 
 function propCard(sim, p) {
   const A = sim.impact.advisor, L = p.lever && LEVERS[p.lever];
@@ -103,11 +106,11 @@ function propCard(sim, p) {
   }
   if (p.status === 'reverted' && p.actual) body += expl(`실측 해석 — ${p.actual.head}`, p.actual.lines, p.actual.verdict === 'good' ? 'good' : p.actual.verdict === 'bad' ? 'bad' : '');
   return `<div class="imp-card ${p.status}" data-imp-id="${p.id}">
-    <div class="imp-ch"><b>${p.title}</b><span class="imp-chips">${chips}</span><small>${STATUS[p.status]}</small></div>
-    <div class="imp-why">📊 근거: ${p.why}</div>
+    <div class="imp-ch"><b>${esc(p.title)}</b><span class="imp-chips">${chips}</span><small>${STATUS[p.status]}</small></div>
+    <div class="imp-why">📊 근거: ${esc(p.why)}</div>
     ${L ? `<div class="imp-chg">⚙️ ${L.label}: <b>${fmtV(p.lever, p.status === 'applied' || p.status === 'reverted' ? p.from : L.get(sim))}</b> → <b>${fmtV(p.lever, p.to)}</b></div>` : ''}
-    <div class="imp-why">🎯 기대 효과: ${p.expect}${p.est ? ` <em>(추정 ${p.est})</em>` : ''}</div>
-    <div class="imp-why muted">⚖️ 부작용: ${p.trade}</div>
+    <div class="imp-why">🎯 기대 효과: ${esc(p.expect)}${p.est ? ` <em>(추정 ${esc(p.est)})</em>` : ''}</div>
+    <div class="imp-why muted">⚖️ 부작용: ${esc(p.trade)}</div>
     ${body}${act}</div>`;
 }
 

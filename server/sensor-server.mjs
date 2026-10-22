@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import mqtt from 'mqtt';
+import { guard, isLoopbackHost } from './http-guard.mjs';
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
 const PORT = Number(arg('port', process.env.SENSOR_PORT ?? 8791)), HOST = arg('host', process.env.SENSOR_HOST || '127.0.0.1');
@@ -147,6 +148,7 @@ if (!process.env.SENSOR_NO_MQTT) {
   client.on('error', (e) => { stats.lastError = e.message; });
 }
 const server = http.createServer((req, res) => {
+  if (guard(req, res, { loopback: isLoopbackHost(HOST) })) return;   // 다른 웹페이지가 보낸 요청 거부
   const url = new URL(req.url, 'http://localhost');
   let r; try { r = route(req.method, url.pathname, url.searchParams); } catch (e) { r = { code: 400, body: { error: e.message } }; }
   if (r.csv != null) { res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8' }); return res.end(r.csv); }

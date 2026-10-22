@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { FAC_PRODUCTS, SUPPLIER, CUSTOMER } from '../js/fac.js';
 import { gs1Check } from '../js/serial.js';
+import { configFile } from './secrets.mjs';
 
 export const WH_NAME = { rackRaw: '물류선반-원자재', rackParts: '물류선반-부품', rackX: '확장선반', feeder: '정밀조립-투입구', cells: '정밀조립-셀', feederA1: '유연생산-투입구', feederA2: '적응가공-투입구', output: '구분적재장', qis: '정밀검사-샘플' };
 // 품질 (3단계): 검사 항목 · 품질 절차 (Non Conformance · Quality Action은 절차를 반드시 지정)
@@ -35,12 +36,13 @@ class Transient extends Error {}
 export function makeErpBridge({ dir, fetchImpl = globalThis.fetch, interval = 1500, serialsOf = null } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const cfgFile = path.join(dir, 'config.json'), qFile = path.join(dir, 'queue.jsonl'), stFile = path.join(dir, 'state.json');
-  const cfg = Object.assign({ url: '', apiKey: '', apiSecret: '', company: '', enabled: false, serials: false }, (() => { try { return JSON.parse(fs.readFileSync(cfgFile, 'utf8')); } catch { return {}; } })());
+  // 설정 파일 — API 키·비밀 키는 앱에서 safeStorage로 암호화해 쓴다 (server/secrets.mjs)
+  const conf = configFile(cfgFile, { url: '', apiKey: '', apiSecret: '', company: '', enabled: false, serials: false }, ['apiKey', 'apiSecret']), cfg = conf.cfg;
   const st = Object.assign({ cursor: 0, prepared: null, wo: {}, docs: [], fail: [], sent: 0, skipped: 0 }, (() => { try { return JSON.parse(fs.readFileSync(stFile, 'utf8')); } catch { return {}; } })());
   let queue = []; try { queue = fs.readFileSync(qFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { /* 처음 */ }
   if (st.cursor > queue.length) st.cursor = queue.length;   // 대기열 파일이 지워졌으면 보낸 위치도 맞춘다
   const rt = { busy: false, nextAt: 0, backoff: interval, lastError: null, lastOk: null, prep: null };
-  const saveCfg = () => fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 1));
+  const saveCfg = () => conf.save();
   const saveSt = () => fs.writeFileSync(stFile, JSON.stringify(st));
   const base = () => String(cfg.url ?? '').replace(/\/+$/, '');
   const A = () => st.prepared?.abbr ?? 'MF', CO = () => st.prepared?.company ?? cfg.company, W = (k) => `${WH_NAME[k] ?? k} - ${A()}`;
@@ -346,7 +348,7 @@ export function makeErpBridge({ dir, fetchImpl = globalThis.fetch, interval = 15
     let b = {}; if (method === 'POST') { try { b = JSON.parse(bodyText || '{}'); } catch { return { code: 400, body: { error: 'JSON이 아닙니다' } }; } }
     if (p === '' || p === 'status') return { code: 200, body: status() };
     if (p === 'config' && method === 'POST') {
-      if (b.url != null) { const u = String(b.url).trim().replace(/\/+$/, ''); if (u && !/^https?:\/\//.test(u)) return { code: 400, body: { error: 'http:// 또는 https:// 주소를 넣으세요' } }; if (u !== cfg.url) { cfg.url = u; st.prepared = null; saveSt(); } }
+      if (b.url != null) { const u = String(b.url).trim().replace(/\/+$/, ''); if (u && !/^https?:\/\//.test(u)) return { code: 400, body: { error: 'http:// 또는 https:// 주소를 넣으세요' } }; if (u !== cfg.url) { cfg.url = u; st.prepared = null; saveSt(); for (const k of ['apiKey', 'apiSecret']) if (!b[k]) conf.forget(k); } }   // 주소를 바꾸면 저장한 키는 버린다 — 새 주소의 키를 다시 넣어야 보낸다
       for (const k of ['apiKey', 'apiSecret']) if (b[k]) cfg[k] = String(b[k]).trim();
       if (b.company != null) cfg.company = String(b.company).trim();
       if (b.enabled != null) cfg.enabled = !!b.enabled;

@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { EpcisStore, epcisDocument, MF_NS } from '../js/epcis.js';
+import { configFile } from './secrets.mjs';
 
 const MAX_EVENTS = 200000, MAX_FILE = 200 * 1024 * 1024, BATCH = 100;   // 한 번에 보낼 이벤트 — 저장소가 413(본문 너무 큼)이면 절반씩 줄인다
 const MF_SCHEMA = { $schema: 'http://json-schema.org/draft-07/schema#', title: 'Meta-Factory EPCIS extension (mf:)', type: 'object', additionalProperties: true,
@@ -33,12 +34,15 @@ export function makeEpcisApi({ dir, fetchImpl = globalThis.fetch, interval = 500
   function compact() { const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean); fs.writeFileSync(file, lines.slice(-MAX_EVENTS).join('\n') + '\n'); }
 
   // ── 외부 저장소 전송 ─────────────────
-  const cfg = (() => { try { return JSON.parse(fs.readFileSync(cfgFile, 'utf8')); } catch { return { url: '', enabled: false, apiKey: '', cursor: 0 }; } })();
+  // 설정 파일 — 키(apiKey)는 앱에서 safeStorage로 암호화해 쓴다 (server/secrets.mjs)
+  const conf = configFile(cfgFile, { url: '', enabled: false, apiKey: '', cursor: 0 }, ['apiKey']), cfg = conf.cfg;
   const fw = { batch: BATCH, sent: 0, failed: 0, lastOk: null, lastError: null, busy: false, nextAt: 0, backoff: interval, registered: null, lastJob: null };
-  const saveCfg = () => { try { fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 1)); } catch { /* 무시 */ } };
+  const saveCfg = () => { try { conf.save(); } catch { /* 무시 */ } };
   const base = () => String(cfg.url ?? '').replace(/\/+$/, '').replace(/\/capture$/, '');
   // EPCIS 2.0 REST: 본문은 JSON-LD · 응답 형식은 넓게 받는다 (OpenEPCIS는 Accept가 application/json뿐이면 406)
-  const headers = (json = true) => ({ ...(json ? { 'Content-Type': 'application/ld+json' } : {}), Accept: 'application/ld+json, application/json;q=0.9, */*;q=0.8', ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}) });
+  // key: 이번 요청에 붙일 키 — 저장한 키는 저장한 주소(base)로 갈 때만 붙인다 (다른 호스트로 키가 새지 않게)
+  const headers = (json = true, key = cfg.apiKey) => ({ ...(json ? { 'Content-Type': 'application/ld+json' } : {}), Accept: 'application/ld+json, application/json;q=0.9, */*;q=0.8', ...(key ? { Authorization: `Bearer ${key}` } : {}) });
+  const sameOrigin = (u) => { try { return new URL(u).origin === new URL(base()).origin; } catch { return false; } };
   const pending = () => store.events.filter((e) => e._seq > (cfg.cursor ?? 0));
   // 확장 필드(mf:) 스키마 등록 — OpenEPCIS는 등록 안 된 네임스페이스가 든 문서를 통째로 거부한다. 등록 기능이 없는 저장소(404·405)는 건너뜀
   async function register() {
@@ -53,7 +57,7 @@ export function makeEpcisApi({ dir, fetchImpl = globalThis.fetch, interval = 500
     const u = /^https?:/.test(loc) ? loc : `${new URL(base()).origin}${loc.startsWith('/') ? '' : '/'}${loc}`;
     for (let i = 0; i < 20; i++) {   // 최대 약 10초 — 중복이 섞인 작업은 OpenEPCIS가 running으로 오래 남겨 둔다
       await new Promise((r) => setTimeout(r, i ? 500 : 200));
-      const r = await fetchImpl(u, { headers: headers(false), signal: AbortSignal.timeout(8000) }); if (!r.ok) continue;
+      const r = await fetchImpl(u, { headers: headers(false, sameOrigin(u) ? cfg.apiKey : ''), signal: AbortSignal.timeout(8000) }); if (!r.ok) continue;   // 캡처 작업 주소가 다른 호스트면 키를 붙이지 않는다
       const j = await r.json().catch(() => null); if (!j || j.running) continue;
       return j;
     }
@@ -87,10 +91,11 @@ export function makeEpcisApi({ dir, fetchImpl = globalThis.fetch, interval = 500
     const c = e.cause?.code ?? e.cause?.errors?.[0]?.code ?? e.name;
     return { ECONNREFUSED: '연결 거부 — 저장소가 꺼져 있거나 주소·포트가 다릅니다', ENOTFOUND: '주소를 찾을 수 없습니다 (호스트 이름 확인)', ETIMEDOUT: '응답 없음 (시간 초과)', TimeoutError: '응답 없음 (시간 초과)', ECONNRESET: '연결이 끊겼습니다', CERT_HAS_EXPIRED: 'HTTPS 인증서가 만료되었습니다', DEPTH_ZERO_SELF_SIGNED_CERT: '자체 서명 HTTPS 인증서 — 신뢰할 수 없음' }[c] ?? `${e.message}${c && c !== 'Error' ? ` (${c})` : ''}`;
   }
-  async function test(url = base()) {
+  // 시험할 때 키: 넘겨받은 키 → 없으면 저장한 주소와 같은 출처일 때만 저장한 키
+  async function test(url = base(), key = null) {
     const u = String(url).replace(/\/+$/, '').replace(/\/capture$/, '');
     if (!/^https?:\/\//.test(u)) return { ok: false, error: 'http:// 또는 https:// 주소를 넣으세요' };
-    try { const r = await fetchImpl(`${u}/events?perPage=1`, { headers: headers(false), signal: AbortSignal.timeout(8000) }); return r.ok ? { ok: true, status: r.status } : { ok: false, status: r.status, error: `HTTP ${r.status}` }; }
+    try { const r = await fetchImpl(`${u}/events?perPage=1`, { headers: headers(false, key || (sameOrigin(u) ? cfg.apiKey : '')), signal: AbortSignal.timeout(8000) }); return r.ok ? { ok: true, status: r.status } : { ok: false, status: r.status, error: `HTTP ${r.status}` }; }
     catch (e) { return { ok: false, error: why(e) }; }
   }
   const status = () => ({ events: store.count, file: fs.existsSync(file) ? fs.statSync(file).size : 0, stats: store.stats,
@@ -119,15 +124,15 @@ export function makeEpcisApi({ dir, fetchImpl = globalThis.fetch, interval = 500
     if (p === 'config') {
       if (method === 'POST') {
         let b; try { b = JSON.parse(bodyText || '{}'); } catch { return { code: 400, body: { error: 'JSON이 아닙니다' } }; }
-        if (b.url != null) { const u = String(b.url).trim(); if (u && !/^https?:\/\//.test(u)) return { code: 400, body: { error: 'http:// 또는 https:// 주소를 넣으세요' } }; if (u !== cfg.url) { cfg.url = u; fw.registered = null; } }
-        if (b.apiKey != null) cfg.apiKey = String(b.apiKey);
+        if (b.url != null) { const u = String(b.url).trim(); if (u && !/^https?:\/\//.test(u)) return { code: 400, body: { error: 'http:// 또는 https:// 주소를 넣으세요' } }; if (u !== cfg.url) { cfg.url = u; fw.registered = null; if (b.apiKey == null) conf.forget('apiKey'); } }   // 주소를 바꾸면 저장한 키는 버린다 — 새 주소의 키를 다시 넣어야 보낸다
+        if (b.apiKey != null) { conf.forget('apiKey'); cfg.apiKey = String(b.apiKey); }
         if (b.enabled != null) cfg.enabled = !!b.enabled;
         if (b.fromStart) cfg.cursor = 0;   // 처음부터 다시 보내기
         fw.nextAt = 0; fw.backoff = interval; saveCfg();
       }
       return { code: 200, body: status().forward };
     }
-    if (p === 'forward/test' && method === 'POST') { let b = {}; try { b = JSON.parse(bodyText || '{}'); } catch { /* 빈 본문 */ } return { code: 200, body: await test(b.url ?? base()) }; }
+    if (p === 'forward/test' && method === 'POST') { let b = {}; try { b = JSON.parse(bodyText || '{}'); } catch { /* 빈 본문 */ } return { code: 200, body: await test(b.url ?? base(), b.apiKey ? String(b.apiKey) : null) }; }
     return null;
   };
   return { route, status, store, pump, close: () => { clearInterval(timer); out?.end(); } };

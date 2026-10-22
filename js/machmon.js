@@ -82,7 +82,7 @@ export class MachineMonitor {
 
   tick(dt) {
     if (!this.on || !this.sim.fos?.adapt) return;
-    this.acc += dt; if (this.acc < 1) return; const step = this.acc; this.acc = 0;
+    this.acc += dt; if (this.acc < 1 - 1e-9) return; const step = this.acc; this.acc = 0;
     for (const M of Object.values(this.m)) this.edge(M, step);
   }
   // 엣지 AI: 이상 점수 · 공구 RUL · 판단 → 존에서 실행 · 상위 보고 · 서버 묶음

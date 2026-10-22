@@ -5,7 +5,7 @@ import { CommandCenter } from './commands.js';
 import { TruckYard, planForklift, YARD, SHIP } from './shipping.js';
 // 출하 지게차 대기 자리: 오른쪽 벽 두 출하 도크(z −31 · −19) 사이 안쪽 — 오른쪽 세로 통로(x 30)·뒤쪽 시설 통로(z −30)를 비켜 주차
 const SHIP_PARK = { x: SHIP.wallX - 7.5, z: -38 };   // 출하 도크(z −38) 앞 줄 왼쪽
-import { InboundYard, planReceiver, WH, INBOUND, LOGI_DZ, XWH, xrackZ, MINILOAD, WH_RACK } from './receiving.js';
+import { InboundYard, planReceiver, WH, INBOUND, LOGI_DZ, XWH, xrackZ, MINILOAD, WH_RACK, XRACK } from './receiving.js';
 import { PatrolDrone, MISSION_PRIO } from './drone.js';
 import { planCCTV, CCTVAgent } from './cctv.js';
 import { Private5G } from './net5g.js';
@@ -439,7 +439,9 @@ export class Simulation {
   constructor(modeKey = 'smart', seed = 12345, opts = {}) {
     const m = (this.mode = { ...MODES[modeKey] });   // 시뮬레이션마다 복사 — AIOS가 운영 정책 값을 바꿔도 다른 시뮬레이션에 번지지 않게
     this.twin = !!opts.twin;                          // AIOS 트윈 검증용 시뮬레이션
+    this.seed = seed;                                 // 확장 Zone·정밀검사 화면 흐름도 같은 시드에서 난수를 만든다 (zones.js · inspzone.js)
     this.rand = mulberry32(seed);
+    this.evRand = mulberry32((seed * 104729 + 41) >>> 0);   // 사용자가 넣는 현장 이벤트의 종류·자리 (생산 흐름 난수와 따로)
     this.zrand = mulberry32((seed * 7919 + 17) >>> 0);   // 확장 Zone 셀 고장·마모 (정밀조립Zone 난수 흐름과 따로)
     this.quiet = !!opts.quiet;
     this.time = 0;
@@ -637,7 +639,10 @@ export class Simulation {
     // 점이 충전 도크(바닥 판·기둥 + 여유 0.45m) 위인지 — 자기 도크 제외
     // 자기 도크는 앞쪽(서는 자리)만 허용 — 뒤(기둥 쪽)로 비켜서다 도크 뒤를 돌아 맴돌지 않게
     const dockAt = (p, m) => this.docks.some((d) => { const H = d.owner.home, c = Math.cos(H.heading), sn = Math.sin(H.heading), rx = p.x - H.x, rz = p.z - H.z, lx = rx * c - rz * sn, lz = rx * sn + rz * c; return d.owner === m ? Math.abs(lx) < 0.93 && lz < 0.1 && lz > -1.6 : Math.abs(lx) < 0.93 && lz < 0.93 && lz > -1.6; });   // 도크 뒤 1.6m까지 금지 — 비켜서다 도크 뒤로 들어가 맴돌지 않게
-    for (const m of this.movers) m.dockAt = dockAt;
+    // 미니로드 몸체(두 줄 4단 선반 ①·② · 동쪽 면 x −44.15)도 비켜설 수 없는 자리 — 우회점이 선반 면 안쪽에 잡혀 휴머노이드가 선반을 파고들었다 (몸 반경 − 2cm 여유 · AGV는 차폭 반 0.55m — tests/logistics.mjs 간섭 기준과 같음)
+    const ML_BODY = { x0: WH_RACK.x - MINILOAD.half, x1: WH_RACK.x + MINILOAD.half, z0: XRACK.z - XRACK.len / 2, z1: WH_RACK.z + 5.1 };
+    const inMiniload = (p, m) => { const r = (m ? (m.kind === 'agv' ? 0.55 : moverRadius(m)) : 0.5) - 0.02, dx = Math.max(ML_BODY.x0 - p.x, 0, p.x - ML_BODY.x1), dz = Math.max(ML_BODY.z0 - p.z, 0, p.z - ML_BODY.z1); return Math.hypot(dx, dz) < r; };
+    for (const m of this.movers) m.dockAt = (p, mm) => dockAt(p, mm) || inMiniload(p, mm);
     this.assignIds();
     // 피지컬AI: VLA 셀(6축 협동·산업용 로봇, AMMR)과 VLA 학습·배포 파이프라인
     for (const st of this.processing) st.vlaCell = m.key === 'dark' && ['cobot', 'articulated', 'ammr', 'humanoid'].includes(st.def.robot?.kind);
@@ -1916,10 +1921,10 @@ export class Simulation {
   // 확장 Zone 현장 이벤트 (왼쪽 Zone 카드에서 고른 Zone의 ⚠ 현장 이벤트): 그 Zone 영역 안 통로 바닥(셀·투입구·적재장 위 제외) 아무 곳
   injectZoneEvent(key, type) {
     const Z = EXTRA_ZONES.find((x) => x.key === key), r = zoneRect(Z, 0), types = Object.keys(FIELD_EVENTS);
-    type ??= types[Math.floor(Math.random() * types.length)];
+    type ??= types[Math.floor(this.evRand() * types.length)];
     const blocks = [...Object.values(Z.cells).map((c) => ({ x: Z.origin.x + c.x, z: Z.origin.z + c.z, h: c.type === 'mill5' || c.type === 'turn' ? 4.6 : 3.0 })), { x: Z.origin.x + Z.src.x, z: Z.origin.z + Z.src.z, h: 3.8 }, { x: Z.origin.x + Z.sink.x, z: Z.origin.z + Z.sink.z, h: 2.6 }];
     for (let k = 0; k < 80; k++) {
-      const x = r.x0 + 1 + Math.random() * (r.x1 - r.x0 - 2), z = r.z0 + 1 + Math.random() * (r.z1 - r.z0 - 2);
+      const x = r.x0 + 1 + this.evRand() * (r.x1 - r.x0 - 2), z = r.z0 + 1 + this.evRand() * (r.z1 - r.z0 - 2);
       if (blocks.some((b) => Math.abs(x - b.x) < 3.0 && Math.abs(z - b.z) < b.h)) continue;
       return this.injectFieldEvent(type, x, z);
     }

@@ -2,7 +2,7 @@
 // 셀 배치·유형·흐름(routes)은 바닥에 고정 — 편집하는 것: 셀 이름 · 하는 일 · 기준 사이클 · 로봇 종류·대수 (셀 종류별 제약)
 // 로봇 대수 효과: 기본 대수 대비 병렬 처리 이득(line.js PARALLEL_GAIN)만큼 사이클이 줄거나 늘어난다 — def.cycleK (기본 구성 = 1, 기존 시뮬레이션 그대로)
 import { EXTRA_ZONES, INSP_CELLS } from './zonedefs.js';
-import { PARALLEL_GAIN, ROBOT_KINDS } from './line.js';
+import { PARALLEL_GAIN, ROBOT_KINDS, plainText } from './line.js';
 
 export const RECIPE_ZONES = ['flex', 'adapt', 'insp'];
 export const ZR_KINDS = { none: '로봇 없음', cobot: '협동로봇', articulated: '6축 산업용 로봇' };
@@ -42,7 +42,7 @@ export function normalizeRecipe(r) {
   const byId = Object.fromEntries((r.cells ?? []).map((c) => [c.id, c]));
   const cells = cur.cells.map((base) => {
     const c = byId[base.id]; if (!c) { warnings.push(`${base.name}: 셀은 바닥에 고정 — 빼지 않고 그대로 둡니다`); return base; }
-    const L = base.lim, out = { ...base, name: String(c.name ?? base.name).slice(0, 24) || base.name, task: String(c.task ?? base.task).slice(0, 60) };
+    const L = base.lim, out = { ...base, name: plainText(c.name ?? base.name, 24) || base.name, task: plainText(c.task ?? base.task, 60) };
     const cy = Number(c.cycle); out.cycle = Number.isFinite(cy) ? Math.round(Math.min(300, Math.max(2, cy)) * 10) / 10 : base.cycle;
     if (Number.isFinite(cy) && cy !== out.cycle) warnings.push(`${out.name}: 기준 사이클 ${cy}초 → ${out.cycle}초 (2~300초)`);
     let kind = c.robot?.kind ?? base.robot.kind, count = Math.round(Number(c.robot?.count ?? base.robot.count));

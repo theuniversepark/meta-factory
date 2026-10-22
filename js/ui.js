@@ -108,9 +108,9 @@ export class UI {
     this.renderFacos();
     this.renderEngine();
     $('thought').innerHTML = this.llm?.enabled
-      ? `<b>운영</b> · ${this.agent.arch === 'hybrid' ? (() => { const H = this.agent.status(); return `혼합형 다중 에이전트 — 정비·품질·흐름 에이전트 제안 ${H.proposed} · 메인 승인 ${H.approved} · 보류 ${H.deferred} · 충돌 ${H.conflicts} · 평균 지연 ${H.avgLat.toFixed(1)}초`; })() : '추론 기반 에이전트가 정비·품질·흐름·물류를 계속 판단합니다'} — ${this.agent.lastThought}<br><b>대화</b> · 입력창 지시를 해석해 공정에 반영합니다 (예: 포장셀 속도 75% · 도어트림 2:1 · e-axle 조립셀 예방정비)`
+      ? `<b>운영</b> · ${this.agent.arch === 'hybrid' ? (() => { const H = this.agent.status(); return `혼합형 다중 에이전트 — 정비·품질·흐름 에이전트 제안 ${H.proposed} · 메인 승인 ${H.approved} · 보류 ${H.deferred} · 충돌 ${H.conflicts} · 평균 지연 ${H.avgLat.toFixed(1)}초`; })() : '추론 기반 에이전트가 정비·품질·흐름·물류를 계속 판단합니다'} — ${esc(this.agent.lastThought)}<br><b>대화</b> · 입력창 지시를 해석해 공정에 반영합니다 (예: 포장셀 속도 75% · 도어트림 2:1 · e-axle 조립셀 예방정비)`
       : sim.mode.agentActive
-      ? `<b>현재 판단</b> · ${this.agent.lastThought}`
+      ? `<b>현재 판단</b> · ${esc(this.agent.lastThought)}`
       : '<b>수동 운영</b> · 설비 데이터가 수집되지 않아 고장·자재 부족을 사람이 발견한 뒤에 대응합니다.';
     this.renderLogs();
     if (this.detailSt) { const el = $('detail'), top = el.scrollTop; this.renderDetail(); el.scrollTop = top; }   // 주기 갱신 때 스크롤 위치 유지 (내용을 통째로 다시 그리면 맨 위로 튀었다)
@@ -335,7 +335,7 @@ export class UI {
     }
     if (!st.def.cycle) {
       const isSrc = st.type === 'source';
-      el.innerHTML = `<h3>${st.name}<button data-act="close">✕</button></h3>
+      el.innerHTML = `<h3>${esc(st.name)}<button data-act="close">✕</button></h3>
         <div class="grid"><span>상태</span><b>${ST_LABEL[st.state]}</b>
         <span>${isSrc ? '자재 재고' : '완제품 적재'}</span><b>${isSrc ? `${sim.rawStock}/${RAW_CAP}` : `${sim.fgStock}/${FG_CAP}`}</b>
         <span>${isSrc ? '투입 간격' : '누적 입고'}</span><b>${isSrc ? sim.releaseInterval.toFixed(1) + '초' : st.c.processed + '개'}</b>
