@@ -750,13 +750,37 @@ let facTab = 'po', facTimer = null, facSrv = null, facNote = '', facPushT = 0, f
 const won = (v) => `${Math.round(v).toLocaleString('ko-KR')}원`;
 const fclk = (tt) => tt == null ? '-' : [3600, 60, 1].map((d, i) => String(Math.floor((Math.floor(tt) + 8 * 3600) / d) % (i ? 60 : 24)).padStart(2, '0')).join(':');
 const pcode = (k) => FAC_PRODUCTS[k]?.code ?? k, lname = (k) => FAC_LOCS[k]?.name ?? k;
-async function facStatus() { if (hub.noServer) { facSrv = null; return; } try { facSrv = await (await fetch('/api/fac/status')).json(); } catch { facSrv = null; } }
+async function facStatus() { if (hub.noServer) { facSrv = null; return; } try { facSrv = await (await fetch('/api/fac/status')).json(); } catch { facSrv = null; } try { erpSrv = await (await fetch('/api/erpnext/v1/status')).json(); } catch { erpSrv = null; } }
+// ── ERPNext 연동 탭 (server/erpnext-bridge.mjs) — 앱 전용 · 선택 ─────────────────
+let erpSrv = null, erpNote = '';
+const erpSlug = (dt) => dt.toLowerCase().replace(/ /g, '-');
+function erpHtml() {
+  if (hub.noServer) return '<div class="dh-note">ERPNext 연동은 맥 앱 · 윈도우 앱 · npm start에서만 씁니다 (웹 버전·공유 페이지는 서버가 없어 외부 ERP로 보내지 않습니다). 앱에서는 FAC 기록(구매오더·입고·재고 이동·생산 입고·출하·정비요청)과 공장 오더(작업지시)를 오픈소스 ERP인 ERPNext에 실제 전표로 남길 수 있습니다.</div>';
+  const v = erpSrv, n = (x) => Math.round(x ?? 0).toLocaleString('ko-KR'), P = v?.prepare, link = (d) => (v?.url ? `<a href="${escH(v.url)}/app/${erpSlug(d.doctype)}/${encodeURIComponent(d.name)}" target="_blank" rel="noopener">${escH(d.name)}</a>` : escH(d.name));
+  const DT_KO = { 'Purchase Order': '구매오더', 'Purchase Receipt': '입고', 'Stock Entry': '재고 전표', 'Delivery Note': '출하', 'Work Order': '작업지시', Asset: '설비 자산', 'Asset Repair': '긴급 수리', 'Asset Maintenance Log': '예방정비 기록' };
+  return `<div class="erp-form">
+      <label>ERPNext 주소<input id="erpUrl" class="ep-in" placeholder="예: http://127.0.0.1:8010 — 사내·클라우드 ERPNext 주소" value="${escH(v?.url ?? '')}" /></label>
+      <label>API 키<input id="erpKey" class="ep-in" type="password" autocomplete="off" placeholder="${v?.apiKey ? '저장됨 — 바꿀 때만 입력' : 'ERPNext 사용자 설정 → API Access → Generate Keys'}" /></label>
+      <label>비밀 키<input id="erpSecret" class="ep-in" type="password" autocomplete="off" placeholder="${v?.apiSecret ? '저장됨 — 바꿀 때만 입력' : 'API Secret (발급 때 한 번만 보임)'}" /></label>
+      <label>회사 (선택)<input id="erpCo" class="ep-in" placeholder="비우면 첫 회사 · 초기 설정 전이면 Meta-Factory Testbed" value="${escH(v?.company ?? '')}" /></label>
+      <div class="erp-btns"><button class="ep-btn" data-erp="test">연결 시험</button><button class="ep-btn" data-erp="prepare">ERPNext 준비</button>
+        <label class="chk"><input type="checkbox" id="erpOn" ${v?.enabled ? 'checked' : ''}/> 연동 켜기</label><label class="chk" title="출하 전표에 트럭 · 팔레트 SSCC · 시리얼 목록(EPCIS 저장소)을 함께 적습니다"><input type="checkbox" id="erpSer" ${v?.serials ? 'checked' : ''}/> 출하 전표에 시리얼</label>
+        <button class="ep-btn" data-erp="save">저장</button></div></div>
+    <div class="od-live"><div><b>상태</b> · ${!v ? '확인 중…' : `${v.prepared ? `<b class="ok">준비 완료</b> ${escH(v.prepared.company)} (${escH(v.prepared.at.slice(0, 16).replace('T', ' '))} UTC)` : '<b class="bad">준비 전</b> — 「연결 시험」 → 「ERPNext 준비」'} · 연동 ${v.enabled ? '<b class="ok">켜짐</b>' : '꺼짐'} · 보냄 ${n(v.sent)} · 대기 ${n(v.queued)} · 건너뜀 ${n(v.skipped)}${v.lastError ? ` · <b class="bad">${escH(v.lastError)}</b>${v.retryMs ? ` (${Math.ceil(v.retryMs / 1000)}초 뒤 다시)` : ''}` : ''}`}</div>
+      ${P ? `<div class="row">ERPNext 준비: ${P.running ? `진행 중 — ${escH(P.step)} (${P.done}/9)` : P.ok ? '완료 — 회사 · 품목 · 창고 · 거래처 · BOM · 작업장 · 설비 자산 분류 · 정비팀 · mf_ref 필드' : `<b class="bad">실패 — ${escH(P.error ?? '')}</b>`}</div>` : ''}
+      ${erpNote ? `<div class="row">${escH(erpNote)}</div>` : ''}</div>
+    ${v?.workOrders?.length ? `<table class="od-tbl" style="margin-top:8px"><tr><th>공장 오더</th><th>제품</th><th>작업지시</th><th>계획</th><th>생산</th><th>상태</th></tr>${v.workOrders.slice().reverse().map((w) => `<tr><td>${escH(w.order)}</td><td>${pcode(w.product)}</td><td>${link({ doctype: 'Work Order', name: w.name })}</td><td>${n(w.qty)}</td><td>${n(w.produced)}</td><td>${w.stopped ? (w.produced >= w.qty ? '완료' : '중지 (오더 종료)') : w.produced >= w.qty ? '완료' : '진행'}</td></tr>`).join('')}</table>` : ''}
+    <table class="od-tbl" style="margin-top:8px"><tr><th>시각 (UTC)</th><th>ERPNext 문서</th><th>번호</th><th>FAC 근거</th><th>내용</th></tr>${(v?.docs ?? []).map((d) => `<tr><td>${escH(d.t.slice(11, 19))}</td><td>${DT_KO[d.doctype] ?? escH(d.doctype)}</td><td>${link(d)}</td><td><small>${escH(String(d.ref ?? '').split(':').slice(1).join(':') || d.ref)}</small></td><td>${escH(d.what)}</td></tr>`).join('') || '<tr><td colspan="5">아직 보낸 전표가 없습니다</td></tr>'}</table>
+    ${v?.failures?.length ? `<table class="od-tbl" style="margin-top:8px"><tr><th>건너뛴 전표</th><th>사유</th></tr>${v.failures.map((f) => `<tr><td>${escH(f.type)} ${escH(f.key ?? '')}</td><td>${escH(f.error)}</td></tr>`).join('')}</table>` : ''}
+    <div class="cmp-note">• 대응: 구매오더 → Purchase Order · 입고 → Purchase Receipt · 내부 이동 → Stock Entry(이동) · 생산 입고 → Stock Entry(Manufacture, BOM 소비 + 완제품, 정밀조립은 작업지시에 배분) · 출고 → Delivery Note · 공장 오더 → Work Order(제품별) · 정비요청 → Asset Repair(긴급) / Asset Maintenance Log(예방)<br>
+    • 문서마다 mf_ref(운전 ID:FAC 번호)로 중복 없이 · ERPNext가 꺼져 있으면 대기했다가 다시 · 검증 오류 전표는 건너뛰고 사유 기록 · 시연용 설정: 음수 재고 허용(시뮬레이션 전표 단위 차이 흡수) · 키는 이 PC 데이터 폴더에만 (화면·응답에 나오지 않음)</div>`;
+}
 function renderFac() {
   const E = sim.fac;
   if (!E?.on) { setHTML(facBody, '<div class="dh-note">레거시 공장은 FAC 기록이 없습니다 (수기 발주·장부). 자동화·피지컬AI 단계에서 FAC이 발주·재고·설비보전을 기록합니다.</div>'); return; }
   const S = E.stats(), Q = E.quant, n = (v) => Math.round(v).toLocaleString('ko-KR');
   const st = (x) => `<span class="od-st ${x === 'done' || x === 'purchase' ? 'done' : x === 'new' ? 'new' : 'wait'}">${{ done: '완료', assigned: '준비됨', purchase: '구매오더', progress: '진행 중', new: '신규' }[x] ?? x}</span>`;
-  const tabs = { po: `🧾 발주 (구매오더 ${S.po})`, stock: `📦 재고 (전표 ${E.db.picking.length})`, mr: `🔧 설비보전 (정비요청 ${S.mr})`, api: '🔌 FAC API', log: '📜 기록 로그' };
+  const tabs = { po: `🧾 발주 (구매오더 ${S.po})`, stock: `📦 재고 (전표 ${E.db.picking.length})`, mr: `🔧 설비보전 (정비요청 ${S.mr})`, api: '🔌 FAC API', erp: '🏭 ERPNext 연동', log: '📜 기록 로그' };
   let body = '';
   if (facTab === 'po') body = `<table class="od-tbl"><tr><th>구매오더</th><th>공급사</th><th>주문 시각</th><th>품목 (주문 / 입고)</th><th>금액</th><th>입고 전표</th><th>트럭</th><th>상태</th></tr>
     ${E.db.po.slice(0, 40).map((p) => `<tr><td>${p.name}</td><td>${escH(p.partner)}</td><td>${fclk(p.date_order)}</td><td>${p.lines.map((l) => `${pcode(l.product)} ${n(l.qty)} / ${n(l.received)}`).join('<br>')}</td><td>${won(p.amount)}</td><td>${p.receipt}</td><td>${p.truck ?? '발주됨'}</td><td>${p.received ? st('done') : st('purchase')}</td></tr>`).join('') || '<tr><td colspan="8">아직 구매오더가 없습니다 — 물류 선반 재고가 재주문점 아래로 내려가면 WMS가 발주합니다</td></tr>'}</table>
@@ -782,7 +806,8 @@ function renderFac() {
         <tr><td style="white-space:nowrap">② 이벤트</td><td><code>GET /api/fac/events?since=0&amp;limit=500&amp;type=po.create,mr.stage</code></td><td>이벤트 이력 — 응답의 <code>next</code>를 다음 <code>since</code>로 넘기면 이어 받기 (master · po.create · receipt.done · internal.done · production.done · delivery.done · mr.create · mr.update · mr.stage)</td></tr></table>
       <div class="cmp-note">• 예: <code>curl ${base}/api/fac/events?since=0</code> — 서버는 이 Mac(127.0.0.1)에서만 열립니다. 단계·라인을 바꾸면 새 운전 ID로 기록을 다시 시작합니다.<br>
       • 외부에서 발주·정비요청을 넣는 쓰기 API는 아직 없습니다 (지시 게이트·보안 계층 검증과 함께 2차로 추가 예정).</div>`;
-  } else body = `<table class="od-tbl"><tr><th>시각</th><th>내용</th></tr>${E.log.map((l) => `<tr><td>${fclk(l.t)}</td><td>${escH(l.text)}</td></tr>`).join('')}</table>`;
+  } else if (facTab === 'erp') body = erpHtml();
+  else body = `<table class="od-tbl"><tr><th>시각</th><th>내용</th></tr>${E.log.map((l) => `<tr><td>${fclk(l.t)}</td><td>${escH(l.text)}</td></tr>`).join('')}</table>`;
   setHTML(facBody, `<div class="od-grid">
       <div class="od-kpi"><span>구매오더</span><b>${n(S.po)}건</b><small>진행 중 ${S.poOpen} · ${won(S.amount)}</small></div>
       <div class="od-kpi"><span>재고 전표</span><b>${n(S.receipts + S.internals + S.productions + S.deliveries)}건</b><small>입고 ${S.receipts} · 내부 ${S.internals} · 생산 ${S.productions} · 출고 ${S.deliveries}</small></div>
@@ -796,7 +821,21 @@ document.getElementById('btnFac').addEventListener('click', () => {
   clearInterval(facTimer); facTimer = setInterval(() => { if (!facModal.classList.contains('hidden') && !facBody.contains(document.activeElement)) facStatus().then(renderFac); }, 1500);
 });
 document.getElementById('closeFac').addEventListener('click', () => { facModal.classList.add('hidden'); clearInterval(facTimer); });
-facBody.addEventListener('click', (e) => { const t = e.target.closest('[data-factab]'); if (t) { facTab = t.dataset.factab; renderFac(); } });
+facBody.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-factab]'); if (t) { facTab = t.dataset.factab; renderFac(); return; }
+  const b = e.target.closest('button[data-erp]'); if (!b) return;
+  const a = b.dataset.erp, val = (id) => document.getElementById(id)?.value.trim() ?? '';
+  const post = (p, body) => fetch(`/api/erpnext/v1/${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) }).then((r) => r.json());
+  const cfg = { url: val('erpUrl'), company: val('erpCo'), enabled: !!document.getElementById('erpOn')?.checked, serials: !!document.getElementById('erpSer')?.checked, ...(val('erpKey') ? { apiKey: val('erpKey') } : {}), ...(val('erpSecret') ? { apiSecret: val('erpSecret') } : {}) };
+  erpNote = { test: '연결 시험 중…', prepare: 'ERPNext 준비 시작…', save: '저장 중…' }[a]; renderFac();
+  // 연결 시험 · 준비도 지금 입력한 주소·키로 (먼저 저장 — 켜기 체크는 「저장」 때만 반영)
+  post('config', a === 'save' ? cfg : { ...cfg, enabled: undefined }).then((c) => {
+    if (c.error) throw new Error(c.error);
+    if (a === 'test') return post('test').then((r) => { erpNote = r.ok ? `연결 성공 — 로그인 ${r.user} · 초기 설정 ${r.setupComplete ? '완료' : '전 (「ERPNext 준비」가 처리)'} · 회사 ${r.companies.join(', ') || '없음'}` : `연결 실패 — ${r.error}`; });
+    if (a === 'prepare') return post('prepare').then((r) => { erpNote = r.error ? `준비 실패 — ${r.error}` : 'ERPNext 준비 진행 중 — 끝나면 「연동 켜기」를 체크하고 「저장」'; });
+    erpNote = `저장했습니다 — 연동 ${c.enabled ? '켜짐' : '꺼짐'}${c.prepared ? '' : ' (먼저 「ERPNext 준비」)'}`;
+  }).catch((err) => { erpNote = `실패 — ${err.message}`; }).finally(() => facStatus().then(renderFac));
+});
 // FAC API 업로드: 2초마다 쌓인 이벤트 + 현황을 서버로 (실패하면 그대로 두고 다음에 다시)
 async function facPushTick(rdt) {
   const E = sim.fac; if (!E?.on || hub.noServer || facBusy) return;

@@ -9,6 +9,7 @@
 // 원칙: 명령은 위 → 아래, 상태는 아래 → 위, 같은 계층(존 ↔ 존)은 핸드셰이크·알림만 — 결정이 필요한 일은 공장으로. 접수 ACK만으로 재개하지 않는다.
 // 렌더링과 분리 — 헤드리스에서도 같은 흐름. 시뮬레이션 난수를 쓰지 않는다 (기록·정산·결정 경로만 더한다).
 import { ZONE_LABEL, zoneDef } from './zonedefs.js';
+import { ZONE_MIXES } from './line.js';
 
 const clk = (t) => { const s = Math.floor(t) + 8 * 3600; return `${String(Math.floor(s / 3600) % 24).padStart(2, '0')}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 
@@ -388,6 +389,8 @@ export class FactoryOS {
     const s = this.sim, id = `ORD-${String(++this.oseq).padStart(3, '0')}`, cyc = s.idealCycle || 8;
     const o = { id, t0: s.time, target: ORDER_SIZE, due: s.time + ORDER_SIZE * cyc * 1.6 + 120, status: 'open', released: false, risk: false, carry: 0 };
     this.orders.unshift(o); if (this.orders.length > 20) this.orders.pop();
+    const w = ZONE_MIXES[s.line?.mix]?.w ?? { doortrim: 1, eaxle: 1 }, tw = (w.doortrim + w.eaxle) || 1;
+    s.fac?.order('order.assign', o, { mix: { doortrim: w.doortrim / tw, eaxle: w.eaxle / tw } });   // FAC 기록 → ERPNext 작업지시 (제품별)
     const m = this.bus.send('factory', 'zone:main', 'order.assign', { subject: { order: id }, body: { target: ORDER_SIZE, due: o.due }, text: `${id} 배정 — 양품 ${ORDER_SIZE}개 · 납기 ${clk(o.due)}` });
     this.bus.send('zone:main', 'factory', 'order.ack', { corr: m.msgId, subject: { order: id }, body: { plan: '셀 능력·자재·AMR·버퍼 확인 → 투입 순서 혼류 비율대로' }, text: `${id} 수락 · 실행 계획 (투입 순서 = 혼류 비율 · 불량 보충 투입 포함)` });
     return o;
@@ -410,6 +413,8 @@ export class FactoryOS {
     const T = this.sim.trace, next = this.order ?? this.issueOrder(); let n = 0;
     for (const r of T.recent) if (r.order === o.id && r.status === 'wip') { r.order = next.id; n++; }
     o.carry = n;
+    const by = {}; for (const r of T.recent) if (r.order === o.id && (r.status === 'ok' || r.status === 'escaped')) by[r.product] = (by[r.product] ?? 0) + 1;
+    this.sim.fac?.order('order.close', o, { good: by, scrap: R.scrap, input: R.input, late: o.late });   // FAC 기록 → ERPNext 작업지시 마감
     this.bus.reply(m, 'order.close', { body: { recon: R, carry: n }, text: `${o.id} 종료 — 양품 ${R.good} · 폐기 ${R.scrap} · 고유 투입 ${R.input}${n ? ` · 잔여 ${n}개 ${next.id}로 이월` : ''}${o.late ? ' · 납기 초과' : ''}` });
     this.sim.log?.('ok', `오더 ${o.id} 종료`, { obs: `양품 ${R.good} · 폐기 ${R.scrap} · 투입 ${R.input} (정산 오차 0)`, act: `${this.name} 확인` });
   }

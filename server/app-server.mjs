@@ -9,9 +9,10 @@ import { runAgentTurn, MODEL } from './llm-agent.mjs';
 import { designLine, designZone } from './line-designer.mjs';
 import { startMqtt, mqttStatus, mqttPublish } from './mqtt-gateway.mjs';
 import { ffmpegInfo, queueConvert, convertClip, readStoredZip, framesToMp4 } from './video-convert.mjs';
-import { facRoute } from './fac-api.mjs';
+import { facRoute, facListen } from './fac-api.mjs';
 import { makeRcaApi } from './rca-api.mjs';
 import { makeEpcisApi } from './epcis-api.mjs';
+import { makeErpBridge } from './erpnext-bridge.mjs';
 import { fork } from 'node:child_process';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -382,6 +383,10 @@ export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
   await startMqtt();
   const rca = makeRcaApi({ publish: mqttPublish });   // 분석 결과는 내장 MQTT 브로커로도 발행
   let epcis = null;   // 내장 EPCIS 저장소 — 처음 요청 때 데이터 폴더에서 불러온다
+  const epcisApi = () => (epcis ??= makeEpcisApi({ dir: path.join(DATA_DIR(), 'epcis') }));
+  // ERPNext 연동 (선택) — FAC 업무 기록 이벤트를 받아 대기열 → ERPNext 전표 (server/erpnext-bridge.mjs) · 출하 전표 시리얼은 내장 EPCIS 저장소의 트럭 리콜 범위에서
+  const erp = makeErpBridge({ dir: path.join(DATA_DIR(), 'erpnext'), serialsOf: (truck) => epcisApi().store.shipmentOf(truck) });
+  facListen((run, events) => erp.enqueue(run, events));
   // 센서 서버 (별도 프로세스 · 별도 DB): 내장 브로커의 센서 묶음을 구독해 SQLite에 저장 — 앱 서버는 /api/sensors/v1/를 그 프로세스로 중계한다
   const mq = mqttStatus(), sensor = { port: null, db: null, pid: null, error: null };
   try {
@@ -444,10 +449,13 @@ export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
     // 앱 내장 EPCIS 2.0 저장소 — 시리얼·포장 묶음·출하·보류·처분 이벤트 보관 · 조회 · 외부 저장소 전송(선택) (server/epcis-api.mjs)
     if (url.pathname.startsWith('/api/epcis/v1')) {
       try {
-        epcis ??= makeEpcisApi({ dir: path.join(DATA_DIR(), 'epcis') });
-        const r = await epcis.route(req.method, url.pathname, url.searchParams, req.method === 'POST' ? await readBody(req, 32 * 1024 * 1024) : '');
+        const r = await epcisApi().route(req.method, url.pathname, url.searchParams, req.method === 'POST' ? await readBody(req, 32 * 1024 * 1024) : '');
         if (r) return send(res, r.code, r.body);
       } catch (e) { return send(res, 400, { error: e.message }); }
+    }
+    if (url.pathname.startsWith('/api/erpnext/v1')) {
+      try { const r = await erp.route(req.method, url.pathname, url.searchParams, req.method === 'POST' ? await readBody(req, 1024 * 1024) : ''); if (r) return send(res, r.code, r.body); }
+      catch (e) { return send(res, 400, { error: e.message }); }
     }
     // RCA 전담 서버 (더미) — 메인 서버(화면 FACOS 품질 모듈)가 불량 판정 리포트를 올리고 분석 결과·종결을 주고받는다 (server/rca-api.mjs)
     if (url.pathname.startsWith('/api/rca/v1')) {

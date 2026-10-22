@@ -1033,6 +1033,10 @@ em.up { color: var(--good); } em.dn { color: var(--bad); } em.mid { color: var(-
 .qt-grid2.qt-g11 { grid-template-columns: 1fr 1fr; }
 .qt-case h5 { margin: 8px 0 4px; font-size: 12.5px; }
 .ep-in { width: min(420px, 100%); padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.04); color: inherit; font: inherit; font-size: 12px; }
+.od-tbl a { color: var(--accent); text-decoration: none; } .od-tbl a:hover { text-decoration: underline; }
+.erp-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; margin: 6px 0 8px; } .erp-form label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--muted); } .erp-form .ep-in { width: 100%; }
+.erp-btns { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; } .erp-btns .chk { flex-direction: row; color: inherit; }
+@media (max-width: 900px) { .erp-form { grid-template-columns: 1fr; } }
 .ep-btn { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: rgba(55, 160, 255, 0.14); color: inherit; font: inherit; font-size: 12px; cursor: pointer; } .ep-btn:hover { background: rgba(55, 160, 255, 0.26); }
 .qt-epcis { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(55, 160, 255, 0.05); } .qt-epcis h5 { margin: 0 0 6px; font-size: 12.5px; } .qt-epcis h5 small { color: var(--muted); font-weight: 400; } .qt-chips { display: flex; flex-wrap: wrap; gap: 4px; font-size: 11px; }
 @media (max-width: 900px) { .qt-unit { grid-template-columns: 1fr; } .qt-grid2.qt-g11 { grid-template-columns: 1fr; } }

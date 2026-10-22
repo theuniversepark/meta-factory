@@ -4,10 +4,12 @@
 //  ① 조회   GET /api/fac/status · /po · /moves · /stock · /mr · /equipment · /orderpoints · /master
 //  ② 이벤트 GET /api/fac/events?since=<seq>&limit=<n>&type=<po.create,mr.stage…>
 //          → { run, events: [{ seq, t, type, key, … }], next } — next를 다음 since로 넘기면 이어 받는다
-//          이벤트 유형: master · po.create · receipt.done · internal.done · production.done · delivery.done · mr.create · mr.update · mr.stage
+//          이벤트 유형: master · po.create · receipt.done · internal.done · production.done · delivery.done · mr.create · mr.update · mr.stage · order.assign · order.close
 // 새 운전(화면에서 단계·라인을 바꿔 run ID가 달라짐)이 올라오면 기록을 비우고 seq를 1부터 다시 센다.
 const MAX_EVENTS = 20000;
 let store = null;
+const listeners = [];   // 새 이벤트를 받을 곳 (server/erpnext-bridge.mjs — ERPNext 연동)
+export function facListen(fn) { listeners.push(fn); }
 
 function fresh(run) { return { run, seq: 0, master: null, events: [], snapshot: null, pushes: 0, lastPush: null }; }
 export function facReset() { store = null; }
@@ -21,16 +23,17 @@ export function facStatus() {
 export function facPush(body) {
   if (!body || typeof body.run !== 'string' || !body.run) throw new Error('run이 없습니다');
   if (!store || store.run !== body.run) store = fresh(body.run);
-  let accepted = 0;
+  let accepted = 0; const added = [];
   for (const ev of Array.isArray(body.events) ? body.events : []) {
     if (!ev || typeof ev.type !== 'string') continue;
-    if (ev.type === 'master') { if (!store.master) store.master = { seq: ++store.seq, ...ev }; else continue; }
-    else store.events.push({ seq: ++store.seq, ...ev });
+    if (ev.type === 'master') { if (!store.master) { store.master = { seq: ++store.seq, ...ev }; added.push(store.master); } else continue; }
+    else { const e = { seq: ++store.seq, ...ev }; store.events.push(e); added.push(e); }
     accepted++;
   }
   if (store.events.length > MAX_EVENTS) store.events.splice(0, store.events.length - MAX_EVENTS);
   if (body.snapshot && typeof body.snapshot === 'object') store.snapshot = body.snapshot;
   store.pushes++; store.lastPush = new Date().toISOString();
+  if (listeners.length && added.length) for (const fn of listeners) { try { fn(store.run, added); } catch { /* 듣는 쪽 오류는 FAC API에 영향 없음 */ } }
   return { accepted, seq: store.seq };
 }
 export function facEvents({ since = 0, limit = 500, type = null } = {}) {
