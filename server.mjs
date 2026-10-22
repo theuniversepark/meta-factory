@@ -20,4 +20,4 @@ console.log(`피지컬AI 실증 메타팩토리 → http://localhost:${port}`);
 const { mqttStatus } = await import('./server/mqtt-gateway.mjs');
 const mq = mqttStatus();
 console.log(mq.listening ? `MQTT 브로커 → mqtt://${mq.host}:${mq.port} (OPC UA PubSub JSON: opcua/json/#)` : `MQTT 브로커 시작 실패: ${mq.error}`);
-console.log(hasApiKey() ? `Claude 에이전트 활성 (${MODEL})` : 'ANTHROPIC_API_KEY 없음 — 규칙 기반 에이전트만 사용 가능 (.env 또는 환경변수로 설정)');
+console.log(hasApiKey() ? `Claude 에이전트 활성 (${MODEL})` : 'ANTHROPIC_API_KEY 없음 — 정책 기반 에이전트만 사용 가능 (.env 또는 환경변수로 설정)');

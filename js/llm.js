@@ -1,4 +1,4 @@
-// 대화 기반 운영 컨트롤러 — 추론 기반 에이전트(FactoryAgent)가 정비·품질·흐름·물류를 계속 운영하고,
+// 대화 기반 운영 컨트롤러 — 정책 기반 에이전트(FactoryAgent)가 정비·품질·흐름·물류를 계속 운영하고,
 // 입력창의 운영자 지시만 해석해 공정에 반영한다. 내장 해석기(js/dialog.js)가 먼저 처리하고,
 // 해석하지 못한 문장은 Claude가 연결되어 있을 때 Claude가 해석해 같은 조치(도구)로 돌려준다.
 import { parseInstruction, applyAction, DIALOG_EXAMPLES } from './dialog.js';
@@ -132,7 +132,7 @@ export class LLMController {
     this.setEnabled(this.enabled && sim.mode.agentActive);
   }
 
-  // 대화 기반은 Claude 연결 없이도 쓸 수 있다 (내장 해석기). 운영 판단은 언제나 추론 기반 에이전트가 한다 — Claude는 운영자 지시 해석에만 쓴다
+  // 대화 기반은 Claude 연결 없이도 쓸 수 있다 (내장 해석기). 운영 판단은 언제나 정책 기반 에이전트가 한다 — Claude는 운영자 지시 해석에만 쓴다
   setEnabled(on) {
     this.enabled = !!(on && this.sim?.mode.agentActive);
     this.onChange?.();
@@ -228,7 +228,7 @@ export class LLMController {
     this.history.push({ t: fmt(sim.time), who: '에이전트', text: items.map(line).join(' / ') });
   }
 
-  // 대화 기반에서는 Claude를 주기적으로 부르지 않는다 (운영 판단은 추론 기반 에이전트)
+  // 대화 기반에서는 Claude를 주기적으로 부르지 않는다 (운영 판단은 정책 기반 에이전트)
   update() {}
 
   snapshot() {
@@ -303,7 +303,7 @@ export class LLMController {
     } catch (e) {
       if (gen !== this.gen) return;
       if (this.pendingDialog) { for (const it of this.pendingDialog.items) if (it.gate.verdict === 'pending') { it.gate.verdict = 'reject'; it.gate.reason = `Agent 호출 실패: ${e.message}`; } this.pendingDialog = null; }
-      this.sim.log('alert', 'Agent 호출 실패', { obs: e.message, act: '추론 기반 에이전트로 계속 운영 · 지시를 더 짧게 다시 입력해 보세요' });
+      this.sim.log('alert', 'Agent 호출 실패', { obs: e.message, act: '정책 기반 에이전트로 계속 운영 · 지시를 더 짧게 다시 입력해 보세요' });
       this.status = `오류: ${e.message}`;
     } finally {
       if (gen === this.gen) {

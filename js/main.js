@@ -706,8 +706,8 @@ function renderArch() {
 document.getElementById('engineSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b || b.disabled) return;
   llm.setEnabled(b.dataset.engine === 'llm');
-  sim.log('info', llm.enabled ? '대화 기반으로 전환' : '추론 기반으로 전환', {
-    obs: llm.enabled ? '추론 기반 에이전트가 계속 운영하고, 입력창 지시를 해석해 공정에 반영' : '추론 기반 에이전트가 모든 판단을 수행',
+  sim.log('info', llm.enabled ? '대화 기반으로 전환' : '정책 기반으로 전환', {
+    obs: llm.enabled ? '정책 기반 에이전트가 계속 운영하고, 입력창 지시를 해석해 공정에 반영' : '정책 기반 에이전트가 모든 판단을 수행',
     act: llm.enabled ? `해석: 내장 해석기${llm.available ? ' + Agent 보조' : ''}` : '',
   });
 });
@@ -1704,7 +1704,7 @@ if (bridge?.isApp) {
     statusEl.className = 'key-status ' + (msg ? 'err' : st.hasKey ? 'ok' : '');
     statusEl.textContent = msg || (st.hasKey
       ? `키 설정됨 (${st.source === 'keychain' ? (document.body.classList.contains('win') ? 'PC에 암호화 저장' : '키체인에 저장') : '환경변수'}) — 대화 기반 Agent를 쓸 수 있습니다`
-      : '키가 없습니다 — 추론 기반 에이전트만 사용 가능');
+      : '키가 없습니다 — 정책 기반 에이전트만 사용 가능');
   };
   const open = async () => { modal.classList.remove('hidden'); input.value = ''; showStatus(await bridge.keyStatus()); input.focus(); };
   const afterChange = async (res) => {
@@ -1734,7 +1734,7 @@ if (bridge?.isApp) {
     const on = llm.available;
     statusEl.className = 'key-status ' + (msg ? 'err' : on ? 'ok' : '');
     statusEl.textContent = msg || (llm.provider === 'key' ? '키 설정됨 (이 브라우저) — 대화 기반 Agent가 Claude API를 직접 부릅니다'
-      : llm.provider === 'claude' ? '키 없음 — 보는 사람의 Claude 계정으로 대화 기반 Agent를 씁니다' : '키가 없습니다 — 추론 기반 에이전트와 내장 해석기만 사용');
+      : llm.provider === 'claude' ? '키 없음 — 보는 사람의 Claude 계정으로 대화 기반 Agent를 씁니다' : '키가 없습니다 — 정책 기반 에이전트와 내장 해석기만 사용');
   };
   const open = () => { modal.classList.remove('hidden'); input.value = ''; try { remember.checked = !!localStorage.getItem('mf.anthropicKey'); } catch { /* 저장소 없음 */ } showStatus(); input.focus(); };
   const afterChange = (res) => { if (!res.ok) return showStatus(res.error); input.value = ''; showStatus(); if (!llm.available && llm.enabled) llm.setEnabled(false); };
@@ -2165,7 +2165,7 @@ function renderFacos() {
   const cmd = K.estopAll || s.processing.some((st) => st.cmd?.estop) ? ['비상정지 발령', 'bad'] : K.pstopAll ? ['보호정지', 'warn'] : K.lineSafe || K.evac || K.feedHold ? ['제한 운전', 'warn'] : ['정상', 'ok'];
   const mq = hub.mqtt;
   const L = [
-    ['💬', '운영자 지시', llm.enabled ? '대화 기반' : '추론 기반', 'ok', null, '추론 기반: 내장 규칙 자율 운영 · 대화 기반: 지시 → 지시 게이트(해석·대상·안전·실행 가능성·영향) → 반영 (js/llm.js · js/dialog.js · js/gate.js)'],
+    ['💬', '운영자 지시', llm.enabled ? '대화 기반' : '정책 기반', 'ok', null, '정책 기반: 명시적 운영 정책(조건·기준값)으로 자율 운영 — 학습 모델·LLM이 아닌 정해 둔 기준으로 판단 · 대화 기반: 지시 → 지시 게이트(해석·대상·안전·실행 가능성·영향) → 반영 (js/llm.js · js/dialog.js · js/gate.js)'],
     ['🏭', 'AIOS', `${P.version}${P.job ? ` · ${AIOS_PH[P.job.phase] ?? ''}` : ''}`, P.job ? 'act' : 'ok', 'btnAios', '공장 운영 AI — 운영 데이터 → 정책 학습 → 트윈 검증 → 오케스트레이터 배포 (js/aios.js)'],
     ['🛰', '오케스트레이터', open ? `인시던트 ${open}건` : '인시던트 없음', open ? 'warn' : 'ok', 'btnOrch', '인시던트 감지 → 셀 자체 조치 → 보고 → 판단 → 명령 → 조치 → 완료 확인 (js/orchestrator.js)'],
     ['🤖', '자율 에이전트', `의사결정 ${agent.decisions}건`, 'ok', 'facos:agent', '관찰 → 판단 → 실행: 예지정비·자율 보정·투입 제어·병목 최적화·공급 차질·AGV 배차·절전 (js/agent.js)'],

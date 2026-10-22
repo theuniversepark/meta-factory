@@ -3625,7 +3625,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     const res = (j, kind) => !j ? '아직 없음' : j.phase === 'done' ? `${j.label} ${kind === 'v' ? `검증 ${j.val}% · ` : ''}배포 완료` : j.phase === 'rejected' ? `${j.label} 기준 미달 · 배포 안 함` : j.phase === 'rollback' ? `${j.label} 롤백` : `${j.label} ${PH[j.phase] ?? j.phase}`;
     const okRate = V?.allEps ? Math.round((V.okEps / V.allEps) * 100) : null;
     box(486, 440, '🧠 AI 학습', '#b89bff', sim.mode.key !== 'dark' ? [
-      ['AI 학습', '피지컬AI 단계에서 운영'], ['현재 단계', `${sim.mode.label} — 데이터 수집·관제`], ['VLA (로봇 추론)', '규칙 기반 로봇 프로그램'], ['AIOS (공장 운영)', 'MES 규칙 기반 운영'],
+      ['AI 학습', '피지컬AI 단계에서 운영'], ['현재 단계', `${sim.mode.label} — 데이터 수집·관제`], ['VLA (로봇 추론)', '규칙 기반 로봇 프로그램'], ['AIOS (공장 운영)', 'MES 고정 정책 기반 운영'],
     ] : [
       ['VLA 로봇 모델', `${V?.label(V.latest) ?? 'v1.0'} · 에피소드 성공률 ${okRate ?? '-'}%`],
       ['VLA 학습', vJob ? `${vJob.label} ${PH[vJob.phase] ?? vJob.phase}${vJob.phase === 'train' ? ` ${vJob.epoch}/${vJob.epochs} 에폭 · loss ${vJob.loss.at(-1) ?? '-'}` : vJob.phase === 'rollout' ? ` ${vJob.rollout.length}대` : ''}` : `대기 · 새 에피소드 ${V?.newEps ?? 0}/${V?.trainAt ?? 0}`, vJob ? '#f5d36b' : null],

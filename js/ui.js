@@ -108,7 +108,7 @@ export class UI {
     this.renderFacos();
     this.renderEngine();
     $('thought').innerHTML = this.llm?.enabled
-      ? `<b>운영</b> · ${this.agent.arch === 'hybrid' ? (() => { const H = this.agent.status(); return `혼합형 다중 에이전트 — 정비·품질·흐름 에이전트 제안 ${H.proposed} · 메인 승인 ${H.approved} · 보류 ${H.deferred} · 충돌 ${H.conflicts} · 평균 지연 ${H.avgLat.toFixed(1)}초`; })() : '추론 기반 에이전트가 정비·품질·흐름·물류를 계속 판단합니다'} — ${esc(this.agent.lastThought)}<br><b>대화</b> · 입력창 지시를 해석해 공정에 반영합니다 (예: 포장셀 속도 75% · 도어트림 2:1 · e-axle 조립셀 예방정비)`
+      ? `<b>운영</b> · ${this.agent.arch === 'hybrid' ? (() => { const H = this.agent.status(); return `혼합형 다중 에이전트 — 정비·품질·흐름 에이전트 제안 ${H.proposed} · 메인 승인 ${H.approved} · 보류 ${H.deferred} · 충돌 ${H.conflicts} · 평균 지연 ${H.avgLat.toFixed(1)}초`; })() : '정책 기반 에이전트가 정비·품질·흐름·물류를 계속 판단합니다'} — ${esc(this.agent.lastThought)}<br><b>대화</b> · 입력창 지시를 해석해 공정에 반영합니다 (예: 포장셀 속도 75% · 도어트림 2:1 · e-axle 조립셀 예방정비)`
       : sim.mode.agentActive
       ? `<b>현재 판단</b> · ${esc(this.agent.lastThought)}`
       : '<b>수동 운영</b> · 설비 데이터가 수집되지 않아 고장·자재 부족을 사람이 발견한 뒤에 대응합니다.';
@@ -183,7 +183,7 @@ export class UI {
     let msg;
     const helper = llm.available ? `Agent 연결됨${llm.provider && llm.provider !== 'server' ? ` (${llm.providerLabel})` : ''}` : '내장 해석기 (Agent 미연결)';
     if (!sim.mode.agentActive) msg = '레거시 공장은 데이터 수집이 없어 대화 기반을 쓸 수 없습니다';
-    else if (!llm.enabled) msg = `대화 기반: 추론 기반 운영 + 입력 지시 해석·반영 · ${helper}`;
+    else if (!llm.enabled) msg = `대화 기반: 정책 기반 운영 + 입력 지시 해석·반영 · ${helper}`;
     else if (llm.inFlight || llm.calls) msg = `${llm.inFlight ? '' : '대기 · '}${llm.status || '준비'} · Agent 해석 ${llm.calls}회 · ${llm.provider === 'claude' ? 'Claude 계정 사용량' : `약 $${llm.costUSD.toFixed(3)}`}`;
     else msg = `대화 기반 · 입력창 지시를 공정에 반영합니다 · ${helper}`;
     st.innerHTML = (llm.inFlight ? '<span class="spin"></span>' : '') + esc(msg);
