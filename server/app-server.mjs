@@ -13,6 +13,7 @@ import { facRoute, facListen } from './fac-api.mjs';
 import { makeRcaApi } from './rca-api.mjs';
 import { makeEpcisApi } from './epcis-api.mjs';
 import { makeErpBridge } from './erpnext-bridge.mjs';
+import { makeMonitorApi } from './monitor-api.mjs';
 import { fork } from 'node:child_process';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -387,6 +388,8 @@ export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
   // ERPNext 연동 (선택) — FAC 업무 기록 이벤트를 받아 대기열 → ERPNext 전표 (server/erpnext-bridge.mjs) · 출하 전표 시리얼은 내장 EPCIS 저장소의 트럭 리콜 범위에서
   const erp = makeErpBridge({ dir: path.join(DATA_DIR(), 'erpnext'), serialsOf: (truck) => epcisApi().store.shipmentOf(truck) });
   facListen((run, events) => erp.enqueue(run, events));
+  // 설비 대시보드 (4단계 · 선택) — monitoring/ 구성을 데이터 폴더로 복사해 Telegraf → InfluxDB → Grafana를 Docker로 (server/monitor-api.mjs)
+  const monitor = makeMonitorApi({ dir: path.join(DATA_DIR(), 'monitoring'), src: path.join(ROOT, 'monitoring'), mqttPort: () => mqttStatus().port });
   // 센서 서버 (별도 프로세스 · 별도 DB): 내장 브로커의 센서 묶음을 구독해 SQLite에 저장 — 앱 서버는 /api/sensors/v1/를 그 프로세스로 중계한다
   const mq = mqttStatus(), sensor = { port: null, db: null, pid: null, error: null };
   try {
@@ -452,6 +455,10 @@ export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
         const r = await epcisApi().route(req.method, url.pathname, url.searchParams, req.method === 'POST' ? await readBody(req, 32 * 1024 * 1024) : '');
         if (r) return send(res, r.code, r.body);
       } catch (e) { return send(res, 400, { error: e.message }); }
+    }
+    if (url.pathname.startsWith('/api/monitor/v1')) {
+      try { const r = await monitor.route(req.method, url.pathname); if (r) return send(res, r.code, r.body); }
+      catch (e) { return send(res, 400, { error: e.message }); }
     }
     if (url.pathname.startsWith('/api/erpnext/v1')) {
       try { const r = await erp.route(req.method, url.pathname, url.searchParams, req.method === 'POST' ? await readBody(req, 1024 * 1024) : ''); if (r) return send(res, r.code, r.body); }

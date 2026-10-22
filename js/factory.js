@@ -2566,7 +2566,8 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
           if (it?.carrier) return { type: 'mover', id: it.carrier.id };
         }
         if (u.stationId && !o.parent?.userData.stationId) return { type: 'station', id: u.stationId };
-        if (u.zoneCell) return { type: 'zcell', ...u.zoneCell };   // 확장 Zone 셀 (설비)
+        if (u.zoneCell) return { type: 'zcell', ...u.zoneCell };
+        if (u.zoneBoard) return { type: 'zboard', zone: u.zoneBoard };   // Zone 전광판 → Zone 대시보드 창   // 확장 Zone 셀 (설비)
         o = o.parent;
       }
     }

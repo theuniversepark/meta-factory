@@ -14,6 +14,7 @@ import { SerialHub } from './serial.js';
 import { QualityComm } from './qcomm.js';
 import { SensorNet } from './sensors.js';
 import { MachineMonitor } from './machmon.js';
+import { ZoneKpi } from './zonekpi.js';
 import { CapaManager } from './capa.js';
 import { FactoryOS } from './factoryos.js';
 import { FacLedger } from './fac.js';
@@ -654,6 +655,7 @@ export class Simulation {
     new QualityComm(this);   // 불량 판정 리포트 → 메인 서버 → RCA 서버 통신 · 품질 통신 pcap (js/qcomm.js)
     new FactoryOS(this);   // Factory OS 계층: 공장 오케스트레이터(FacOS) · 정밀조립 Manufacturing Agent · 셀 OCS · A2A 메시지 (js/factoryos.js)
     new MachineMonitor(this);   // 적응가공 가공기 상태 감시 · 공구 상태 · 엣지 AI 예지보전 → 공장 오케스트레이터 보고 · 서버 전송 · AAS (js/machmon.js)
+    new ZoneKpi(this, seed);   // Zone 운영 분석: OEE · 손실·NG 파레토 · 관리도 · 공정–품질 상관 (js/zonekpi.js — Zone 대시보드 · 설비 대시보드)
   }
 
   // 설비·로봇 고유 ID — 현황판·라벨·텔레메트리·데이터 연동에 같은 ID를 쓴다 (사람은 제외)
@@ -1131,6 +1133,7 @@ export class Simulation {
     this.sensors?.tick(dt);
     this.fos?.update(dt);
     this.machmon?.tick(dt);
+    this.zkpi?.tick();
     this.orch.update();
     // 자재 공급이 재개되면 공급 차질 인시던트를 닫는다
     const sup = this.orch.find('supply');

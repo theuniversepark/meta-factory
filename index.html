@@ -41,6 +41,7 @@
     <button id="btnAios" class="dark-only vla-top aios-top" title="AIOS 공장 운영 AI — 현장 생산·운영 데이터 → AI-ready 운영 데이터셋 → 서버 저장 → 운영 정책 학습 → 디지털트윈 검증 → 오케스트레이터 배포, 운영 데이터셋 다운로드">🏭 AIOS 학습</button>
     <button id="btnImpact" class="vla-top imp-top" title="이벤트·문제가 UPH · OEE · WIP · POWER에 미친 영향 분석 · 개선 제안 리포트 · 디지털트윈 검증 · 적용 여부 의사결정">📊 KPI 영향·개선<b id="impBadge" hidden></b></button>
     <button id="btnTrace" class="vla-top qt-top" title="제품 추적 관리(시리얼·계보) · 품질 불량 AI 원인 분석 데이터 내려받기 · Zone·총괄 오케스트레이터 8D CAPA · 운영 정책 반영">🔎 품질 추적<b id="qtBadge" hidden></b></button>
+    <button id="btnZoneDash" class="vla-top zd-top" title="Zone별 실시간 모니터링(설비 상태·생산 진행률·시계열) · 종합 설비 효율(OEE·6대 손실 파레토) · 공정–품질 상관·관리도 — 3D Zone 전광판을 눌러도 열림">📈 Zone 대시보드</button>
     <div class="seg" id="modeSeg">
       <button data-mode="traditional">레거시</button><i class="seg-arrow">›</i>
       <button data-mode="smart" class="on">자동화</button><i class="seg-arrow">›</i>
@@ -225,6 +226,12 @@
     <div class="modal-card wide qt-card">
       <div class="modal-h"><h2>품질 추적 · 불량 원인 분석 · 8D CAPA <small>정밀조립Zone 제품 시리얼·계보(EPCIS 2.0 · ISA-95) → 체결 전수 검사 NG → AI 원인 분석·데이터 내려받기 → Zone·총괄 오케스트레이터 8D → 운영 정책 반영</small></h2><button id="closeTrace">✕</button></div>
       <div id="traceBody"></div>
+    </div>
+  </div>
+  <div class="modal hidden" id="zdModal">
+    <div class="modal-card wide qt-card zd-card">
+      <div class="modal-h"><h2>Zone 대시보드 <small>실시간 모니터링 · 종합 설비 효율(OEE · ISO 22400-2) · 6대 손실·NG 파레토 · 관리도(X̄-R / I-MR · Western Electric) · 공정–품질 상관</small></h2><button id="closeZd">✕</button></div>
+      <div id="zdBody"></div>
     </div>
   </div>
   <div class="modal hidden" id="impactModal">

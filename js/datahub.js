@@ -279,6 +279,52 @@ function inspAssets(assets, sim, I, plate) {
   });
 }
 
+// ── 설비 상태 요약 · 이벤트 (UNS 평면 토픽) — 4단계 설비 대시보드(Telegraf → InfluxDB → Grafana)가 바로 읽는 짧은 JSON ─────────────────
+// OPC UA PubSub JSON은 구조가 깊어 시계열 도구로 바로 읽기 어렵다 — 통합 네임스페이스(UNS) 관례대로 설비마다 요약을 함께 발행한다 (기존 발행은 그대로)
+//   metafactory/telemetry/v1/{존}/{설비 ID}  { asset, name, zone, kind, health, rul_min, risk10, cpk, util, state, busy, down }
+//   metafactory/events/v1/{수준}             { level, title, text, zone }   — 그래프 위 이벤트 표시(정비·고장·품질 NG)
+export const UNS_TELEMETRY = (zone, id) => `metafactory/telemetry/v1/${zone}/${id}`;
+export const UNS_EVENT = (level) => `metafactory/events/v1/${level}`;
+const r3 = (v, d = 2) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 10 ** d) / 10 ** d);
+export function unsTelemetry(sim) {
+  const out = [], put = (zone, st, kind) => {
+    let a = {}; try { a = sim.assess(st) ?? {}; } catch { /* 평가 불가 설비 */ }
+    const id = String(st.uid ?? st.id).replace(/[^\w.-]/g, '_'), s = st.state ?? 'OK';
+    out.push({ topic: UNS_TELEMETRY(zone, id), payload: JSON.stringify({ asset: st.uid ?? st.id, name: st.name, zone, kind, health: r3(st.health, 1), rul_min: r3(a.rul, 1), risk10: r3(a.risk10, 4), cpk: r3(a.cpk, 3), util: r3(a.util, 3), state: s, busy: s === 'BUSY' || st.busy ? 1 : 0, down: s === 'DOWN' || s === 'MAINT' ? 1 : 0 }) });
+  };
+  for (const st of sim.processing ?? []) if (!st.standby) put('main', st, 'cell');
+  for (const st of sim.zoneCells ?? []) put(st.zone, st, 'cell');
+  return out;
+}
+// 운영 로그 중 대시보드에 겹쳐 볼 것 (경보 · 주의 · 조치) — since 이후 새 것만
+export function unsEvents(sim, since) {
+  const L = (sim.logs ?? []).filter((x) => x.id > since && ['alert', 'warn', 'act'].includes(x.level)).reverse();
+  return { next: sim.logSeq ?? since, messages: L.map((l) => ({ topic: UNS_EVENT(l.level), payload: JSON.stringify({ level: l.level, title: l.title, text: [l.obs, l.dec, l.act].filter(Boolean).join(' / ').slice(0, 400), zone: /유연생산|FLX-/.test(l.title) ? 'flex' : /적응가공|ADP-/.test(l.title) ? 'adapt' : /정밀검사|QIS-/.test(l.title) ? 'insp' : 'main' }) })) };
+}
+
+// Zone 운영 분석 (js/zonekpi.js) — 설비 대시보드 「Zone 운영 분석」
+//   metafactory/oee/v1/{존}       { zone, oee, a, p, q, good, judged, progress, loss_*(분 · 누적), pm_min }   — 2초마다
+//   metafactory/quality/v1/{존}   { zone, product, id, ng, kind, x_*(공정 변수), y_*(품질 특성) }   — 제품 1개 판정마다 (평면 JSON)
+export const UNS_OEE = (zone) => `metafactory/oee/v1/${zone}`;
+export const UNS_QUALITY = (zone) => `metafactory/quality/v1/${zone}`;
+export function unsZoneKpi(sim, { max = 400 } = {}) {
+  const K = sim.zkpi; if (!K) return [];
+  K.feedOn = true; K.collectMain();
+  const zones = ['main', 'flex', 'adapt', 'insp'].filter((z) => z === 'main' || (z === 'insp' ? sim.xzones?.insp : sim.xzones?.byKey?.(z)));
+  const out = zones.map((z) => {
+    const o = K.oee(z), L = Object.fromEntries(K.lossPareto(z, o).map((x) => [`loss_${x.key}`, r3(x.v, 2)])), pr = K.progress(z);
+    return { topic: UNS_OEE(z), payload: JSON.stringify({ zone: z, oee: r3(o.OEE, 4), a: r3(o.A, 4), p: r3(o.P, 4), q: r3(o.Q, 4), good: o.quality.good, judged: o.quality.judged, progress: r3(pr.pct, 4),
+      ...Object.fromEntries(['down', 'setup', 'stop', 'idle', 'blocked', 'speed', 'defect'].map((k) => [`loss_${k}`, L[`loss_${k}`] ?? 0])), pm_min: r3(o.rows.filter((r) => !r.standby).reduce((a, r) => a + r.t.pm, 0) / 60, 2) }) };
+  });
+  for (const u of K.drain().slice(-max)) {
+    const flat = { zone: u.zone, product: u.product, id: String(u.id), ng: u.ng ? 1 : 0, kind: u.kind ?? 'OK' };
+    for (const [k, v] of Object.entries(u.x)) if (Number.isFinite(v)) flat[`x_${k}`] = v;
+    for (const [k, v] of Object.entries(u.y)) if (Number.isFinite(v)) flat[`y_${k}`] = v;
+    out.push({ topic: UNS_QUALITY(u.zone), payload: JSON.stringify(flat) });
+  }
+  return out;
+}
+
 export class DataHub {
   constructor() {
     this.interval = 10;         // 수집 주기 (시뮬레이션 초)

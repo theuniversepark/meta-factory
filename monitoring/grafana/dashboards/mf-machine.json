@@ -1,0 +1,651 @@
+{
+ "uid": "mf-machine",
+ "title": "메타팩토리 · 적응가공 가공기 상태 감시",
+ "description": "적응가공 가공기 4대 — 주축 부하·진동·AE·베어링 온도·공구 마모 → 엣지 AI 이상 점수·RUL·판단 (metafactory/machmon/v1)",
+ "tags": [
+  "메타팩토리"
+ ],
+ "timezone": "browser",
+ "refresh": "10s",
+ "time": {
+  "from": "now-30m",
+  "to": "now"
+ },
+ "schemaVersion": 41,
+ "version": 1,
+ "editable": false,
+ "templating": {
+  "list": [
+   {
+    "name": "machine",
+    "label": "가공기",
+    "type": "query",
+    "datasource": {
+     "type": "influxdb",
+     "uid": "mf-influx"
+    },
+    "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"raw\", tag: \"asset\", predicate: (r) => r._measurement == \"machine\", start: -1d)",
+    "refresh": 2,
+    "includeAll": true,
+    "multi": true,
+    "current": {
+     "text": "All",
+     "value": "$__all"
+    },
+    "allValue": ".*",
+    "sort": 1
+   }
+  ]
+ },
+ "annotations": {
+  "list": [
+   {
+    "builtIn": 1,
+    "datasource": {
+     "type": "grafana",
+     "uid": "-- Grafana --"
+    },
+    "enable": true,
+    "hide": true,
+    "iconColor": "rgba(0, 211, 255, 1)",
+    "name": "Annotations & Alerts",
+    "type": "dashboard"
+   },
+   {
+    "datasource": {
+     "type": "influxdb",
+     "uid": "mf-influx"
+    },
+    "enable": true,
+    "iconColor": "red",
+    "name": "운영 이벤트 — 경보",
+    "target": {
+     "refId": "Anno",
+     "query": "from(bucket: \"raw\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"event\" and r.level == \"alert\") |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\") |> map(fn: (r) => ({ _time: r._time, text: r.title + (if exists r.text then \" — \" + r.text else \"\"), tags: r.zone }))"
+    }
+   },
+   {
+    "datasource": {
+     "type": "influxdb",
+     "uid": "mf-influx"
+    },
+    "enable": true,
+    "iconColor": "orange",
+    "name": "운영 이벤트 — 주의",
+    "target": {
+     "refId": "Anno",
+     "query": "from(bucket: \"raw\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"event\" and r.level == \"warn\") |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\") |> map(fn: (r) => ({ _time: r._time, text: r.title + (if exists r.text then \" — \" + r.text else \"\"), tags: r.zone }))"
+    }
+   },
+   {
+    "datasource": {
+     "type": "influxdb",
+     "uid": "mf-influx"
+    },
+    "enable": false,
+    "iconColor": "blue",
+    "name": "운영 이벤트 — 조치",
+    "target": {
+     "refId": "Anno",
+     "query": "from(bucket: \"raw\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"event\" and r.level == \"act\") |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\") |> map(fn: (r) => ({ _time: r._time, text: r.title + (if exists r.text then \" — \" + r.text else \"\"), tags: r.zone }))"
+    }
+   }
+  ]
+ },
+ "panels": [
+  {
+   "id": 1,
+   "type": "timeseries",
+   "title": "이상 점수 (엣지 AI)",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "mf-influx"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "mf-influx"
+     },
+     "refId": "A",
+     "query": "from(bucket: \"raw\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"machine\" and r._field == \"anomaly\" and r.asset =~ /^${machine:regex}$/) |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset })) |> group(columns: [\"_field\"])"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 6,
+      "showPoints": "never",
+      "spanNulls": true,
+      "thresholdsStyle": {
+       "mode": "line+area"
+      }
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "transparent",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 0.6
+       },
+       {
+        "color": "red",
+        "value": 0.8
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "lastNotNull",
+      "min",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 2,
+   "type": "timeseries",
+   "title": "잔여 수명 RUL — 공구 · 주축 (분)",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "mf-influx"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "mf-influx"
+     },
+     "refId": "A",
+     "query": "from(bucket: \"raw\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"machine\" and (r._field == \"rul_tool_min\" or r._field == \"rul_spindle_min\") and r.asset =~ /^${machine:regex}$/) |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset + (if r._field == \"rul_tool_min\" then \" 공구\" else \" 주축\") })) |> group(columns: [\"_field\"])"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "m",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 6,
+      "showPoints": "never",
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "lastNotNull",
+      "min",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 3,
+   "type": "timeseries",
+   "title": "주축 부하 (%)",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "mf-influx"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 8,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "mf-influx"
+     },
+     "refId": "A",
+     "query": "from(bucket: \"raw\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"machine\" and r._field == \"spindleLoad\" and r.asset =~ /^${machine:regex}$/) |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset })) |> group(columns: [\"_field\"])"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 6,
+      "showPoints": "never",
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "lastNotNull",
+      "min",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 4,
+   "type": "timeseries",
+   "title": "진동 RMS (mm/s)",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "mf-influx"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 8,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "mf-influx"
+     },
+     "refId": "A",
+     "query": "from(bucket: \"raw\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"machine\" and r._field == \"vibration\" and r.asset =~ /^${machine:regex}$/) |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset })) |> group(columns: [\"_field\"])"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "suffix: mm/s",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 6,
+      "showPoints": "never",
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "lastNotNull",
+      "min",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 5,
+   "type": "timeseries",
+   "title": "진동 첨도 (Kurtosis)",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "mf-influx"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 8,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "mf-influx"
+     },
+     "refId": "A",
+     "query": "from(bucket: \"raw\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"machine\" and r._field == \"kurtosis\" and r.asset =~ /^${machine:regex}$/) |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset })) |> group(columns: [\"_field\"])"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 6,
+      "showPoints": "never",
+      "spanNulls": true,
+      "thresholdsStyle": {
+       "mode": "line+area"
+      }
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "transparent",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 4.5
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "lastNotNull",
+      "min",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 6,
+   "type": "timeseries",
+   "title": "음향방출 AE (dB)",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "mf-influx"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 16,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "mf-influx"
+     },
+     "refId": "A",
+     "query": "from(bucket: \"raw\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"machine\" and r._field == \"ae\" and r.asset =~ /^${machine:regex}$/) |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset })) |> group(columns: [\"_field\"])"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "suffix: dB",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 6,
+      "showPoints": "never",
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "lastNotNull",
+      "min",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 7,
+   "type": "timeseries",
+   "title": "주축 베어링 온도 (°C)",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "mf-influx"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 16,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "mf-influx"
+     },
+     "refId": "A",
+     "query": "from(bucket: \"raw\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"machine\" and r._field == \"bearingTemp\" and r.asset =~ /^${machine:regex}$/) |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset })) |> group(columns: [\"_field\"])"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "celsius",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 6,
+      "showPoints": "never",
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "lastNotNull",
+      "min",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 8,
+   "type": "timeseries",
+   "title": "공구 플랭크 마모 VB (µm)",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "mf-influx"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 16,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "mf-influx"
+     },
+     "refId": "A",
+     "query": "from(bucket: \"raw\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"machine\" and r._field == \"toolVB\" and r.asset =~ /^${machine:regex}$/) |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset })) |> group(columns: [\"_field\"])"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "suffix: µm",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 6,
+      "showPoints": "never",
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "lastNotNull",
+      "min",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 9,
+   "type": "timeseries",
+   "title": "공구 마모율",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "mf-influx"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 24,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "mf-influx"
+     },
+     "refId": "A",
+     "query": "from(bucket: \"raw\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"machine\" and r._field == \"tool_wear\" and r.asset =~ /^${machine:regex}$/) |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset })) |> group(columns: [\"_field\"])"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 6,
+      "showPoints": "never",
+      "spanNulls": true
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "calcs": [
+      "lastNotNull",
+      "min",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   }
+  },
+  {
+   "id": 10,
+   "type": "state-timeline",
+   "title": "엣지 AI 판단 (정상 · 감시 · 교체 권고 · 즉시 교체 · 주축 점검)",
+   "datasource": {
+    "type": "influxdb",
+    "uid": "mf-influx"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 24,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "influxdb",
+      "uid": "mf-influx"
+     },
+     "refId": "A",
+     "query": "from(bucket: \"raw\") |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == \"machine\" and r._field == \"decision\" and r.asset =~ /^${machine:regex}$/) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset })) |> group(columns: [\"_field\"])"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "showValue": "auto",
+    "mergeValues": true,
+    "rowHeight": 0.8
+   }
+  }
+ ],
+ "links": [
+  {
+   "title": "메타팩토리 대시보드",
+   "type": "dashboards",
+   "tags": [
+    "메타팩토리"
+   ],
+   "asDropdown": true,
+   "includeVars": false,
+   "keepTime": true
+  }
+ ]
+}

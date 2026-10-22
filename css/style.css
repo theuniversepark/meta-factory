@@ -1176,3 +1176,37 @@ details.zone-agent:not([open]) { padding-bottom: 7px; } details.zone-agent:not([
 .apps-note { margin: 0; padding-left: 18px; font-size: 12px; color: var(--ink2); display: grid; gap: 5px; }
 .apps-note a { color: var(--accent); }
 @media (max-width: 560px) { .apps-card .apps-row { grid-template-columns: 1fr; } }
+
+/* Zone 대시보드 (zonedash.js) — 실시간 모니터링 · OEE·파레토 · 관리도·산점도 */
+.topbar .zd-top { border-color: #ffd166; background: rgba(255, 209, 102, 0.12); color: #ffe7a8; margin-right: 4px; }
+.topbar .zd-top:hover { background: rgba(255, 209, 102, 0.24); }
+.zd-card { width: min(1360px, 97vw); }
+.zd-zones { margin-top: 8px; width: max-content; max-width: 100%; flex-wrap: wrap; } .zd-zones small { opacity: 0.75; margin-left: 4px; }
+.zd-gf { margin-left: 8px; border: 1px solid #f5b82e !important; color: #ffe7a8 !important; }
+.zd-body { max-height: min(70vh, 760px); overflow: auto; padding-right: 4px; }
+.zd-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 4px; } .imp-tile.bad b { color: var(--bad); }
+.zd-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0; } .zd-two > div { min-width: 0; }
+@media (max-width: 900px) { .zd-two { grid-template-columns: 1fr; } .zd-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.zd-chart { border: 1px solid var(--line); border-radius: 10px; background: rgba(255, 255, 255, 0.02); padding: 6px 8px 4px; margin-bottom: 8px; }
+.zd-ct { font-size: 12px; font-weight: 700; color: var(--ink); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; margin-bottom: 2px; }
+.zd-leg { display: flex; flex-wrap: wrap; gap: 2px 10px; font-weight: 500; font-size: 10.5px; color: var(--ink2); margin-left: auto; }
+.zd-leg i, .zd-legend i, .zd-dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.zd-svg { width: 100%; height: auto; display: block; } .zd-svg.zd-r { margin-top: -2px; }
+.zd-svg .zd-grid { stroke: rgba(255, 255, 255, 0.07); } .zd-svg .zd-ax { fill: var(--muted); font-size: 9.5px; }
+.zd-empty { border: 1px dashed var(--line); border-radius: 10px; padding: 26px 12px; color: var(--muted); text-align: center; margin-bottom: 8px; font-size: 12px; }
+.zd-prog { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin-top: 8px; background: rgba(255, 255, 255, 0.02); }
+.zd-pl { font-size: 12px; color: var(--ink2); margin-bottom: 5px; } .zd-pl b { color: var(--ink); }
+.zd-pbar { position: relative; height: 12px; border-radius: 6px; background: rgba(255, 255, 255, 0.07); overflow: visible; }
+.zd-pbar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; background: linear-gradient(90deg, #37a0ff, #3ddc84); }
+.zd-pbar em { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #ffd166; }
+.zd-prog small { display: block; margin-top: 5px; color: var(--muted); font-size: 11px; } .zd-prog .good { color: var(--good); } .zd-prog .bad { color: var(--bad); }
+.zd-bar { display: inline-block; height: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.07); vertical-align: middle; overflow: hidden; } .zd-bar i { display: block; height: 100%; }
+.zd-stack { display: flex; width: 100%; min-width: 180px; height: 10px; border-radius: 4px; overflow: hidden; background: rgba(255, 255, 255, 0.05); } .zd-stack i { display: block; height: 100%; }
+.zd-tbl { width: 100%; margin-top: 6px; } .zd-tbl td.num { text-align: right; font-variant-numeric: tabular-nums; } .zd-tbl tr.muted td { opacity: 0.55; }
+.zd-tbl small { color: var(--muted); font-size: 10.5px; } .zd-item { color: var(--ink2); font-size: 11.5px; }
+.zd-pairs tr[data-zd-x] { cursor: pointer; } .zd-pairs tr:hover td { background: rgba(255, 255, 255, 0.04); } .zd-pairs tr.sel td { background: rgba(55, 160, 255, 0.14); }
+.zd-pairs b.bad { color: var(--bad); } .zd-pairs b.warn { color: var(--warn); }
+.zd-seg { margin: 6px 0; width: max-content; max-width: 100%; flex-wrap: wrap; }
+.zd-note { color: var(--muted); font-size: 11px; margin: 6px 0; }
+.zd-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--ink2); margin-top: 4px; }
+.zd-viol { margin: 4px 0 0; padding-left: 18px; font-size: 11.5px; color: var(--ink2); } .zd-viol b { color: var(--bad); } .zd-viol .muted { color: var(--muted); list-style: none; margin-left: -18px; }

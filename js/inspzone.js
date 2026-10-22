@@ -191,7 +191,7 @@ export class InspZone {
   buildBoard() {
     this.boardT = 0;   // (Zone 바닥 입간판은 없앴다 — 오른쪽 벽 전광판이 같은 내용을 크게 보여 준다)
     // 오른쪽 벽 전광판: 셀별 상태 · 판정 실적 · 제품별 결과 · 검사 AMR · 최근 판정
-    const W = INSP.wall, wg = put(new THREE.Group(), W.x, W.y, W.z, this.G); wg.rotation.y = W.rot; this.wallG = wg;
+    const W = INSP.wall, wg = put(new THREE.Group(), W.x, W.y, W.z, this.G); wg.rotation.y = W.rot; this.wallG = wg; wg.userData.zoneBoard = 'insp';   // 전광판을 누르면 Zone 대시보드 창 (main.js)
     put(box(W.w + 0.3, W.h + 0.3, 0.12, std(0x14181e, { roughness: 0.6, metalness: 0.3 })), 0, 0, -0.08, wg);
     const wc = document.createElement('canvas'); wc.width = 2304; wc.height = 512; this.wallCv = wc;
     const wt = new THREE.CanvasTexture(wc); wt.colorSpace = THREE.SRGBColorSpace; wt.anisotropy = 8; this.wallTex = wt;
@@ -390,7 +390,7 @@ export class InspZone {
   step(dt, halted) {
     if (!this.sim) return;
     const K = this.ctl ??= zoneCtl();
-    this.halted = halted || K.stop; if (this.halted) return;   // 정밀조립 비상·보호정지 또는 운영자 Zone 정지(대화 지시)
+    this.halted = halted || K.stop; if (this.halted) { this.sim.zkpi?.stopAll('insp', this.order, dt); return; }   // 정밀조립 비상·보호정지 또는 운영자 Zone 정지(대화 지시)
     dt *= K.speed;   // 운영자 Zone 속도 (대화 지시)
     this.time += dt;
     this.sampleTick();
@@ -398,9 +398,10 @@ export class InspZone {
       // 셀 고장·정비 (sim.js 설비 관리 — 정밀검사 정비실 인력이 수리): 끝날 때까지 검사가 멈춘다 · 가동 여부를 알려 마모 계산에 쓴다
       const zc = this.sim.zoneCell?.('insp', c.id); c.fault = zc && (zc.state === 'DOWN' || zc.state === 'MAINT') ? zc.state : null;
       if (zc) zc.busy = c.state === 'BUSY';
+      this.sim.zkpi?.acc('insp', c, dt, { held: K.hold.has(c.id), ideal: c.def.cycle * (c.def.cycleK ?? 1) * this.mul, name: `${c.def.no} ${c.def.label}` });   // OEE 셀 시간 분류 (js/zonekpi.js)
       if (c.fault || c.state !== 'BUSY' || K.hold.has(c.id)) continue;   // 운영자 셀 정지 (대화 지시)
       c.busy += dt; c.progress = Math.min(1, c.progress + dt / c.cur);
-      if (c.progress >= 1) { c.state = 'DONE'; c.done++; }
+      if (c.progress >= 1) { c.state = 'DONE'; c.done++; this.sim.zkpi?.done('insp', c.id); }
     }
     // 대기 중인 샘플 요청 → 스테이션의 빈 AMR 배차 (출구에 가까운 자리부터)
     if (this.queue.length) {
@@ -491,6 +492,7 @@ export class InspZone {
       return;
     }
     s.done++; s[res]++; by[res]++; this.push(it, res);
+    this.sim.zkpi?.inspUnit(it, res, cell.id, zl(zk), plabel);   // 측정 편차·불확도 → 품질 표본 (관리도·산점도)
     this.sim.fos?.sampleResult(it, res);   // 결과 → 생산 Zone · NG면 품질 알림 → 정밀조립 8D
     cell.flash = { col: res === 'ok' ? 0x3ddc84 : 0xff4d4d, t: 2 };
     const sh = cell.parts.shelves[res === 'ok' ? 'ok' : 'ng'], n = res === 'ok' ? s.ok : s.ng; sh.forEach((b, i) => (b.visible = i < Math.min(6, n)));

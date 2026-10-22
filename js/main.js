@@ -17,7 +17,7 @@ import { UI } from './ui.js';
 import { LLMController, serverless } from './llm.js';
 import { LineDesigner } from './designer.js';
 import { renderConcept } from './concept.js';
-import { DataHub, PUBLISHER_ID, WRITER_GROUP } from './datahub.js';
+import { DataHub, unsTelemetry, unsEvents, unsZoneKpi, PUBLISHER_ID, WRITER_GROUP } from './datahub.js';
 import { PacketCapture } from './pcap.js';
 import { RENDER, loadBlenderAssets, applyRenderEnv, resetRenderEnv, primKey, blenderize } from './blender.js';
 import { FAC_PRODUCTS, FAC_LOCS } from './fac.js';
@@ -26,6 +26,7 @@ import { GateView } from './gateview.js';
 import { EpisodeRecorder, buildEpisodesZip, EP_HZ, SAMPLE } from './vla.js';
 import { impactHTML, impactClick } from './impactview.js';
 import { traceHTML, traceClick, traceState } from './traceview.js';
+import { zoneDashHTML, zoneDashClick, zdState } from './zonedash.js';
 import { sensorHTML, sensorClick, sensorState } from './sensorview.js';
 import { RECIPE_ZONES, applyRecipe, recipePatch, recipeFromPatch } from './zonerecipe.js';
 import { caseFiles, allFiles } from './trace.js';
@@ -137,6 +138,14 @@ async function epcisPump() {
   finally { epcisSt.busy = false; }
 }
 setInterval(() => { epcisPump(); }, 5000);
+// 설비 상태 요약 · 이벤트 (UNS 평면 토픽) → 서버 MQTT 브로커 — 2초(실제 시간)마다 · 설비 대시보드(Telegraf → InfluxDB → Grafana)가 구독 (js/datahub.js unsTelemetry)
+let unsSince = 0, unsBusy = false;
+setInterval(async () => {
+  if (hub.noServer || unsBusy || !sim) return;
+  const E = unsEvents(sim, unsSince); unsSince = E.next;
+  const messages = [...unsTelemetry(sim), ...E.messages, ...unsZoneKpi(sim)]; if (!messages.length) return;   // + Zone OEE · 품질 표본 (js/zonekpi.js)
+  unsBusy = true; try { await fetch('/api/mqtt/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages }) }); } catch { /* 서버가 잠시 안 되면 다음 주기에 */ } finally { unsBusy = false; }
+}, 2000);
 function epcisAttach() {
   const H = sim?.serials; if (!H) return;
   H.serSeq = SERIAL_SEQ; H.wipSeq = WIP_SEQ; H.feedOn = true;
@@ -906,6 +915,20 @@ function pcapVideoTick(rdt) {
     pr?.then((bytes) => bytes && pcapPublishFrame(ca ? ca.id : f.ref.stationId ?? 'Cell', ue ? '5g' : 'lan', `Robot_${ca ? ca.id : `${f.ref.stationId}_${f.ref.idx ?? 0}`}`, 160, 120, bytes, simT, {}, ca ? hub.ipOf(ca) : null));
   }
 }
+// 설비 대시보드 칸 (4단계 · server/monitor-api.mjs): Docker로 Telegraf → InfluxDB → Grafana 켜기 · 열기 · 끄기
+let monSt = null, monNote = '', monAt = 0;
+async function monStatus(force = false) { if (hub.noServer || (!force && Date.now() - monAt < 5000)) return; monAt = Date.now(); try { monSt = await (await fetch('/api/monitor/v1/status')).json(); } catch { monSt = null; } }
+function monHtml() {
+  if (hub.noServer) return '<div class="dh-note">설비 대시보드는 맥 앱 · 윈도우 앱 · npm start에서 씁니다 (웹 버전·공유 페이지에는 MQTT 브로커·서버가 없음). 앱에서는 설비 건강도·RUL · 적응가공 가공기 상태 감시 · 환경 센서를 오픈소스 시계열 도구(InfluxDB)에 쌓고 Grafana 대시보드로 봅니다.</div>';
+  const v = monSt, J = v?.job, run = !!(v?.grafana && v?.influx), n = (x) => Math.round(x ?? 0).toLocaleString('ko-KR');
+  const C = v?.counts ?? {}, KO = { equipment: '설비 요약', sensor: '센서', machine: '가공기 감시', event: '운영 이벤트' };
+  return `<div class="grid2"><span>Docker</span><b>${!v ? '확인 중…' : v.docker ? `${escH(v.docker.version)}${v.docker.compose ? ` · compose ${escH(v.docker.compose)}` : ' · <b class="bad">compose 없음</b>'}` : '<b class="bad">찾을 수 없음</b> — Docker Desktop(맥·윈도우) 또는 Colima를 설치·실행하세요'}</b>
+      <span>대시보드</span><b>${run ? `<b class="ok">실행 중</b> · <a href="${escH(v.url)}" target="_blank" rel="noopener">${escH(v.url)}</a> (이 PC 안에서만 열림)` : (v?.containers ?? []).length ? `준비 중 · ${v.containers.map((c) => `${c.service} ${c.state}`).join(' · ')}` : '꺼짐'}</b>
+      <span>최근 1분 수신</span><b>${run ? Object.keys(KO).map((k) => `${KO[k]} ${n(C[k])}`).join(' · ') : '-'} · 앱 브로커 :${v?.mqttPort ?? '-'}</b>
+      <span>조작</span><b><button class="ep-btn" data-mon="start" ${J?.running ? 'disabled' : ''}>${run ? '다시 켜기 (구성 갱신)' : '대시보드 켜기'}</button> <button class="ep-btn" data-mon="open" ${run ? '' : 'disabled'}>대시보드 열기</button> <button class="ep-btn" data-mon="stop" ${run ? '' : 'disabled'}>끄기</button>
+        ${J ? ` · ${J.running ? `진행 중 — ${escH(J.step)}` : J.ok ? `완료${J.reset ? ' (저장 공간 토큰을 다시 맞춤)' : ''}` : `<b class="bad">실패 — ${escH(J.error ?? '')}</b>`}` : ''}</b></div>
+    <div class="dh-note">${escH(monNote) || '처음 켜면 이미지 내려받기로 몇 분 걸립니다 (메모리 약 1GB). 대시보드 5종: Zone 운영 분석(OEE·파레토·관리도·산점도) · 공장 개요 · 설비 건강도·RUL · 적응가공 가공기 상태 감시 · 환경·설비 센서 — 고장·정비·품질 NG 같은 운영 이벤트를 그래프 위에 겹쳐 봅니다. 원시값 7일 · 1분 집계 90일 보관. 끄기는 데이터를 남깁니다.'}</div>`;
+}
 // EPCIS 저장소 칸: 앱 = 내장 저장소(파일 보관) + 외부 저장소 전송(선택) · 웹 = 브라우저 메모리
 let epcisNote = '';
 function epcisHtml() {
@@ -952,6 +975,7 @@ function renderData() {
         <span>상위 명령</span><b><code>opcua/json/data/${PUBLISHER_ID}/${WRITER_GROUP}/Commands</code> (명령 상태가 바뀔 때마다: 전송 · 수신 확인 · 실행 · 완료/거부)</b>
         <span>이벤트 · AAS 모델</span><b><code>opcua/json/data/${PUBLISHER_ID}/${WRITER_GROUP}/Events</code> · <code>aas/${PUBLISHER_ID}/environment</code> (retain)</b></div>
         <details><summary>마지막 NetworkMessage — <code>${escH(hub.lastMsg?.topic ?? '')}</code></summary><pre class="dh-pre">${escH(preview)}</pre></details></section>
+      <section class="span2"><h4>📈 설비 대시보드 (Telegraf → InfluxDB → Grafana — 건강도·RUL · 가공기 상태 감시 · 센서 · 운영 이벤트)</h4>${monHtml()}</section>
       <section class="span2"><h4>🗂 EPCIS 저장소 (GS1 EPCIS 2.0 — 시리얼·포장 묶음·출하·보류·처분 이벤트)</h4>${epcisHtml()}</section>
       <section class="span2"><h4>📦 패킷 덤프 (pcap · Wireshark)</h4>${pcapHtml()}</section>
       <section class="span2"><h4>💾 저장 (현재까지 수집한 데이터)</h4>
@@ -965,8 +989,8 @@ function renderData() {
 }
 document.getElementById('btnData').addEventListener('click', () => {
   dataModal.classList.remove('hidden'); dataNote = '';
-  Promise.all([hub.refreshStatus(), epcisServerStatus()]).then(renderData); renderData();
-  clearInterval(dataTimer); dataTimer = setInterval(() => { Promise.all([hub.refreshStatus(), epcisServerStatus()]).then(() => { if (!dataModal.classList.contains('hidden') && !dataBody.contains(document.activeElement)) renderData(); }); }, 1500);
+  Promise.all([hub.refreshStatus(), epcisServerStatus(), monStatus(true)]).then(renderData); renderData();
+  clearInterval(dataTimer); dataTimer = setInterval(() => { Promise.all([hub.refreshStatus(), epcisServerStatus(), monStatus()]).then(() => { if (!dataModal.classList.contains('hidden') && !dataBody.contains(document.activeElement)) renderData(); }); }, 1500);
 });
 document.getElementById('closeData').addEventListener('click', () => { dataModal.classList.add('hidden'); clearInterval(dataTimer); });
 dataBody.addEventListener('change', (e) => {
@@ -974,6 +998,17 @@ dataBody.addEventListener('change', (e) => {
   if (e.target.id === 'dhPub') { hub.publishOn = e.target.checked; e.target.blur(); renderData(); }
 });
 dataBody.addEventListener('click', (e) => {
+  const mb = e.target.closest('button[data-mon]');
+  if (mb) {
+    const a = mb.dataset.mon;
+    if (a === 'open') { if (monSt?.url) window.open(monSt.url, '_blank', 'noopener'); return; }
+    monNote = a === 'start' ? '대시보드 켜는 중… (처음이면 이미지 내려받기로 몇 분)' : '끄는 중…'; renderData();
+    fetch(`/api/monitor/v1/${a}`, { method: 'POST' }).then((r) => r.json()).then((r) => { monNote = a === 'stop' ? (r.ok ? '껐습니다 — 쌓인 데이터는 남아 있어 다시 켜면 이어서 봅니다' : `끄기 실패 — ${r.error ?? ''}`) : ''; })
+      .catch((err) => { monNote = `실패 — ${err.message}`; }).finally(() => monStatus(true).then(renderData));
+    // 켜는 동안 진행 단계를 따라 보여 준다
+    if (a === 'start') { const iv = setInterval(() => monStatus(true).then(() => { renderData(); if (!monSt?.job?.running) { clearInterval(iv); if (monSt?.job?.ok) monNote = `켰습니다 — 「대시보드 열기」로 ${monSt.url} (데이터는 몇 초 뒤부터 쌓입니다)`; renderData(); } }), 3000); }
+    return;
+  }
   const eb = e.target.closest('button[data-epcis]');
   if (eb) {
     const a = eb.dataset.epcis, url = document.getElementById('epUrl')?.value.trim() ?? '', key = document.getElementById('epKey')?.value ?? '', on = !!document.getElementById('epOn')?.checked;
@@ -1063,6 +1098,8 @@ labelRenderer.domElement.addEventListener('pointerup', (e) => {
   // 로봇(셀 로봇·AMR·AGV·휴머노이드·사족보행)을 누르면 관절·센서 텔레메트리, 설비를 누르면 설비 상세
   const hit = view.pick(ray.intersectObjects(view.pickTargets(), true));
   selectZone(zoneOfClick(hit, ray));   // 누른 Zone으로 왼쪽 Zone 카드 드롭다운 자동 전환
+  if (hit?.type === 'zboard') { openZoneDash(hit.zone); return; }   // Zone 전광판 → Zone 대시보드 창
+  if (view.screen?.visible && ray.intersectObject(view.screen, false)[0] && !hit) { openZoneDash('main'); return; }   // 정밀조립 중앙 관제 화면
   if (hit?.type === 'cctv') { closePopups(['cctvPanel', 'cctvCard']); openCctv(hit.id); return; }
   if (hit?.type === 'gnb') { closePopups(['gnbPanel', 'net5gCard']); openGnb(hit.id); return; }
   closePopups('detail');   // 로봇·설비를 누르거나 빈 곳을 누르면 CCTV·기지국 창은 닫는다
@@ -1523,7 +1560,7 @@ document.addEventListener('visibilitychange', () => {
 
 // ── 루프 ─────────────────────────────
 const clock = new THREE.Clock();
-let uiTimer = 0, screenTimer = 0, robotTimer = 0, camTimer = 0, vlaTimer = 0;
+let uiTimer = 0, screenTimer = 0, robotTimer = 0, camTimer = 0, vlaTimer = 0, zdTimer = 0;
 const rbCam = { key: null, sel: 'head' };   // 로봇 정보 창 카메라 선택
 document.getElementById('detail').addEventListener('click', (e) => { const b = e.target.closest('[data-rbcam]'); if (b) { rbCam.sel = b.dataset.rbcam; camTimer = 1; } });
 const clockEl = document.getElementById('clock');
@@ -1572,7 +1609,7 @@ function frame() {
   if (view.telemetry && ui.robotMode) placeRobotPanel();
   if (screenTimer > 0.6 && modeKey !== 'traditional') { screenTimer = 0; view.drawScreen(sim.kpi(), agent.lastThought, { hub: hub.stats(), msgs: hub.msgs, bytes: hub.bytes }); }
   epRec.update();
-  vlaTimer += rdt; if (vlaTimer > 0.5) { vlaTimer = 0; renderVla(); renderAios(); renderImpact(); renderTrace(); aiosUpload(); renderFacos(); renderFacosView(); renderSensors(); sensorFlush(); updateSensor3d(); }
+  vlaTimer += rdt; if (vlaTimer > 0.5) { vlaTimer = 0; renderVla(); renderAios(); renderImpact(); renderTrace(); zdTimer += 0.5; if (zdTimer >= 2) { zdTimer = 0; renderZoneDash(); } aiosUpload(); renderFacos(); renderFacosView(); renderSensors(); sensorFlush(); updateSensor3d(); }
   cctvT += rdt; if (cctvSel && cctvT > 0.12) { cctvT = 0; renderCctvPanel(); }
   if (!glLost) {
     try {
@@ -1837,6 +1874,24 @@ traceBody.addEventListener('input', (e) => {
   traceState.q = e.target.value; const pos = e.target.selectionStart; renderTrace(true);
   const el = document.getElementById('qtSearch'); el?.focus(); el?.setSelectionRange(pos, pos);
 });
+// ── Zone 대시보드 창 (js/zonedash.js · js/zonekpi.js): 실시간 모니터링 · OEE·파레토 · 관리도·산점도 — 상단 버튼 · 3D Zone 전광판 클릭 ─────────────────
+const zdModal = document.getElementById('zdModal'), zdBody = document.getElementById('zdBody');
+function openZoneDash(zone = null) { if (zone) zdState.zone = zone; zdModal.classList.remove('hidden'); monStatus(); renderZoneDash(true); }
+document.getElementById('btnZoneDash').addEventListener('click', () => openZoneDash(zonePick.view === 'precision' ? 'main' : zonePick.view));
+document.getElementById('closeZd').addEventListener('click', () => zdModal.classList.add('hidden'));
+zdModal.addEventListener('click', (e) => { if (e.target === zdModal) zdModal.classList.add('hidden'); });
+zdBody.addEventListener('click', (e) => {
+  const r = zoneDashClick(e); if (!r) return;
+  if (r.grafana) { if (monSt?.url) window.open(`${monSt.url}d/mf-zone?var-zone=${zdState.zone}&from=now-6h&to=now`, '_blank', 'noopener'); return; }
+  renderZoneDash(true);
+});
+function renderZoneDash(force) {
+  if (zdModal.classList.contains('hidden')) return;
+  if (!force && (zdBody.querySelector('button:hover, tr:hover, circle:hover, rect:hover') || window.getSelection()?.toString())) return;
+  const sc = zdBody.querySelector('.zd-body')?.scrollTop ?? 0;
+  setHTML(zdBody, zoneDashHTML(sim, { grafana: !hub.noServer && monSt?.grafana ? monSt.url : null }));
+  const b = zdBody.querySelector('.zd-body'); if (b) b.scrollTop = sc;
+}
 // ── 센서망 창 · 공장 중앙 MQTT 발행 · 3D 센서 위치 (js/sensors.js · js/sensorview.js) ─────────────────
 const sensorModal = document.getElementById('sensorModal'), sensorBody = document.getElementById('sensorBody');
 let sensorSrv = null, sensorSrvT = 0, sensorBusy = false;

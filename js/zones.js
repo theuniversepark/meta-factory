@@ -641,6 +641,7 @@ class ExtraZone {
     put(box(B.w + 0.3, B.h + 0.3, 0.12, std(0x0b0d10, { roughness: 0.5, metalness: 0.4 })), 0, 0, -0.08, g);   // 테두리 판
     put(new THREE.Mesh(new THREE.PlaneGeometry(B.w, B.h), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false })), 0, 0, 0, g);
     g.traverse((o) => (o.castShadow = false));
+    g.userData.zoneBoard = this.Z.key;   // 전광판을 누르면 Zone 대시보드 창 (main.js)
     this.board2 = { g, cv, tex, t: 0 };
     const S = W.server, srv = put(new THREE.Group(), S.x, 0, S.z, root); srv.rotation.y = S.rot;   // 서버 랙 4대 (앞면 = 건물 안쪽)
     this.srvLeds = [];
@@ -662,6 +663,11 @@ class ExtraZone {
     c.fillStyle = acc; c.fillRect(0, 0, 14, H);
     const good = this.stats.good, tot = Object.values(good).reduce((a, b) => a + b, 0), uph = this.time > 120 ? Math.round((tot / this.time) * 3600) : 0;
     c.textBaseline = 'middle'; c.fillStyle = '#e8eef4'; c.font = `800 44px ${F}`; c.fillText(`${Z.name} 운영 현황`, 36, 40);
+    const KP = s.zkpi; if (KP) {   // Zone 운영 분석 요약 (js/zonekpi.js) — 자세히는 전광판을 눌러 Zone 대시보드 창
+      const o = KP.oee(Z.key), pr = KP.progress(Z.key), p = (v) => Math.round(v * 100);
+      c.textAlign = 'right'; c.font = `700 30px ${F}`; c.fillStyle = o.OEE >= 0.65 ? '#3ddc84' : o.OEE >= 0.45 ? '#f5b82e' : '#ff8a5c';
+      c.fillText(`OEE ${p(o.OEE)}%  (가동 ${p(o.A)} · 성능 ${p(o.P)} · 품질 ${p(o.Q)})  ·  교대 진행 ${p(pr.pct)}%`, W - 30, 40); c.textAlign = 'left';
+    }
     c.font = `700 32px ${F}`; c.fillStyle = '#c9d2dc';
     c.fillText(`${Object.entries(Z.products).map(([k, v]) => `${v.label} ${good[k] ?? 0}`).join(' · ')} · UPH ${uph} · 투입 ${this.stats.released} · ${Z.ng ? `NG ${this.stats.ng}` : `리워크 ${this.stats.rework}`} · 셀 고장 누적 ${s.zoneCells.filter((x) => x.zone === Z.key).reduce((a, x) => a + x.c.fails, 0)}건`, 640, 40);
     // 셀 타일: 이름 · 상태 · 건강도 막대
@@ -892,16 +898,17 @@ class ExtraZone {
   // ── 흐름 시뮬레이션 (dt: 시뮬레이션 초) ─────────────────
   step(dt, halted) {
     const K = this.ctl ??= zoneCtl();
-    if (halted || K.stop) { for (const c of this.order) if (c.state === 'BUSY') c.halt = true; return; }   // 정밀조립 비상·보호정지 또는 운영자 Zone 정지(대화 지시)
+    if (halted || K.stop) { for (const c of this.order) if (c.state === 'BUSY') c.halt = true; this.sim?.zkpi?.stopAll(this.Z.key, this.order, dt); return; }   // 정밀조립 비상·보호정지 또는 운영자 Zone 정지(대화 지시) — OEE 운영 정지 시간
     dt *= K.speed;   // 운영자 Zone 속도 (대화 지시 · 셀 작업과 AMR 이동 모두)
     this.time += dt;
-    const Z = this.Z;
+    const Z = this.Z, KP = this.sim?.zkpi;
     // 셀 작업
     for (const c of this.order) {
       c.halt = false;
       // 셀 고장·정비 (sim.js 확장 Zone 셀): 수리 끝날 때까지 작업이 멈춘다 · 가동 여부를 알려 마모 계산에 쓴다
       const zc = this.sim?.zoneCell(Z.key, c.id); c.fault = zc && (zc.state === 'DOWN' || zc.state === 'MAINT') ? zc.state : null;
       if (zc) zc.busy = c.state === 'BUSY';
+      KP?.acc(Z.key, c, dt, { held: K.hold.has(c.id), ideal: c.cycle, name: `${c.def.no ?? c.id} ${c.def.label}` });   // OEE 셀 시간 분류 (js/zonekpi.js)
       if (c.fault) continue;
       if (K.hold.has(c.id)) { if (c.state === 'BUSY') c.halt = true; continue; }   // 운영자 셀 정지 (대화 지시) — 다시 지시할 때까지 그 자리
       if (c.state !== 'BUSY') continue;
@@ -912,6 +919,9 @@ class ExtraZone {
         const it = c.item; it.done.add(c.id); c.done++;
         if (Z.ng && c.id === Z.ng.at && !it.ng && this.rng() < Z.ng.rate * (this.sim?.serials?.inlineMul(Z.key) ?? 1)) { it.ng = true; it.ngNext = true; this.stats.ng++; }   // 정밀검사 NG 공정 보정 중이면 검사 기준 강화 (js/serial.js)
         else it.ngNext = false;
+        KP?.done(Z.key, c.id);
+        if (KP && Z.ng && c.id === Z.ng.at) KP.flexUnit(it, it.ngNext);   // 치수·외관검사 측정값 → 품질 표본 (관리도·산점도)
+        if (KP && Z.key === 'adapt') { KP.adaptCtx(it, c); if (c.id === Z.rework?.at) KP.adaptUnit(it, !!(it.rework || it.toolBreak)); }   // 가공 셀 공구·주축 상태 → CMM 측정값
         // 2단 ID: 최종 검사 합격 → 제품 시리얼 발행 · 마킹(유연생산 C06·C07 QR 라벨 · 적응가공 CMM DataMatrix 각인) · 판독 검증 (js/serial.js)
         const H = this.sim?.serials;
         if (H) { H.extDone(it, c.id, Z.ng && c.id === Z.ng.at ? (it.ngNext ? 'NG' : 'OK') : null); if (H.isMarkCell(Z.key, c.id) && !it.ngNext && H.issue(it, { cell: c.id, name: Z.cells[c.id]?.label ?? c.id })?.mark) c.markT = this.time; }
