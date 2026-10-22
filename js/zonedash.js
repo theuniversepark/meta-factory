@@ -1,6 +1,6 @@
 // Zone 대시보드 창 — 📡 실시간 모니터링(설비 상태 · 생산 진행률 · 시계열) · ⚙ OEE·파레토(가동률·성능·품질 · 6대 손실 · NG 유형) · 📊 품질·상관(관리도 · 산점도)
 // 계산은 js/zonekpi.js, 그리기는 SVG 문자열 (라이브러리 없음 — 웹 버전·공유 아티팩트에서도 그대로). 3D 전광판을 누르거나 상단 「📈 Zone 대시보드」로 연다
-import { ZONES, ZONE_NAME, LOSS, PLANNED, QSPEC, controlChart, topPairs, pearson } from './zonekpi.js';
+import { ZONES, ZONE_NAME, LOSS, PLANNED, QSPEC, controlChart, topPairs, pearson, interpretControl, interpretScatter } from './zonekpi.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const pct = (v, d = 1) => (v == null || !Number.isFinite(v) ? '-' : `${(v * 100).toFixed(d)}%`);
@@ -84,6 +84,14 @@ function scatter(units, xk, yk, spec, xl, yl) {
   return `<div class="zd-chart"><div class="zd-ct">산점도 — ${esc(xl.label)}${xl.unit ? ` (${esc(xl.unit)})` : ''} × ${esc(yl.label)} (${esc(yl.unit)})<span class="zd-leg"><span><i style="background:#5ab0ff"></i>양품</span><span><i style="background:#ff4d4d"></i>NG</span><span><i style="background:#ffd166"></i>회귀선</span><span>r = ${fx(p.r, 3)} · R² = ${fx(p.r * p.r, 3)} · n = ${p.n}</span></span></div><svg viewBox="0 0 ${W} ${H}" class="zd-svg">${clip}${s}</svg></div>`;
 }
 
+// 그래프 해석 상자 — 데이터에서 뽑은 판정 · 근거 · 조치
+function insight(I, title) {
+  if (!I) return '';
+  return `<div class="zd-ins ${I.tone}"><div class="zd-ins-h">🧭 ${title} 해석 <b>${esc(I.head)}</b></div>
+    <ul>${I.items.map((x) => `<li class="${x.tone}"><b>${esc(x.k)}</b> ${esc(x.t)}</li>`).join('')}</ul>
+    ${I.acts.length ? `<div class="zd-ins-a"><b>권장 조치</b><ol>${I.acts.map((a) => `<li>${esc(a)}</li>`).join('')}</ol></div>` : ''}</div>`;
+}
+
 // ── 탭 ─────────────────
 function liveTab(sim, z, K, o) {
   const pr = K.progress(z), cells = liveCells(sim, z), hist = K.hist.filter((h) => h[z]);
@@ -123,14 +131,15 @@ function qaTab(sim, z, K) {
   const vals = U.map((u) => u.y[yk]), cc = controlChart(vals, { n: 5, lsl: S.lsl ?? null, usl: S.usl ?? null });
   const pairs = topPairs(U).filter((p) => p.y === yk), xk = pairs.some((p) => p.x === st.x) ? st.x : pairs[0]?.x, XL = K.xl[z];
   const viol = [...new Map(cc.viol.map((v) => [`${v.i}:${v.rule}`, v])).values()].slice(-6);
-  const ng = U.filter((u) => u.ng).length;
+  const ng = U.filter((u) => u.ng).length, lead = pairs[0] ? { label: XL[pairs[0].x]?.label ?? pairs[0].x, r: pairs[0].r } : null;
+  const iC = interpretControl(cc, vals, S, lead), iS = xk ? interpretScatter(U, xk, yk, XL[xk] ?? { label: xk, unit: '' }, S) : null;
   return `<div class="seg small zd-seg">${Object.entries(spec).map(([k, s]) => `<button data-zd-y="${k}" class="${k === yk ? 'on' : ''}">${esc(s.label)} (${esc(s.unit)})</button>`).join('')}</div>
     <div class="imp-tiles zd-tiles">${tile('표본', U.length, `NG ${ng} · 최근 600개`)}${tile('평균 · 규격', `${fx(cc.mean, 3)} ${esc(S.unit)}`, `LSL ${S.lsl ?? '-'} · USL ${S.usl ?? '-'}`)}${tile('공정능력 Cp · Cpk', `${fx(cc.cp, 2)} · ${fx(cc.cpk, 2)}`, `σ(군내) ${fx(cc.sigma, 3)} · 1.33 이상 양호`, cc.cpk != null && cc.cpk < 1 ? 'bad' : '')}${tile('관리도 이상', viol.length ? `${new Set(cc.viol.map((v) => v.i)).size}점` : '없음', viol.length ? 'Western Electric 규칙 위반' : '관리 상태', viol.length ? 'bad' : '')}</div>
     <div class="zd-two"><div>${ctlChart(cc, S, `관리도 — ${esc(S.label)}`)}
-      <ul class="zd-viol">${viol.map((v) => `<li><b>규칙 ${v.rule}</b> ${cc.type === 'xbar-r' ? '부분군' : '표본'} ${v.i + 1} — ${esc(v.text)}</li>`).join('') || '<li class="muted">위반 없음 — 우연 원인 산포 범위</li>'}</ul></div>
+      <ul class="zd-viol">${viol.map((v) => `<li><b>규칙 ${v.rule}</b> ${cc.type === 'xbar-r' ? '부분군' : '표본'} ${v.i + 1} — ${esc(v.text)}</li>`).join('') || '<li class="muted">위반 없음 — 우연 원인 산포 범위</li>'}</ul>${insight(iC, '관리도')}</div>
       <div>${xk ? scatter(U, xk, yk, S, XL[xk] ?? { label: xk, unit: '' }, S) : '<div class="zd-empty">산점도 — 공정 변수와 짝지을 표본이 12개 이상 쌓이면 표시합니다</div>'}
       <table class="od-tbl zd-tbl zd-pairs"><thead><tr><th>공정 변수 (x)</th><th>상관계수 r</th><th>n</th><th>영향 (기울기)</th></tr></thead><tbody>${pairs.slice(0, 8).map((p) => `<tr data-zd-x="${esc(p.x)}" class="${p.x === xk ? 'sel' : ''}"><td>${esc(XL[p.x]?.label ?? p.x)}${XL[p.x]?.unit ? ` <small>(${esc(XL[p.x].unit)})</small>` : ''}</td><td class="num"><b class="${Math.abs(p.r) >= 0.5 ? 'bad' : Math.abs(p.r) >= 0.3 ? 'warn' : ''}">${fx(p.r, 3)}</b></td><td class="num">${p.n}</td><td class="num">${fx(p.b, 4)} ${esc(S.unit)}/단위</td></tr>`).join('') || '<tr><td colspan="4">표본 수집 중</td></tr>'}</tbody></table>
-      <p class="zd-note">|r| ≥ 0.5 강한 상관 · 0.3 ~ 0.5 중간 — 행을 누르면 산점도를 바꿉니다. 상관은 원인을 증명하지 않으므로 계보(🔎 품질 추적)·8D 분석과 함께 봅니다.</p></div></div>`;
+      <p class="zd-note">|r| ≥ 0.5 강한 상관 · 0.3 ~ 0.5 중간 — 행을 누르면 산점도를 바꿉니다. 상관은 원인을 증명하지 않으므로 계보(🔎 품질 추적)·8D 분석과 함께 봅니다.</p>${insight(iS, '산점도')}</div></div>`;
 }
 
 export function zoneDashHTML(sim, { grafana = null } = {}) {

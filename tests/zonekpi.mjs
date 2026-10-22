@@ -3,7 +3,7 @@
 import { zoneLine } from '../js/line.js';
 import { Simulation } from '../js/sim.js';
 import { FactoryAgent } from '../js/agent.js';
-import { ZoneKpi, controlChart, westernElectric, pareto, pearson, topPairs, designUph, QSPEC, LOSS } from '../js/zonekpi.js';
+import { ZoneKpi, controlChart, westernElectric, pareto, pearson, topPairs, designUph, QSPEC, LOSS, interpretControl, interpretScatter } from '../js/zonekpi.js';
 import { zoneDashHTML, zdState } from '../js/zonedash.js';
 import { unsZoneKpi } from '../js/datahub.js';
 import { EXTRA_ZONES } from '../js/zonedefs.js';
@@ -100,6 +100,27 @@ check('발행 — 품질 표본은 처음 호출 뒤 새로 판정된 것만 (�
 for (let t = 0; t < 600; t += 0.1) { s.step(0.1); ag.update(0.1); }
 const q2 = unsZoneKpi(s).filter((m) => m.topic.includes('/quality/')).map((m) => JSON.parse(m.payload));
 check('… 10분 더 돌린 뒤 새 표본 발행 · 키 형식', q2.length > 20 && q2.every((p) => p.zone === 'main' && [0, 1].includes(p.ng) && typeof p.kind === 'string' && Object.keys(p).some((x) => x.startsWith('x_')) && Object.keys(p).some((x) => x.startsWith('y_')) && Object.entries(p).every(([x, v]) => !/^[xy]_/.test(x) || Number.isFinite(v))), `${q2.length}건`);
+
+console.log('== 그래프 해석 (관리도 · 산점도)');
+{
+  let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }, gauss = () => Math.sqrt(-2 * Math.log(rnd())) * Math.cos(2 * Math.PI * rnd());
+  const SP = { label: '보어', unit: 'µm', lsl: -15, usl: 15 }, txt = (I) => JSON.stringify(I);
+  const stable = Array.from({ length: 30 }, (_, i) => [0.6, -0.4, 1.1, -0.9, 0.2, -1.2, 0.8, -0.1, 0.4, -0.7][i % 10] * 2), Is = interpretControl(controlChart(stable, SP), stable, SP);
+  check('안정 · 중심 맞음 · Cpk 높음 → good · 「관리 상태」 · 조치 = 현 조건 유지', Is.tone === 'good' && /관리 상태/.test(txt(Is)) && /현 조건 유지/.test(Is.acts.join()), Is.head);
+  const shift = [...Array.from({ length: 20 }, () => gauss()), ...Array.from({ length: 10 }, () => 6 + gauss())], Ish = interpretControl(controlChart(shift, SP), shift, SP, { label: '공구 마모', r: 0.62 });
+  check('후반 평균 이동 → 평균/추세 경고 · 공구·보정 이력 조치 · 원인 후보 변수', Ish.tone !== 'good' && Ish.items.some((i) => ['평균', '추세'].includes(i.k) && i.tone !== 'good') && /공구 교체/.test(Ish.acts.join()) && /공구 마모/.test(Ish.acts.join()), Ish.head);
+  const off = Array.from({ length: 30 }, () => 9 + gauss()), Io = interpretControl(controlChart(off, SP), off, SP);
+  check('중심 치우침(Cp ≫ Cpk) → USL 쪽 · 중심 조정 조치', /USL 쪽/.test(txt(Io)) && /중심 조정/.test(Io.acts.join()));
+  check('표본 8개 미만 → 해석 없음', interpretControl(controlChart([1, 2, 3], SP), [1, 2, 3], SP) === null);
+  const U2 = Array.from({ length: 40 }, (_, i) => { const w = 10 + i * 1.5, y = -10 + 0.4 * w + gauss() * 1.2; return { id: `S${i}`, x: { vb: w }, y: { bore: y }, ng: y > 15 }; });
+  const Isc = interpretScatter(U2, 'vb', 'bore', { label: '마모 VB', unit: 'µm' }, SP);
+  check('강한 양의 상관 → 유의 · 기울기 · 공차 대비 영향 · USL 도달 지점 · NG가 높은 쪽에 몰림', /강한 양\(\+\)/.test(txt(Isc)) && Isc.items.some((i) => i.k === '신뢰도' && i.tone === 'good') && Isc.items.some((i) => i.k === '한계 도달') && /높은 쪽에서 NG/.test(txt(Isc)) && /관리 기준/.test(Isc.acts.join()), Isc.head);
+  const U3 = Array.from({ length: 40 }, (_, i) => ({ id: `R${i}`, x: { vb: rnd() * 50 }, y: { bore: gauss() * 3 }, ng: false }));
+  const Iw = interpretScatter(U3, 'vb', 'bore', { label: '마모 VB', unit: 'µm' }, SP);
+  check('무관한 변수 → 관계 약함 · 다른 변수 확인 조치 · 한계 도달 없음', /관계 약함/.test(Iw.head) && /상관표/.test(Iw.acts.join()) && !Iw.items.some((i) => i.k === '한계 도달'), Iw.head);
+  zdState.tab = 'qa'; zdState.zone = 'main'; const hq = zoneDashHTML(s);
+  check('품질·상관 탭 — 관리도·산점도 해석 상자 2개 · NaN/undefined 없음', (hq.match(/class="zd-ins /g) ?? []).length === 2 && /관리도 해석/.test(hq) && /산점도 해석/.test(hq) && !/NaN|undefined|Infinity/.test(hq.replace(/<[^>]+>/g, ' ')));
+}
 
 console.log(`\n${pass} PASS · ${fail} FAIL`);
 process.exit(fail ? 1 : 0);
