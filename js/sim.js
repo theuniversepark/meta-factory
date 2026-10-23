@@ -177,7 +177,9 @@ export const LOC = {
 };
 // AGV(레거시는 지게차) 충전 패드: 왼쪽 확장동 위쪽, 앞 통로(z 9) 바로 북쪽에 동서로 한 줄 — 자재창고(물류존)·투입구(AS/RS) 사이 가운데쯤
 // post: 충전 기둥 z (통로 반대쪽)
-export const chgLoc = (i) => ({ x: -49.4 + i * 3.2, z: 5.4, post: 3.9, aisle: 'F', name: '충전소' });
+// 지게차(레거시)는 4.4m 간격 · 기둥 0.2m 더 뒤: 충전 자리에서는 옆(+x)을 보고 서는데, 3.2m 간격이면 옆 자리 지게차 포크 끝(1.9m)이 내 자리 0.7m 앞까지 와서
+// 들어오는 지게차가 막혀 비켜서기를 되풀이하다(교착) 기둥·옆 차와 겹친다 · 통로를 본 채 후진으로 들어와(Mover) +x로 돌 때 카운터웨이트가 기둥 모서리에 닿지 않게
+export const chgLoc = (i, kind) => (kind === 'forklift' ? { x: -49.4 + i * 4.4, z: 5.4, post: 3.7, aisle: 'F', name: '충전소' } : { x: -49.4 + i * 3.2, z: 5.4, post: 3.9, aisle: 'F', name: '충전소' });
 // 설비 앞면(로컬 +z) 기준 지점 → 동선 위치. 앞면이 향한 통로(F/B)를 쓴다.
 export const localLoc = (def, lx, lz, name) => { const p = toWorld(def, lx, lz); return { ...p, aisle: p.z >= 0 ? 'F' : 'B', name }; };
 // 설비 앞 작업 위치: 셀 앞 모서리(2.3m)와 통로 차로 사이, 지나가는 이동체와 겹치지 않는 거리
@@ -186,6 +188,8 @@ export const svcLoc = (st) => st.svc ?? localLoc(st.def, 0.9, SVC_Z, st.name);  
 // 확장 Zone 투입구 부품 키트 버퍼 (피지컬AI): 가득 12 · 4개 이하이면 물류 휴머노이드가 확장 선반에서 8개씩 가져온다
 export { ZONE_LABEL };
 export const ZONE_KIT = { cap: 12, reorder: 4, carry: 8 };
+// 지게차 포크: 차체 중심에서 앞으로 1.9m(포크 끝), 포크 폭 반 0.42m + 여유 — 차체·포크를 선분(뒤 0.8 ~ 앞 1.45m) + 반폭 0.55m로 본다
+export const FORK = { reach: 1.9, half: 0.55, back: 0.8, front: 1.8 };   // front: 다른 이동체가 보는 차체·포크 선분 앞끝 — 포크 끝 모서리(1.9m · ±0.42m)까지 반폭 0.55m 안에 들도록 (1.45면 끝 모서리가 빠져 옆에서 걸어 들어온다)
 // 미니로드 출고 컨베이어 상차: AGV는 롤러 이재로 자동 적재 (MINILOAD.xfer초), 유인 지게차는 포크로 떠서 싣는다 (4초)
 const xferWait = (v) => (v.kind === 'agv' ? MINILOAD.xfer : 4);
 export const KIT_PICK = { x: -43.4, z: 14.6, aisle: 'F' };   // 확장 선반 동쪽 면 부품 열 앞 (물류 휴머노이드 키트 피킹) — 북쪽 원재료 열 앞은 Zone 전용 AGV 상차 자리
@@ -195,10 +199,12 @@ export const zoneRawPick = (key) => ({ x: -43.0, z: Math.min(xrackZ(`${key}:raw`
 // end = 컨베이어 동쪽 끝 세계 x: AGV 자리는 차체 옆(차폭 1.1m의 서쪽 끝)까지 내밀어 롤러로 넘기고,
 // 휴머노이드 피킹 자리는 선반 면에서 멈춘다 — 휴머노이드는 선반을 보고 서서 손을 뻗어 토트를 집으므로 몸·다리가 컨베이어에 닿지 않는다
 const ML_FACE = WH_RACK.x + MINILOAD.half + 0.03;
+// fork = 유인 지게차(레거시) 상차 자리: 컨베이어를 보고(서쪽) 서서 포크 끝이 컨베이어 끝 5cm 앞 — AGV 자리(컨베이어 끝 0.8m 옆)에 서면 떠날 때 제자리에서 도는 카운터웨이트가 컨베이어 끝·랙 기둥에 닿는다
+const forkAt = (z, end) => ({ x: end + FORK.reach + 0.05, z });
 export const MINILOAD_OUTS = {
-  wh: [{ z: LOC.WH.z, end: LOC.WH.x - 0.8, pick: LOC.WH, keys: ['raw'], agv: true },
+  wh: [{ z: LOC.WH.z, end: LOC.WH.x - 0.8, pick: LOC.WH, fork: forkAt(LOC.WH.z, LOC.WH.x - 0.8), keys: ['raw'], agv: true },
     ...[0, 1, 2].map((i) => ({ z: LOC.WH_PARTS.z - i * 1.4, end: ML_FACE, pick: { x: LOC.WH_PARTS.x, z: LOC.WH_PARTS.z - i * 1.4 }, keys: ['parts'] }))],   // 부품 피킹: 휴머노이드마다 1.4m 간격 (h.pick)
-  x: [...['flex', 'adapt'].map((z) => ({ z: zoneRawPick(z).z, end: -43.55, pick: zoneRawPick(z), keys: [`${z}:raw`], agv: true })),
+  x: [...['flex', 'adapt'].map((z) => ({ z: zoneRawPick(z).z, end: -43.55, pick: zoneRawPick(z), fork: forkAt(zoneRawPick(z).z, -43.55), keys: [`${z}:raw`], agv: true })),
     { z: KIT_PICK.z, end: ML_FACE, pick: KIT_PICK, keys: ['flex:parts', 'adapt:parts'] }],
 };
 // 확장 Zone 자재 투입구 원재료 버퍼: 양쪽(제품별) 20칸씩 40 · 20 이하로 떨어지면 Zone 전용 AGV가 확장 선반에서 20개씩 실어 온다
@@ -224,13 +230,15 @@ function buildZoneCells(sim) {
       // 가운데 줄(①소재 식별 · ⑥CMM)은 북쪽 — 셀 옆(동·서)은 AMR이 셀을 드나드는 길
       : (row < 0 ? { x: x + 0.9, z: z - 2.9, aisle: 'F' } : row > 0 ? { x: x + 0.9, z: z + 2.9, aisle: 'FF' } : { x, z: z - 2.9, aisle: 'F' });
     const name = `${Z.code} ${c.label}`;
+    // 헤밍 프레스는 셀 판 뒤로 0.75m 나와(zones.js HEM) 정비 인력은 그 뒤에 선다 — 점검 자리(정비 자리 옆 1.6m)는 프레스 옆이라 그대로
+    const back = Z.key === 'flex' && row < 0 && c.type === 'hem' ? 0.55 : 0;
     // 사족보행 점검 자리: 정비 자리에서 셀 모서리를 따라 1.6m — 정비 자리가 셀 옆(같은 줄)이면 z로, 앞뒤면 x로 (셀 판 안으로 들어가지 않게)
     const beside = Math.abs(svc.z - z) < 0.01;
     return {
       id: `${Z.uidp}-${id}`, uid: `${Z.uidp}-${id}`, zone: Z.key, cellId: id, name, x, z, def: { cycle: c.cycle, wear: 0.3 },
       health: 80 + sim.zrand() * 20, drift: 0, state: 'OK', request: null, repairRemaining: 0, repairTotal: 0, techOnSite: false, maintKind: null,
       c: { fails: 0, down: 0, maint: 0 }, busy: false,
-      svc: { ...svc, name }, scan: beside ? { x: svc.x, z: svc.z + 1.6, aisle: svc.aisle, name } : { x: svc.x + 1.6, z: svc.z, aisle: svc.aisle, name },
+      svc: { ...svc, z: svc.z - back, name }, scan: beside ? { x: svc.x, z: svc.z + 1.6, aisle: svc.aisle, name } : { x: svc.x + 1.6, z: svc.z, aisle: svc.aisle, name },
     };
   }));
   return [...ext, ...insp()];   // 정밀검사 셀은 맨 뒤 (난수 순서 — 기존 Zone 셀 초기 건강도가 그대로)
@@ -265,8 +273,6 @@ export const moverRadius = (m) => RADIUS[m.kind] ?? 0.5;
 // 차체 폭(m) — 진로 안에 있는지(옆으로 비껴 지나갈 수 있는지) 판정용
 const WIDTH = { dock: 0.95, agv: 1.1, forklift: 1.2, carrier: 0.95, zoneamr: 0.95, robot: 0.9, quadruped: 0.5, humanoid: 0.6, human: 0.6, worker: 0.6 };
 export const moverWidth = (m) => WIDTH[m.kind] ?? 0.8;
-// 지게차 포크: 차체 중심에서 앞으로 1.9m(포크 끝), 포크 폭 반 0.42m + 여유 — 차체·포크를 선분(뒤 0.8 ~ 앞 1.45m) + 반폭 0.55m로 본다
-export const FORK = { reach: 1.9, half: 0.55, back: 0.8, front: 1.8 };   // front: 다른 이동체가 보는 차체·포크 선분 앞끝 — 포크 끝 모서리(1.9m · ±0.42m)까지 반폭 0.55m 안에 들도록 (1.45면 끝 모서리가 빠져 옆에서 걸어 들어온다)
 
 // 이동체(AGV·지게차·정비 인력/로봇·작업자) — 단계(step) 목록을 순서대로 실행
 export class Mover {
@@ -401,6 +407,13 @@ export class Mover {
             else this.path.splice(this.path.length - 1, 0, { ...front });
           }
         }
+        // 지게차 충전소: 앞(포크)을 충전 기둥 쪽으로 둔 채 들어가면 포크가 기둥을 뚫는다 — 충전소 쪽 차로(통로 남쪽 줄)에서 통로를 보고 돌아선 뒤 후진으로 들어간다
+        // (먼 쪽 차로에서 돌면 포크 끝이 통로 건너 확장 선반 끝에 닿는다)
+        if (this.kind === 'forklift' && st.go.name === '충전소' && !st.via && this.path.length >= 2) {
+          const last = this.path[this.path.length - 1], prev = this.path[this.path.length - 2], az = AISLE[st.go.aisle], zt = last.z < az ? az - LANE : az + LANE;
+          if (Math.abs(prev.x - last.x) < 0.01 && Math.abs(prev.z - zt) > 0.01) this.path.splice(this.path.length - 1, 0, { x: last.x, z: zt });
+          last.rev = true;
+        }
       }
       if (this.hazard?.(this, st)) { this.wantDir = null; return; }   // 진로 위 현장 이벤트: 우회하거나 해결될 때까지 정지 대기 (sim.moverHazard)
       let rem = this.speed * dt, checked = false;
@@ -409,16 +422,19 @@ export class Mover {
         const dx = p.x - this.x, dz = p.z - this.z, d = Math.hypot(dx, dz);
         if (d < 1e-4) { this.path.shift(); continue; }
         if (!checked) { checked = true; this.wantDir = { x: dx / d, z: dz / d }; if (this.yieldTo(this.wantDir, dt)) break; if (this.path[0] !== p) continue; }
-        if (!st.rev) this.heading = Math.atan2(dx, dz);   // rev: 후진 — 차체 방향을 그대로 두고 뒤로 (지게차가 포크를 적재함에서 반듯이 빼낼 때)
+        if (p.rev) this.heading = Math.atan2(-dx, -dz);   // 점 rev: 그 점까지 후진 (가는 방향의 반대를 본다 — 충전소 후진 진입)
+        else if (!st.rev) this.heading = Math.atan2(dx, dz);   // rev: 후진 — 차체 방향을 그대로 두고 뒤로 (지게차가 포크를 적재함에서 반듯이 빼낼 때)
         if (d <= rem) { this.x = p.x; this.z = p.z; rem -= d; this.dist += d; this.path.shift(); if (this.detourPts > 0) this.detourPts--; if (this.kind === 'forklift') checked = false; if (p.hold) { this.holdFor = p.hold; this.holdT = 0; break; } }   // 지게차: 꺾기 전에 새 방향으로 다시 감지 (포크가 옆으로 휩쓸지 않게)
         else { this.x += (dx / d) * rem; this.z += (dz / d) * rem; this.dist += rem; rem = 0; }
         this.moving = true;
       }
       if (!this.path.length) { this.path = null; this.loc = st.go; this.steps.shift(); this.detourPts = 0; }
     } else if ('wait' in st) {
+      if (st.face != null) this.heading = st.face;   // 서서 하는 일의 방향 (지게차 상차: 컨베이어 쪽)
       st.wait -= dt;
       if (st.wait <= 0) { st.done?.(); this.steps.shift(); }
     } else if (st.until) {
+      if (st.face != null) this.heading = st.face;
       if (st.task && this.task !== st.task) { st.prev = this.task; this.task = st.task; }   // 기다리는 동안 작업 표시를 바꾼다
       if (st.until()) { if (st.prev) this.task = st.prev; this.steps.shift(); if (this.steps.length && (this.instant = (this.instant ?? 0) + 1) < 8) return this.update(dt); }   // 시간이 안 드는 단계는 같은 틱에 이어서
     } else if (st.do) {
@@ -514,7 +530,7 @@ export class Simulation {
 
     this.vehicles = [];
     for (let i = 0; i < m.vehicles; i++) {
-      const v = new Mover(m.vehicleKind === 'agv' ? `AGV-${i + 1}` : `지게차-${i + 1}`, m.vehicleKind, chgLoc(i), m.vehicleSpeed);
+      const v = new Mover(m.vehicleKind === 'agv' ? `AGV-${i + 1}` : `지게차-${i + 1}`, m.vehicleKind, chgLoc(i, m.vehicleKind), m.vehicleSpeed);
       v.battery = 60 + this.rand() * 40;
       this.vehicles.push(v);
     }
@@ -524,7 +540,7 @@ export class Simulation {
     for (const [k, key] of Object.keys(ZONE_FAC).entries()) {
       const code = EXTRA_ZONES.find((Z) => Z.key === key).code;
       let v = reuse ? this.vehicles[nv - 2 + k] : null;
-      if (!v) { v = new Mover(`${code} 지게차`, m.vehicleKind, chgLoc(this.vehicles.length), m.vehicleSpeed); v.battery = 100; this.vehicles.push(v); }
+      if (!v) { v = new Mover(`${code} 지게차`, m.vehicleKind, chgLoc(this.vehicles.length, m.vehicleKind), m.vehicleSpeed); v.battery = 100; this.vehicles.push(v); }
       else v.id = `${code} AGV`;
       v.zone = key;
     }
@@ -1646,10 +1662,18 @@ export class Simulation {
     for (let k = 0; k < list.length && taken.has(st); k++) st = list[++q.round % list.length];
     q.round += 1; q.target = st;
     q.setTask(`순찰 점검 → ${st.name}`, [
-      { go: st.scan ?? localLoc(st.def, st.ammrRacks?.some((r) => r.mode === 'x' && r.dir > 0 && r.side > 0) ? 1.95 : 3.0, SVC_Z, st.name) },   // 정비 위치(0.9)와 떨어진 셀 옆 모서리에서 점검 (그 모서리에 AMMR 부품 선반이 있으면 안쪽으로)
+      { go: st.scan ?? this.patrolSpot(st) },
       { do: () => { q.scanning = st; } },
       { wait: 4, done: () => { q.scanning = null; this.patrolScan(q, st); } },
     ]);
+  }
+  // 정밀조립 셀 순찰 점검 자리: 정비 위치(0.9)와 떨어진 셀 옆 모서리(3.0m) — 그 모서리에 AMMR 부품 선반이 있거나 운반 AMR 길이 1.2m 안으로 지나면 안쪽(1.95m)으로
+  // (분류셀 출구에서 도어트림 줄로 비스듬히 오르는 AMR 길이 모서리 자리 0.85m 옆을 지나, 서 있는 사족보행 다리가 지나가는 AMR 차체에 닿았다)
+  patrolSpot(st) {
+    const at = (x) => localLoc(st.def, x, SVC_Z, st.name), p = at(3.0);
+    const seg = (a, b) => { const vx = b.x - a.x, vz = b.z - a.z, L = vx * vx + vz * vz || 1, t = Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.z - a.z) * vz) / L)); return Math.hypot(p.x - a.x - vx * t, p.z - a.z - vz * t); };
+    const nearAmr = this.conveyors.some((c) => c.path.some((q, i) => i > 0 && seg(c.path[i - 1], q) < 1.2));
+    return st.ammrRacks?.some((r) => r.mode === 'x' && r.dir > 0 && r.side > 0) || nearAmr ? at(1.95) : p;
   }
   patrolScan(q, st) {
     st.lastScan = this.time;
@@ -1941,10 +1965,10 @@ export class Simulation {
       const halted = this.zoneDisrupted?.[key] > this.time, safety = halted && this.zoneSafety?.[key];   // 공급 차질: 확장 선반 출고 중단 — 안전재고 긴급 운송 1회만
       if (this.zoneRaw[key] + this.zoneRawIn[key] > ZONE_SRC.cap - ZONE_SRC.load || (halted && !safety) || (!safety && w.raw < 1)) continue;
       if (safety) this.zoneSafety[key] = false;
-      const pick = { ...zoneRawPick(key), aisle: 'F', name: `확장 선반 ${code} 원재료 출고` };
+      const pick = { ...(v.kind === 'forklift' ? MINILOAD_OUTS.x.find((o) => o.keys[0] === `${key}:raw`).fork : zoneRawPick(key)), aisle: 'F', name: `확장 선반 ${code} 원재료 출고` }, face = v.kind === 'forklift' ? -Math.PI / 2 : null;
       v.setTask(`${code} 원재료 운반`, [
         { go: pick },
-        { wait: xferWait(v), done: () => { const n = Math.min(ZONE_SRC.load, safety ? ZONE_SRC.load : w.raw, ZONE_SRC.cap - this.zoneRaw[key] - this.zoneRawIn[key]); if (!safety) { w.raw -= n; if (n) this.fac?.consume(`${key}:raw`, n, `${code} 투입구`); } this.zoneRawIn[key] += n; v.load = { type: 'raw', n, safety }; } },
+        { wait: xferWait(v), face, done: () => { const n = Math.min(ZONE_SRC.load, safety ? ZONE_SRC.load : w.raw, ZONE_SRC.cap - this.zoneRaw[key] - this.zoneRawIn[key]); if (!safety) { w.raw -= n; if (n) this.fac?.consume(`${key}:raw`, n, `${code} 투입구`); } this.zoneRawIn[key] += n; v.load = { type: 'raw', n, safety }; } },
         { go: F.agvDrop },
         { wait: 4, done: () => { const n = v.load?.n ?? 0, sf = v.load?.safety; this.zoneRaw[key] = Math.min(ZONE_SRC.cap, this.zoneRaw[key] + n); this.zoneRawIn[key] -= n; v.load = null; this.stats.zoneTrips = (this.stats.zoneTrips ?? 0) + 1; if (sf) this.orch.step(this.orch.find(`supply:${key}`), 'exec', 'act', `${v.id} 안전재고 ${n}개 ${ZONE_LABEL[key]} 투입구 도착 (재고 ${this.zoneRaw[key]}개)`); } },
         { go: v.home },   // 내려놓은 자리(Zone AMR 투입 경로 옆)에 서 있지 않고 충전 자리로 — 다음 운반도 바로 옆 확장 선반에서 시작한다
@@ -2034,13 +2058,16 @@ export class Simulation {
   zoneCell(key, id) { return this.zoneCells.find((c) => c.zone === key && c.cellId === id); }
 
   // ── 물류 작업 ─────────────────────────────
+  // 자재창고 원자재 출고 자리: AGV는 컨베이어 옆(롤러 이재) · 유인 지게차는 컨베이어를 보고 포크로 (MINILOAD_OUTS fork)
+  whPick(v) { return v.kind === 'forklift' ? [{ ...LOC.WH, ...MINILOAD_OUTS.wh[0].fork }, -Math.PI / 2] : [LOC.WH, null]; }
   dispatchSupply(v) {
     this.inboundRaw += PALLET_RAW;
+    const [at, face] = this.whPick(v);
     v.setTask('자재 공급', [
-      { go: LOC.WH },
-      { until: () => this.time >= this.supplyDisruptedUntil, task: '출고 대기 (공급 차질)' },
-      { until: () => this.whRaw > 0, task: '창고 재고 대기 (입고 트럭 대기)' },
-      { wait: xferWait(v), done: () => { const n = Math.min(PALLET_RAW, this.whRaw); this.whRaw -= n; v.load = { type: 'raw', n }; this.fac?.consume('raw', n, '투입구 (AS/RS)'); } },
+      { go: at },
+      { until: () => this.time >= this.supplyDisruptedUntil, task: '출고 대기 (공급 차질)', face },
+      { until: () => this.whRaw > 0, task: '창고 재고 대기 (입고 트럭 대기)', face },
+      { wait: xferWait(v), face, done: () => { const n = Math.min(PALLET_RAW, this.whRaw); this.whRaw -= n; v.load = { type: 'raw', n }; this.fac?.consume('raw', n, '투입구 (AS/RS)'); } },
       { go: this.loc.SRC },
       { wait: 4, done: () => {
         const n = v.load?.n ?? PALLET_RAW;
@@ -2052,9 +2079,10 @@ export class Simulation {
   // 안전재고 긴급 운송 — 창고 내 별도 보관분이라 출고 중단과 무관하게 실을 수 있다
   dispatchSafety(v, n) {
     this.safetyStock -= n; this.inboundRaw += n;
+    const [at, face] = this.whPick(v);
     v.setTask('안전재고 긴급 운송', [
-      { go: LOC.WH },
-      { wait: xferWait(v), done: () => { v.load = { type: 'raw', n }; } },
+      { go: at },
+      { wait: xferWait(v), face, done: () => { v.load = { type: 'raw', n }; } },
       { go: this.loc.SRC },
       { wait: 4, done: () => {
         this.rawStock = Math.min(RAW_CAP, this.rawStock + n); this.inboundRaw -= n; v.load = null; this.stats.supplyTrips++;

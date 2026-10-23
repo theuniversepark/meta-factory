@@ -797,7 +797,7 @@ function ammrContact(r, o) {
     });
     r.body.pose(); r.root.position.copy(keep); r.contactKey = key;
   }
-  r.root.position.x = o.slot.x + (tx - o.slot.x) * o.ap; r.root.position.z = o.slot.z + (stopZ - o.slot.z) * o.ap;
+  r.root.position.x = o.slot.x + (tx - o.slot.x) * o.ap; r.root.position.z = o.slot.z + (stopZ - o.slot.z) * o.ap; r.lean = o.ap;
   r.body.pose(...AMMR_LEAN.map((v, i) => v * o.ap + (i === 5 && !o.hold ? Math.sin(o.t * 1.6) * 0.06 * o.ap : 0)));
   r.arms.forEach((a, k) => {
     const K = r.contactQ[k], s = o.hold ? 0 : Math.sin(o.t * 3 + k * Math.PI) * 0.5 + 0.5;
@@ -2133,7 +2133,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     const waitAt = (m, x, z, r = 0.5) => Math.hypot(m.x - x, m.z - z) < r && m.steps?.[0]?.wait != null;
     for (const b of S.outs) {
       if (b.state !== 'xfer') {
-        const m = sim.movers.find((o) => !o.receiver && waitAt(o, b.pick.x, b.pick.z));
+        const m = sim.movers.find((o) => !o.receiver && (waitAt(o, b.pick.x, b.pick.z) || (b.fork && o.kind === 'forklift' && waitAt(o, b.fork.x, b.fork.z))));   // 유인 지게차는 포크 상차 자리(fork)
         if (m) {   // 차량이 섰는데 아직 토트가 오는 중이면 출고 자리에 바로 대 둔다 (크레인 작업 취소)
           if (S.job?.bay === b) { S.job = null; S.ph = 'move'; S.tote.visible = false; }
           b.state = 'xfer'; b.m = m; b.st = m.steps[0]; if (!W.has(b.st)) W.set(b.st, b.st.wait); b.tote.visible = true;
@@ -3070,14 +3070,17 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     if (st.ammr && parts.robots) parts.robots.forEach((r, i) => {
       const u = st.ammr[i]; if (!u || !r.slot || r.contactAp > 0) return;   // 접촉 작업 중에는 ammrContact가 자리를 정한다
       const e = u.pos * u.pos * (3 - 2 * u.pos), pl = r.plan;
+      // 접촉 작업(ammrContact)은 대상물 쪽으로 옆(x)·앞(z)으로 다가간다 — 고속 재생·사이클 끝에서 접촉이 끊기면 그 자리에 남으므로, 여기서 매번 슬롯 줄로 되돌린다
+      // (안 되돌리면 옆으로 0.6m 비낀 채 선반에 가서 팔이 선반 기둥에 닿는다) · 숙인 몸통도 편다
+      if (r.lean) { r.body?.pose(); r.lean = 0; }
       if (pl?.mode === 'x') {
         // 셀 옆쪽 선반: 진행 방향(±x)으로 돌아 로봇 줄을 따라 주행
-        r.root.position.x = r.slot.x + (pl.pick.x - r.slot.x) * e;
+        r.root.position.x = r.slot.x + (pl.pick.x - r.slot.x) * e; r.root.position.z = r.slot.z;
         const face = pl.dir < 0 ? -Math.PI / 2 : Math.PI / 2;
         const d = ((face - r.slot.yaw + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
         r.root.rotation.y = r.slot.yaw + u.turn * d;
       } else {
-        r.root.position.z = r.slot.z + (r.slot.side * AMMR.pickZ - r.slot.z) * e;
+        r.root.position.x = r.slot.x; r.root.position.z = r.slot.z + (r.slot.side * AMMR.pickZ - r.slot.z) * e;
         r.root.rotation.y = r.slot.yaw + u.turn * Math.PI;
       }
       // 피지컬AI: 선반을 오가는 동안은 두 팔을 작업 자세(그리퍼 1.28m)로 들고 간다 — 기본 대기 자세(0.88m)로 선반 앞에 서면 그리퍼가 가운데 선반판(0.96m)에 닿는다
@@ -3470,7 +3473,10 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       const z = hs[0].home.z; area(-40.4, z - 1.3, -37.0, z + 1.5, GREEN, title, sub, -38.7, z + 1.05, 3.0);
     }
     // 물류 대기: AGV(레거시는 지게차) 대기·충전 — 충전 패드 4칸과 충전 기둥
-    { const a = chgLoc(0), b = chgLoc(3);   // 왼쪽 확장동 위쪽, 앞 통로(z 9) 바로 북쪽 · 이름은 북쪽(AMR 출동 차로 쪽) 빈 바닥에
+    // 충전 패드: 지게차(레거시)는 4.4m 간격 3칸 · AGV는 3.2m 간격 4칸 (sim.js chgLoc)
+    const kind = sim.mode.vehicleKind, nPad = agv ? 4 : 3;
+    (this.chargers ?? []).forEach((c, i) => { const L = chgLoc(i, kind); c.group.position.x = L.x; c.post.position.set(L.x, c.post.position.y, L.post); c.group.visible = c.post.visible = i < nPad; });
+    { const a = chgLoc(0, kind), b = chgLoc(nPad - 1, kind);   // 왼쪽 확장동 위쪽, 앞 통로(z 9) 바로 북쪽 · 이름은 북쪽(AMR 출동 차로 쪽) 빈 바닥에
       area(a.x - 1.3, a.post - 0.5, b.x + 1.3, a.z + 1.5, GREEN, agv ? '🔋 물류 대기 · AGV 충전' : '물류 대기 · 지게차', agv ? '자재 공급 AGV 대기·자동 충전' : '자재 운반 지게차 대기 (유인)', (a.x + b.x) / 2, a.post - 1.4, 6.5); }
     // 로봇 스테이션 (피지컬AI): 사족보행 충전 스테이션(도킹 충전기 + 상태등 — 충전 중 초록 점멸, 대기 파랑)과 바로 아래 드론 이착륙·충전 패드를 한 구역으로 표시
     this.quadDocks = [];

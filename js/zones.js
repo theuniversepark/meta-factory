@@ -126,8 +126,7 @@ function buildMount(g) {
 }
 // C05 헤밍: 통로 건너편(+z)에 전용 헤밍 프레스 (베드·문형 기둥·크라운·램)
 function buildHem(g) {
-  const product = makeProductMachine('oden', g, [0,0,1.9]); if (product) return product;
-  const pz = 1.9;
+  const pz = HEM.press.z, product = makeProductMachine('oden', g, [0, 0, pz]); if (product) return product;
   put(box(1.9, 0.85, 0.9, MAT.dark), 0, 0.43, pz, g); put(box(1.75, 0.06, 0.8, MAT.steel), 0, 0.88, pz, g);
   for (const x of [-1.05, 1.05]) put(box(0.22, 2.7, 0.5, MAT.accent), x, 1.35, pz, g);
   put(box(2.35, 0.4, 0.6, MAT.accent), 0, 2.85, pz, g);
@@ -164,7 +163,7 @@ const PICK_AT = { kit: (r) => ({ x: 0.45, y: 0.505, z: Math.sign(r.slot.z) * 1.1
 // 받침대가 없으면 J1 하우징이 프레스 베이스(높이 0.65m · 앞면 z 1.1) 위를 돌며 부딪히고, 더 앞(z > 0.82)이면 받침대·J1 하우징이 베이스·기둥에 닿는다
 // x는 패널 끝(±0.8m) 바깥 — 패널 길이 안쪽에 서면 프레스에 넣을 때 패널 안쪽 가장자리가 로봇 어깨·위팔 위에 걸린다
 // 프레스 램은 넣고 뺄 때 0.5m 더 열리고(손목·아래팔이 다이 밑으로 들어감), 헤밍 때 다이 아래면이 패널 윗면까지 내려온다
-const HEM = { robot: { x: -1.1, z: 0.8, y: 0.5 }, press: { x: 0, z: 1.9 }, bedY: 0.77, open: 0.5, dieY: 1.1, edge: 0.15 };
+export const HEM = { robot: { x: -1.25, z: 0.9, y: 0.5 }, press: { x: 0, z: 2.3 }, bedY: 0.77, open: 0.7, dieY: 1.1, edge: 0.15, gx: 0.2, lift: 0.1, mouth: 0.75, rest: { dx: 0.4, y: 1.55, dz: 0.07 } };   // mouth: 프레스 중심 → 기둥 앞면 (ODEN 기둥 깊이 1.5m의 절반)
 // 머신텐딩 동작 경유점 (로봇 루트 로컬: +z = 기계 쪽, 높이는 루트 기준) — 문 밖 대기 · 문 앞 · 테이블/척 · AMR 위 · AMR 지그
 // 대기(home)는 팔을 접어 TCP를 몸 앞 0.15m에 둔다 — 머시닝센터 문이 로봇 중심에서 0.53m 앞이라, 0.45m 앞에 두면 닫힌 문(가공 중)에 팔·그리퍼가 들어간다
 const TEND_PTS = (() => {
@@ -1163,7 +1162,8 @@ class ExtraZone {
     if (c.halt || c.fault || this.halted) return;   // 정지·고장: 팔·패널 모두 그 자리
     const A = r.arm, P = r.root.parent, V = (x, y, z) => new THREE.Vector3(x, y, z), pm = car?.pm;
     const ik = (v) => { const l = r.root.worldToLocal(P.localToWorld(v.clone())); return A.ik(l.x, l.y, l.z, true); };
-    r.hemRest ??= ik(V(HEM.robot.x - 0.7, 1.45, HEM.robot.z + 0.05));   // 대기: 로봇 뒤(−x)로 팔을 접어 AMR 통로·프레스 입구를 비운다
+    // 대기: 로봇 앞 프레스 쪽(+x)으로 팔을 세워 접는다 — 로봇 바로 뒤(+z)가 왼쪽 프레스 기둥이라, 뒤(−x)로 접으면 오갈 때마다 팔이 그 기둥을 쓸고 지나간다 · AMR 통로(z < 0.78) 밖
+    r.hemRest ??= ik(V(HEM.robot.x + HEM.rest.dx, HEM.rest.y, HEM.robot.z + HEM.rest.dz));
     const restore = () => { const h = r.hemPm; if (h?.userData.home) { h.position.copy(h.userData.home.p); h.quaternion.copy(h.userData.home.q); } r.hemPm = null; };
     if (!pm || c.state !== 'BUSY' || !c.item) { restore(); r.hemKey = null; r.hemCur = r.hemCur ? r.hemCur.map((v, k) => v + (r.hemRest[k] - v) * 0.15) : r.hemRest.slice(); A.pose(...r.hemCur); return; }
     if (r.hemPm && r.hemPm !== pm) restore();
@@ -1171,7 +1171,7 @@ class ExtraZone {
     if (r.hemKey !== c.item.id) {
       pm.position.copy(pm.userData.home.p); pm.quaternion.copy(pm.userData.home.q);
       const b = contactBox(pm, P); if (!b) return;
-      const cx = (b.min[0] + b.max[0]) / 2, cz = (b.min[2] + b.max[2]) / 2, sz = Math.sign(HEM.robot.z - cz) || 1, gx = cx - 0.2, gz = cz + sz * HEM.edge;
+      const cx = (b.min[0] + b.max[0]) / 2, cz = (b.min[2] + b.max[2]) / 2, sz = Math.sign(HEM.robot.z - cz) || 1, gx = cx - HEM.gx, gz = cz + sz * HEM.edge;
       pm.updateWorldMatrix(true, false);
       const d0w = V(1, 0, 0).transformDirection(pm.matrixWorld).setY(0).normalize(), dl = P.worldToLocal(P.getWorldPosition(V()).add(d0w)).sub(P.worldToLocal(P.getWorldPosition(V()))).setY(0).normalize(), pl = V(-dl.z, 0, dl.x);
       // 잡는 높이: 흡착컵 4개(긴 쪽 ±0.23 · 짧은 쪽 ±0.13) 아래 패널 윗면 중 가장 높은 곳 + 3mm — 휜 패널에서 컵·프레임이 패널 속으로 들어가지 않게
@@ -1179,16 +1179,16 @@ class ExtraZone {
       const gy = Math.max(surfaceY(pm, P, null, gx, gz, b.max[1]), ...cupY) + 0.003, off = V(gx - cx, 0, gz - cz);
       const G1 = V(gx, gy, gz), G2 = V(HEM.press.x - off.x, HEM.bedY + (gy - b.min[1]), HEM.press.z - off.z);   // 프레스에서는 반 바퀴 돈 자세 — 잡은 점이 프레스 앞(통로) 쪽
       const A1 = G1.clone().setY(gy + 0.42),   // 들어 올려 옮기는 높이 — 낮으면 반 바퀴 도는 동안 위팔(J2 링크)이 패널 안쪽 가장자리를 스친다
-         I2 = G2.clone().setY(G2.y + 0.1), E = V(G2.x, G2.y + 0.1, G2.z - 0.4);   // 프레스 입구: 패널 앞쪽 가장자리가 베드 앞 — 더 앞(로봇 쪽)이면 패널 안쪽 가장자리가 로봇 위팔 위에 걸린다
+         hd = (b.max[2] - b.min[2]) / 2, I2 = G2.clone().setY(G2.y + HEM.lift), E = V(G2.x, G2.y + HEM.lift, G2.z - (hd + HEM.mouth + 0.05));   // 프레스 입구: 패널 뒤쪽 가장자리가 기둥 앞면보다 5cm 앞 — 반 바퀴를 다 돌고 똑바로 밀어 넣는다 (기둥 사이에서 옆으로 움직이면 패널 모서리가 기둥에 닿는다)
       // 반 바퀴 옮기는 길: 로봇 축에서 같은 반지름·높이의 호 위 두 점을 지난다 — 관절 보간만 하면 손목이 안쪽으로 당겨져 패널 안쪽 가장자리가 J1·J2 링크를 스친다
       const bx = HEM.robot.x, bz = HEM.robot.z, ang = (v) => Math.atan2(v.z - bz, v.x - bx), rad = (v) => Math.hypot(v.x - bx, v.z - bz);
       let a1 = ang(A1), aE = ang(E); if (aE - a1 > PI) aE -= 2 * PI; if (a1 - aE > PI) aE += 2 * PI;
-      const R0 = Math.max(rad(A1), rad(E)) + 0.05, Hc = Math.max(A1.y, E.y) + 0.05, arc = (k) => { const a = a1 + (aE - a1) * k; return ik(V(bx + Math.cos(a) * R0, Hc, bz + Math.sin(a) * R0)); };
+      const R0 = Math.max(rad(A1), rad(E)) + 0.05, Hc = Math.max(A1.y, E.y) + 0.05, arcP = (k) => { const a = a1 + (aE - a1) * k; return V(bx + Math.cos(a) * R0, Hc, bz + Math.sin(a) * R0); }, arc = (k) => ik(arcP(k));
       const Q = { A1: ik(A1), G1: ik(G1), E: ik(E), I2: ik(I2), G2: ik(G2), R: r.hemRest, M1: arc(1 / 3), M2: arc(2 / 3) };   // 프레스가 누르는 동안(0.49 ~ 0.6)은 대기 자세로 물러나 있다
       // 손목 방향 기준: 잡을 때 플랜지 x축을 패널 긴 쪽(패널 로컬 x)에 맞춘다
       pm.updateWorldMatrix(true, false);
       const d0 = V(1, 0, 0).transformDirection(pm.matrixWorld).setY(0).normalize();
-      r.hemPlan = { Q, d0, topY: G2.y + (b.max[1] - gy) };
+      r.hemPlan = { Q, d0, L: new Map([[Q.E, E], [Q.I2, I2], [Q.M2, arcP(2 / 3)]]), topY: G2.y + (b.max[1] - gy) };
       A.pose(...this.hemAlign(r, Q.G1.slice(), d0)); pm.updateWorldMatrix(true, false);
       const fl = A.flange; fl.updateWorldMatrix(true, false);
       r.hemRel = fl.matrixWorld.clone().invert().multiply(pm.matrixWorld);
@@ -1200,7 +1200,9 @@ class ExtraZone {
     const K = [[0, Q.R], [0.06, Q.R], [0.12, Q.A1], [0.15, Q.G1], [0.17, Q.G1], [0.21, Q.A1], [0.24, Q.M1], [0.27, Q.M2], [0.3, Q.E], [0.34, Q.I2], [0.36, Q.G2], [0.37, Q.G2], [0.39, Q.I2], [0.43, Q.E], [0.49, Q.R],
       [0.6, Q.R], [0.66, Q.E], [0.7, Q.I2], [0.72, Q.G2], [0.735, Q.G2], [0.75, Q.I2], [0.79, Q.E], [0.82, Q.M2], [0.845, Q.M1], [0.87, Q.A1], [0.9, Q.G1], [0.91, Q.G1], [0.94, Q.A1], [1, Q.R]];
     let j = K.findIndex((k) => k[0] > p); if (j < 0) j = K.length - 1; if (j === 0) j = 1;
-    const [t0, a] = K[j - 1], [t1, bq] = K[j], e = sm(t0, t1, p), q = a.map((v, n) => v + (bq[n] - v) * e);
+    const [t0, a] = K[j - 1], [t1, bq] = K[j], e = sm(t0, t1, p);
+    // 호 끝 → 입구 → 베드 위: 관절 보간 대신 직선 (IK) — 기둥 사이 여유가 한쪽 12cm뿐이라 곡선으로 들어가면 패널이 기둥을 스치고, 입구로 내려올 때 곡선이면 패널이 위팔 쪽으로 당겨진다
+    const L = r.hemPlan.L, q = L.has(a) && L.has(bq) ? ik(L.get(a).clone().lerp(L.get(bq), e)) : a.map((v, n) => v + (bq[n] - v) * e);
     // 패널 방향: 잡은 뒤 프레스 앞까지 반 바퀴(0 → π), 꺼낸 뒤 AMR 위까지 되돌림 — 그 밖에서는 손목을 대기 자세 그대로
     const phi = PI * (sm(0.21, 0.3, p) - sm(0.79, 0.87, p)), grip = p > 0.12 && p < 0.94;
     const want = d0.clone().applyAxisAngle(V(0, 1, 0), phi);
@@ -1290,6 +1292,16 @@ class ExtraZone {
     const press = busy ? Math.min(1, Math.max(0, Math.sin(((p - 0.48) / 0.14) * PI) * 1.4)) * (p > 0.48 && p < 0.62 ? 1 : 0) : 0;
     const depth = Math.max(0, HEM.dieY - (c.hemTopY ?? HEM.bedY + 0.16) - 0.003);
     ram.position.y = M.rest.Ram.y + HEM.open * open - depth * press;
+    // 램을 쉬는 자리보다 더 올려 열 때(모델은 아래로만 움직이게 되어 있다): 피스톤 로드는 슬라이드와 같이 움직이고, 실린더 몸통은 슬라이드 윗면에 닿는 만큼만 크라운 안으로 올린다
+    // — 그대로 두면 열린 슬라이드가 실린더 몸통을 뚫고 로드가 슬라이드 밑으로 빠져나와 프레스 안에 매달린다
+    if (!M.hemDrive) {
+      const bb = (o) => { o.geometry.computeBoundingBox(); return o.geometry.boundingBox; }, slide = ram.getObjectByName('Slide');
+      const parts = ['RamRod', 'RamRod_old', 'HydraulicCylinder', 'HydraulicCylinder_old'].map((n) => M.root.getObjectByName(n)).filter((o) => o?.isMesh);
+      const top = slide ? M.rest.Ram.y + slide.position.y + bb(slide).max.y : M.rest.Ram.y;
+      M.hemDrive = parts.map((o) => ({ o, y: o.position.y, gap: /Cylinder/.test(o.name) ? o.position.y + bb(o).min.y - top : null }));
+    }
+    const dy = ram.position.y - M.rest.Ram.y;
+    for (const d of M.hemDrive) d.o.position.y = d.y + (d.gap == null ? dy : Math.max(0, dy - d.gap));
     c.parts.screen?.emissive?.setHex(press > 0.05 ? 0xf5b82e : 0x2c7f9e);
   }
   animCell(c, t, rdt, dts) {

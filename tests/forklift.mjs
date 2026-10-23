@@ -9,12 +9,13 @@ let pass = 0, fail = 0;
 const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  — ' + info : ''}`); };
 const forkPts = (f) => { const d = { x: Math.sin(f.heading), z: Math.cos(f.heading) }, n = { x: d.z, z: -d.x }, out = [];
   for (let a = 0.75; a <= 1.9 + 1e-6; a += 0.23) for (const l of [-0.42, 0, 0.42]) out.push({ x: f.x + d.x * a + n.x * l, z: f.z + d.z * a + n.z * l }); return out; };
-const fixed = [...[0, 1, 2, 3, 4, 5].map((i) => { const c = chgLoc(i); return { name: '충전 기둥', x0: c.x - 0.25, x1: c.x + 0.25, z0: c.post - 0.2, z1: c.post + 0.2 }; }),
-  { name: '정비실 비품', local: true, x0: -2.5, x1: 5.1, z0: -0.1, z1: 0.8 }];   // 정비실 비품 줄: 정비실 로컬 좌표 (zonedefs.js techLocal)
+const fixedFor = (kind) => [...[...Array(kind === 'forklift' ? 3 : 6).keys()].map((i) => { const c = chgLoc(i, kind);   // 레거시 지게차 충전 패드는 3칸 (factory.js)
+  return { name: '충전 기둥', x0: c.x - 0.25, x1: c.x + 0.25, z0: c.post - 0.2, z1: c.post + 0.2 }; }),
+  { name: '정비실 비품', local: true, x0: -2.5, x1: 5.1, z0: -0.1, z1: 0.8 }];   // 정비실 비품 줄: 정비실 로컬 좌표 (zonedefs.js techLocal) · 충전 기둥은 단계의 차량 종류 간격 (sim.js chgLoc)
 console.log('== 지게차 포크 간섭');
 check('포크 크기 설정: 포크 끝 1.9m · 차체·포크 선분 앞 1.45m + 반폭 0.55m ≥ 1.9m', FORK.reach >= 1.9 && FORK.front + FORK.half >= 1.9);
 for (const [mode, label] of [['traditional', '레거시'], ['smart', '자동화'], ['dark', '피지컬AI']]) {
-  const s = new Simulation(mode, 2, { line: zoneLine(), quiet: true }), ag = new FactoryAgent(s);
+  const s = new Simulation(mode, 2, { line: zoneLine(), quiet: true }), ag = new FactoryAgent(s), fixed = fixedFor(s.mode.vehicleKind);
   const forks = [...s.forklifts, ...s.vehicles.filter((v) => v.kind === 'forklift')];
   const hit = { mover: [], cell: [], fixed: [] }; let backOut = 0, turnIn = 0;
   for (let t = 0; t < 1800; t += 0.1) {
