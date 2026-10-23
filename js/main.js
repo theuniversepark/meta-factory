@@ -1065,7 +1065,7 @@ const conceptModal = document.getElementById('concept'), conceptBody = document.
 function showConcept(busy = false) {
   renderConcept(conceptBody, { current: modeKey, res: ui.cachedCompare(SEED, currentLine), lineName: currentLine.name, busy });
 }
-document.getElementById('btnConcept').addEventListener('click', () => { conceptModal.classList.remove('hidden'); showConcept(); });
+document.getElementById('btnConcept').addEventListener('click', () => { conceptModal.classList.remove('hidden'); showConcept(ui.comparing(SEED, currentLine)); });
 document.getElementById('closeConcept').addEventListener('click', () => conceptModal.classList.add('hidden'));
 conceptBody.addEventListener('click', (e) => {
   const st = e.target.closest('button[data-stage]');
@@ -1077,7 +1077,7 @@ conceptBody.addEventListener('click', (e) => {
   }
   if (e.target.closest('button[data-calc]')) {
     showConcept(true);
-    ui.computeCompare(SEED, currentLine).then(() => showConcept());
+    ui.computeCompare(SEED, currentLine).catch(() => {}).then(() => showConcept(ui.comparing(SEED, currentLine)));   // 늦게 끝난 이전 라인 계산이면 지금 라인 상태로 다시 그림
   }
 });
 
@@ -1967,7 +1967,7 @@ function renderTrace(force) {
 
 // ── AIOS 공장 운영 AI 창 ─────────────────
 const aiosModal = document.getElementById('aiosModal'), aiosBody = document.getElementById('aiosBody');
-const aiosUp = { n: 0, bytes: 0, busy: false, fail: 0, nextAt: 0, lastError: null };   // fail·nextAt: 올리기 실패 횟수 · 다시 시도할 시각 (실패한 묶음은 완료로 치지 않고 간격을 늘려 다시)
+const aiosUp = { n: 0, bytes: 0, busy: false, fail: 0, nextAt: 0, lastError: null, lost: 0 };   // fail·nextAt: 올리기 실패 횟수 · 다시 시도할 시각 (실패한 묶음은 완료로 치지 않고 간격을 늘려 다시)
 let aiosDir = null;
 document.getElementById('btnAios').addEventListener('click', () => {
   aiosModal.classList.remove('hidden'); renderAios(true);
@@ -1986,14 +1986,23 @@ aiosModal.addEventListener('click', (e) => {
   sim.sec?.onExport('AIOS 운영 데이터셋', a.download, zip.byteLength ?? zip.length);
 });
 // 10분 묶음이 생길 때마다 서버(data/aios/)에 올린다 — 서버가 받았을 때(HTTP 200)만 완료로 표시, 실패하면 5초부터 최대 2분 간격으로 다시
+//   묶음이 생기면 바로 ZIP을 만들어 두고 성공할 때까지 같은 본문을 보낸다 — 브라우저 샘플은 최근 6시간만 남아, 나중에 다시 만들면 비거나 일부만 담긴다
+//   ZIP을 만들 때 이미 샘플이 없으면(원본 만료) 완료로 치지 않고 복구 불가(lost)로 센다
 function aiosUpload() {
-  const P = sim.aios; if (!P?.on || !epRec.server || aiosUp.busy || performance.now() < aiosUp.nextAt) return;
-  const c = P.chunks.find((x) => !x.up); if (!c) return;
+  const P = sim.aios; if (!P?.on || !epRec.server) return;
+  for (const x of P.chunks) {
+    if (x.up || x.zip || x.lost) continue;
+    const range = [x.t - (AIOS_CHUNK - 1) * AIOS_SAMPLE_S, x.t];
+    if (!P.samples.some((s) => s.t >= range[0] && s.t <= range[1])) { x.lost = true; aiosUp.lost++; continue; }
+    x.zip = buildAiosZip(P, zipStore, (t) => hub.iso(t), epRec.runId, range);
+  }
+  if (aiosUp.busy || performance.now() < aiosUp.nextAt) return;
+  const c = P.chunks.find((x) => !x.up && x.zip); if (!c) return;
   aiosUp.busy = true;
-  const zip = buildAiosZip(P, zipStore, (t) => hub.iso(t), epRec.runId, [c.t - (AIOS_CHUNK - 1) * AIOS_SAMPLE_S, c.t]);
+  const zip = c.zip;
   fetch(`/api/aios?id=${epRec.runId}_${c.id}`, { method: 'POST', body: zip }).then((r) => {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    c.up = true; aiosUp.n++; aiosUp.bytes += zip.length; aiosUp.fail = 0; aiosUp.nextAt = 0; aiosUp.lastError = null;
+    c.up = true; c.zip = null; aiosUp.n++; aiosUp.bytes += zip.length; aiosUp.fail = 0; aiosUp.nextAt = 0; aiosUp.lastError = null;
   }).catch((e) => { aiosUp.fail++; aiosUp.lastError = e.message; aiosUp.nextAt = performance.now() + Math.min(120000, 5000 * 2 ** Math.min(aiosUp.fail - 1, 5)); })
     .finally(() => { aiosUp.busy = false; });
 }
@@ -2013,7 +2022,7 @@ function renderAios(force) {
       ${stage('🏭', '1 현장 데이터 수집', `샘플 ${P.total}개 · ${AIOS_SAMPLE_S}초 주기`, '생산·설비·물류(AMR·AGV)·에너지·품질 + 인시던트·운영 의사결정', true)}<b class="va">›</b>
       ${stage('🧹', '2 AI-ready 정제', `특징 ${AIOS_FEATURES.length}종 · 셀 ${sim.processing.length}×5`, '고정 스키마 · UTC 동기 · 보상 라벨 · 전이(상태·행동·보상)', true)}<b class="va">›</b>
       ${stage('📚', '3 운영 데이터셋', `전이 ${Math.max(0, P.samples.length - 1)} · 이벤트 ${P.events.length}`, `의사결정 ${P.decisions.length}건 · 10분 묶음 ${P.chunks.length}개`, false)}<b class="va">›</b>
-      ${stage('🗄', '4 서버 저장', epRec.server ? `${aiosUp.n}묶음 · ${(aiosUp.bytes / 1048576).toFixed(1)}MB` : '브라우저 보관', epRec.server ? (aiosUp.fail ? `올리기 실패 ${aiosUp.fail}회 (${escV(aiosUp.lastError ?? '')}) — 다시 시도 중` : escV(dirTxt)) : '서버 없음 (웹·공유) — 파일로 내려받아 보관', aiosUp.n > 0)}<b class="va">›</b>
+      ${stage('🗄', '4 서버 저장', epRec.server ? `${aiosUp.n}묶음 · ${(aiosUp.bytes / 1048576).toFixed(1)}MB` : '브라우저 보관', epRec.server ? (aiosUp.fail ? `올리기 실패 ${aiosUp.fail}회 (${escV(aiosUp.lastError ?? '')}) — 다시 시도 중` : aiosUp.lost ? `${escV(dirTxt)} · 복구 불가 ${aiosUp.lost}묶음 (원본 만료)` : escV(dirTxt)) : '서버 없음 (웹·공유) — 파일로 내려받아 보관', aiosUp.n > 0)}<b class="va">›</b>
       ${stage('🧠', '5 AIOS 학습', act === 'train' ? `에폭 ${j.epoch}/${j.epochs} · loss ${j.loss.at(-1) ?? '-'}` : `다음 학습까지 ${Math.max(0, need - P.newSamples)}개`, act === 'train' ? `${j.label} · 정책 헤드 ${AIOS_HEADS.length}개` : `새 샘플 ${P.newSamples}개 누적 (30분마다)`, act === 'train')}<b class="va">›</b>
       ${stage('🧪', '6 트윈 검증', tw != null ? `시뮬레이션 ${tw}%` : last ? `UPH ${last.result.uphCur} → ${last.result.uphCand}` : '-', tw != null ? '현재 vs 후보 정책 · 20분 × 2' : last ? `${last.label} · 생산 ${last.result.gain >= 0 ? '+' : ''}${last.result.gain}% · 에너지 ${last.result.eGain >= 0 ? '+' : ''}${last.result.eGain}%` : '디지털트윈에서 현재·후보 정책 비교', act === 'twin')}<b class="va">›</b>
       ${stage('🚀', '7 오케스트레이터 배포', `AIOS ${P.version}`, act === 'shadow' ? `${j.label} 섀도 모드 (추천만)` : act === 'verify' ? `${j.label} 적용 · 실측 효과 확인 중` : '운영 정책 → 피지컬AI 오케스트레이터', act === 'shadow' || act === 'verify')}

@@ -60,7 +60,7 @@ app.whenReady().then(async () => {
   await testPopup('오케스트레이터 (흐름 분석)', () => js(`document.querySelector('#orchPanel [data-cview=analysis]').click()`), D('#orchPanel'), () => js(`document.querySelector('#orchPanel [data-cview=steps]').click()`));
   await testPopup('오케스트레이터 (명령 콘솔)', () => js(`document.querySelector('#orchPanel [data-tab=cmd]').click()`), D('#orchPanel'), async () => { await js(`document.querySelector('#orchPanel [data-tab=flow]').click()`); await clickId('btnOrch'); });
   await testPopup('진화 컨셉', () => clickId('btnConcept'), D('#concept'), () => clickId('closeConcept'));
-  await testPopup('3단계 8시간 비교', async () => { await clickId('btnCompare'); await wait(1500); }, D('#compare'), () => clickId('closeCompare'));
+  await testPopup('3단계 8시간 비교', async () => { await clickId('btnCompare'); for (let k = 0; k < 180 && await js(`/계산 중/.test(document.getElementById('compareBody').innerText)`); k++) await wait(1000); }, D('#compare'), () => clickId('closeCompare'));   // 비교는 Worker에서 계산 — 결과 표가 나온 뒤 검사
   await testPopup('데이터 연동', () => clickId('btnData'), D('#datahub'), () => clickId('closeData'));
   for (const tab of ['po', 'stock', 'mr', 'api', 'log']) await testPopup(`FAC (${tab})`, async () => { await clickId('btnFac'); await js(`document.querySelector('[data-factab=${tab}]')?.click()`); }, D('#facModal'), () => clickId('closeFac'));
   await testPopup('VLA 학습', () => clickId('btnVla'), D('#vlaModal'), () => clickId('closeVla'));

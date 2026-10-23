@@ -459,22 +459,27 @@ export class UI {
   }
 
   // 3개 단계 헤드리스 시뮬레이션 (동일 시드, 8시간, 화면과 같은 0.1초 간격) — 같은 라인이면 결과를 재사용한다 · 계산은 Worker에서 (js/compare.js)
+  //   라인별로 결과를 따로 보관한다 — 계산이 늦게 끝난 이전 라인이 새 라인 결과를 덮어쓰지 않게 (cmpRuns: 계산 중인 라인)
   computeCompare(seed, line, HOURS = 8) {
-    const sig = JSON.stringify([seed, line]);
-    if (this.cmpCache?.sig === sig) return Promise.resolve(this.cmpCache.res);
-    if (this.cmpRun?.sig === sig) return this.cmpRun.p;
-    const p = compareModes(Object.keys(MODES), seed, line, HOURS).then((res) => { this.cmpCache = { sig, res }; return res; }).finally(() => { if (this.cmpRun?.p === p) this.cmpRun = null; });
-    this.cmpRun = { sig, p };
+    const sig = JSON.stringify([seed, line, HOURS]);
+    this.cmpCache ??= new Map(); this.cmpRuns ??= new Map();
+    if (this.cmpCache.has(sig)) return Promise.resolve(this.cmpCache.get(sig));
+    if (this.cmpRuns.has(sig)) return this.cmpRuns.get(sig);
+    const p = compareModes(Object.keys(MODES), seed, line, HOURS).then((res) => { this.cmpCache.set(sig, res); if (this.cmpCache.size > 8) this.cmpCache.delete(this.cmpCache.keys().next().value); return res; })
+      .finally(() => this.cmpRuns.delete(sig));
+    this.cmpRuns.set(sig, p);
     return p;
   }
-  cachedCompare(seed, line) { return this.cmpCache?.sig === JSON.stringify([seed, line]) ? this.cmpCache.res : null; }
+  cachedCompare(seed, line, HOURS = 8) { return this.cmpCache?.get(JSON.stringify([seed, line, HOURS])) ?? null; }
+  comparing(seed, line, HOURS = 8) { return !!this.cmpRuns?.has(JSON.stringify([seed, line, HOURS])); }
 
   runCompare(seed, line) {
     const modal = $('compare'), body = $('compareBody');
     modal.classList.remove('hidden');
     body.innerHTML = '<p style="color:#a9b4c0">계산 중… (3개 단계 × 8시간, 0.1초 간격 — 화면은 계속 동작합니다)</p>';
-    const HOURS = 8;
+    const HOURS = 8, want = (this.cmpWant = JSON.stringify([seed, line, HOURS]));   // 비교 창에는 마지막으로 요청한 라인 결과만
     this.computeCompare(seed, line, HOURS).then((res) => {
+      if (this.cmpWant !== want) return;
       const keys = Object.keys(MODES);
       const rows = [
         ['양품 생산량 (개)', (r) => r.k.good, num, 'max'],
@@ -507,6 +512,6 @@ export class UI {
         • 차이의 주요 원인: 예지보전·순찰 선제 감지로 돌발 고장 감소 → 가용률↑, 풀(Pull)방식 투입·병목 최적화 → 재공↓·성능↑, SPC 자율 보정·전수 판정 → 불량 유출↓, 고효율 조명·공조 최소화 → 에너지 원단위↓<br>
         • 대상 라인: <b>${esc(line.name)}</b> (${line.stations.map((x) => esc(x.name)).join(' → ')})<br>
         • 공정 구성은 오른쪽 하단 ‘공정 설계’에서, 운영 파라미터(마모율·고장 위험함수·수리시간 등)는 <code>js/sim.js</code>의 <code>MODES</code>와 <code>js/line.js</code>에서 조정할 수 있습니다. 결과는 예시용 가정값 기반입니다.</div>`;
-    }).catch((e) => { body.innerHTML = `<p style="color:#ff8a80">계산 실패 — ${esc(e?.message ?? e)}</p>`; });
+    }).catch((e) => { if (this.cmpWant !== want) return; body.innerHTML = `<p style="color:#ff8a80">계산 실패 — ${esc(e?.message ?? e)}</p>`; });
   }
 }

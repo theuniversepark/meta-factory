@@ -14,6 +14,8 @@ import { DataHub } from '../js/datahub.js';
 import { Simulation, SIM_DT } from '../js/sim.js';
 import { FactoryAgent } from '../js/agent.js';
 import { compareMode } from '../js/compare.js';
+import { UI } from '../js/ui.js';
+import { buildAiosZip } from '../js/aios.js';
 
 let pass = 0, fail = 0;
 const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  — ' + info : ''}`); };
@@ -115,7 +117,7 @@ console.log('== AIOS 업로드 — 실패한 묶음은 완료로 치지 않고 �
   const code = source.slice(source.indexOf('function aiosUpload()'), source.indexOf('function renderAios('));
   const c = { id: 'aios_0001', t: 600 }, state = { busy: false, n: 0, bytes: 0, fail: 0, nextAt: 0, lastError: null };
   let calls = 0, ok = false, now = 0;
-  const ctx = { sim: { aios: { on: true, chunks: [c] } }, epRec: { server: true, runId: 'test' }, aiosUp: state, performance: { now: () => now },
+  const ctx = { sim: { aios: { on: true, chunks: [c], samples: [{ t: 600 }] } }, epRec: { server: true, runId: 'test' }, aiosUp: state, performance: { now: () => now },
     hub: { iso: (t) => String(t) }, AIOS_CHUNK: 60, AIOS_SAMPLE_S: 10, zipStore: () => {}, buildAiosZip: () => new Uint8Array([1]),
     fetch: async () => { calls++; return ok ? { ok: true, status: 200 } : { ok: false, status: 503 }; } };
   vm.createContext(ctx); vm.runInContext(code, ctx);
@@ -157,6 +159,88 @@ console.log('== 화면 보간 — 비율 0 경계에서 뒤로 튀지 않음');
     }
     check(`60fps · ${speed}배속 600프레임 뒤로 간 프레임 0`, back === 0, `${back}회`);
   }
+}
+
+
+console.log('== EPCIS — 처리 중에 「처음부터 다시」를 눌러도 앞 이벤트를 다시 보냄');
+{
+  let done = true; const captures = [];
+  const api = makeEpcisApi({ dir: path.join(tmp, 'epcis-rewind'), interval: 1e9, fetchImpl: async (url, opts) => {
+    if (url.includes('userExtension')) return new Response('', { status: 404 });
+    if (url.endsWith('/capture')) { captures.push(JSON.parse(opts.body).epcisBody.eventList.map((e) => e.eventID)); return new Response('', { status: 202, headers: { Location: '/capture/job' } }); }
+    return Response.json(done ? { running: false, success: true, errors: [] } : { running: true });
+  } });
+  const config = (b) => api.route('POST', '/api/epcis/v1/config', new URLSearchParams(), JSON.stringify(b));
+  const capture = (id) => api.route('POST', '/api/epcis/v1/capture', new URLSearchParams(), JSON.stringify([{ type: 'ObjectEvent', eventID: `urn:uuid:${id}`, eventTime: '2026-10-23T00:00:00Z', eventTimeZoneOffset: '+09:00', epcList: ['urn:test:unit'], action: 'ADD' }]));
+  const realTimeout = globalThis.setTimeout, realNow = Date.now;
+  globalThis.setTimeout = (fn) => { queueMicrotask(fn); return 0; };
+  try {
+    await config({ url: 'https://repository.example', enabled: true });
+    await capture('history'); await api.pump();
+    done = false; await capture('pending'); await api.pump();
+    await config({ fromStart: true });
+    done = true; Date.now = () => realNow() + 2e9;
+    await api.pump(); await api.pump();
+    const after = api.status().forward;
+    check('처음부터 다시 → 두 이벤트를 다시 보내 대기 0', after.pending === 0 && captures.length === 3 && captures[2].join() === 'urn:uuid:history,urn:uuid:pending', JSON.stringify(captures));
+  } finally { globalThis.setTimeout = realTimeout; Date.now = realNow; api.close(); }
+}
+{
+  // 보내는 도중(응답 대기)에 「처음부터 다시」 — 늦게 온 응답이 새 커서를 덮어쓰지 않음
+  let release; const gate = new Promise((r) => { release = r; });
+  const api = makeEpcisApi({ dir: path.join(tmp, 'epcis-race'), interval: 1e9, fetchImpl: async (url) => {
+    if (url.includes('userExtension')) return new Response('', { status: 404 });
+    if (url.endsWith('/capture')) { await gate; return new Response('', { status: 200 }); }
+    return Response.json({ running: false, success: true });
+  } });
+  await api.route('POST', '/api/epcis/v1/config', new URLSearchParams(), JSON.stringify({ url: 'https://repository.example', enabled: true }));
+  await api.route('POST', '/api/epcis/v1/capture', new URLSearchParams(), JSON.stringify([{ type: 'ObjectEvent', eventID: 'urn:uuid:race', eventTime: '2026-10-23T00:00:00Z', eventTimeZoneOffset: '+09:00', epcList: ['urn:test:unit'], action: 'ADD' }]));
+  const p = api.pump(); await new Promise(setImmediate);
+  await api.route('POST', '/api/epcis/v1/config', new URLSearchParams(), JSON.stringify({ fromStart: true }));
+  release(); await p;
+  check('보내는 도중 「처음부터 다시」 → 늦은 응답이 커서를 옮기지 않음', api.status().forward.pending === 1);
+  api.close();
+}
+
+console.log('== 3단계 비교 — 늦게 끝난 이전 라인이 새 라인 결과를 덮어쓰지 않음');
+{
+  const workers = [], original = globalThis.Worker, doc = globalThis.document;
+  globalThis.Worker = class { constructor() { workers.push(this); } postMessage(m) { this.msg = m; } terminate() {}
+    finish() { const n = this.msg.line.name === 'line-A' ? 11 : 22; this.onmessage({ data: { res: { decisions: n, k: { good: n, uph: n, OEE: 0.8, A: 0.9, Q: 0.99, ppm: 0, failures: 0, pm: 0, cal: 0, avgWip: 1, kwhPerUnit: 1, people: 2 } } } }); } };
+  const body = { innerHTML: '' };
+  globalThis.document = { getElementById: (id) => (id === 'compare' ? { classList: { remove() {} } } : body) };
+  try {
+    const ui = Object.create(UI.prototype), A = { name: 'line-A', stations: [] }, B = { name: 'line-B', stations: [] };
+    const flush = async () => { for (let i = 0; i < 6; i++) await new Promise(setImmediate); };
+    ui.runCompare(1, A); ui.runCompare(1, B);
+    workers.slice(3).forEach((w) => w.finish()); await flush();
+    const showB = body.innerHTML.includes('line-B');
+    workers.slice(0, 3).forEach((w) => w.finish()); await flush();
+    check('B 결과 표시 뒤 A가 끝나도 창은 B 그대로', showB && body.innerHTML.includes('line-B') && !body.innerHTML.includes('line-A'));
+    check('라인별 결과 보관 (A·B 모두 캐시)', ui.cachedCompare(1, A)?.smart.k.good === 11 && ui.cachedCompare(1, B)?.smart.k.good === 22 && !ui.comparing(1, A) && !ui.comparing(1, B));
+  } finally { globalThis.Worker = original; globalThis.document = doc; }
+}
+
+console.log('== AIOS 업로드 — 다시 보낼 때도 처음 만든 본문 · 원본이 없으면 복구 불가');
+{
+  const source = fs.readFileSync(path.join(root, 'js/main.js'), 'utf8');
+  const code = source.slice(source.indexOf('function aiosUpload()'), source.indexOf('function renderAios('));
+  const sim = new Simulation('dark', 1, { quiet: true }), P = sim.aios;
+  P.on = true; P.chunks = [{ id: 'aios_0001', t: 600 }, { id: 'aios_0002', t: 99999 }];
+  P.samples = Array.from({ length: 60 }, (_, i) => ({ t: 10 * (i + 1) }));
+  P.transitions = () => [];
+  const c = P.chunks[0], sent = [], state = { busy: false, n: 0, bytes: 0, fail: 0, nextAt: 0, lastError: null, lost: 0 };
+  let now = 0, ok = false;
+  const ctx = { sim, epRec: { server: true, runId: 'run-test' }, aiosUp: state, performance: { now: () => now }, hub: { iso: (t) => String(t) }, AIOS_CHUNK: 60, AIOS_SAMPLE_S: 10, buildAiosZip,
+    zipStore: (files) => new TextEncoder().encode(JSON.stringify(JSON.parse(new TextDecoder().decode(files.find((f) => f.path === 'meta/info.json').data)).samples)),
+    fetch: async (u, o) => { sent.push(new TextDecoder().decode(o.body)); return { ok, status: ok ? 200 : 503 }; } };
+  vm.createContext(ctx); vm.runInContext(code, ctx);
+  const flush = async () => { for (let i = 0; i < 6; i++) await new Promise(setImmediate); };
+  vm.runInContext('aiosUpload()', ctx); await flush();
+  P.samples = [{ t: 22200 }]; now = 6000; ok = true;   // 장애 중 원본이 6시간 보관 범위 밖으로 밀려남
+  vm.runInContext('aiosUpload()', ctx); await flush();
+  check('재시도 본문 = 처음 본문 (샘플 60개) → 성공 뒤 완료', sent.length === 2 && sent[0] === '60' && sent[1] === '60' && c.up === true && !c.zip, sent.join(' / '));
+  check('원본이 이미 없는 묶음은 보내지 않고 복구 불가로 셈', P.chunks[1].lost === true && !P.chunks[1].up && state.lost === 1);
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

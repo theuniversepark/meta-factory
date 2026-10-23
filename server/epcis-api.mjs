@@ -45,7 +45,7 @@ export function makeEpcisApi({ dir, fetchImpl = globalThis.fetch, interval = 500
   // ── 외부 저장소 전송 ─────────────────
   // 설정 파일 — 키(apiKey)는 앱에서 safeStorage로 암호화해 쓴다 (server/secrets.mjs)
   const conf = configFile(cfgFile, { url: '', enabled: false, apiKey: '', cursor: 0 }, ['apiKey']), cfg = conf.cfg;
-  const fw = { batch: BATCH, sent: 0, failed: 0, lastOk: null, lastError: null, busy: false, nextAt: 0, backoff: interval, registered: null, lastJob: null };
+  const fw = { batch: BATCH, sent: 0, failed: 0, lastOk: null, lastError: null, busy: false, nextAt: 0, backoff: interval, registered: null, lastJob: null, gen: 0 };   // gen: 전송 세대 — 「처음부터 다시」·주소 변경 때 올린다 (그 전에 시작한 응답이 새 커서를 덮어쓰지 못하게)
   const saveCfg = () => { try { conf.save(); } catch { /* 무시 */ } };
   const base = () => String(cfg.url ?? '').replace(/\/+$/, '').replace(/\/capture$/, '');
   // EPCIS 2.0 REST: 본문은 JSON-LD · 응답 형식은 넓게 받는다 (OpenEPCIS는 Accept가 application/json뿐이면 406)
@@ -74,8 +74,9 @@ export function makeEpcisApi({ dir, fetchImpl = globalThis.fetch, interval = 500
     }
     return null;
   }
-  // 끝난 캡처 작업 결과 반영 → 커서를 그 묶음 끝으로
-  function settle(J, last, n) {
+  // 끝난 캡처 작업 결과 반영 → 커서를 그 묶음 끝으로 (보낸 뒤 세대가 바뀌었으면 버린다)
+  function settle(J, last, n, gen) {
+    if (gen !== fw.gen) return;
     let note = null;
     if (J) {
       const errs = (J.errors ?? []).filter((x) => !/duplicate/i.test(`${x.detail ?? ''} ${x.title ?? ''}`));
@@ -88,10 +89,12 @@ export function makeEpcisApi({ dir, fetchImpl = globalThis.fetch, interval = 500
     if (!cfg.enabled || !base() || fw.busy || Date.now() < fw.nextAt) return;
     const batch = pending().slice(0, fw.batch); if (!batch.length) return;
     fw.busy = true;
+    const gen = fw.gen;
     try {
       if (fw.job) {   // 지난 주기에 보낸 캡처 작업이 아직 처리 중 — 결과를 먼저 확인
         const J = fw.job.base === base() ? await job(fw.job.loc, 1) : null;
-        if (J) { const { last, n } = fw.job; fw.job = null; settle(J, last, n); return; }
+        if (J) { const { last, n } = fw.job ?? {}; if (gen === fw.gen) fw.job = null; settle(J, last, n, gen); return; }
+        if (gen !== fw.gen) return;   // 확인하는 동안 「처음부터 다시」 — 새 커서로 다음 주기에
         if (fw.job.base === base() && Date.now() - fw.job.at < JOB_WAIT) { fw.nextAt = Date.now() + interval; return; }
         fw.job = null;   // 오래 처리 중이거나 주소가 바뀜 → 같은 묶음을 다시 보낸다
       }
@@ -101,9 +104,10 @@ export function makeEpcisApi({ dir, fetchImpl = globalThis.fetch, interval = 500
       if (!r.ok) throw new Error(`HTTP ${r.status}${r.statusText ? ' ' + r.statusText : ''}`);
       const loc = r.headers.get('location'), last = batch.at(-1)._seq;
       // proceed: 문제가 있는 이벤트만 건너뛰고 나머지는 저장 — 중복(이미 보낸 것)은 정상, 검증 실패는 건수·사유만 남기고 다음으로 (한 건 때문에 전송이 멈추지 않게)
-      if (!loc) { settle(null, last, batch.length); return; }   // 작업 주소 없이 바로 끝난 저장소
+      if (!loc) { settle(null, last, batch.length, gen); return; }   // 작업 주소 없이 바로 끝난 저장소
       const J = await job(loc);
-      if (J) { settle(J, last, batch.length); return; }
+      if (J) { settle(J, last, batch.length, gen); return; }
+      if (gen !== fw.gen) return;
       fw.job = { loc, base: base(), last, n: batch.length, at: Date.now() };
       fw.lastError = '저장소가 아직 처리 중 — 끝나면 보낸 것으로 확정 (다음 주기에 다시 확인)'; fw.nextAt = Date.now() + interval;
     } catch (e) { fw.failed++; fw.lastError = /^(HTTP|저장소|확장)/.test(e.message) ? e.message : why(e); fw.backoff = Math.min(60000, fw.backoff * 2); fw.nextAt = Date.now() + fw.backoff; }
@@ -149,10 +153,12 @@ export function makeEpcisApi({ dir, fetchImpl = globalThis.fetch, interval = 500
     if (p === 'config') {
       if (method === 'POST') {
         let b; try { b = JSON.parse(bodyText || '{}'); } catch { return { code: 400, body: { error: 'JSON이 아닙니다' } }; }
+        const urlBefore = cfg.url;
         if (b.url != null) { const u = String(b.url).trim(); if (u && !/^https?:\/\//.test(u)) return { code: 400, body: { error: 'http:// 또는 https:// 주소를 넣으세요' } }; if (u !== cfg.url) { cfg.url = u; fw.registered = null; if (b.apiKey == null) conf.forget('apiKey'); } }   // 주소를 바꾸면 저장한 키는 버린다 — 새 주소의 키를 다시 넣어야 보낸다
         if (b.apiKey != null) { conf.forget('apiKey'); cfg.apiKey = String(b.apiKey); }
         if (b.enabled != null) cfg.enabled = !!b.enabled;
         if (b.fromStart) cfg.cursor = 0;   // 처음부터 다시 보내기
+        if (b.fromStart || cfg.url !== urlBefore) { fw.gen++; fw.job = null; }   // 처리 중이던 작업·진행 중인 응답은 새 커서에 반영하지 않는다
         fw.nextAt = 0; fw.backoff = interval; saveCfg();
       }
       return { code: 200, body: status().forward };
