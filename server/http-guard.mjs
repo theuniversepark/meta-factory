@@ -4,8 +4,10 @@
 //  ① Host — 루프백에 연 서버는 Host가 127.0.0.1 · localhost · [::1]일 때만 (DNS 리바인딩: 남의 도메인이 127.0.0.1로 풀려 들어오는 요청을 막는다)
 //  ② Origin — 있으면 요청 받은 주소(Host)와 같은 출처여야 한다 ('null' 출처 포함 거부)
 //  ③ Sec-Fetch-Site — cross-site · same-site면 거부 (같은 PC의 다른 포트 페이지, <img>·<form> 같은 출처 헤더 없는 요청도 여기서 걸린다)
-const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
-export const isLoopbackHost = (h) => LOOPBACK.has(String(h ?? '').toLowerCase()) || /^127\./.test(String(h ?? ''));
+import net from 'node:net';
+const LOOPBACK = new Set(['localhost', '::1', '[::1]']);
+// 127.0.0.0/8은 실제 IPv4 주소일 때만 — '127.attacker.example' 같은 도메인은 루프백이 아니다 (DNS 리바인딩으로 127.0.0.1에 풀릴 수 있음)
+export const isLoopbackHost = (h) => { const s = String(h ?? '').toLowerCase(); return LOOPBACK.has(s) || (net.isIPv4(s) && s.startsWith('127.')); };
 const hostname = (hostHeader) => { try { return new URL(`http://${hostHeader}`).hostname; } catch { return null; } };
 
 // 거부 사유(문자열) 또는 null(통과)

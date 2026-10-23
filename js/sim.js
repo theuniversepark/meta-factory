@@ -34,6 +34,8 @@ export function mulberry32(a) {
   };
 }
 
+// 시뮬레이션 고정 간격(초) — 화면 루프(main.js) · 3단계 비교 · 트윈 검증이 같은 간격으로 돌아야 같은 시드의 결과가 같다
+export const SIM_DT = 0.1;
 export const MODES = {
   traditional: {
     key: 'traditional', label: '레거시 공장', short: '레거시',

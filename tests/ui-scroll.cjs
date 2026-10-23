@@ -4,7 +4,7 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('node:path');
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
-setTimeout(() => { console.log('TIMEOUT'); process.exitCode = 1; app.quit(); }, 400000);
+setTimeout(() => { console.log('TIMEOUT'); app.exit(1); }, 400000);   // app.quit()은 process.exitCode를 전달하지 않는다 → 실패를 종료 코드로 알리려면 app.exit(코드)
 const H = +(process.env.H || 620);
 app.whenReady().then(async () => {
   const w = new BrowserWindow({ width: 1400, height: H, show: false });
@@ -70,5 +70,5 @@ app.whenReady().then(async () => {
   const bad = results.filter((r) => r[3] === 'FAIL' || r[3] === 'skip').length;
   console.log(`\n결과: ${results.filter((r) => r[3] === 'PASS').length} PASS / ${bad} FAIL (스크롤 불필요 ${results.filter((r) => r[3] === 'n/a').length}) · 콘솔 오류 ${errs.length}`);
   if (errs.length) console.log(errs.slice(0, 5));
-  process.exitCode = bad || errs.length ? 1 : 0; app.quit();
+  app.exit(bad || errs.length ? 1 : 0);
 });

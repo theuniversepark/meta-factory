@@ -16,11 +16,11 @@ const ACTION = {
 
 export class RcaCore {
   constructor() { this.reports = new Map(); this.seq = 0; this.day = null; }
-  // ① 접수: 필수 항목 확인 → 티켓. 같은 사례를 다시 보내면 같은 티켓 (멱등)
+  // ① 접수: 필수 항목 확인 → 티켓. 같은 실행의 같은 사례를 다시 보내면 같은 티켓 (멱등) — 다른 실행의 같은 사례 번호는 새 티켓
   receive(rep, nowIso) {
     const miss = ['caseId', 'serial', 'detectedAt', 'inspection'].filter((k) => rep?.[k] == null);
     if (miss.length) return { code: 422, body: { error: `필수 항목 없음: ${miss.join(', ')}`, schema: RCA_SCHEMA } };
-    for (const r of this.reports.values()) if (r.report.caseId === rep.caseId) return { code: 200, body: this.view(r, true) };
+    for (const r of this.reports.values()) if (r.report.caseId === rep.caseId && (r.report.runId ?? null) === (rep.runId ?? null)) return { code: 200, body: this.view(r, true) };
     const d = (nowIso ?? new Date().toISOString()).slice(0, 10).replace(/-/g, '');
     if (d !== this.day) { this.day = d; this.seq = 0; }
     const ticket = `RCA-${d}-${String(++this.seq).padStart(4, '0')}`;

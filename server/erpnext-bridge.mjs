@@ -13,7 +13,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { FAC_PRODUCTS, SUPPLIER, CUSTOMER } from '../js/fac.js';
 import { gs1Check } from '../js/serial.js';
-import { configFile } from './secrets.mjs';
+import { configFile, writePrivate } from './secrets.mjs';
+import { loadJsonl } from './jsonl.mjs';
 
 export const WH_NAME = { rackRaw: '물류선반-원자재', rackParts: '물류선반-부품', rackX: '확장선반', feeder: '정밀조립-투입구', cells: '정밀조립-셀', feederA1: '유연생산-투입구', feederA2: '적응가공-투입구', output: '구분적재장', qis: '정밀검사-샘플' };
 // 품질 (3단계): 검사 항목 · 품질 절차 (Non Conformance · Quality Action은 절차를 반드시 지정)
@@ -39,11 +40,14 @@ export function makeErpBridge({ dir, fetchImpl = globalThis.fetch, interval = 15
   // 설정 파일 — API 키·비밀 키는 앱에서 safeStorage로 암호화해 쓴다 (server/secrets.mjs)
   const conf = configFile(cfgFile, { url: '', apiKey: '', apiSecret: '', company: '', enabled: false, serials: false }, ['apiKey', 'apiSecret']), cfg = conf.cfg;
   const st = Object.assign({ cursor: 0, prepared: null, wo: {}, docs: [], fail: [], sent: 0, skipped: 0 }, (() => { try { return JSON.parse(fs.readFileSync(stFile, 'utf8')); } catch { return {}; } })());
-  let queue = []; try { queue = fs.readFileSync(qFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { /* 처음 */ }
+  // 대기열 — 깨진 줄이 있어도 정상 줄은 모두 살리고(server/jsonl.mjs) 상태에 복구 내용을 알린다. 깨진 줄은 보낼 때 건너뛴 것으로 센다
+  const Lq = loadJsonl(qFile);
+  let queue = Lq.items;
+  const recovery = Lq.bad || Lq.torn ? { at: new Date().toISOString(), bad: Lq.bad, torn: Lq.torn } : null;
   if (st.cursor > queue.length) st.cursor = queue.length;   // 대기열 파일이 지워졌으면 보낸 위치도 맞춘다
-  const rt = { busy: false, nextAt: 0, backoff: interval, lastError: null, lastOk: null, prep: null };
+  const rt = { busy: false, nextAt: 0, backoff: interval, lastError: recovery ? `대기열 파일 복구 — 깨진 줄 ${recovery.bad + (recovery.torn ? 1 : 0)}개 (정상 줄은 모두 살림${recovery.torn ? ` · 끝 조각은 ${path.basename(recovery.torn)}` : ''})` : null, lastOk: null, prep: null };
   const saveCfg = () => conf.save();
-  const saveSt = () => fs.writeFileSync(stFile, JSON.stringify(st));
+  const saveSt = () => writePrivate(stFile, JSON.stringify(st));   // 임시 파일 → 이름 바꾸기 (쓰다가 꺼져도 커서·전표 배분이 반쯤 쓰이지 않게)
   const base = () => String(cfg.url ?? '').replace(/\/+$/, '');
   const A = () => st.prepared?.abbr ?? 'MF', CO = () => st.prepared?.company ?? cfg.company, W = (k) => `${WH_NAME[k] ?? k} - ${A()}`;
 
@@ -323,7 +327,9 @@ export function makeErpBridge({ dir, fetchImpl = globalThis.fetch, interval = 15
     rt.busy = true;
     try {
       for (let k = 0; k < 20 && st.cursor < queue.length; k++) {
-        const { run, e } = queue[st.cursor];
+        const item = queue[st.cursor];
+        if (!item?.e) { st.skipped++; st.fail.unshift({ t: new Date().toISOString(), type: '?', key: null, error: `대기열 ${st.cursor + 1}번째 줄이 깨져 읽을 수 없음` }); if (st.fail.length > 50) st.fail.pop(); st.cursor++; saveSt(); continue; }
+        const { run, e } = item;
         try { await H[e.type](run, e); st.sent++; rt.lastOk = new Date().toISOString(); rt.lastError = null; }
         catch (err) {
           if (err instanceof Transient) throw err;
@@ -341,7 +347,7 @@ export function makeErpBridge({ dir, fetchImpl = globalThis.fetch, interval = 15
 
   const status = () => ({ url: cfg.url, company: st.prepared?.company ?? cfg.company, enabled: !!cfg.enabled, serials: !!cfg.serials, apiKey: !!cfg.apiKey, apiSecret: !!cfg.apiSecret,
     prepared: st.prepared?.at ? { at: st.prepared.at, company: st.prepared.company, url: st.prepared.url } : null, prepare: rt.prep,
-    queued: queue.length - st.cursor, sent: st.sent, skipped: st.skipped, lastOk: rt.lastOk, lastError: rt.lastError, retryMs: rt.nextAt ? Math.max(0, rt.nextAt - Date.now()) : 0,
+    queued: queue.length - st.cursor, recovery, sent: st.sent, skipped: st.skipped, lastOk: rt.lastOk, lastError: rt.lastError, retryMs: rt.nextAt ? Math.max(0, rt.nextAt - Date.now()) : 0,
     workOrders: Object.values(st.wo).slice(-10).map((w) => ({ order: w.order, product: w.product, name: w.name, qty: w.qty, produced: w.produced, stopped: w.stopped })), docs: st.docs.slice(0, 30), failures: st.fail.slice(0, 10) });
   const route = async (method, pathname, query, bodyText) => {
     const p = pathname.replace(/^\/api\/erpnext\/v1\/?/, '');

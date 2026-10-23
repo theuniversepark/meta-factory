@@ -44,6 +44,7 @@ const Q = {
 };
 const rules = new Map(), level = new Map(), latest = new Map();
 for (const r of db.prepare('SELECT id, warn, alarm, metric FROM sensor').all()) rules.set(r.id, { warn: JSON.parse(r.warn || 'null'), alarm: JSON.parse(r.alarm || 'null'), metric: r.metric });
+for (const a of db.prepare('SELECT sensor, level FROM alarm WHERE cleared_ts IS NULL').all()) level.set(a.sensor, a.level);   // 다시 켤 때 열린 경보 상태 복원 — 없으면 정상값이 와도 이전 경보를 닫지 않는다
 const stats = { msgs: 0, readings: 0, batches: 0, births: 0, errors: 0, started: new Date().toISOString(), lastUs: 0, recent: [] };
 const lvOf = (R, v) => {
   const skip = R.metric === 'force' && v === 0;   // 하중 0 = 셀 대기 (경보 아님)
@@ -64,6 +65,7 @@ export function ingest(topic, text) {
   }
   if (msg.spec !== 'metafactory/sensor-batch/1.0') return;
   const H = msg.hops ?? {};
+  const lvNext = new Map();   // 이번 묶음의 경보 수준 변화 — 커밋에 성공했을 때만 메모리에 반영 (실패하면 DB와 어긋나지 않게)
   db.exec('BEGIN');
   try {
     const b = Q.batch.run(msg.run ?? null, msg.seq, msg.zone, msg.cell, msg.edge, msg.gateway, msg.zoneServer, H.edge, H.gateway, H.zone, H.central, H.ingest, Date.now() * 1000, msg.readings.length, msg.clock?.edgeErrUs ?? null, msg.clock?.gatewayErrUs ?? null).lastInsertRowid;
@@ -73,11 +75,12 @@ export function ingest(topic, text) {
       Q.agg.run(s, Math.floor(ts / 60e6) * 60e6, v, v, v);
       latest.set(s, { ts, v, u, e, extra });
       const R = rules.get(s);
-      if (R) { const lv = lvOf(R, v), prev = level.get(s) ?? 'ok'; if (lv !== prev) { Q.alarmClose.run(ts, s); if (lv !== 'ok') Q.alarmOpen.run(ts, s, lv, v, JSON.stringify(lv === 'alarm' ? R.alarm : R.warn)); level.set(s, lv); } }
+      if (R) { const lv = lvOf(R, v), prev = lvNext.get(s) ?? level.get(s) ?? 'ok'; if (lv !== prev) { Q.alarmClose.run(ts, s); if (lv !== 'ok') Q.alarmOpen.run(ts, s, lv, v, JSON.stringify(lv === 'alarm' ? R.alarm : R.warn)); lvNext.set(s, lv); } }
       if (ts > stats.lastUs) stats.lastUs = ts;
       stats.readings++;
     }
     db.exec('COMMIT');
+    for (const [s, lv] of lvNext) level.set(s, lv);
   } catch (e) { db.exec('ROLLBACK'); throw e; }
   stats.batches++; stats.recent.push([Date.now(), msg.readings.length]); if (stats.recent.length > 600) stats.recent.shift();
 }

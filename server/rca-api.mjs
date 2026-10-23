@@ -1,6 +1,6 @@
 // RCA 전담 서버 (더미) REST API — 메인 서버(화면의 FACOS 품질 모듈 · js/qcomm.js)가 불량 판정 리포트를 올리면 접수 → 분석 → 결과 발행 → 종결을 처리한다.
 // 처리 로직은 js/rcacore.js (화면 시뮬레이션과 같은 코드). 분석 결과는 MQTT(내장 브로커 · 앱 서버일 때) metafactory/quality/v1/rca/{사례}/result로도 발행한다.
-//   POST /api/rca/v1/reports                  리포트 접수 → 202 { ticket, status: received } (같은 caseId는 같은 티켓 · 필수 항목 없으면 422)
+//   POST /api/rca/v1/reports                  리포트 접수 → 202 { ticket, status: received } (같은 실행(runId)·caseId는 같은 티켓 · 필수 항목 없으면 422)
 //   GET  /api/rca/v1/reports?limit=100        목록 (최근 순)
 //   GET  /api/rca/v1/reports/{ticket}         상세 (분석 결과 · 이력 · 종결)
 //   POST /api/rca/v1/reports/{ticket}/close   8D 종결 보고 → 200

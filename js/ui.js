@@ -1,8 +1,8 @@
 // HTML 오버레이 UI — KPI, 추이 차트, 에이전트 로그, 설비 상세, 모드 비교
 import { machmonHtml } from './machmonview.js';
-import { Simulation, MODES, ST_LABEL, RAW_CAP, FG_CAP } from './sim.js';
+import { MODES, ST_LABEL, RAW_CAP, FG_CAP } from './sim.js';
 import { STATION_TYPES, ROBOT_KINDS } from './line.js';
-import { FactoryAgent } from './agent.js';
+import { compareModes } from './compare.js';
 import { MACHINE_SPECS, MACHINE_BY_TYPE } from './machine-specs.js';
 import { zoneCellRobots } from './zonedefs.js';
 
@@ -458,27 +458,23 @@ export class UI {
     this.onDetailRendered?.();
   }
 
-  // 3개 단계 헤드리스 시뮬레이션 (동일 시드, 8시간) — 같은 라인이면 결과를 재사용한다
+  // 3개 단계 헤드리스 시뮬레이션 (동일 시드, 8시간, 화면과 같은 0.1초 간격) — 같은 라인이면 결과를 재사용한다 · 계산은 Worker에서 (js/compare.js)
   computeCompare(seed, line, HOURS = 8) {
     const sig = JSON.stringify([seed, line]);
-    if (this.cmpCache?.sig === sig) return this.cmpCache.res;
-    const res = {};
-    for (const key of Object.keys(MODES)) {
-      const s = new Simulation(key, seed, { quiet: true, line }), ag = new FactoryAgent(s);
-      for (let i = 0; i < (HOURS * 3600) / 0.25; i++) { s.step(0.25); ag.update(0.25); }
-      res[key] = { k: s.kpi(), decisions: ag.decisions };
-    }
-    this.cmpCache = { sig, res };
-    return res;
+    if (this.cmpCache?.sig === sig) return Promise.resolve(this.cmpCache.res);
+    if (this.cmpRun?.sig === sig) return this.cmpRun.p;
+    const p = compareModes(Object.keys(MODES), seed, line, HOURS).then((res) => { this.cmpCache = { sig, res }; return res; }).finally(() => { if (this.cmpRun?.p === p) this.cmpRun = null; });
+    this.cmpRun = { sig, p };
+    return p;
   }
   cachedCompare(seed, line) { return this.cmpCache?.sig === JSON.stringify([seed, line]) ? this.cmpCache.res : null; }
 
   runCompare(seed, line) {
     const modal = $('compare'), body = $('compareBody');
     modal.classList.remove('hidden');
-    body.innerHTML = '<p style="color:#a9b4c0">계산 중…</p>';
-    setTimeout(() => {
-      const HOURS = 8, res = this.computeCompare(seed, line, HOURS);
+    body.innerHTML = '<p style="color:#a9b4c0">계산 중… (3개 단계 × 8시간, 0.1초 간격 — 화면은 계속 동작합니다)</p>';
+    const HOURS = 8;
+    this.computeCompare(seed, line, HOURS).then((res) => {
       const keys = Object.keys(MODES);
       const rows = [
         ['양품 생산량 (개)', (r) => r.k.good, num, 'max'],
@@ -511,6 +507,6 @@ export class UI {
         • 차이의 주요 원인: 예지보전·순찰 선제 감지로 돌발 고장 감소 → 가용률↑, 풀(Pull)방식 투입·병목 최적화 → 재공↓·성능↑, SPC 자율 보정·전수 판정 → 불량 유출↓, 고효율 조명·공조 최소화 → 에너지 원단위↓<br>
         • 대상 라인: <b>${esc(line.name)}</b> (${line.stations.map((x) => esc(x.name)).join(' → ')})<br>
         • 공정 구성은 오른쪽 하단 ‘공정 설계’에서, 운영 파라미터(마모율·고장 위험함수·수리시간 등)는 <code>js/sim.js</code>의 <code>MODES</code>와 <code>js/line.js</code>에서 조정할 수 있습니다. 결과는 예시용 가정값 기반입니다.</div>`;
-    }, 30);
+    }).catch((e) => { body.innerHTML = `<p style="color:#ff8a80">계산 실패 — ${esc(e?.message ?? e)}</p>`; });
   }
 }

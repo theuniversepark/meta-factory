@@ -4,7 +4,7 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('node:path'), fs = require('node:fs');
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-setTimeout(() => { console.log('TIMEOUT'); process.exitCode = 1; app.quit(); }, 240000);
+setTimeout(() => { console.log('TIMEOUT'); app.exit(1); }, 240000);
 app.whenReady().then(async () => {
   const { startServer } = await import(path.join(__dirname, '..', 'server', 'app-server.mjs'));
   const { port } = await startServer({ port: 0 });

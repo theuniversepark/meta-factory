@@ -30,6 +30,7 @@ export class QualityComm {
     this.cap = new PacketCapture(); this.cap.limit = 60e6; this.cap.start(this.epochMs);
     this.cases = new Map(); this.order = [];
     this.mirror = null;   // () => 전체 캡처(DataHub pcap)가 켜져 있으면 그 PacketCapture — 같은 패킷을 함께 기록
+    this.runId = null;    // 이번 실행 ID (화면: DataHub runId) — 사례 번호 NG-날짜-0001은 실행마다 다시 시작하므로 RCA 서버는 (실행, 사례)로 같은 건을 가린다
     this.live = false;    // 실제 RCA 서버(앱 서버 /api/rca/v1)에 같은 리포트를 보낼지 (화면에서 서버가 있으면 true)
     this.stats = { reports: 0, mqtt: 0, http: 0, bytes: 0, results: 0, actions: 0, closed: 0, liveOk: 0, liveFail: 0 };
   }
@@ -42,7 +43,7 @@ export class QualityComm {
   reportOf(c) {
     const r = this.sim.trace?.byId.get(c.serial);
     return {
-      schema: RCA_SCHEMA, caseId: c.id, kind: c.kind, serial: c.serial, product: c.product, order: c.order, mode: c.mode, detectedAt: c.detectedAt, detectedName: c.detectedName, time: this.iso(c.t),
+      schema: RCA_SCHEMA, runId: this.runId, caseId: c.id, kind: c.kind, serial: c.serial, product: c.product, order: c.order, mode: c.mode, detectedAt: c.detectedAt, detectedName: c.detectedName, time: this.iso(c.t),
       inspection: c.inspection, escaped: false,
       rca: { model: c.rca?.model, confidence: c.rca?.confidence, causes: (c.rca?.causes ?? []).slice(0, 5).map((x) => ({ station: x.station, factor: x.factor, label: x.label, score: x.score })), why: c.rca?.why },
       suspects: c.suspects, excursions: c.excursions, equipment: c.equipment,

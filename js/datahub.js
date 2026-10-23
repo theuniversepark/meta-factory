@@ -343,7 +343,7 @@ export class DataHub {
     this.sim = sim; this.view = view; this.xzones = xzones;
     const base = new Date(); base.setHours(8, 0, 0, 0);          // 화면 시계(08:00 시작)와 같은 기준
     this.epochMs = base.getTime();
-    this.runId = `run-${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}`;
+    this.runId = `run-${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}-${Math.random().toString(36).slice(2, 6).padEnd(4, '0')}`;   // 같은 초에 다시 시작해도 겹치지 않게 짧은 난수 접미사 (서버 저장 ID 64자 제한 안)
     this.assets = buildAssets(sim, view, xzones);
     this.writerIds = new Map(this.assets.map((a, i) => [a.id, i + 1]));
     this.samples = []; this.events = []; this.lastLogId = sim.logSeq; this.lastT = -Infinity; this.seq = 0;

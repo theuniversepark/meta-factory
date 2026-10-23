@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { EpcisStore, epcisDocument, MF_NS } from '../js/epcis.js';
 import { configFile } from './secrets.mjs';
+import { loadJsonl } from './jsonl.mjs';
 
 const MAX_EVENTS = 200000, MAX_FILE = 200 * 1024 * 1024, BATCH = 100;   // 한 번에 보낼 이벤트 — 저장소가 413(본문 너무 큼)이면 절반씩 줄인다
 const MF_SCHEMA = { $schema: 'http://json-schema.org/draft-07/schema#', title: 'Meta-Factory EPCIS extension (mf:)', type: 'object', additionalProperties: true,
@@ -24,14 +25,22 @@ const MF_SCHEMA = { $schema: 'http://json-schema.org/draft-07/schema#', title: '
 export function makeEpcisApi({ dir, fetchImpl = globalThis.fetch, interval = 5000 } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'events.jsonl'), cfgFile = path.join(dir, 'forward.json');
-  let out = null;   // 이어 쓰기 스트림
-  const store = new EpcisStore({ max: MAX_EVENTS, onAdd: (rec) => { out ??= fs.createWriteStream(file, { flags: 'a' }); out.write(JSON.stringify(rec) + '\n'); } });
-  // 다시 켤 때 파일에서 불러오기 (깨진 줄은 건너뜀)
+  let out = null, writeError = null;   // 이어 쓰기 스트림 · 마지막 파일 쓰기 오류 (상태에 표시)
+  const store = new EpcisStore({ max: MAX_EVENTS, onAdd: (rec) => {
+    if (!out) { out = fs.createWriteStream(file, { flags: 'a' }); out.on('error', (e) => { writeError = { at: new Date().toISOString(), error: e.message }; out = null; }); }
+    out.write(JSON.stringify(rec) + '\n');
+  } });
+  // 다시 켤 때 파일에서 불러오기 — 깨진 줄은 건너뛰고, 끝의 반쯤 쓰인 줄은 잘라 둔다(server/jsonl.mjs): 그대로 두면 새 이벤트가 그 조각에 붙어 다음 재시작에 사라진다
+  let recovery = null;
   try {
     if (fs.existsSync(file) && fs.statSync(file).size > MAX_FILE) compact();
-    if (fs.existsSync(file)) for (const line of fs.readFileSync(file, 'utf8').split('\n')) { if (!line) continue; try { const r = JSON.parse(line); store.add(r); store.seq = Math.max(store.seq, r._seq ?? 0); } catch { /* 깨진 줄 */ } }
+    if (fs.existsSync(file)) {
+      const L = loadJsonl(file);
+      for (const r of L.items) if (r) { store.add(r); store.seq = Math.max(store.seq, r._seq ?? 0); }
+      if (L.bad || L.torn) recovery = { at: new Date().toISOString(), bad: L.bad, torn: L.torn && path.basename(L.torn) };
+    }
   } catch { /* 첫 실행 */ }
-  function compact() { const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean); fs.writeFileSync(file, lines.slice(-MAX_EVENTS).join('\n') + '\n'); }
+  function compact() { const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean); const tmp = `${file}.tmp`; fs.writeFileSync(tmp, lines.slice(-MAX_EVENTS).join('\n') + '\n'); fs.renameSync(tmp, file); }
 
   // ── 외부 저장소 전송 ─────────────────
   // 설정 파일 — 키(apiKey)는 앱에서 safeStorage로 암호화해 쓴다 (server/secrets.mjs)
@@ -53,34 +62,50 @@ export function makeEpcisApi({ dir, fetchImpl = globalThis.fetch, interval = 500
     fw.registered = base();
   }
   // 캡처는 비동기 (EPCIS 2.0): 202 + Location의 캡처 작업이 끝날 때까지 확인 — 검증에 실패하면 보낸 것으로 치지 않는다
-  async function job(loc) {
+  //   끝난 결과를 받기 전에는 보낸 위치(커서)를 옮기지 않는다: 아직 처리 중이면 null → 다음 주기에 같은 작업을 다시 확인 (접수 202 ≠ 저장 완료)
+  const JOB_WAIT = 10 * 60 * 1000;   // 처리 중으로 이만큼 남으면 같은 묶음을 다시 보낸다 — eventID가 같아 저장소는 중복으로 처리
+  async function job(loc, tries = 20) {
     const u = /^https?:/.test(loc) ? loc : `${new URL(base()).origin}${loc.startsWith('/') ? '' : '/'}${loc}`;
-    for (let i = 0; i < 20; i++) {   // 최대 약 10초 — 중복이 섞인 작업은 OpenEPCIS가 running으로 오래 남겨 둔다
+    for (let i = 0; i < tries; i++) {   // 최대 약 10초 — 중복이 섞인 작업은 OpenEPCIS가 running으로 오래 남겨 둔다
       await new Promise((r) => setTimeout(r, i ? 500 : 200));
       const r = await fetchImpl(u, { headers: headers(false, sameOrigin(u) ? cfg.apiKey : ''), signal: AbortSignal.timeout(8000) }); if (!r.ok) continue;   // 캡처 작업 주소가 다른 호스트면 키를 붙이지 않는다
       const j = await r.json().catch(() => null); if (!j || j.running) continue;
       return j;
     }
-    return { success: true, unknown: true };   // 결과를 끝내 못 받으면 접수(202)를 믿는다
+    return null;
+  }
+  // 끝난 캡처 작업 결과 반영 → 커서를 그 묶음 끝으로
+  function settle(J, last, n) {
+    let note = null;
+    if (J) {
+      const errs = (J.errors ?? []).filter((x) => !/duplicate/i.test(`${x.detail ?? ''} ${x.title ?? ''}`));
+      fw.lastJob = { id: J.captureID ?? null, success: J.success, errors: (J.errors ?? []).length, duplicates: (J.errors ?? []).length - errs.length };
+      if (errs.length) { fw.rejected = (fw.rejected ?? 0) + errs.length; note = `저장소가 ${errs.length}건 거부 — ${errs[0].detail ?? errs[0].title ?? ''}`.trim(); }
+    }
+    cfg.cursor = last; saveCfg(); fw.sent += n; fw.lastOk = new Date().toISOString(); fw.lastError = note; fw.backoff = interval; fw.nextAt = 0;
   }
   async function pump() {
     if (!cfg.enabled || !base() || fw.busy || Date.now() < fw.nextAt) return;
     const batch = pending().slice(0, fw.batch); if (!batch.length) return;
     fw.busy = true;
     try {
+      if (fw.job) {   // 지난 주기에 보낸 캡처 작업이 아직 처리 중 — 결과를 먼저 확인
+        const J = fw.job.base === base() ? await job(fw.job.loc, 1) : null;
+        if (J) { const { last, n } = fw.job; fw.job = null; settle(J, last, n); return; }
+        if (fw.job.base === base() && Date.now() - fw.job.at < JOB_WAIT) { fw.nextAt = Date.now() + interval; return; }
+        fw.job = null;   // 오래 처리 중이거나 주소가 바뀜 → 같은 묶음을 다시 보낸다
+      }
       await register();
       const r = await fetchImpl(`${base()}/capture`, { method: 'POST', headers: { ...headers(), 'GS1-Capture-Error-Behaviour': 'proceed' }, body: JSON.stringify(epcisDocument(batch.map(({ _seq, recordTime, ...e }) => e), new Date().toISOString())), signal: AbortSignal.timeout(20000) });
       if (r.status === 413 && fw.batch > 5) { fw.batch = Math.max(5, Math.floor(fw.batch / 2)); fw.nextAt = 0; return; }   // 바로 더 작게 다시
       if (!r.ok) throw new Error(`HTTP ${r.status}${r.statusText ? ' ' + r.statusText : ''}`);
-      const loc = r.headers.get('location');
+      const loc = r.headers.get('location'), last = batch.at(-1)._seq;
       // proceed: 문제가 있는 이벤트만 건너뛰고 나머지는 저장 — 중복(이미 보낸 것)은 정상, 검증 실패는 건수·사유만 남기고 다음으로 (한 건 때문에 전송이 멈추지 않게)
-      let note = null;
-      if (loc) {
-        const J = await job(loc), errs = (J.errors ?? []).filter((x) => !/duplicate/i.test(`${x.detail ?? ''} ${x.title ?? ''}`));
-        fw.lastJob = { id: J.captureID ?? null, success: J.success, errors: (J.errors ?? []).length, duplicates: (J.errors ?? []).length - errs.length };
-        if (errs.length) { fw.rejected = (fw.rejected ?? 0) + errs.length; note = `저장소가 ${errs.length}건 거부 — ${errs[0].detail ?? errs[0].title ?? ''}`.trim(); }
-      }
-      cfg.cursor = batch.at(-1)._seq; saveCfg(); fw.sent += batch.length; fw.lastOk = new Date().toISOString(); fw.lastError = note; fw.backoff = interval; fw.nextAt = 0;
+      if (!loc) { settle(null, last, batch.length); return; }   // 작업 주소 없이 바로 끝난 저장소
+      const J = await job(loc);
+      if (J) { settle(J, last, batch.length); return; }
+      fw.job = { loc, base: base(), last, n: batch.length, at: Date.now() };
+      fw.lastError = '저장소가 아직 처리 중 — 끝나면 보낸 것으로 확정 (다음 주기에 다시 확인)'; fw.nextAt = Date.now() + interval;
     } catch (e) { fw.failed++; fw.lastError = /^(HTTP|저장소|확장)/.test(e.message) ? e.message : why(e); fw.backoff = Math.min(60000, fw.backoff * 2); fw.nextAt = Date.now() + fw.backoff; }
     finally { fw.busy = false; }
   }
@@ -98,8 +123,8 @@ export function makeEpcisApi({ dir, fetchImpl = globalThis.fetch, interval = 500
     try { const r = await fetchImpl(`${u}/events?perPage=1`, { headers: headers(false, key || (sameOrigin(u) ? cfg.apiKey : '')), signal: AbortSignal.timeout(8000) }); return r.ok ? { ok: true, status: r.status } : { ok: false, status: r.status, error: `HTTP ${r.status}` }; }
     catch (e) { return { ok: false, error: why(e) }; }
   }
-  const status = () => ({ events: store.count, file: fs.existsSync(file) ? fs.statSync(file).size : 0, stats: store.stats,
-    forward: { url: cfg.url, enabled: !!cfg.enabled, apiKey: !!cfg.apiKey, pending: pending().length, sent: fw.sent, failed: fw.failed, lastOk: fw.lastOk, lastError: fw.lastError, lastJob: fw.lastJob, batch: fw.batch, rejected: fw.rejected ?? 0, nextRetryMs: fw.nextAt ? Math.max(0, fw.nextAt - Date.now()) : 0 } });
+  const status = () => ({ events: store.count, file: fs.existsSync(file) ? fs.statSync(file).size : 0, stats: store.stats, recovery, writeError,
+    forward: { url: cfg.url, enabled: !!cfg.enabled, apiKey: !!cfg.apiKey, pending: pending().length, sent: fw.sent, failed: fw.failed, lastOk: fw.lastOk, lastError: fw.lastError, lastJob: fw.lastJob, processing: fw.job ? { since: new Date(fw.job.at).toISOString(), events: fw.job.n } : null, batch: fw.batch, rejected: fw.rejected ?? 0, nextRetryMs: fw.nextAt ? Math.max(0, fw.nextAt - Date.now()) : 0 } });
 
   const route = async (method, pathname, query, bodyText) => {
     const p = pathname.replace(/^\/api\/epcis\/v1\/?/, '');

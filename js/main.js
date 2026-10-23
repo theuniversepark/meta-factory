@@ -5,7 +5,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { Simulation, MODES, ST_LABEL } from './sim.js';
+import { Simulation, MODES, ST_LABEL, SIM_DT } from './sim.js';
 import { StepInterp } from './stepinterp.js';
 import { FactoryAgent } from './agent.js';
 import { HybridAgent, compareArchitecturesAsync } from './multiagent.js';
@@ -140,9 +140,10 @@ async function epcisPump() {
 }
 setInterval(() => { epcisPump(); }, 5000);
 // 설비 상태 요약 · 이벤트 (UNS 평면 토픽) → 서버 MQTT 브로커 — 2초(실제 시간)마다 · 설비 대시보드(Telegraf → InfluxDB → Grafana)가 구독 (js/datahub.js unsTelemetry)
-let unsSince = 0, unsBusy = false;
+let unsSince = 0, unsBusy = false, unsSim = null;
 setInterval(async () => {
   if (hub.noServer || unsBusy || !sim) return;
+  if (unsSim !== sim) { unsSim = sim; unsSince = 0; }   // 새 실행은 로그 번호가 1부터 다시 — 이전 실행의 커서를 쓰면 첫 경보 묶음이 빠진다
   const E = unsEvents(sim, unsSince); unsSince = E.next;
   const messages = [...unsTelemetry(sim), ...E.messages, ...unsZoneKpi(sim)]; if (!messages.length) return;   // + Zone OEE · 품질 표본 (js/zonekpi.js)
   unsBusy = true; try { await fetch('/api/mqtt/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages }) }); } catch { /* 서버가 잠시 안 되면 다음 주기에 */ } finally { unsBusy = false; }
@@ -321,7 +322,7 @@ function start(key) {
   buildSensor3d();
   if (sim.machmon) sim.machmon.onItem = machmonPcap;   // 가공기 감시 MQTT → 전체 캡처 · 그 가공기 개별 캡처
   epcisAttach();   // 시리얼 번호 이어 받기 · EPCIS 이벤트 대기열 켜기
-  if (sim.qcomm) { sim.qcomm.setEpoch(hub.epochMs); sim.qcomm.mirror = () => hub.pcap; sim.qcomm.live = !hub.noServer; }   // 품질 통신: 기준 시계 · 전체 캡처에 함께 기록 · 실제 RCA 서버(앱 서버)에도 전송
+  if (sim.qcomm) { sim.qcomm.setEpoch(hub.epochMs); sim.qcomm.mirror = () => hub.pcap; sim.qcomm.live = !hub.noServer; sim.qcomm.runId = hub.runId; }   // 품질 통신: 기준 시계 · 전체 캡처에 함께 기록 · 실제 RCA 서버(앱 서버)에도 전송
   camWall.setup(sim, view); for (const w of zoneWalls) w.setup(sim, view);
   cctvView.setup(sim, view); for (const b of cctvBoards) b.setup(sim);
   epRec.attach(sim);
@@ -1076,7 +1077,7 @@ conceptBody.addEventListener('click', (e) => {
   }
   if (e.target.closest('button[data-calc]')) {
     showConcept(true);
-    setTimeout(() => { ui.computeCompare(SEED, currentLine); showConcept(); }, 30);
+    ui.computeCompare(SEED, currentLine).then(() => showConcept());
   }
 });
 
@@ -1564,7 +1565,7 @@ document.addEventListener('visibilitychange', () => {
 
 // ── 루프 ─────────────────────────────
 const clock = new THREE.Clock();
-const SIM_DT = 0.1, interp = new StepInterp();
+const interp = new StepInterp();   // 간격은 SIM_DT (js/sim.js)
 let stepAcc = 0;
 // 보간 대상: 이동체(차량·지게차·AMR·정비·보충·사족보행·드론·작업자·트럭) · 셀 진행률(로봇 팔 자세) — 확장 Zone·정밀검사의 AMR·셀 포함
 const interpTargets = () => [sim.vehicles, sim.forklifts, sim.carriers, sim.techs, sim.helpers, sim.quads, sim.drones, sim.workers, sim.yard?.trucks, sim.inbound?.trucks, sim.stations,
@@ -1593,7 +1594,7 @@ function frame() {
   bzT += rdt; if (bzT > 1.5) { bzT = 0; blenderize(scene); trimShadows(scene); }   // Blender 옵션: 운영 중에 새로 생긴 모델(대상물·트럭 등)도 바꿔 끼운다
   pcapVideoTick(rdt);
   facPushTick(rdt);
-  interp.apply(interpTargets(), stepAcc / SIM_DT);   // 그리는 동안만 위치·진행률을 직전 간격과 섞는다
+  interp.apply(interpTargets(), running && !llm.holdSim ? stepAcc / SIM_DT : 1);   // 그리는 동안만 위치·진행률을 직전 간격과 섞는다 (멈춤 중에는 현재 상태 그대로 — 멈춘 채 편집한 위치가 보이게)
   view.update(rdt, running, speed);
   xzones.update(rdt, running && !llm.holdSim, speed); insp.update(rdt, running && !llm.holdSim, speed);
   interp.restore();
@@ -1966,7 +1967,7 @@ function renderTrace(force) {
 
 // ── AIOS 공장 운영 AI 창 ─────────────────
 const aiosModal = document.getElementById('aiosModal'), aiosBody = document.getElementById('aiosBody');
-const aiosUp = { n: 0, bytes: 0, busy: false };
+const aiosUp = { n: 0, bytes: 0, busy: false, fail: 0, nextAt: 0, lastError: null };   // fail·nextAt: 올리기 실패 횟수 · 다시 시도할 시각 (실패한 묶음은 완료로 치지 않고 간격을 늘려 다시)
 let aiosDir = null;
 document.getElementById('btnAios').addEventListener('click', () => {
   aiosModal.classList.remove('hidden'); renderAios(true);
@@ -1984,14 +1985,17 @@ aiosModal.addEventListener('click', (e) => {
   a.download = `AIOS_ops_${range ? 'recent10m' : `${P.samples.length}samples`}_${P.version}_${epRec.runId}.zip`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   sim.sec?.onExport('AIOS 운영 데이터셋', a.download, zip.byteLength ?? zip.length);
 });
-// 10분 묶음이 생길 때마다 서버(data/aios/)에 올린다
+// 10분 묶음이 생길 때마다 서버(data/aios/)에 올린다 — 서버가 받았을 때(HTTP 200)만 완료로 표시, 실패하면 5초부터 최대 2분 간격으로 다시
 function aiosUpload() {
-  const P = sim.aios; if (!P?.on || !epRec.server || aiosUp.busy) return;
+  const P = sim.aios; if (!P?.on || !epRec.server || aiosUp.busy || performance.now() < aiosUp.nextAt) return;
   const c = P.chunks.find((x) => !x.up); if (!c) return;
-  c.up = true; aiosUp.busy = true;
+  aiosUp.busy = true;
   const zip = buildAiosZip(P, zipStore, (t) => hub.iso(t), epRec.runId, [c.t - (AIOS_CHUNK - 1) * AIOS_SAMPLE_S, c.t]);
-  fetch(`/api/aios?id=${epRec.runId}_${c.id}`, { method: 'POST', body: zip }).then((r) => { if (r.ok) { aiosUp.n++; aiosUp.bytes += zip.length; } })
-    .catch(() => {}).finally(() => { aiosUp.busy = false; });
+  fetch(`/api/aios?id=${epRec.runId}_${c.id}`, { method: 'POST', body: zip }).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    c.up = true; aiosUp.n++; aiosUp.bytes += zip.length; aiosUp.fail = 0; aiosUp.nextAt = 0; aiosUp.lastError = null;
+  }).catch((e) => { aiosUp.fail++; aiosUp.lastError = e.message; aiosUp.nextAt = performance.now() + Math.min(120000, 5000 * 2 ** Math.min(aiosUp.fail - 1, 5)); })
+    .finally(() => { aiosUp.busy = false; });
 }
 function renderAios(force) {
   if (aiosModal.classList.contains('hidden') && !force) return;
@@ -2009,7 +2013,7 @@ function renderAios(force) {
       ${stage('🏭', '1 현장 데이터 수집', `샘플 ${P.total}개 · ${AIOS_SAMPLE_S}초 주기`, '생산·설비·물류(AMR·AGV)·에너지·품질 + 인시던트·운영 의사결정', true)}<b class="va">›</b>
       ${stage('🧹', '2 AI-ready 정제', `특징 ${AIOS_FEATURES.length}종 · 셀 ${sim.processing.length}×5`, '고정 스키마 · UTC 동기 · 보상 라벨 · 전이(상태·행동·보상)', true)}<b class="va">›</b>
       ${stage('📚', '3 운영 데이터셋', `전이 ${Math.max(0, P.samples.length - 1)} · 이벤트 ${P.events.length}`, `의사결정 ${P.decisions.length}건 · 10분 묶음 ${P.chunks.length}개`, false)}<b class="va">›</b>
-      ${stage('🗄', '4 서버 저장', epRec.server ? `${aiosUp.n}묶음 · ${(aiosUp.bytes / 1048576).toFixed(1)}MB` : '브라우저 보관', epRec.server ? escV(dirTxt) : '서버 없음 (웹·공유) — 파일로 내려받아 보관', aiosUp.n > 0)}<b class="va">›</b>
+      ${stage('🗄', '4 서버 저장', epRec.server ? `${aiosUp.n}묶음 · ${(aiosUp.bytes / 1048576).toFixed(1)}MB` : '브라우저 보관', epRec.server ? (aiosUp.fail ? `올리기 실패 ${aiosUp.fail}회 (${escV(aiosUp.lastError ?? '')}) — 다시 시도 중` : escV(dirTxt)) : '서버 없음 (웹·공유) — 파일로 내려받아 보관', aiosUp.n > 0)}<b class="va">›</b>
       ${stage('🧠', '5 AIOS 학습', act === 'train' ? `에폭 ${j.epoch}/${j.epochs} · loss ${j.loss.at(-1) ?? '-'}` : `다음 학습까지 ${Math.max(0, need - P.newSamples)}개`, act === 'train' ? `${j.label} · 정책 헤드 ${AIOS_HEADS.length}개` : `새 샘플 ${P.newSamples}개 누적 (30분마다)`, act === 'train')}<b class="va">›</b>
       ${stage('🧪', '6 트윈 검증', tw != null ? `시뮬레이션 ${tw}%` : last ? `UPH ${last.result.uphCur} → ${last.result.uphCand}` : '-', tw != null ? '현재 vs 후보 정책 · 20분 × 2' : last ? `${last.label} · 생산 ${last.result.gain >= 0 ? '+' : ''}${last.result.gain}% · 에너지 ${last.result.eGain >= 0 ? '+' : ''}${last.result.eGain}%` : '디지털트윈에서 현재·후보 정책 비교', act === 'twin')}<b class="va">›</b>
       ${stage('🚀', '7 오케스트레이터 배포', `AIOS ${P.version}`, act === 'shadow' ? `${j.label} 섀도 모드 (추천만)` : act === 'verify' ? `${j.label} 적용 · 실측 효과 확인 중` : '운영 정책 → 피지컬AI 오케스트레이터', act === 'shadow' || act === 'verify')}

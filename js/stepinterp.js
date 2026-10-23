@@ -16,7 +16,7 @@ export class StepInterp {
   }
   apply(objs, a) {
     this.restore();
-    if (!(a > 0 && a < 1)) return;
+    if (!(a >= 0 && a < 1)) return;   // a = 0도 섞는다(= 직전 간격 위치) — 0에서 현재 위치를 그리면 다음 프레임에 직전 위치로 돌아가 뒤로 튄다
     for (const o of objs) {
       const P = o && this.prev.get(o); if (!P) continue;
       const { K, v: p } = P, cur = K.map((k) => (k ? o[k] : undefined)), out = cur.slice();
