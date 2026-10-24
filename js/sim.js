@@ -14,6 +14,7 @@ import { SerialHub } from './serial.js';
 import { QualityComm } from './qcomm.js';
 import { SensorNet } from './sensors.js';
 import { MachineMonitor } from './machmon.js';
+import { WasherMonitor } from './washer.js';
 import { ZoneKpi } from './zonekpi.js';
 import { CapaManager } from './capa.js';
 import { FactoryOS } from './factoryos.js';
@@ -82,9 +83,12 @@ export const FIELD_EVENTS = {
 
 // 정비실 도구 세트 — 정비원·정비 휴머노이드가 상황에 맞는 도구를 정비실에서 챙겨 출동하고, 처리 후 반납한다
 // at: 정비실 안 보관 위치(정비실 기준 로컬 x, 앞쪽 픽업 z) — 공구 카트·작업대 / 청소 코너 / 소화기
+// 정비 요청 종류 이름 (정비 배정·로그·셀 정보 창)
+export const MAINT_KO = { repair: '긴급수리', pm: '예지정비', cal: '재보정', filter: '세척기 필터 교체' };
 export const TOOL_KITS = {
   repair: { label: '수리 공구 세트', items: '공구함 · 토크렌치 · 멀티미터', vis: 'toolbox', at: -1.15 },
   pm:     { label: '예지정비 키트', items: '진동 분석기 · 그리스 건 · 교체 부품', vis: 'diag', at: 0.35 },
+  filter: { label: '세척기 필터 키트', items: '백필터 카트리지 · 필터 렌치 · 폐액 용기', vis: 'diag', at: 0.35 },   // 적응가공 세척기 필터 교체 (js/washer.js)
   cal:    { label: '보정 키트', items: '다이얼 게이지 · 보정 지그', vis: 'diag', at: 0.35 },
   leak:   { label: '누유 처리 키트', items: '흡착재 키트 · 대걸레 · 버킷', vis: 'mop', at: 4.35 },
   debris: { label: '이물질 수거 도구', items: '빗자루 · 쓰레받기 · 수거함', vis: 'broom', at: 4.35 },
@@ -185,6 +189,7 @@ export const localLoc = (def, lx, lz, name) => { const p = toWorld(def, lx, lz);
 // 설비 앞 작업 위치: 셀 앞 모서리(2.3m)와 통로 차로 사이, 지나가는 이동체와 겹치지 않는 거리
 export const SVC_Z = 2.7;
 export const svcLoc = (st) => st.svc ?? localLoc(st.def, 0.9, SVC_Z, st.name);   // 확장 Zone 셀은 셀마다 정한 정비 자리 (buildZoneCells)
+const svcFor = (st, kind) => (kind === 'filter' && st.svcWash ? st.svcWash : svcLoc(st));   // 세척기 필터 교체는 필터 유닛 앞
 // 확장 Zone 투입구 부품 키트 버퍼 (피지컬AI): 가득 12 · 4개 이하이면 물류 휴머노이드가 확장 선반에서 8개씩 가져온다
 export { ZONE_LABEL };
 export const ZONE_KIT = { cap: 12, reorder: 4, carry: 8 };
@@ -239,7 +244,9 @@ function buildZoneCells(sim) {
       id: `${Z.uidp}-${id}`, uid: `${Z.uidp}-${id}`, zone: Z.key, cellId: id, name, x, z, def: { cycle: c.cycle, wear: 0.3 },
       health: 80 + sim.zrand() * 20, drift: 0, state: 'OK', request: null, repairRemaining: 0, repairTotal: 0, techOnSite: false, maintKind: null,
       c: { fails: 0, down: 0, maint: 0 }, busy: false,
-      svc: { ...svc, z: svc.z - back, name }, scan: beside ? { x: svc.x, z: svc.z + 1.6, aisle: svc.aisle, name } : { x: svc.x + 1.6, z: svc.z, aisle: svc.aisle, name },
+      // 세척기가 딸린 셀(유압블록 디버링셀): 점검 자리는 세척기 캐빈(셀 오른쪽 바깥) 반대쪽 · 필터 교체는 세척기 동쪽 필터 유닛 앞 (zones.js buildWasher)
+      svc: { ...svc, z: svc.z - back, name }, scan: beside ? { x: svc.x, z: svc.z + 1.6, aisle: svc.aisle, name } : { x: svc.x + (c.wash ? -1.6 : 1.6), z: svc.z, aisle: svc.aisle, name },
+      ...(c.wash ? { svcWash: { x: x + 6.4, z: z + 2.2, aisle: svc.aisle, name: `${name} 세척기 필터 유닛` } } : {}),
     };
   }));
   return [...ext, ...insp()];   // 정밀검사 셀은 맨 뒤 (난수 순서 — 기존 Zone 셀 초기 건강도가 그대로)
@@ -678,6 +685,7 @@ export class Simulation {
     if (!this.quiet || opts.sensors) new SensorNet(this);   // 환경·설비 상태 센서망 — 센서 → 셀 엣지 → 게이트웨이 → 존 서버 → 공장 중앙 (js/sensors.js · 헤드리스 시험·트윈은 opts.sensors일 때만)
     new QualityComm(this);   // 불량 판정 리포트 → 메인 서버 → RCA 서버 통신 · 품질 통신 pcap (js/qcomm.js)
     new FactoryOS(this);   // Factory OS 계층: 공장 오케스트레이터(FacOS) · 정밀조립 Manufacturing Agent · 셀 OCS · A2A 메시지 (js/factoryos.js)
+    new WasherMonitor(this);   // 적응가공 유압블록 세척기 공정 데이터 · 청정도 · 필터 정비 요청 (js/washer.js)
     new MachineMonitor(this);   // 적응가공 가공기 상태 감시 · 공구 상태 · 엣지 AI 예지보전 → 공장 오케스트레이터 보고 · 서버 전송 · AAS (js/machmon.js)
     new ZoneKpi(this, seed);   // Zone 운영 분석: OEE · 손실·NG 파레토 · 관리도 · 공정–품질 상관 (js/zonekpi.js — Zone 대시보드 · 설비 대시보드)
   }
@@ -1157,6 +1165,7 @@ export class Simulation {
     this.sensors?.tick(dt);
     this.fos?.update(dt);
     this.machmon?.tick(dt);
+    this.washer?.tick(dt);
     this.zkpi?.tick();
     this.orch.update();
     // 자재 공급이 재개되면 공급 차질 인시던트를 닫는다
@@ -1479,7 +1488,7 @@ export class Simulation {
   }
 
   requestTech(st, kind, delay = 0) {
-    if (st.request) { if (st.request.kind !== kind) this.fos?.validate(st, kind, false, `거부 — ${({ repair: '긴급수리', pm: '예지정비', cal: '재보정' })[st.request.kind] ?? '정비'} 진행·대기 중`); return false; }
+    if (st.request) { if (st.request.kind !== kind) this.fos?.validate(st, kind, false, `거부 — ${MAINT_KO[st.request.kind] ?? '정비'} 진행·대기 중`); return false; }
     if (kind !== 'repair' && this.cmd.stationGate(st)) { this.fos?.validate(st, kind, false, '거부 — 현장 명령으로 정지 중 (인터록)'); return false; }   // 명령으로 멈춘 셀에는 정비·보정을 새로 걸지 않는다 (수리 요청은 접수)
     this.fos?.validate(st, kind, true);   // 셀 OCS 명령 검증 (정밀조립 셀)
     st.request = { st, kind, readyAt: this.time + delay, tech: null };
@@ -1506,7 +1515,7 @@ export class Simulation {
     //  ① 일을 마치고 공구 반납·대기 자리로 돌아가는 인력도 바로 새 일에 배정 (배터리 교체 중 제외)
     //  ② 긴급수리에 비어 있는 인력이 없으면 예지정비·재보정을 하러 가는 중인 인력을 돌려 긴급수리부터 (그 정비 요청은 다시 대기열로 · 현장에서 정비 중이면 그대로)
     //  ③ 그래도 20초 넘게 아무도 없으면 다른 Zone 정비실의 비어 있는 인력을 지원으로 보낸다
-    const KP = { repair: 3, cal: 5, pm: 5 }, zoneOf = (st) => st.zone ?? 'main';
+    const KP = { repair: 3, cal: 5, pm: 5, filter: 5 }, zoneOf = (st) => st.zone ?? 'main';
     const p1Zones = new Set(this.orch.urgentOpen(1).map((i) => (i.where ? zoneAt(i.where.x, i.where.z, 0) : 'main')));
     const order = [...this.requests].sort((a, b) => KP[a.kind] - KP[b.kind] || a.readyAt - b.readyAt);
     const free = (t) => !t.outOfService && (t.idle || (!t.job && !t.swapping && t.task !== '배터리 팩 교체')) && (t.kind !== 'humanoid' || t.battery > 15);
@@ -1514,7 +1523,7 @@ export class Simulation {
     for (const req of order) {
       if (req.tech || this.time < req.readyAt) continue;
       const st = req.st, zk = zoneOf(st), inc = req.kind === 'repair' ? this.orch.find(`fail:${st.id}`) : null;
-      if (KP[req.kind] >= 5 && p1Zones.has(zk)) { if (!req.deferred) { req.deferred = true; this.stats.deferred = (this.stats.deferred ?? 0) + 1; this.log('info', `${st.name} ${req.kind === 'pm' ? '예지정비' : '재보정'} 보류`, { obs: 'P1 화재·인명 안전 대응 중 (같은 Zone)', act: '안전 확보 뒤 배정 (정비 인력 안전 대응 대기)' }); } continue; }
+      if (KP[req.kind] >= 5 && p1Zones.has(zk)) { if (!req.deferred) { req.deferred = true; this.stats.deferred = (this.stats.deferred ?? 0) + 1; this.log('info', `${st.name} ${MAINT_KO[req.kind]} 보류`, { obs: 'P1 화재·인명 안전 대응 중 (같은 Zone)', act: '안전 확보 뒤 배정 (정비 인력 안전 대응 대기)' }); } continue; }
       req.waitFrom ??= this.time;
       const pool = this.techs.filter((t) => (t.zone ?? 'main') === zk);   // Zone마다 자기 정비실 인력이 맡는다
       let best = near(pool.filter(free), st), how = '';
@@ -1522,7 +1531,7 @@ export class Simulation {
         const t = near(pool.filter((x) => x.job?.req && KP[x.job.req.kind] >= 5 && !x.job.req.st.techOnSite && (x.kind !== 'humanoid' || x.battery > 15)), st);
         if (t) {
           const old = t.job.req; old.tech = null; old.waitFrom = this.time; t.job = null; best = t;
-          how = `${old.st.name} ${old.kind === 'pm' ? '예지정비' : '재보정'}로 가던 ${t.id}를 긴급수리로 전환 (그 정비는 다시 대기열)`;
+          how = `${old.st.name} ${MAINT_KO[old.kind]}로 가던 ${t.id}를 긴급수리로 전환 (그 정비는 다시 대기열)`;
           this.stats.techPreempt = (this.stats.techPreempt ?? 0) + 1;
         }
       }
@@ -1535,13 +1544,13 @@ export class Simulation {
       if (how) { this.log('act', `${st.name} 긴급수리 배정 조정`, { obs: '빈 정비 인력 없음', dec: '긴급수리(P3) 우선', act: how }); if (inc) this.orch.step(inc, 'orch', 'decide', `정비 배정 조정: ${how}`); }
       req.tech = best; best.job = { prio: KP[req.kind], st, req }; this.fac?.maintStart(st, best);
       if (req.kind === 'repair') this.orch.step(inc, 'exec', 'act', `${best.id} 배정 · 출동${req.waitFrom != null && this.time - req.waitFrom > 1 ? ` (배정 대기 ${Math.round(this.time - req.waitFrom)}초)` : ''}`);
-      const kindLabel = { repair: '긴급수리', pm: '예지정비', cal: '재보정' }[req.kind];
+      const kindLabel = MAINT_KO[req.kind];
       const T = toolSteps(this, best, req.kind, inc);
       best.support = support ? { from: support.from, to: zk, st } : null;
       const back = support ? [{ do: () => { best.support = null; this.log('ok', `${best.id} ${ZONE_LABEL[zk]} 지원 완료 · 복귀`, { obs: `${st.name} ${kindLabel} 완료`, act: `${ZONE_LABEL[support.from]} 정비실로 복귀` }); if (inc) this.orch.step(inc, 'orch', 'notify', `${ZONE_LABEL[support.from]} 오케스트레이터에 지원 완료 통보 — ${best.id} 복귀`); } }] : [];
       best.setTask(`${support ? `[${ZONE_LABEL[zk]} 지원] ` : ''}${kindLabel} → ${st.name} (${TOOL_KITS[req.kind].label})`, [
         ...T.take,
-        { go: svcLoc(st) },
+        { go: svcFor(st, req.kind) },
         { do: () => this.techArrive(req) },
         { until: () => !st.request || st.request !== req || req.tech !== best },   // 다른 인력에게 넘어간 요청이면 그만둔다
         { do: () => { if (best.job?.req === req) best.job = null; } },
@@ -1559,7 +1568,7 @@ export class Simulation {
     const zones = Object.keys(ZONE_LABEL).filter((z) => z !== zk && this.techs.some((t) => (t.zone ?? 'main') === z));
     const ctr = (z) => { const L = this.techs.filter((t) => (t.zone ?? 'main') === z); return L.length ? { x: L.reduce((a, t) => a + t.home.x, 0) / L.length, z: L.reduce((a, t) => a + t.home.z, 0) / L.length } : { x: 0, z: 0 }; };
     zones.sort((a, b) => Math.hypot(ctr(a).x - st.x, ctr(a).z - st.z) - Math.hypot(ctr(b).x - st.x, ctr(b).z - st.z));
-    const kindLabel = { repair: '긴급수리', pm: '예지정비', cal: '재보정' }[req.kind];
+    const kindLabel = MAINT_KO[req.kind];
     for (const z of zones) {
       if (asked[z] != null && this.time - asked[z] < 30) continue;
       asked[z] = this.time;
@@ -1593,7 +1602,7 @@ export class Simulation {
     st.techOnSite = true;
     if (st.state !== 'DOWN') {
       st.state = 'MAINT'; st.maintKind = req.kind;
-      st.repairRemaining = st.repairTotal = req.kind === 'pm' ? (m.pmTime || 90) * (0.8 + (st.zone ? this.zrand : this.rand)() * 0.4) : 15;
+      st.repairRemaining = st.repairTotal = req.kind === 'pm' ? (m.pmTime || 90) * (0.8 + (st.zone ? this.zrand : this.rand)() * 0.4) : req.kind === 'filter' ? 40 * (0.9 + (st.zone ? this.zrand : this.rand)() * 0.2) : 15;   // 세척기 백필터 교체 약 40초
     }
   }
 
@@ -1604,6 +1613,7 @@ export class Simulation {
     else if (kind === 'cal' && st.request?.self) { const inc = o.find(`cal:${st.id}`); o.step(inc, 'cell', 'act', '자율 보정 완료 — 드리프트 0'); o.step(inc, 'orch', 'notify', '결과 통보 수신 (상위 조치 불필요)'); o.close(inc, '셀 자체 해결 · 종료'); }
     if (kind === 'repair') { st.health = 90 + (st.zone ? this.zrand : this.rand)() * 10; st.drift = 0; }
     else if (kind === 'pm') { st.health = 100; st.drift = 0; if (st.zone) this.stats.zonePm = (this.stats.zonePm ?? 0) + 1; else this.stats.pm++; }   // 확장 Zone 예지정비는 따로 센다
+    else if (kind === 'filter') { this.washer?.maintained(); this.stats.washFilter = (this.stats.washFilter ?? 0) + 1; }   // 세척기 백필터 (세척액 오염 기준이면 세척액도)
     else { st.drift = 0; st.health = Math.min(100, st.health + 4); this.stats.cal++; }
     st.state = st.zone ? 'OK' : st.item ? (st.done ? 'BLOCKED' : 'BUSY') : 'STARVED';
     st.techOnSite = false; st.maintKind = null;
@@ -1611,8 +1621,8 @@ export class Simulation {
     if (!st.request?.self) this.fac?.maintDone(st);   // FAC: 정비 완료 (셀 자율 보정은 정비요청 없음)
     st.request = null;
     this.emit('repaired', { st, kind });
-    const label = { repair: '수리 완료', pm: '예지정비 완료', cal: '재보정 완료' }[kind];
-    this.log('ok', `${st.name} ${label}`, { obs: `건강도 ${st.health.toFixed(0)}% 회복, 라인 재가동` });
+    const label = { repair: '수리 완료', pm: '예지정비 완료', cal: '재보정 완료', filter: '세척기 필터 교체 완료' }[kind];
+    this.log('ok', `${st.name} ${label}`, { obs: kind === 'filter' ? `${this.washer?.events[0]?.text ?? '백필터 교체'}, 세척 재개` : `건강도 ${st.health.toFixed(0)}% 회복, 라인 재가동` });
   }
 
   // 휴머노이드가 부품 선반을 채우는 자리: 선반 바깥쪽 (셀 옆쪽 선반이면 선반 뒤, 긴 쪽 선반이면 선반 옆)
@@ -1868,7 +1878,7 @@ export class Simulation {
     let rest = steps;
     if (st && st.techOnSite && st.request === prev.req) {
       st.techOnSite = false;
-      rest = [{ go: svcLoc(st) }, { do: () => { if (st.request === prev.req) { st.techOnSite = true; this.orch.step(this.orch.find(`fail:${st.id}`), 'exec', 'act', `${m.id} 안전 대응 후 복귀 · 수리 재개`); } } }, ...steps];
+      rest = [{ go: svcFor(st, prev.req?.kind) }, { do: () => { if (st.request === prev.req) { st.techOnSite = true; this.orch.step(this.orch.find(`fail:${st.id}`), 'exec', 'act', `${m.id} 안전 대응 후 복귀 · 수리 재개`); } } }, ...steps];
     }
     this.stats.preempts = (this.stats.preempts ?? 0) + 1;
     if (prev?.prio) (this.preemptLog ??= []).push({ t: this.time, who: m.id, from: prev.prio, to: P });

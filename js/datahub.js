@@ -2,7 +2,8 @@
 // AAS 모델로 정의한 값을 OPC UA PubSub(Part 14, JSON 인코딩) NetworkMessage로 만들어 MQTT로 보내며,
 // 수집 데이터를 JSON(AAS) · XML(AAS) · RDF(Turtle) · CSV · AutomationML로 저장한다.
 import { COMMANDS, CMD_STATE } from './commands.js';
-import { ST_LABEL } from './sim.js';
+import { ST_LABEL, MAINT_KO } from './sim.js';
+import { WASH_SPEC, WASH_CELL } from './washer.js';
 import { ROBOT_KINDS, STATION_TYPES, ZONE_MIXES, isZone } from './line.js';
 import { buildEnvironment, buildRobotEnvironment, detailCSV, toXML, toTurtle, toCSV, toAutomationML, aasId, smId, SEM, AAS_RECENT, addVideos, videoLinkFiles } from './aas.js';
 import { machineTech } from './machine-specs.js';
@@ -173,7 +174,7 @@ function zoneAssets(assets, sim, xzones, plate) {
       const d = cell.def, zc = () => sim.zoneCell(Z.key, cell.id), id = `${pre}_${cell.id}`, R = d.robot;
       assets.push({
         id, kind: 'Station', parent: zid, name: `${code} ${d.label}`, nameplate: plate(id, `${d.label} 셀`),
-        tech: { EquipmentId: zc()?.uid ?? `${code}-${cell.id}`, Zone: code, StationType: d.type, Robot: R[1] ? `${ROBOT_KINDS[R[0]]?.label ?? R[0]} ${R[1]}대${R[2] ? ` (피지컬AI: ${ROBOT_KINDS[R[2]]?.label ?? R[2]} ${R[3]}대)` : ''}` : '없음', BaseCycleTime: d.cycle, ...machineTech(d.type), Task: d.use, ProductLine: d.product },
+        tech: { EquipmentId: zc()?.uid ?? `${code}-${cell.id}`, Zone: code, StationType: d.type, Robot: R[1] ? `${ROBOT_KINDS[R[0]]?.label ?? R[0]} ${R[1]}대${R[2] ? ` (피지컬AI: ${ROBOT_KINDS[R[2]]?.label ?? R[2]} ${R[3]}대)` : ''}` : '없음', BaseCycleTime: d.cycle, ...machineTech(d.type), Task: d.use, ProductLine: d.product, ...(d.wash ? { Washer: WASH_SPEC.model, WasherProcess: WASH_SPEC.process, WasherAssetId: WASH_SPEC.asset, CleanlinessSpec: `최대 입자 ${WASH_SPEC.maxParticle}µm · 잔류 ${WASH_SPEC.maxResidue}mg (ISO 16232 / VDA 19.1)`, AuxRobot: d.aux ? `${ROBOT_KINDS[d.aux[0]]?.label ?? d.aux[0]} ${d.aux[1]}대 (${d.aux[2]})` : null } : {}) },
         fields: [
           f('State', '상태', 'string', null, () => cell.fault ?? cell.state),
           f('StateText', '상태(한글)', 'string', null, () => ZST[cell.fault ?? cell.state] ?? cell.state),
@@ -185,7 +186,15 @@ function zoneAssets(assets, sim, xzones, plate) {
           f('CurrentProduct', '작업 제품', 'string', null, () => (cell.item ? Z.products[cell.item.product]?.label ?? cell.item.product : '')),
           f('Processed', '처리 누적', 'int', 'pcs', () => cell.done),
           f('Failures', '고장 누적', 'int', 'count', () => zc()?.c.fails ?? 0),
-          f('MaintenanceRequest', '정비 요청', 'string', null, () => (zc()?.request ? (zc().request.kind === 'repair' ? '긴급수리' : '예지정비') : '')),
+          f('MaintenanceRequest', '정비 요청', 'string', null, () => (zc()?.request ? MAINT_KO[zc().request.kind] ?? '정비' : '')),
+          // 세척기 (유압블록 디버링셀 · js/washer.js): 공정 센서 · 청정도 · 필터 상태
+          ...(Z.key === 'adapt' && cell.id === WASH_CELL && sim.washer ? (() => { const W = sim.washer, L = () => W.latest ?? {}, last = () => W.records[0] ?? null; return [
+            f('WashPressure', '세척 고압 펌프 압력', 'double', 'bar', () => L().pressure ?? null), f('WashFlow', '세척 분사 유량', 'double', 'L/min', () => L().flow ?? null),
+            f('WashTemperature', '세척액 온도', 'double', '°C', () => L().temp ?? null), f('WashConductivity', '세척액 전도도', 'double', 'µS/cm', () => L().cond ?? null),
+            f('FilterDifferentialPressure', '백필터 차압', 'double', 'bar', () => W.dp), f('FilterRemainingWashes', '필터 교체까지 남은 세척', 'int', 'count', () => W.remaining()),
+            f('CleanlinessMaxParticle', '청정도 최대 입자 (최근)', 'double', 'µm', () => last()?.maxParticle_um ?? null), f('CleanlinessResidue', '청정도 잔류 오염량 (최근)', 'double', 'mg', () => last()?.residue_mg ?? null),
+            f('RewashCount', '재세척 누적', 'int', 'count', () => W.stats.rewash), f('FilterChanges', '필터 교체 누적', 'int', 'count', () => W.stats.filterChanges),
+          ]; })() : []),
         ],
       });
       // 셀 로봇: 관절·TCP (정밀조립 CellRobot과 같은 필드)

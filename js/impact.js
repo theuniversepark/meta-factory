@@ -37,7 +37,7 @@ const r1 = (v) => Math.round(v * 10) / 10, r2 = (v) => Math.round(v * 100) / 100
 const stopCause = (st) => {
   switch (st.state) {
     case 'DOWN': return 'failure';
-    case 'MAINT': return st.maintKind === 'pm' ? 'pm' : st.maintKind === 'cal' ? 'cal' : 'failure';
+    case 'MAINT': return st.maintKind === 'pm' || st.maintKind === 'filter' ? 'pm' : st.maintKind === 'cal' ? 'cal' : 'failure';   // 세척기 필터 교체는 계획 정비
     case 'NOPARTS': return 'parts';
     case 'CSTOP': case 'ESTOP': case 'PSTOP': return 'command';
     default: return null;

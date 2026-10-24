@@ -77,6 +77,7 @@ const health = dash('mf-health', '메타팩토리 · 설비 건강도 · RUL', [
 pid = 0;
 const machVar = { name: 'machine', label: '가공기', type: 'query', datasource: DS, query: 'import "influxdata/influxdb/schema"\nschema.tagValues(bucket: "raw", tag: "asset", predicate: (r) => r._measurement == "machine", start: -1d)', refresh: 2, includeAll: true, multi: true, current: { text: 'All', value: '$__all' }, allValue: '.*', sort: 1 };
 const mTs = (field) => `from(bucket: "raw") |> ${R} |> filter(fn: (r) => r._measurement == "machine" and r._field == "${field}" and r.asset =~ /^\${machine:regex}$/) |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset })) |> group(columns: ["_field"])`;
+const wTs = (meas, field) => `from(bucket: "raw") |> ${R} |> filter(fn: (r) => r._measurement == "${meas}" and r._field == "${field}") |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset })) |> group(columns: ["_field"])`;   // 세척기 (자산 1대)
 const machine = dash('mf-machine', '메타팩토리 · 적응가공 가공기 상태 감시', [
   ts('이상 점수 (엣지 AI)', { x: 0, y: 0, w: 12, h: 8 }, mTs('anomaly'), { thresholds: [{ color: 'transparent', value: null }, { color: 'orange', value: 0.6 }, { color: 'red', value: 0.8 }] }),
   ts('잔여 수명 RUL — 공구 · 주축 (분)', { x: 12, y: 0, w: 12, h: 8 }, `from(bucket: "raw") |> ${R} |> filter(fn: (r) => r._measurement == "machine" and (r._field == "rul_tool_min" or r._field == "rul_spindle_min") and r.asset =~ /^\${machine:regex}$/) |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset + (if r._field == "rul_tool_min" then " 공구" else " 주축") })) |> group(columns: ["_field"])`, { unit: 'm' }),
@@ -89,7 +90,13 @@ const machine = dash('mf-machine', '메타팩토리 · 적응가공 가공기 �
   ts('공구 마모율', { x: 0, y: 24, w: 12, h: 8 }, mTs('tool_wear'), { unit: 'percentunit' }),
   panel('state-timeline', '엣지 AI 판단 (정상 · 감시 · 교체 권고 · 즉시 교체 · 주축 점검)', { x: 12, y: 24, w: 12, h: 8 }, `from(bucket: "raw") |> ${R} |> filter(fn: (r) => r._measurement == "machine" and r._field == "decision" and r.asset =~ /^\${machine:regex}$/) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset })) |> group(columns: ["_field"])`,
     { fieldConfig: { defaults: { color: { mode: 'thresholds' } }, overrides: [] }, options: { showValue: 'auto', mergeValues: true, rowHeight: 0.8 } }),
-], { vars: [machVar], from: 'now-30m', desc: '적응가공 가공기 4대 — 주축 부하·진동·AE·베어링 온도·공구 마모 → 엣지 AI 이상 점수·RUL·판단 (metafactory/machmon/v1)' });
+  // 유압블록 디버링셀 세척기 (js/washer.js · metafactory/washer/v1): 공정 센서 · 블록별 청정도 — 필터 차압이 오르면 청정도가 나빠지고, 교체하면 돌아온다
+  ts('세척기 고압 펌프 압력 (bar)', { x: 0, y: 32, w: 8, h: 8 }, wTs('washer', 'pressure'), { thresholds: [{ color: 'transparent', value: null }, { color: 'orange', value: 540 }] }),
+  ts('세척기 백필터 차압 (bar)', { x: 8, y: 32, w: 8, h: 8 }, wTs('washer', 'dp'), { thresholds: [{ color: 'transparent', value: null }, { color: 'orange', value: 0.8 }, { color: 'red', value: 1.2 }] }),
+  ts('세척액 전도도 (µS/cm)', { x: 16, y: 32, w: 8, h: 8 }, wTs('washer', 'cond'), { thresholds: [{ color: 'transparent', value: null }, { color: 'orange', value: 900 }, { color: 'red', value: 1200 }] }),
+  ts('청정도 — 최대 금속 입자 (µm · 블록마다 · 규격 ≤ 400)', { x: 0, y: 40, w: 12, h: 8 }, wTs('cleanliness', 'maxParticle_um'), { thresholds: [{ color: 'transparent', value: null }, { color: 'red', value: 400 }] }),
+  ts('청정도 — 잔류 오염량 (mg · 블록마다 · 규격 ≤ 2.0)', { x: 12, y: 40, w: 12, h: 8 }, wTs('cleanliness', 'residue_mg'), { thresholds: [{ color: 'transparent', value: null }, { color: 'red', value: 2 }] }),
+], { vars: [machVar], from: 'now-30m', desc: '적응가공 가공기 4대 — 주축 부하·진동·AE·베어링 온도·공구 마모 → 엣지 AI 이상 점수·RUL·판단 (metafactory/machmon/v1) · 유압블록 세척기 공정·청정도 (metafactory/washer/v1)' });
 
 // ④ 환경 · 설비 센서
 pid = 0;

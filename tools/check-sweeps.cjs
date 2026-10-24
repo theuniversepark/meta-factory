@@ -4,6 +4,7 @@
 //  ② 정밀조립 AMMR(분류·포장셀): 선반 피킹 구간을 1×·3× 프레임 간격으로 — 팔 ↔ 셀(선반 기둥·빈) · 실제 재생 중 선반에 갈 때 슬롯 줄에서 비껴난 거리
 //  ③ 레거시 지게차: 충전 자리·미니로드 출고 지게차 자리에서 제자리 한 바퀴, 진입 직선 — 차체·포크 ↔ 시설
 //  ④ 적응가공 ⑥CMM(피지컬AI): 진행률 0~1을 501점 — 양팔 로봇 ↔ 문형 겐트리·셀 설비, 로봇 ↔ 로봇, AMR·소재 ↔ 설비, 정비·사족보행 자리 ↔ 레일·다리
+//  ⑤ 적응가공 ③유압블록 디버링셀 세척기(피지컬AI·자동화): 진행률 0~1을 601점 — 이송 6축 ↔ 세척기(문·고정구·벽)·셀 설비, 로봇 ↔ 로봇, 든 블록·AMR ↔ 설비, 정비·필터 교체 자리 ↔ 세척기
 // 실행: npm run check:sweeps   결과: outputs/sweeps/report.json
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs'), path = require('node:path');
@@ -87,6 +88,31 @@ for(const p of [0.45,0.8]){c.progress=p;z.animCell(c,t.sim.time,0.016,0.016);v.s
 c.progress=p0;z.animCell(c,t.sim.time,0.016,0.016);document.getElementById('playBtn').click();
 return {name:'적응가공 CMM 겐트리·양팔 로봇',note:'겐트리 x '+bxMin.toFixed(2)+'~'+bxMax.toFixed(2)+' · 양팔 로봇이 다가가기 시작할 때 겐트리 x '+(parkAt?.bx)+' (진행률 '+(parkAt?.p)+')',hits:[...res.entries()].map(([k,h])=>({k,...h})).sort((a,b)=>b.max-a.max)};})()`;
 
+const WASHER = `(async()=>{const THREE=await import('three');${LIB}${under}
+const t=window.__twin,v=t.view,wait=ms=>new Promise(r=>setTimeout(r,ms));document.querySelector('[data-speed="10"]')?.click();
+const z=t.xzones.zones.find(z=>z.Z.key==='adapt'),c=z.order.find(c=>c.id==='HB_DEBR');let car=null;
+for(let k=0;k<1500;k++){car=z.carriers.find(q=>q.at===c.id&&q.state==='work'&&q.pm);if(car&&c.state==='BUSY'&&(c.progress??0)<0.3)break;car=null;await wait(100);}
+if(!car)return {err:'디버링셀에 소재 없음'};document.getElementById('playBtn').click();await wait(200);
+const p0=c.progress,X=c.robots.find(r=>r.washXfer);if(!X||!c.parts.washer)return {err:'세척기·이송 로봇 없음'};
+const TOOL=/ToolFlange|ToolTCP|J6_Origin|J5_Origin|WristCamera|Gripper|Finger|tool_left|tool_right|EE_|[LR]_J[67]/;
+const inR=(m)=>c.robots.find(r=>under(m,r.root)),fixed=[];c.g.traverse(m=>{if(solid(m)&&!inR(m)&&!under(m,car.g)){const B=obb(m);if(B&&B.max[1]>0.08)fixed.push(m);}});   // 셀 바닥판(높이 0.06m)은 받침대가 서는 면 — 뺀다 (check-collisions와 같음)
+const res=new Map(),add=(k,pen,p)=>{const h=res.get(k);if(!h||pen>h.max)res.set(k,{max:+pen.toFixed(3),p:+p.toFixed(3)});};
+const pair=(a,b,k,p)=>{const A=obb(a),B=obb(b);if(!A||!B||!box(A,B))return;const pen=sat(A,B);if(pen>=0.02&&real(a,b))add(k+' '+nameOf(a).split('<')[0]+' | '+nameOf(b).split('<')[0],pen,p);};
+let inside=0,doorMin=1;
+for(let i=0;i<=600;i++){const p=i/600;c.progress=p;z.animCell(c,t.sim.time,0.016,0.016);v.scene.updateMatrixWorld(true);
+ if(X.tendInside)inside++;doorMin=Math.min(doorMin,c.parts.washer.doorK);
+ const RM=c.robots.map(r=>{const a=[];r.root.traverse(m=>{if(solid(m))a.push(m);});return a;}),C=[];car.g.traverse(m=>{if(solid(m)&&m.visible!==false)C.push(m);});
+ if(X.tendHeld?.visible)X.tendHeld.traverse(m=>{if(solid(m)&&!C.includes(m))C.push(m);});
+ RM.forEach((ms,j)=>{const nm=c.robots[j].washXfer?'이송6축':'협동'+j;for(const a of ms)for(const b of fixed)pair(a,b,nm+'↔설비',p);for(const a of ms){if(TOOL.test(nameOf(a)))continue;for(const b of C)pair(a,b,nm+' 몸·팔↔AMR·블록',p);}
+  for(let k=j+1;k<RM.length;k++)for(const a of ms)for(const b of RM[k])pair(a,b,nm+'↔로봇'+k,p);});
+ for(const a of C)for(const b of fixed){if(/WashFixture/.test(nameOf(b)))continue;pair(a,b,'AMR·블록↔설비',p);}}
+const zc=t.sim.zoneCell('adapt','HB_DEBR'),spots=[['정비 자리',zc.svc,0.35,0.35],['사족보행 점검 자리',zc.scan,0.6,0.3],['필터 교체 자리',zc.svcWash,0.35,0.35]];
+v.scene.updateMatrixWorld(true);
+for(const [nm,s,hx,hz] of spots){if(!s){add(nm+' 없음',1,0);continue;}const S={min:[s.x-hx,0,s.z-hz],max:[s.x+hx,1.0,s.z+hz]};for(const b of fixed){const B=obb(b);if(!B||!box(S,B))continue;add(nm+' ↔ '+nameOf(b).split('<')[0]+' @'+[B.c.x,B.c.z].map(x=>x.toFixed(2)).join(','),Math.min(S.max[0]-B.min[0],B.max[0]-S.min[0],S.max[2]-B.min[2],B.max[2]-S.min[2]),0);}}
+c.progress=p0;z.animCell(c,t.sim.time,0.016,0.016);document.getElementById('playBtn').click();
+if(!inside)add('이송 로봇이 세척기 안으로 들어가지 않음',1,0);
+return {name:'적응가공 디버링셀 세척기·이송 로봇',note:'세척기 안 구간 '+inside+'점 · 문 최소 열림 '+doorMin.toFixed(2),hits:[...res.entries()].map(([k,h])=>({k,...h})).sort((a,b)=>b.max-a.max)};})()`;
+
 app.whenReady().then(async () => {
   try {
     const { startServer } = await import(path.resolve(__dirname, '../server/app-server.mjs')); const { port } = await startServer({ port: 0 });
@@ -96,7 +122,7 @@ app.whenReady().then(async () => {
     for (let k = 0; k < 90; k++) { if (await js('!!window.__twin?.RENDER.loaded')) break; await wait(500); }
     if (!await js('!!window.__twin?.RENDER.loaded')) throw Error('Blender assets not loaded');
     const report = [];
-    for (const [mode, code] of [['smart', HEM('hood')], ['smart', HEM('door')], ['dark', AMMR], ['traditional', FORKLIFT], ['dark', CMM]]) {
+    for (const [mode, code] of [['smart', HEM('hood')], ['smart', HEM('door')], ['dark', AMMR], ['traditional', FORKLIFT], ['dark', CMM], ['dark', WASHER], ['smart', WASHER]]) {
       await js(`document.querySelector('[data-mode=${mode}]').click()`); await wait(1500);
       const r = await js(code); if (r.err) throw Error(r.err);
       const bad = r.hits.filter((h) => h.max >= PEN), driftBad = r.drift != null && r.drift > 0.01;
@@ -106,7 +132,7 @@ app.whenReady().then(async () => {
     }
     fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify({ pen: PEN, report, errors }, null, 2));
     const total = report.reduce((n, r) => n + r.violations, 0);
-    console.log(total ? `FAIL: ${total}건 (outputs/sweeps/report.json)` : 'PASS: 헤밍·AMMR 피킹·레거시 지게차 자리·적응가공 CMM 전 구간 간섭 없음');
+    console.log(total ? `FAIL: ${total}건 (outputs/sweeps/report.json)` : 'PASS: 헤밍·AMMR 피킹·레거시 지게차 자리·적응가공 CMM·디버링셀 세척기 전 구간 간섭 없음');
     clearTimeout(timer); app.exit(total ? 1 : 0);
   } catch (e) { console.error(e.stack); clearTimeout(timer); app.exit(1); }
 });

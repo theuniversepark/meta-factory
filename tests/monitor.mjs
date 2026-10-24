@@ -10,6 +10,7 @@ import { Simulation } from '../js/sim.js';
 import { FactoryAgent } from '../js/agent.js';
 import { unsTelemetry, unsEvents, unsZoneKpi } from '../js/datahub.js';
 import { MON_SENSORS } from '../js/machmon.js';
+import { WASH_SENSORS, WASH_TOPIC } from '../js/washer.js';
 let pass = 0, fail = 0;
 const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  — ' + info : ''}`); };
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), MON = path.join(ROOT, 'monitoring');
@@ -39,7 +40,7 @@ check('운영 이벤트 — 경보·주의·조치만 · 다음 호출은 새 �
 check('이벤트 본문 400자 이내 · 존 태그 main/flex/adapt/insp', E1.messages.map((m) => JSON.parse(m.payload)).every((p) => p.text.length <= 400 && ['main', 'flex', 'adapt', 'insp'].includes(p.zone) && p.title));
 
 console.log('== Telegraf 수집 규칙 ↔ 앱이 보내는 메시지');
-check('입력 6개 — equipment · sensor · machine · event · oee · quality', inputs.map((i) => i.meas).join() === 'equipment,sensor,machine,event,oee,quality');
+check('입력 8개 — equipment · sensor · machine · washer · cleanliness · event · oee · quality', inputs.map((i) => i.meas).join() === 'equipment,sensor,machine,washer,cleanliness,event,oee,quality');
 const ZK = unsZoneKpi(s); for (let t = 0; t < 600; t += 0.1) { s.step(0.1); ag.update(0.1); }
 const ZK2 = unsZoneKpi(s), oeeMsg = ZK2.filter((m) => m.topic.includes('/oee/')), qMsg = ZK2.filter((m) => m.topic.includes('/quality/'));
 check('Zone OEE · 품질 표본 토픽 → oee · quality 입력에만 걸림 (평면 JSON — @this 객체 · 태그 zone/product/kind)', oeeMsg.length >= 1 && qMsg.length > 5 && oeeMsg.every((m) => inputOf(m.topic).map((i) => i.meas).join() === 'oee') && qMsg.every((m) => inputOf(m.topic).map((i) => i.meas).join() === 'quality') && qMsg.every((m) => { const p = JSON.parse(m.payload); return ['zone', 'product', 'kind'].every((k) => typeof p[k] === 'string') && Object.entries(p).every(([k, v]) => ['zone', 'product', 'kind', 'id'].includes(k) || Number.isFinite(v)); }) && ZK.length >= 1, `oee ${oeeMsg.length} · 품질 ${qMsg.length}`);
@@ -56,13 +57,19 @@ const sm = new Simulation('dark', 7, { quiet: true }), mon = sm.machmon;
 const cells = { HB_MILL: { id: 'HB_MILL', def: { type: 'mill5', cycle: 16 }, state: 'BUSY', progress: 0.5, cycle: 16 } };
 sm.xzones = { byKey: (k) => (k === 'adapt' ? { cells } : null) };
 for (let t = 0; t < 30; t += 0.5) sm.step(0.5);
-const ms = mon.outbox.filter((m) => m.kind === 'sample'), mIn = inputs.find((i) => i.meas === 'machine');
+const ms = mon.outbox.filter((m) => m.kind === 'sample' && m.topic.startsWith('metafactory/machmon/')), mIn = inputs.find((i) => i.meas === 'machine');   // 같은 묶음에 세척기(js/washer.js) 샘플도 섞인다
 check('가공기 감시 샘플 → machine 입력 · 필드 경로(rul.min · rul.spindleMin · tool.wear …)가 메시지에 있음', ms.length > 0 && ms.every((m) => inputOf(m.topic).map((i) => i.meas).join() === 'machine') && mIn.fields.every((f) => f.path.split('.')[0] in ms.at(-1)) && Number.isFinite(ms.at(-1).rul?.spindleMin), mIn.fields.map((f) => `${f.path}=${JSON.stringify(at(ms.at(-1), f.path))}`).join(' '));
 check('가공기 측정값 v — 센서 13종이 숫자로', MON_SENSORS.every((x) => Number.isFinite(ms.at(-1).v[x.key])));
+// 세척기: 공정 샘플 → washer 입력 (v 측정값 6종) · 블록별 청정도 → cleanliness 입력 (필드 경로가 메시지에) · 이벤트는 수집하지 않음
+const W = sm.washer; for (let k = 0; k < 3; k++) { const it = { id: `T${k}`, product: 'hblock' }; W.plan(it); W.done(it); }
+W.acc = 1; W.lastQ = -99; W.tick(0);
+const ws = mon.outbox.filter((m) => m.topic === WASH_TOPIC && m.kind === 'sample'), wp = mon.outbox.filter((m) => m.topic === `${WASH_TOPIC}/part`), cIn = inputs.find((i) => i.meas === 'cleanliness');
+check('세척기 샘플 → washer 입력 · 측정값 v 6종 숫자 · 단계 문자열', ws.length > 0 && ws.every((m) => inputOf(m.topic).map((i) => i.meas).join() === 'washer') && WASH_SENSORS.every((x) => Number.isFinite(ws.at(-1).v[x.key])) && typeof ws.at(-1).phase === 'string', `${ws.length}건`);
+check('세척 청정도 → cleanliness 입력 · 필드 경로가 메시지에 · 이벤트는 수집 안 함', wp.length === 3 && wp.every((m) => inputOf(m.topic).map((i) => i.meas).join() === 'cleanliness') && cIn.fields.every((f) => Number.isFinite(wp[0][f.path])) && inputOf(`${WASH_TOPIC}/event`).length === 0);
 
 console.log('== Grafana 대시보드 ↔ 수집되는 측정·필드');
 const dash = fs.readdirSync(path.join(MON, 'grafana/dashboards')).filter((f) => f.endsWith('.json')).map((f) => ({ f, j: JSON.parse(fs.readFileSync(path.join(MON, 'grafana/dashboards', f), 'utf8')) }));
-const fieldsOf = { equipment: new Set(eqIn.fields.map((f) => f.name)), machine: new Set([...mIn.fields.map((f) => f.name), ...MON_SENSORS.map((x) => x.key)]), sensor: new Set(['v']), event: new Set(['title', 'text']), oee: new Set(Object.keys(JSON.parse(oeeMsg[0].payload)).filter((k) => k !== 'zone')), quality: new Set(qMsg.flatMap((m) => Object.keys(JSON.parse(m.payload)))) };
+const fieldsOf = { equipment: new Set(eqIn.fields.map((f) => f.name)), machine: new Set([...mIn.fields.map((f) => f.name), ...MON_SENSORS.map((x) => x.key)]), sensor: new Set(['v']), washer: new Set(['phase', ...WASH_SENSORS.map((x) => x.key)]), cleanliness: new Set(cIn.fields.map((f) => f.name)), event: new Set(['title', 'text']), oee: new Set(Object.keys(JSON.parse(oeeMsg[0].payload)).filter((k) => k !== 'zone')), quality: new Set(qMsg.flatMap((m) => Object.keys(JSON.parse(m.payload)))) };
 const queries = dash.flatMap(({ f, j }) => [...j.panels.flatMap((p) => (p.targets ?? []).map((t) => ({ f, q: t.query, ds: t.datasource?.uid ?? p.datasource?.uid }))), ...j.annotations.list.filter((a) => a.target).map((a) => ({ f, q: a.target.query, ds: a.datasource?.uid }))]);
 check('대시보드 5종 (개요 · 건강도·RUL · 가공기 · 센서 · Zone 운영 분석) · uid 고정 · 홈 mf-overview', dash.map((d) => d.j.uid).sort().join() === 'mf-health,mf-machine,mf-overview,mf-sensors,mf-zone');
 const zd = dash.find((d) => d.j.uid === 'mf-zone').j;

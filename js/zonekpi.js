@@ -28,7 +28,8 @@ export const QSPEC = {
     ea_torque: { label: 'e-axle 체결 토크', unit: 'N·m', product: 'eaxle', ...lim(PARAM_SPEC.fasten.torque) }, ea_angle: { label: 'e-axle 체결 각도', unit: '°', product: 'eaxle', ...lim(PARAM_SPEC.fasten.angle) },
   },
   flex: { gap: { label: '갭', unit: 'mm', lsl: 3.5, usl: 4.5 }, flush: { label: '단차', unit: 'mm', lsl: -0.5, usl: 0.5 } },
-  adapt: { bore: { label: '보어 직경 편차', unit: 'µm', lsl: -15, usl: 15 }, pos: { label: '위치도', unit: 'µm', usl: 20 } },
+  // 청정도는 유압블록만 (세척기 js/washer.js · ISO 16232 / VDA 19.1) — 리어커버 표본에는 값이 없어 관리도·상관에서 빠진다
+  adapt: { bore: { label: '보어 직경 편차', unit: 'µm', lsl: -15, usl: 15 }, pos: { label: '위치도', unit: 'µm', usl: 20 }, particle: { label: '청정도 최대 입자 (유압블록)', unit: 'µm', usl: 400 }, residue: { label: '잔류 오염량 (유압블록)', unit: 'mg', usl: 2.0 } },
   insp: { dev: { label: '측정 편차 (공차 대비)', unit: '%', lsl: -100, usl: 100 }, unc: { label: '측정 불확도', unit: '%', usl: 25 } },
 };
 function lim(s) { return { lsl: s.lsl, usl: s.usl }; }
@@ -195,8 +196,9 @@ export class ZoneKpi {
       if (kind.startsWith('보어')) bore = 15.5 + Math.abs(this.g()) * 3; else if (kind.startsWith('위치도')) pos = 20.5 + Math.abs(this.g()) * 3;
     }
     if (!rework) { bore = clampIn(bore, QSPEC.adapt.bore); pos = clampIn(pos, QSPEC.adapt.pos); }
-    for (const [k, lb, un] of [['wear', '공구 마모율', ''], ['vb', '공구 플랭크 마모 VB', 'µm'], ['vib', '주축 진동 RMS', 'mm/s'], ['load', '주축 부하', '%'], ['btemp', '베어링 온도', '°C'], ['health', '가공 셀 건강도', '%']]) this.label('adapt', k, lb, un);
-    this.push('adapt', { t: this.sim.time, id: it.serial ?? it.wip ?? it.id, product: it.product, x: { wear: r3(wear), vb: r3(m.vb, 1), vib: r3(m.vib, 2), load: r3(m.load, 1), btemp: r3(m.temp, 1), health: r3(m.health, 1) }, y: { bore: r3(bore, 2), pos: r3(pos, 2) }, ng: !!rework, kind });
+    for (const [k, lb, un] of [['wear', '공구 마모율', ''], ['vb', '공구 플랭크 마모 VB', 'µm'], ['vib', '주축 진동 RMS', 'mm/s'], ['load', '주축 부하', '%'], ['btemp', '베어링 온도', '°C'], ['health', '가공 셀 건강도', '%'], ['fdp', '세척기 백필터 차압', 'bar'], ['wcond', '세척액 전도도', 'µS/cm']]) this.label('adapt', k, lb, un);
+    const W = it.qx?.wash;   // 유압블록 세척 (디버링셀 세척기) — 필터 차압·세척액 전도도 → 청정도
+    this.push('adapt', { t: this.sim.time, id: it.serial ?? it.wip ?? it.id, product: it.product, x: { wear: r3(wear), vb: r3(m.vb, 1), vib: r3(m.vib, 2), load: r3(m.load, 1), btemp: r3(m.temp, 1), health: r3(m.health, 1), ...(W ? { fdp: r3(W.dp, 3), wcond: r3(W.cond, 0) } : {}) }, y: { bore: r3(bore, 2), pos: r3(pos, 2), ...(W ? { particle: r3(W.particle, 0), residue: r3(W.residue, 2) } : {}) }, ng: !!rework, kind });
   }
   // 정밀검사: 샘플 최종 판정 — 측정 편차(공차 대비 %) · 측정 불확도(검사 셀 건강도·온도) · NG 유형 = 시료 Zone·제품
   inspUnit(it, res, cellId, zoneLabel, productLabel) {

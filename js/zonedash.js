@@ -127,7 +127,7 @@ function oeeTab(sim, z, K, o) {
     <table class="od-tbl zd-tbl"><thead><tr><th>셀</th><th>가동률</th><th>성능</th><th>OEE</th><th>처리 수</th><th>기준 사이클</th><th>시간 구성</th></tr></thead><tbody>${cellRows}</tbody></table>`;
 }
 function qaTab(sim, z, K) {
-  const st = zdState, U = K.units[z], spec = QSPEC[z], yk = spec[st.y] ? st.y : Object.keys(spec)[0], S = spec[yk];
+  const st = zdState, spec = QSPEC[z], yk = spec[st.y] ? st.y : Object.keys(spec)[0], S = spec[yk], U = K.units[z].filter((u) => u.y[yk] != null);   // 그 품질 특성이 있는 표본만 (적응가공 청정도는 유압블록만)
   const vals = U.map((u) => u.y[yk]), cc = controlChart(vals, { n: 5, lsl: S.lsl ?? null, usl: S.usl ?? null });
   const pairs = topPairs(U).filter((p) => p.y === yk), xk = pairs.some((p) => p.x === st.x) ? st.x : pairs[0]?.x, XL = K.xl[z];
   const viol = [...new Map(cc.viol.map((v) => [`${v.i}:${v.rule}`, v])).values()].slice(-6);

@@ -90,7 +90,7 @@ export class CellOCS {
   get state() { return ocsState(this.st); }
   record(kind, ok, reason, by) { const c = { t: this.fos.sim.time, kind, ok, reason, by }; this.checks.unshift(c); if (this.checks.length > 12) this.checks.pop(); ok ? this.ok++ : this.rej++; return c; }
 }
-const KIND_KO = { repair: '긴급수리', pm: '예지정비', cal: '재보정', selfcal: '자율 보정', cmd: '현장 명령', changeover: '품목 전환', tool: '공구 교환', condition: '조건 조정' };
+const KIND_KO = { repair: '긴급수리', pm: '예지정비', cal: '재보정', filter: '세척기 필터 교체', selfcal: '자율 보정', cmd: '현장 명령', changeover: '품목 전환', tool: '공구 교환', condition: '조건 조정' };
 
 // ── 존 오케스트레이터: 정밀조립 Manufacturing Agent ─────────────────
 export class ManufacturingAgent {

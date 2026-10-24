@@ -13,7 +13,7 @@
 //          (조회 /api/fac/po · moves · stock · mr · equipment, 이벤트 /api/fac/events?since=)
 // 렌더링과 분리되어 헤드리스 시뮬레이션에서도 같은 흐름으로 동작한다 (tests/fac.mjs).
 import { WH, WH_ITEMS } from './receiving.js';
-import { EXTRA_ZONES, zoneCellRobots, zoneRobotUid, zoneAmrUid } from './zonedefs.js';
+import { EXTRA_ZONES, zoneCellRobots, zoneCellAux, zoneRobotUid, zoneAmrUid } from './zonedefs.js';
 
 export const FAC_PRODUCTS = {
   raw: { code: 'RM-BOX', name: '원자재 박스 (도어트림·e-axle 공용)', price: 12000 },
@@ -72,7 +72,7 @@ export class FacLedger {
     for (const st of sim.processing) (st.robotUids ?? []).forEach((u, i) => this.equip(u, `${st.name} 로봇 #${i + 1}`, '셀 로봇', `${st.id}-${i + 1}`));
     // 확장 Zone 셀 로봇 · 운반 AMR (zones.js와 같은 고유 ID — zonedefs.js)
     for (const Z of EXTRA_ZONES) {
-      for (const [id, c] of Object.entries(Z.cells)) for (let i = 0; i < zoneCellRobots(c, sim.mode.key).count; i++) this.equip(zoneRobotUid(Z, id, i), `${Z.code} ${c.label} 로봇 #${i + 1}`, '확장 Zone 셀 로봇', `${Z.code}-${id}-${i + 1}`);
+      for (const [id, c] of Object.entries(Z.cells)) for (let i = 0; i < zoneCellRobots(c, sim.mode.key).count + zoneCellAux(c, sim.mode.key); i++) this.equip(zoneRobotUid(Z, id, i), `${Z.code} ${c.label} 로봇 #${i + 1}`, '확장 Zone 셀 로봇', `${Z.code}-${id}-${i + 1}`);
       for (let i = 0; i < Z.amr.count; i++) this.equip(zoneAmrUid(Z, i), `${Z.code}-AMR${String(i + 1).padStart(2, '0')}`, '확장 Zone 운반 AMR', `${Z.code}-AMR${i + 1}`);
     }
     for (const m of [...sim.carriers, ...sim.vehicles, ...(sim.forklifts ?? []), ...sim.techs.filter((t) => t.kind !== 'human'), ...sim.helpers, ...sim.quads]) this.equip(m.uid ?? m.id, m.id, m.kind === 'carrier' ? '운반 AMR' : m.kind === 'agv' ? 'AGV' : m.kind === 'forklift' ? '지게차' : m.kind === 'humanoid' ? '휴머노이드' : m.kind === 'quadruped' ? '사족보행' : '이동 로봇', m.id);
@@ -203,7 +203,7 @@ export class FacLedger {
       return;
     }
     const type = kind === 'repair' ? 'corrective' : 'preventive';
-    const mr = { id: this.db.mr.length + 1, ref: this.name('mr'), name: kind === 'repair' ? `${st.name} 설비 고장` : `${st.name} ${kind === 'pm' ? '예지·예방 정비' : kind === 'cal' ? '재보정' : '정비'}`, equipment: e.serial_no, equipmentName: e.name, type, stage: 'new', request_date: this.now(), start: null, close: null, duration: 0, tech: null, description: reason || (kind === 'repair' ? `건강도 ${st.health.toFixed(0)}% · 가동 정지` : `건강도 ${st.health.toFixed(0)}% · RUL 기반 정비 지시`) };
+    const mr = { id: this.db.mr.length + 1, ref: this.name('mr'), name: kind === 'repair' ? `${st.name} 설비 고장` : `${st.name} ${kind === 'pm' ? '예지·예방 정비' : kind === 'cal' ? '재보정' : kind === 'filter' ? '세척기 백필터 교체' : '정비'}`, equipment: e.serial_no, equipmentName: e.name, type, stage: 'new', request_date: this.now(), start: null, close: null, duration: 0, tech: null, description: reason || (kind === 'repair' ? `건강도 ${st.health.toFixed(0)}% · 가동 정지` : `건강도 ${st.health.toFixed(0)}% · RUL 기반 정비 지시`) };
     this.db.mr.unshift(mr); this.byStation.set(st.id, mr); e.requests++; e.open++;
     // 오케스트레이터 인시던트와 연결: 고장 인시던트 타임라인에 FAC 정비요청 번호를 남긴다
     const inc = this.sim.orch?.find(`fail:${st.id}`);
