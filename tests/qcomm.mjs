@@ -10,8 +10,9 @@ const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${
 
 console.log('== 불량 판정 리포트 흐름 (피지컬AI 3시간)');
 const s = new Simulation('dark', 5, { line: zoneLine(), quiet: true }), ag = new FactoryAgent(s); s.capa.auto = true;
-// 사례별 pcap이 전체의 일부인지 보려면 사례가 2건 이상 있어야 한다 — 3시간에 1건뿐이면(난수 흐름에 따라) 6시간까지 더 돌린다
-for (let t = 0; t < 3 * 3600 || (s.trace.cases.length < 2 && t < 6 * 3600); t += 0.1) { s.step(0.1); ag.update(0.1); }
+// 사례별 pcap이 전체의 일부인지 보려면 사례가 2건 이상, 8D 종결 보고를 보려면 종결된 사례가 1건 이상 있어야 한다 — 3시간에 모자라면(난수 흐름에 따라) 6시간까지 더 돌린다
+const closedN = () => [...s.qcomm.cases.values()].filter((x) => x.status === 'closed').length;
+for (let t = 0; t < 3 * 3600 || ((s.trace.cases.length < 2 || !closedN()) && t < 6 * 3600); t += 0.1) { s.step(0.1); ag.update(0.1); }
 const Q = s.qcomm, cms = [...Q.cases.values()], cm = cms[0];
 check('불량 사례마다 리포트 전송', cms.length > 0 && cms.length === s.trace.cases.length, `사례 ${s.trace.cases.length} · 리포트 ${cms.length}`);
 const kinds = cm.msgs.map((m) => `${m.proto}:${m.ref.replace(/NG-\d+-\d+|RCA-\d+-\d+/g, '#')}`);

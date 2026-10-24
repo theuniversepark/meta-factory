@@ -96,7 +96,11 @@ const machine = dash('mf-machine', '메타팩토리 · 적응가공 가공기 �
   ts('세척액 전도도 (µS/cm)', { x: 16, y: 32, w: 8, h: 8 }, wTs('washer', 'cond'), { thresholds: [{ color: 'transparent', value: null }, { color: 'orange', value: 900 }, { color: 'red', value: 1200 }] }),
   ts('청정도 — 최대 금속 입자 (µm · 블록마다 · 규격 ≤ 400)', { x: 0, y: 40, w: 12, h: 8 }, wTs('cleanliness', 'maxParticle_um'), { thresholds: [{ color: 'transparent', value: null }, { color: 'red', value: 400 }] }),
   ts('청정도 — 잔류 오염량 (mg · 블록마다 · 규격 ≤ 2.0)', { x: 12, y: 40, w: 12, h: 8 }, wTs('cleanliness', 'residue_mg'), { thresholds: [{ color: 'transparent', value: null }, { color: 'red', value: 2 }] }),
-], { vars: [machVar], from: 'now-30m', desc: '적응가공 가공기 4대 — 주축 부하·진동·AE·베어링 온도·공구 마모 → 엣지 AI 이상 점수·RUL·판단 (metafactory/machmon/v1) · 유압블록 세척기 공정·청정도 (metafactory/washer/v1)' });
+  // CMM 셀 (js/cmmcell.js · metafactory/cmm/v1): 항온 측정실 온도 · 소재 온도와 온도 보정 뒤 남은 오차 (피지컬AI < 1µm · 자동화 선형식 수 µm)
+  ts('CMM 측정실 온도 (°C · 20 ± 1)', { x: 0, y: 48, w: 8, h: 8 }, wTs('cmm', 'room'), { thresholds: [{ color: 'transparent', value: null }, { color: 'orange', value: 20.6 }, { color: 'red', value: 21 }] }),
+  ts('CMM 소재 온도 (°C · 소재마다)', { x: 8, y: 48, w: 8, h: 8 }, wTs('cmm_part', 'partTemp_C')),
+  ts('CMM 온도 보정 뒤 남은 오차 (µm · 소재마다)', { x: 16, y: 48, w: 8, h: 8 }, wTs('cmm_part', 'residual_um')),
+], { vars: [machVar], from: 'now-30m', desc: '적응가공 가공기 4대 — 주축 부하·진동·AE·베어링 온도·공구 마모 → 엣지 AI 이상 점수·RUL·판단 (metafactory/machmon/v1) · 유압블록 세척기 공정·청정도 (metafactory/washer/v1) · CMM 측정실·온도 보정 (metafactory/cmm/v1)' });
 
 // ④ 환경 · 설비 센서
 pid = 0;

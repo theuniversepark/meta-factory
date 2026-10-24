@@ -109,6 +109,20 @@ export function attachDeburrSpindle(arm) {
   if (g) g.userData.spin = (dt) => { bit.rotation.y += dt * 60; };
   return g;
 }
+// CMM 셀 협동로봇 복합 툴: 디버링 스핀들(버 끝 = TCP) + 동축 에어 블로 링 + 옆 접촉 온도 프로브 — 측정 전 블로·소재 온도 측정 · 1차 측정 NG 버·표면 접촉 리워크
+export function attachCmmPrepTool(arm) {
+  let bit = null;
+  const g = mount(arm, (g) => {
+    box(0.1, 0.04, 0.1, M.arm, 0, 0.02, 0, g);
+    cyl(0.04, 0.04, 0.1, M.body, 0, 0.09, 0, g);                                     // 스핀들 모터
+    cyl(0.022, 0.016, 0.02, M.blue, 0, 0.13, 0, g);                                   // 에어 블로 링 (콜릿 둘레)
+    cyl(0.003, 0.003, 0.09, M.nozzle, 0.05, 0.1, 0, g);                               // 접촉 온도 프로브 (스핀들 옆 · 끝은 버보다 1cm 위)
+    bit = new THREE.Group(); bit.position.y = 0.14; g.add(bit);
+    cyl(0.004, 0.004, 0.01, M.nozzle, 0, 0.0, 0, bit); cyl(0.007, 0.004, 0.012, std(0xd0b060, { metalness: 0.9, roughness: 0.25 }), 0, 0.006, 0, bit);   // 버 (끝 = TCP)
+  });
+  if (g) g.userData.spin = (dt) => { bit.rotation.y += dt * 60; };
+  return g;
+}
 // 에어 블로 노즐 (측정 전 표면 청소): 툴 축 방향 가는 노즐 · 끝이 TCP
 export function attachAirNozzle(arm) {
   return mount(arm, (g) => {

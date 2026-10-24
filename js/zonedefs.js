@@ -175,13 +175,15 @@ export const EXTRA_ZONES = [
       HB_DEBR: { no: '3', type: 'deburr', label: '유압블록 사선·디버링셀', product: 'hblock', use: '사선홀 가공·워터젯 디버링·세척', x: 1, z: BOT, cycle: 14, robot: ['articulated', 1], wash: true, aux: ['articulated', 1, '부스·세척기 이송'] },
       RC_MILL: { no: '4', type: 'mill5', label: '리어커버 정밀절삭셀', product: 'rcover', use: '5축 정밀 절삭', x: -9, z: TOP, side: -1, cycle: 18, robot: ['articulated', 1] },
       RC_TURN: { no: '5', type: 'turn', label: '리어커버 선삭·AI품질셀', product: 'rcover', use: '보어 선삭·품질예측', x: 1, z: TOP, side: -1, cycle: 14, robot: ['articulated', 1] },
-      CMM: { no: '6', type: 'cmm', label: '초정밀 측정·리워크셀', product: 'shared', use: 'CMM 판정·리워크', x: 10, z: 0, cycle: 10, robot: ['cobot', 2, 'ammr', 2] },
+      // 항온 측정실(브리지형 CMM · 북서) · 리워크 머시닝센터(북동) ← 이송 6축(aux · AMR 정북) · 남쪽 협동로봇(자동화)/양팔 로봇(피지컬AI): 에어 블로·소재 온도 측정 · 접촉 리워크
+      // 공정 순서는 js/cmmcell.js CMM_PLANS · 설비는 zones.js buildCMM
+      CMM: { no: '6', type: 'cmm', label: '초정밀 측정·리워크셀', product: 'shared', use: 'CMM 판정·리워크', x: 10, z: 0, cycle: 10, robot: ['cobot', 1, 'ammr', 1], aux: ['articulated', 1, '측정실·리워크기 이송'] },
     },
     routes: { hblock: ['MATL', 'HB_MILL', 'HB_DEBR', 'CMM'], rcover: ['MATL', 'RC_MILL', 'RC_TURN', 'CMM'] },
     src: { x: -28, z: 0 }, sink: { x: 18, z: 0 },
     paths: {},
     ret: [{ x: 21, z: 0 }, { x: 21, z: 9 }, { x: -33.6, z: 9 }, { x: -33.6, z: 0 }],   // 적재 → 동쪽 끝 → 앞쪽(시설 통로 쪽) 복귀로 → 투입 왼쪽 진입로
-    rework: { at: 'CMM', rate: 0.06 },
+    rework: { at: 'CMM', rate: 0.06, mul: 2 },   // 리워크: 1차 측정 → 재가공(머시닝센터)·접촉 리워크 → 재측정 — 셀 시간 2배
     amr: { count: 15, speed: 1.6, ret: 2.6 }, load: 4, unload: 4,
     foot: { x0: -34.1, x1: 21.6, z0: -7.2, z1: 9.6 },
     // 포장·구분 적재: 제품별 적재 팔레트(적재장 북쪽 — 동쪽은 자체 복귀로) · 팔레타이징 로봇 · 출하 지게차는 앞쪽 통로(z 9)에서 내려와 실어 간다

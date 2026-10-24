@@ -192,13 +192,14 @@ export class ZoneKpi {
     const m = it.qx?.mill ?? {}, t = it.qx?.turn ?? null, wear = Math.max(m.wear ?? 0, t?.wear ?? 0), sev = (100 - (m.health ?? 100)) / 40, vib = m.vib ?? 1;
     let bore = 2.2 * this.g() + 14 * wear - 3 + (t ? 3 * (t.wear ?? 0) : 0), pos = Math.abs(3 * this.g()) + 4 + 7 * sev + 0.8 * Math.max(0, vib - 1), kind = null;
     if (rework) {
-      kind = it.toolBreak ? '공구 파손 흔적 — 표면 결함' : this.r() < 0.55 + wear * 0.3 ? '보어 직경 초과 — 공구 마모' : '위치도 초과 — 셋업·진동';
+      // 접촉 리워크(js/cmmcell.js kind 'hand')는 버 잔존 · 그 밖(머시닝센터 재가공)은 치수 NG
+      kind = it.toolBreak ? '공구 파손 흔적 — 표면 결함' : it.cmm?.kind === 'hand' ? '버 잔존 — 모서리·교차홀' : this.r() < 0.55 + wear * 0.3 ? '보어 직경 초과 — 공구 마모' : '위치도 초과 — 셋업·진동';
       if (kind.startsWith('보어')) bore = 15.5 + Math.abs(this.g()) * 3; else if (kind.startsWith('위치도')) pos = 20.5 + Math.abs(this.g()) * 3;
     }
     if (!rework) { bore = clampIn(bore, QSPEC.adapt.bore); pos = clampIn(pos, QSPEC.adapt.pos); }
-    for (const [k, lb, un] of [['wear', '공구 마모율', ''], ['vb', '공구 플랭크 마모 VB', 'µm'], ['vib', '주축 진동 RMS', 'mm/s'], ['load', '주축 부하', '%'], ['btemp', '베어링 온도', '°C'], ['health', '가공 셀 건강도', '%'], ['fdp', '세척기 백필터 차압', 'bar'], ['wcond', '세척액 전도도', 'µS/cm']]) this.label('adapt', k, lb, un);
-    const W = it.qx?.wash;   // 유압블록 세척 (디버링셀 세척기) — 필터 차압·세척액 전도도 → 청정도
-    this.push('adapt', { t: this.sim.time, id: it.serial ?? it.wip ?? it.id, product: it.product, x: { wear: r3(wear), vb: r3(m.vb, 1), vib: r3(m.vib, 2), load: r3(m.load, 1), btemp: r3(m.temp, 1), health: r3(m.health, 1), ...(W ? { fdp: r3(W.dp, 3), wcond: r3(W.cond, 0) } : {}) }, y: { bore: r3(bore, 2), pos: r3(pos, 2), ...(W ? { particle: r3(W.particle, 0), residue: r3(W.residue, 2) } : {}) }, ng: !!rework, kind });
+    for (const [k, lb, un] of [['wear', '공구 마모율', ''], ['vb', '공구 플랭크 마모 VB', 'µm'], ['vib', '주축 진동 RMS', 'mm/s'], ['load', '주축 부하', '%'], ['btemp', '베어링 온도', '°C'], ['health', '가공 셀 건강도', '%'], ['fdp', '세척기 백필터 차압', 'bar'], ['wcond', '세척액 전도도', 'µS/cm'], ['ptemp', 'CMM 소재 온도', '°C'], ['tres', '온도 보정 후 남은 오차', 'µm']]) this.label('adapt', k, lb, un);
+    const W = it.qx?.wash, Cm = it.qx?.cmm;   // CMM 셀 소재 온도 · 온도 보정 (js/cmmcell.js)   // 유압블록 세척 (디버링셀 세척기) — 필터 차압·세척액 전도도 → 청정도
+    this.push('adapt', { t: this.sim.time, id: it.serial ?? it.wip ?? it.id, product: it.product, x: { wear: r3(wear), vb: r3(m.vb, 1), vib: r3(m.vib, 2), load: r3(m.load, 1), btemp: r3(m.temp, 1), health: r3(m.health, 1), ...(W ? { fdp: r3(W.dp, 3), wcond: r3(W.cond, 0) } : {}), ...(Cm ? { ptemp: r3(Cm.temp, 2), tres: r3(Cm.residual, 2) } : {}) }, y: { bore: r3(bore, 2), pos: r3(pos, 2), ...(W ? { particle: r3(W.particle, 0), residue: r3(W.residue, 2) } : {}) }, ng: !!rework, kind });
   }
   // 정밀검사: 샘플 최종 판정 — 측정 편차(공차 대비 %) · 측정 불확도(검사 셀 건강도·온도) · NG 유형 = 시료 Zone·제품
   inspUnit(it, res, cellId, zoneLabel, productLabel) {

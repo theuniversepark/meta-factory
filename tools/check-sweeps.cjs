@@ -3,7 +3,8 @@
 //  ① 유연생산 C05 헤밍: 진행률 0~1을 601점 — 로봇 ↔ 프레스(기둥·램·다이), 패널·AMR ↔ 프레스, 로봇 팔 ↔ 잡은 패널 (후드·도어 각각)
 //  ② 정밀조립 AMMR(분류·포장셀): 선반 피킹 구간을 1×·3× 프레임 간격으로 — 팔 ↔ 셀(선반 기둥·빈) · 실제 재생 중 선반에 갈 때 슬롯 줄에서 비껴난 거리
 //  ③ 레거시 지게차: 충전 자리·미니로드 출고 지게차 자리에서 제자리 한 바퀴, 진입 직선 — 차체·포크 ↔ 시설
-//  ④ 적응가공 ⑥CMM(피지컬AI): 진행률 0~1을 501점 — 양팔 로봇 ↔ 문형 겐트리·셀 설비, 로봇 ↔ 로봇, AMR·소재 ↔ 설비, 정비·사족보행 자리 ↔ 레일·다리
+//  ④ 적응가공 ⑥CMM(피지컬AI·자동화): 정상품·재가공·접촉 리워크 각각 진행률 0~1을 801점 — 이송 6축 ↔ 측정실(유리벽·문·브리지)·리워크 머시닝센터·셀 설비, 남쪽 로봇 ↔ 설비,
+//     로봇 ↔ 로봇, 든 소재·AMR ↔ 설비, 정비·사족보행 자리, AMR이 셀에 들어오고(③·⑤에서) 적재장으로 나가는 길
 //  ⑤ 적응가공 ③유압블록 디버링셀(피지컬AI·자동화): 진행률 0~1을 601점 — 텐딩 6축 ↔ 사선홀 머시닝센터 · 이송 6축 ↔ 워터젯 부스·세척기(문·고정구·벽)·셀 설비, 로봇 ↔ 로봇, 든 블록·AMR ↔ 설비,
 //     정비·필터 교체 자리 ↔ 세척기·레일, AMR이 셀을 나가는 경로(→ ⑥CMM, 5cm 간격 · 꺾이는 곳은 앞뒤 방향) ↔ 이송 로봇·세척기·겐트리
 // 실행: npm run check:sweeps   결과: outputs/sweeps/report.json
@@ -70,31 +71,47 @@ const t=window.__twin,v=t.view,wait=ms=>new Promise(r=>setTimeout(r,ms));documen
 const z=t.xzones.zones.find(z=>z.Z.key==='adapt'),c=z.order.find(c=>c.id==='CMM');let car=null;
 for(let k=0;k<1200;k++){car=z.carriers.find(q=>q.at===c.id&&q.state==='work'&&q.pm);if(car&&c.state==='BUSY'&&(c.progress??0)<0.2)break;car=null;await wait(100);}
 if(!car)return {err:'CMM에 소재 없음'};document.getElementById('playBtn').click();await wait(200);
-const p0=c.progress,R=c.robots.filter(r=>r.body);if(R.length!==2||R.some(r=>Math.abs(r.slot.x)>1e-6))return {err:'CMM 양팔 로봇 2대가 도킹 정면(x 0)에 없음 '+JSON.stringify(R.map(r=>r.slot))};
-const TOOL=/ToolFlange|ToolTCP|J6_Origin|J5_Origin|WristCamera|Gripper|Finger|tool_left|tool_right|EE_|[LR]_J[67]/,PROBE=/^$/;
-const inR=(m)=>c.robots.find(r=>under(m,r.root)),fixed=[];c.g.traverse(m=>{if(solid(m)&&!inR(m)&&!under(m,car.g))fixed.push(m);});
+const p0=c.progress,X=c.robots.find(r=>r.xfer),it=c.item,save={cmm:it.cmm,rw:it.rework};if(!X||!c.parts.room||!c.parts.rwMc)return {err:'측정실·머시닝센터·이송 로봇 없음'};
+const WORKAT=/CmmFixture|McFixture/;   // 그리퍼가 측정실 지그·바이스 위 소재에 닿는 것은 작업 접촉
+const TOOL=/ToolFlange|ToolTCP|J6_Origin|J5_Origin|WristCamera|Gripper|Finger|tool_left|tool_right|EE_|[LR]_J[67]/;
+// 측정실 유리벽은 투명 재질이라 solid()가 빼지만 실제 벽 — 이름(RoomGlass)으로 넣는다 · 셀 바닥판(0.06m)은 뺀다
+const inR=(m)=>c.robots.find(r=>under(m,r.root)),fixed=[];c.g.traverse(m=>{if((solid(m)||(m.isMesh&&m.name==='RoomGlass'&&visible(m)))&&!inR(m)&&!under(m,car.g)){const B=obb(m);if(B&&B.max[1]>0.08)fixed.push(m);}});
 const res=new Map(),add=(k,pen,p)=>{const h=res.get(k);if(!h||pen>h.max)res.set(k,{max:+pen.toFixed(3),p:+p.toFixed(3)});};
-const pair=(a,b,k,p)=>{const A=obb(a),B=obb(b);if(!A||!B||!box(A,B))return;const pen=sat(A,B);if(pen>=0.02&&real(a,b))add(k+' '+nameOf(a).split('<')[0]+' | '+nameOf(b).split('<')[0],pen,p);};
-let bxMin=9,bxMax=-9,parkAt=null;
-for(let i=0;i<=500;i++){const p=i/500;c.progress=p;z.animCell(c,t.sim.time,0.016,0.016);v.scene.updateMatrixWorld(true);
- const bx=c.parts.bridge.position.x;bxMin=Math.min(bxMin,bx);bxMax=Math.max(bxMax,bx);if(parkAt==null&&R.some(r=>r.lean>0.01))parkAt={p,bx:+bx.toFixed(3)};
- const RM=c.robots.map(r=>{const a=[];r.root.traverse(m=>{if(solid(m))a.push(m);});return a;}),C=[];car.g.traverse(m=>{if(solid(m))C.push(m);});
- RM.forEach((ms,j)=>{for(const a of ms)for(const b of fixed)pair(a,b,'로봇'+j+'↔설비',p);for(const a of ms){if(TOOL.test(nameOf(a)))continue;for(const b of C)pair(a,b,'로봇'+j+' 몸·팔↔AMR·소재',p);}
-  for(let k=j+1;k<RM.length;k++)for(const a of ms)for(const b of RM[k])pair(a,b,'로봇'+j+'↔로봇'+k,p);});
- for(const a of C)for(const b of fixed){if(/Quill|Probe/.test(nameOf(b)))continue;pair(a,b,'AMR·소재↔설비',p);}}
-// 정비 인력(반지름 0.35m)·사족보행(1.1×0.5m) 자리 — 겐트리 측정 위치·비킨 위치 둘 다
+const pair=(a,b,k,p)=>{const A=obb(a),B=obb(b);if(!A||!B||!box(A,B))return;const pen=sat(A,B);if(pen>=0.02&&real(a,b))add(k+' '+nameOf(a).split('<')[0]+' | '+nameOf(b).split('<')[0]+' @'+[B.c.x,B.c.y,B.c.z].map(x=>x.toFixed(2)).join(','),pen,p);};
+const inside={};
+for(const kind of ['ok','mc','hand']){it.cmm={...(save.cmm??{}),kind};it.rework=kind!=='ok';
+ for(let i=0;i<=800;i++){const p=i/800;c.progress=p;z.animCell(c,t.sim.time,0.016,0.016);v.scene.updateMatrixWorld(true);
+  if(X.tendInside){inside[kind+':'+X.xferLoc]=(inside[kind+':'+X.xferLoc]??0)+1;if(Math.max(c.parts.room.doorK,c.parts.rwMc.doorK)<0.99)add('문이 덜 열린 채 이송 6축이 역 안 ['+kind+']',1,p);}
+  const RM=c.robots.map(r=>{const a=[];r.root.traverse(m=>{if(solid(m))a.push(m);});return a;}),C=[];car.g.traverse(m=>{if(solid(m)&&m.visible!==false)C.push(m);});
+  if(X.tendHeld?.visible)X.tendHeld.traverse(m=>{if(solid(m)&&!C.includes(m))C.push(m);});
+  RM.forEach((ms,j)=>{const nm=(c.robots[j].xfer?'이송6축':'남쪽로봇')+'['+kind+']';for(const a of ms)for(const b of fixed){if(TOOL.test(nameOf(a))&&WORKAT.test(nameOf(b)))continue;pair(a,b,nm+'↔설비',p);}for(const a of ms){if(TOOL.test(nameOf(a)))continue;for(const b of C)pair(a,b,nm+' 몸·팔↔AMR·소재',p);}
+   for(let k=j+1;k<RM.length;k++)for(const a of ms)for(const b of RM[k])pair(a,b,nm+'↔로봇'+k,p);});
+  for(const a of C)for(const b of fixed){if(WORKAT.test(nameOf(b))||/Quill|McHead/.test(nameOf(b)))continue;pair(a,b,'AMR·소재['+kind+']↔설비',p);}}}   // 탐침·공구 끝이 소재 윗면에 닿는 것은 측정·가공
+it.cmm=save.cmm;it.rework=save.rw;
+// 문이 덜 열린 채 이송 6축이 문 안 경유점에 있는지: 문 열림 구간 안에서만 들어간다
 const zc=t.sim.zoneCell('adapt','CMM'),spots=[['정비 자리',zc.svc,0.35,0.35],['사족보행 점검 자리',zc.scan,0.6,0.3]];
-for(const p of [0.45,0.8]){c.progress=p;z.animCell(c,t.sim.time,0.016,0.016);v.scene.updateMatrixWorld(true);
- for(const [nm,s,hx,hz] of spots){const S={min:[s.x-hx,0,s.z-hz],max:[s.x+hx,1.0,s.z+hz]};for(const b of fixed){const B=obb(b);if(!B||!box(S,B))continue;add(nm+' ↔ '+nameOf(b).split('<')[0]+' @'+[B.c.x,B.c.z].map(x=>x.toFixed(2)).join(','),Math.min(S.max[0]-B.min[0],B.max[0]-S.min[0],S.max[2]-B.min[2],B.max[2]-S.min[2]),p);}}}
+c.progress=0.5;z.animCell(c,t.sim.time,0.016,0.016);v.scene.updateMatrixWorld(true);
+for(const [nm,s,hx,hz] of spots){const S={min:[s.x-hx,0,s.z-hz],max:[s.x+hx,1.0,s.z+hz]};for(const b of fixed){const B=obb(b);if(!B||!box(S,B))continue;add(nm+' ↔ '+nameOf(b).split('<')[0]+' @'+[B.c.x,B.c.z].map(x=>x.toFixed(2)).join(','),Math.min(S.max[0]-B.min[0],B.max[0]-S.min[0],S.max[2]-B.min[2],B.max[2]-S.min[2]),0);}}
+// AMR이 셀에 들어오는 길(유압블록 ③ · 리어커버 ⑤에서 합류 차로 → 셀 중심선)과 적재장으로 나가는 길 — 셀 5m 안 (5cm 간격 · 꺾이는 곳은 앞뒤 방향)
+c.progress=0;z.animCell(c,t.sim.time,0.016,0.016);
+const B0=z.Z.cells.CMM,paths=['HB_DEBR','RC_TURN'].map(id=>{const A=z.Z.cells[id],x0=A.x+2.3,ez=Math.sign(A.z-B0.z)*0.75,ex=B0.x-2;return [[x0,A.z],[Math.max(x0,ex-3),ez],[B0.x-3.5,0],[B0.x,0]];});paths.push([[B0.x,0],[z.Z.sink.x,0]]);
+const g0={p:car.g.position.clone(),r:car.g.rotation.y},robM=c.robots.flatMap(r=>{const a=[];r.root.traverse(m=>{if(solid(m))a.push(m);});return a;});let amrN=0;
+for(const path of paths)for(let s=0;s<path.length-1;s++){const [ax,az]=path[s],[bx,bz]=path[s+1],L=Math.hypot(bx-ax,bz-az),hd=Math.atan2(bx-ax,bz-az),prev=s?Math.atan2(ax-path[s-1][0],az-path[s-1][1]):hd;
+ for(let d=0;d<=L;d+=0.05){const px=ax+(bx-ax)*d/L,pz=az+(bz-az)*d/L;if(Math.hypot(px-B0.x,pz-B0.z)>5.5)continue;
+  for(const h of d<0.3?[prev,hd]:[hd]){car.g.position.x=px;car.g.position.z=pz;car.g.rotation.y=h;v.scene.updateMatrixWorld(true);amrN++;
+   const C=[];car.g.traverse(m=>{if(solid(m)&&m.visible!==false)C.push(m);});
+   for(const a of C){for(const b of fixed)pair(a,b,'AMR 드나드는 길↔설비',d+s*10);for(const b of robM)pair(a,b,'AMR 드나드는 길↔로봇',d+s*10);}}}}
+car.g.position.copy(g0.p);car.g.rotation.y=g0.r;
 c.progress=p0;z.animCell(c,t.sim.time,0.016,0.016);document.getElementById('playBtn').click();
-return {name:'적응가공 CMM 겐트리·양팔 로봇',note:'겐트리 x '+bxMin.toFixed(2)+'~'+bxMax.toFixed(2)+' · 양팔 로봇이 다가가기 시작할 때 겐트리 x '+(parkAt?.bx)+' (진행률 '+(parkAt?.p)+')',hits:[...res.entries()].map(([k,h])=>({k,...h})).sort((a,b)=>b.max-a.max)};})()`;
+for(const k of ['ok:cmm','mc:cmm','mc:mc','hand:cmm'])if(!inside[k])add('이송 로봇이 '+k+' 역 안으로 들어가지 않음',1,0);
+return {name:'적응가공 CMM 측정실·리워크기·이송 6축',note:'역 안 구간 '+JSON.stringify(inside)+' · AMR 드나드는 길 '+amrN+'자세',hits:[...res.entries()].map(([k,h])=>({k,...h})).sort((a,b)=>b.max-a.max)};})()`;
 
 const WASHER = `(async()=>{const THREE=await import('three');${LIB}${under}
 const t=window.__twin,v=t.view,wait=ms=>new Promise(r=>setTimeout(r,ms));document.querySelector('[data-speed="10"]')?.click();
 const z=t.xzones.zones.find(z=>z.Z.key==='adapt'),c=z.order.find(c=>c.id==='HB_DEBR');let car=null;
 for(let k=0;k<1500;k++){car=z.carriers.find(q=>q.at===c.id&&q.state==='work'&&q.pm);if(car&&c.state==='BUSY'&&(c.progress??0)<0.3)break;car=null;await wait(100);}
 if(!car)return {err:'디버링셀에 소재 없음'};document.getElementById('playBtn').click();await wait(200);
-const p0=c.progress,X=c.robots.find(r=>r.washXfer);if(!X||!c.parts.washer||!c.parts.booth)return {err:'부스·세척기·이송 로봇 없음'};
+const p0=c.progress,X=c.robots.find(r=>r.xfer);if(!X||!c.parts.washer||!c.parts.booth)return {err:'부스·세척기·이송 로봇 없음'};
 const WORKAT=/ProcessWorkpiece|Fixture|TiltCradle|WashFixture|BoothFixture/;   // 그리퍼가 기계·부스·세척기 고정구 위 소재에 닿는 것은 작업 접촉
 const TOOL=/ToolFlange|ToolTCP|J6_Origin|J5_Origin|WristCamera|Gripper|Finger|tool_left|tool_right|EE_|[LR]_J[67]/;
 const inR=(m)=>c.robots.find(r=>under(m,r.root)),fixed=[];c.g.traverse(m=>{if(solid(m)&&!inR(m)&&!under(m,car.g)){const B=obb(m);if(B&&B.max[1]>0.08)fixed.push(m);}});   // 셀 바닥판(높이 0.06m)은 받침대가 서는 면 — 뺀다 (check-collisions와 같음)
@@ -105,7 +122,7 @@ for(let i=0;i<=600;i++){const p=i/600;c.progress=p;z.animCell(c,t.sim.time,0.016
  if(X.tendInside)inside++;doorMin=Math.min(doorMin,c.parts.washer.doorK);
  const RM=c.robots.map(r=>{const a=[];r.root.traverse(m=>{if(solid(m))a.push(m);});return a;}),C=[];car.g.traverse(m=>{if(solid(m)&&m.visible!==false)C.push(m);});
  if(X.tendHeld?.visible)X.tendHeld.traverse(m=>{if(solid(m)&&!C.includes(m))C.push(m);});
- RM.forEach((ms,j)=>{const nm=c.robots[j].washXfer?'이송6축':'텐딩6축';for(const a of ms)for(const b of fixed){if(TOOL.test(nameOf(a))&&WORKAT.test(nameOf(b)))continue;pair(a,b,nm+'↔설비',p);}for(const a of ms){if(TOOL.test(nameOf(a)))continue;for(const b of C)pair(a,b,nm+' 몸·팔↔AMR·블록',p);}
+ RM.forEach((ms,j)=>{const nm=c.robots[j].xfer?'이송6축':'텐딩6축';for(const a of ms)for(const b of fixed){if(TOOL.test(nameOf(a))&&WORKAT.test(nameOf(b)))continue;pair(a,b,nm+'↔설비',p);}for(const a of ms){if(TOOL.test(nameOf(a)))continue;for(const b of C)pair(a,b,nm+' 몸·팔↔AMR·블록',p);}
   for(let k=j+1;k<RM.length;k++)for(const a of ms)for(const b of RM[k])pair(a,b,nm+'↔로봇'+k,p);});
  for(const a of C)for(const b of fixed){if(WORKAT.test(nameOf(b)))continue;pair(a,b,'AMR·블록↔설비',p);}}   // 든 블록 ↔ 고정구·기계 안 작업물(같은 블록을 넘겨줌)은 뺀다
 const zc=t.sim.zoneCell('adapt','HB_DEBR'),spots=[['정비 자리',zc.svc,0.35,0.35],['사족보행 점검 자리',zc.scan,0.6,0.3],['필터 교체 자리',zc.svcWash,0.35,0.35]];
@@ -134,7 +151,9 @@ app.whenReady().then(async () => {
     for (let k = 0; k < 90; k++) { if (await js('!!window.__twin?.RENDER.loaded')) break; await wait(500); }
     if (!await js('!!window.__twin?.RENDER.loaded')) throw Error('Blender assets not loaded');
     const report = [];
-    for (const [mode, code] of [['smart', HEM('hood')], ['smart', HEM('door')], ['dark', AMMR], ['traditional', FORKLIFT], ['dark', CMM], ['dark', WASHER], ['smart', WASHER]]) {
+    const ALL = [['smart', HEM('hood')], ['smart', HEM('door')], ['dark', AMMR], ['traditional', FORKLIFT], ['dark', CMM], ['smart', CMM], ['dark', WASHER], ['smart', WASHER]];
+    const only = process.env.SWEEPS?.split(',').map(Number);   // 일부만: SWEEPS=4,5 (0부터 — 위 목록 순서)
+    for (const [mode, code] of only ? ALL.filter((_, i) => only.includes(i)) : ALL) {
       await js(`document.querySelector('[data-mode=${mode}]').click()`); await wait(1500);
       const r = await js(code); if (r.err) throw Error(r.err);
       const bad = r.hits.filter((h) => h.max >= PEN), driftBad = r.drift != null && r.drift > 0.01;
