@@ -18,6 +18,7 @@ import { WasherMonitor } from './washer.js';
 import { CmmCellMonitor } from './cmmcell.js';
 import { MatlCellMonitor } from './matlcell.js';
 import { KitMonitor } from './kitcell.js';
+import { SpsMonitor, SPS_GEO } from './sps.js';
 import { ZoneKpi } from './zonekpi.js';
 import { CapaManager } from './capa.js';
 import { FactoryOS } from './factoryos.js';
@@ -616,7 +617,10 @@ export class Simulation {
     // 확장 Zone 투입구 부품 키트 (피지컬AI: 물류 휴머노이드가 채움 · 그 밖 단계는 확장 선반에서 바로 꺼냄)
     this.zoneKits = m.helpers ? Object.fromEntries(Object.keys(ZONE_FAC).map((k) => [k, ZONE_KIT.cap])) : null;
     this.zoneRaw = Object.fromEntries(Object.keys(ZONE_FAC).map((k) => [k, ZONE_SRC.cap - 8])); this.zoneRawIn = { flex: 0, adapt: 0 };   // 투입구 원재료 · 운반 중
-    if (m.partsCap) for (const st of this.processing) { st.parts = m.partsCap; st.partsReq = null; }
+    // 부품분류셀은 부품 선반 대신 양옆 키팅 구역의 서열 버퍼에서 키트를 꺼낸다 (js/sps.js) — 선반 재고·보충 휴머노이드 대상이 아니다
+    if (m.partsCap) for (const st of this.processing) { if (this.zone && st.id === 'SORT') continue; st.parts = m.partsCap; st.partsReq = null; }
+    // 부품분류셀 정비 자리: 셀 서쪽(입구 쪽) — 셀 앞(통로 쪽)은 키팅 구역이라 통로에서 곧장 내려오면 흐름 랙·컨베이어를 지난다
+    if (this.zone) for (const st of this.processing) if (st.id === 'SORT') st.svc = localLoc(st.def, -3.0, 1.6, st.name);
     // AMMR 셀: 대상물 하나마다 옆 부품 선반에서 부품을 가져와 작업한다 (레거시 단계는 사람이 대신 작업)
     for (const st of this.processing) {
       if (st.def.robot.kind !== 'ammr' || modeKey === 'traditional') continue;
@@ -692,6 +696,7 @@ export class Simulation {
     new CmmCellMonitor(this);
     new MatlCellMonitor(this);
     new KitMonitor(this);   // 유연생산 C01 키팅 구역·키트 검증·보울 피더·흐름 랙 재고 데이터 (js/kitcell.js)   // 적응가공 소재 식별셀 ID·재질·3D 스캔·가공 여유 데이터 (js/matlcell.js)   // 적응가공 CMM 셀 측정실·온도 보정·파지·리워크 데이터 (js/cmmcell.js)
+    new SpsMonitor(this);   // 정밀조립Zone 서열 키팅(부품분류셀 양옆 키팅 구역 · AMR 키트 포켓) · 라인사이드 투빈 칸반 (js/sps.js)
     new MachineMonitor(this);   // 적응가공 가공기 상태 감시 · 공구 상태 · 엣지 AI 예지보전 → 공장 오케스트레이터 보고 · 서버 전송 · AAS (js/machmon.js)
     new ZoneKpi(this, seed);   // Zone 운영 분석: OEE · 손실·NG 파레토 · 관리도 · 공정–품질 상관 (js/zonekpi.js — Zone 대시보드 · 설비 대시보드)
   }
@@ -767,6 +772,13 @@ export class Simulation {
   planAmmrRacks(st) {
     const zone = this.zone, zr = 1.7;
     const slots = zone ? [[-0.75, -1], [-0.75, 1], [0.95, -1], [0.95, 1]] : [[-0.6, -1], [0.6, 1], [1.3, -1], [-1.3, 1]];
+    // 부품분류셀: 선반 대신 셀 양옆 키팅 구역의 키트 컨베이어(서열 버퍼) — 로봇은 자기 쪽 컨베이어 앞까지 나가 키트를 꺼낸다 (js/sps.js SPS_GEO)
+    if (zone && st.id === 'SORT') {
+      const G = SPS_GEO;
+      st.ammrRacks = st.ammr.map((u, i) => { const [sx, side] = slots[i] ?? slots[0]; return { mode: 'z', sps: true, rack: { x: sx, z: side * G.conv.z }, pick: { x: sx, z: side * G.pickZ }, side, slot: { x: sx, z: side * AMMR.slotZ } }; });
+      for (const [i, u] of st.ammr.entries()) { const p = st.ammrRacks[i]; u.rack = p; u.travel = Math.abs(p.pick.z - p.slot.z); }
+      return;
+    }
     const RW = 1.46, RD = 0.52, M = 0.35;   // 선반 폭·깊이, 여유
     const worldRect = (cx, cz, w, d) => {   // 셀 기준 사각형 → 월드 AABB
       const pts = [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]].map(([a, b]) => toWorld(st.def, cx + a, cz + b));
@@ -1175,6 +1187,7 @@ export class Simulation {
     this.cmm?.tick(dt);
     this.matl?.tick(dt);
     this.kit?.tick(dt);
+    this.sps?.tick(dt);
     this.zkpi?.tick();
     this.orch.update();
     // 자재 공급이 재개되면 공급 차질 인시던트를 닫는다
@@ -1374,7 +1387,8 @@ export class Simulation {
       const nominal = st.fastenPts ? fastenT(F, st.fastenPts) : st.def.cycle;
       const base = nominal * m.cycleMul * st.speedMul * (this.vla?.cycleFactor(st) ?? 1) * (this.trace?.cycleFactor(st) ?? 1);   // 배포된 VLA 모델 버전만큼 사이클 단축 · 환경 인터록 정책(공정 보상)
       st.cycleTime = st.item.scrap ? 0.5 : Math.max(base * 0.6, base * (1 + m.cycleVar * gauss(this.rand)));
-      if (st.def.type === 'pack' && !st.item.scrap && this.serials) st.cycleTime += this.serials.plan(st.item);   // 검사·포장셀: QR 라벨 판독 실패 → 재부착 시간만 더한다 (첫 라벨은 포장과 병렬)
+      if (st.def.type === 'pack' && !st.item.scrap && this.serials) st.cycleTime += this.serials.plan(st.item);
+      if (this.sps && !st.item.scrap) st.cycleTime += this.sps.plan(st, st.item);   // 서열 키팅: 버퍼가 비면 키트를 기다림 · 조립셀에서 키트 오류 발견 · 라인사이드 공용 부품 결품   // 검사·포장셀: QR 라벨 판독 실패 → 재부착 시간만 더한다 (첫 라벨은 포장과 병렬)
     }
     if (!st.item && cycleStop) { st.state = 'CSTOP'; st.c.stop = (st.c.stop ?? 0) + dt; }
     else if (!st.item) {
@@ -1416,6 +1430,7 @@ export class Simulation {
     const m = this.mode, it = st.item;
     if (it.scrap) return;   // 빈 AMR(불량 배출 후)은 작업 없이 통과
     st.c.processed++;
+    this.sps?.done(st, it);   // 키트를 AMR 키트 포켓에 실음 · 조립셀 키트 소진 · 라인사이드 공용 부품 소모
     if (st.parts != null) {   // 대상물 하나에 부품 한 세트 (AMMR 셀은 로봇이 선반에서 가져간 만큼)
       st.parts = Math.max(0, st.parts - 1);
       if (st.parts <= m.partsReorder && !st.partsReq) { st.partsReq = { st, helper: null }; this.partsReq.push(st.partsReq); }
@@ -1690,6 +1705,7 @@ export class Simulation {
   // 정밀조립 셀 순찰 점검 자리: 정비 위치(0.9)와 떨어진 셀 옆 모서리(3.0m) — 그 모서리에 AMMR 부품 선반이 있거나 운반 AMR 길이 1.2m 안으로 지나면 안쪽(1.95m)으로
   // (분류셀 출구에서 도어트림 줄로 비스듬히 오르는 AMR 길이 모서리 자리 0.85m 옆을 지나, 서 있는 사족보행 다리가 지나가는 AMR 차체에 닿았다)
   patrolSpot(st) {
+    if (this.zone && st.id === 'SORT') return localLoc(st.def, -3.4, 2.4, st.name);   // 부품분류셀: 셀 앞은 키팅 구역(키트 컨베이어 · 검증 아치) — 셀 서쪽 모서리 밖 (정비 자리 −3.0 · 1.6 옆)
     const at = (x) => localLoc(st.def, x, SVC_Z, st.name), p = at(3.0);
     const seg = (a, b) => { const vx = b.x - a.x, vz = b.z - a.z, L = vx * vx + vz * vz || 1, t = Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.z - a.z) * vz) / L)); return Math.hypot(p.x - a.x - vx * t, p.z - a.z - vz * t); };
     const nearAmr = this.conveyors.some((c) => c.path.some((q, i) => i > 0 && seg(c.path[i - 1], q) < 1.2));

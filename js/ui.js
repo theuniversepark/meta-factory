@@ -4,6 +4,7 @@ import { washerHtml } from './washerview.js';
 import { cmmHtml } from './cmmview.js';
 import { matlHtml } from './matlview.js';
 import { kitHtml } from './kitview.js';
+import { spsHtml, SPS_CELLS } from './spsview.js';
 import { MODES, ST_LABEL, RAW_CAP, FG_CAP, MAINT_KO } from './sim.js';
 import { STATION_TYPES, ROBOT_KINDS } from './line.js';
 import { compareModes } from './compare.js';
@@ -373,6 +374,7 @@ export class UI {
       ${sim.mode.key === 'traditional' ? '<div class="note">※ 레거시 공장에는 센서가 없어 건강도·RUL은 현장에서 보이지 않는 시뮬레이션 내부값입니다.</div>' : ''}
       ${this.facLine(st)}
       ${this.sim.zone ? this.markLine('main', st.id) : ''}
+      ${sim.zone && sim.sps && SPS_CELLS.includes(st.id) ? spsHtml(sim.sps, st.id) : ''}
       <div class="btns"><button data-act="fault">⚡ 고장 주입</button><button data-act="pm">🔧 정비 지시</button></div>
       <div class="pcap-box" id="pcapBox"></div>`;
     this.onDetailRendered?.();

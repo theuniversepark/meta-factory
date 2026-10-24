@@ -15,6 +15,7 @@ import { makePayloadArm, makePayloadDual } from './payload-robots.js';
 import { ROBOT_SPECS } from './robot-specs.js';
 import { makeProductMachine } from './product-machines.js';
 import { ZONE_SRC, ZONE_SINK } from './line.js';
+import { SPS_GEO, SPS_KITS, SPS_SIDE, SPS_T, SPS_LOAD } from './sps.js';
 import { ROBOT_KINDS, toWorld, pointAt, pathLength, isZone, ZONE_CELLS, ZONE_PRODUCTS, ZONE_MIXES, ZONE_NAME, FG_ZONE_CAP, fastenT, FASTEN_RETRACT, AMR_LANES, amrPark, ZONE_AMR, AMMR, AMMR_FETCH } from './line.js';
 
 // ── 헬퍼 ─────────────────────────────
@@ -380,6 +381,20 @@ function makeHumanoidBlender(accent) {
   g.userData = { body, waist, head, cams, armL: A.find('Shoulder_L'), armR: A.find('Shoulder_R'), legL: A.find('Hip_L'), legR: A.find('Hip_R'),
     elbowL, elbowR, kneeL: A.find('Knee_L'), kneeR: A.find('Knee_R'), visor: A.mats.VISOR, bin, acc: A.mats.ACC, blender: true };
   return g;
+}
+// AMR 키트 포켓 (정밀조립Zone 서열 키팅 — js/sps.js): 지그 상판 앞뒤 끝에 잇댄 트레이 2개 (상판 높이 · 차체 크기 그대로) — 기둥 2개로 차체 윗면에 고정
+// 대상물 그룹 좌표(x = 진행 방향 · y = 지그 윗면 0)로 둔다 — AMR 메시는 대상물 그룹에서 +90° 돌고 −BELT_Y 내려가 있으므로 그 반대로 감싼다
+//  · 뒤 포켓 x −0.67 (폭 0.12 · 지그 뒤끝 −0.60 바로 뒤) · 앞 포켓 x 0.62 (폭 0.2 · 지그 앞끝 0.50 앞) — 칸마다 z ±0.2에 부품 1개 (칸 j: 뒤 −z · 뒤 +z · 앞 −z · 앞 +z)
+//  상판 아래에 두면 조립셀 로봇 아래팔이 지그 모서리 아래로 파고들어야 해서 상판 높이로 올렸다 (tools/check-collisions.cjs)
+export const KIT_POCKET = [[-0.67, 0.02, -0.2], [-0.67, 0.02, 0.2], [0.62, 0.02, -0.2], [0.62, 0.02, 0.2]];   // 칸 바닥 (대상물 그룹 좌표)
+function addKitPockets(amr) {
+  const kp = put(new THREE.Group(), 0, BELT_Y, 0, amr); kp.rotation.y = -Math.PI / 2; kp.name = 'KitPockets';
+  const tray = std(0x2f6f8f, { roughness: 0.55 });
+  for (const [x, w] of [[-0.67, 0.12], [0.62, 0.2]]) {
+    put(box(w, 0.04, 0.74, tray), x, 0, 0, kp); for (const sz of [-1, 1]) put(box(w, 0.04, 0.02, tray), x, 0.04, sz * 0.36, kp);
+    for (const sz of [-1, 1]) put(box(0.04, 0.51, 0.04, MAT.dark), x, -0.275, sz * 0.3, kp);   // 기둥 (차체 윗면 −0.53 → 트레이 밑)
+  }
+  return kp;
 }
 function makeCarrierAMR() {
   if (blenderOn()) return makeCarrierAMRBlender();
@@ -1257,6 +1272,7 @@ function placeRobots(g, st) {
   robots.forEach((r, i) => { if (plans[i]) r.plan = plans[i]; });
   const seen = new Map();
   for (const pl of plans) {
+    if (pl.sps) continue;   // 부품분류셀: 선반 대신 셀 양옆 키팅 구역의 키트 컨베이어 (buildSps)
     const key = `${pl.rack.x.toFixed(2)},${pl.rack.z.toFixed(2)}`; if (seen.has(key)) continue; seen.set(key, true);
     const side = pl.side;
     const rk = put(new THREE.Group(), pl.rack.x, 0.06, pl.rack.z, group);
@@ -1337,13 +1353,12 @@ function buildSort(g, st, sim) {
   // 분류 게이트를 셀 입구(x −1.75)에 두고, 분류 로봇은 그 뒤에서 게이트 결정대로 작업한다
   const gate = buildGate(g, -1.75, 0x33ff99);
   if (sim?.zone) {
-    // 제품별 키트 빈: 도어트림 쪽(+z) · e-axle 쪽(−z), 게이트 뒤 출구 쪽
+    // 제품 라인 표시판: 도어트림 쪽(+z) · e-axle 쪽(−z) 셀 출구 — 키트는 셀 양옆 서열 키팅 구역(buildSps)에서 담아 AMR 키트 포켓에 싣는다
     [['doortrim', 1.15], ['eaxle', -1.15]].forEach(([k, z]) => {
-      const tones = k === 'doortrim' ? [0xf0a030, 0xf5b82e, 0xd98a2b] : [0x9a6bff, 0x7b5cd6, 0x2f6fd6];
-      tones.forEach((c, i) => { const bin = put(box(0.42, 0.34, 0.4, std(c)), 0.45 + i * 0.47, 0.32, z, g); put(box(0.36, 0.02, 0.34, MAT.dark), 0, 0.17, 0, bin); });
       const tag = put(box(0.5, 0.22, 0.04, std(ZONE_COLOR[k], { emissive: ZONE_COLOR[k], emissiveIntensity: 0.6 })), 1.85, 0.75, z, g);
       put(box(0.04, 0.5, 0.04, MAT.dark), 0, -0.35, 0, tag);
     });
+    return { ...gate, sps: buildSps(g, sim) };
   } else {
     [0x2f6fd6, 0x3ddc84, 0xf5b82e, 0xd23b3b].forEach((c, i) => {
       const bin = put(box(0.42, 0.34, 0.4, std(c)), 0.2 + i * 0.47, 0.32, 1.15, g);
@@ -1389,6 +1404,103 @@ function drawGateSign(gs, st) {
   while (c.measureText(t).width > 460 && fs > 22) { fs -= 2; c.font = `bold ${fs}px "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`; }
   c.fillText(t, 32, 98);
   gs.tex.needsUpdate = true;
+}
+
+// ── 정밀조립Zone 서열 키팅 구역 (부품분류셀 양옆 · js/sps.js) ─────────────────
+// 쪽마다(도어트림 +z · e-axle −z) 키트 컨베이어(담기·검증 자리 → 서열 버퍼) · 검증 아치(카메라 + 저울) · 피킹 길 · 흐름 랙 3대(칸마다 표시등)
+// 도어트림: 플렉시블 피더(스위치 — 진동판 + 위 카메라) / e-axle: 개봉대(포장째 베어링·오일씰 · 로트 스캐너) · 클린 부스(비닐 커튼 + FFU)
+// 고정 설비는 z를 쪽 부호로 뒤집은 묶음에 SPS_GEO 그대로(양수 z) 그리고, 피킹 로봇·트레이는 셀 그룹에 z × 부호로 둔다
+const SPS_MAT = { conv: std(0x5a6470, { metalness: 0.5, roughness: 0.4 }), roller: std(0x9aa3ad, { metalness: 0.7, roughness: 0.3 }), tray: std(0x2f6f8f, { roughness: 0.55 }), rack: std(0xf2c230, { roughness: 0.5 }),
+  bin: [std(0x2f6fd6), std(0xf08a24), std(0x3ddc84)], curtain: new THREE.MeshStandardMaterial({ color: 0xcfe6f2, transparent: true, opacity: 0.22, roughness: 0.2, side: THREE.DoubleSide, depthWrite: false }) };
+// 부품 하나를 정해진 크기 안에 맞춘 복제본 (Blender 부품이 없으면 작은 상자) — 키트 트레이 · AMR 키트 포켓 · 그리퍼
+function fitPart(name, size, col = 0x9aa3ad) {
+  const o = blenderOn() && RENDER.assets.parts ? partClone(name) : null;
+  const g = new THREE.Group();
+  if (!o) { put(box(size * 0.8, size * 0.35, size * 0.6, std(col)), 0, size * 0.175, 0, g); return g; }
+  const b = new THREE.Box3().setFromObject(o), d = b.getSize(new THREE.Vector3()), k = Math.min(1.4, size / Math.max(1e-3, d.x, d.z));
+  o.scale.multiplyScalar(k); o.position.y = -b.min.y * k; g.add(o); return g;
+}
+// 키트 트레이 (0.46 × 0.32m · 4칸) — 제품마다 부품 4개 (SPS_KITS 순서)
+function spsTray(parent, product) {
+  const t = put(new THREE.Group(), 0, 0, 0, parent); t.name = 'SpsKitTray';
+  put(box(0.46, 0.04, 0.32, SPS_MAT.tray), 0, 0.02, 0, t);
+  for (const sx of [-1, 1]) put(box(0.02, 0.05, 0.32, SPS_MAT.tray), sx * 0.22, 0.065, 0, t);
+  t.userData.parts = SPS_KITS[product].map(([, mesh], k) => put(fitPart(mesh, 0.1, ZONE_COLOR[product]), -0.165 + k * 0.11, 0.04, 0, t));
+  t.visible = false; return t;
+}
+function buildSps(cg, sim) {
+  const G = SPS_GEO, C = G.conv, mode = sim.mode?.key ?? 'smart', out = {};
+  for (const [p, s] of Object.entries(SPS_SIDE)) {
+    const g = put(new THREE.Group(), 0, 0, 0, cg); g.scale.z = s; g.name = 'SpsArea';
+    // 키트 컨베이어 (롤러 · 다리) · 버퍼 칸 정지 표시
+    const cv = put(new THREE.Group(), (C.x0 + C.x1) / 2, 0, C.z, g); cv.name = 'SpsConveyor';
+    const L = C.x1 - C.x0, ry = C.y - 0.03;
+    put(box(L, 0.06, C.w, SPS_MAT.conv), 0, ry - 0.04, 0, cv);
+    for (let d = -L / 2 + 0.1; d < L / 2; d += 0.16) put(cyl(0.025, 0.025, C.w - 0.06, SPS_MAT.roller, 8), d, ry, 0, cv).rotation.x = Math.PI / 2;
+    for (const d of [-L / 2 + 0.15, 0, L / 2 - 0.15]) for (const sz of [-0.2, 0.2]) put(box(0.05, ry - 0.07, 0.05, MAT.dark), d, (ry - 0.07) / 2, sz, cv);
+    for (const x of G.buf) put(box(0.03, 0.025, C.w, emis(0xf5b82e, 0.8), false), x - 0.25, C.y - 0.015, C.z, g);
+    // 검증 아치 (담기·검증 자리 위 카메라 · 저울 판)
+    const vf = put(new THREE.Group(), G.build, 0, C.z, g); vf.name = 'SpsVerify';
+    for (const sz of [-1, 1]) put(box(0.05, C.y + 0.75, 0.05, MAT.dark), 0, (C.y + 0.75) / 2, sz * 0.36, vf);
+    put(box(0.08, 0.06, 0.78, MAT.dark), 0, C.y + 0.72, 0, vf);
+    const camMat = emis(0x37e8ff, 0.6), cam = put(box(0.1, 0.08, 0.16, MAT.dark), 0, C.y + 0.65, 0, vf); put(cyl(0.03, 0.03, 0.02, camMat, 12), 0, -0.05, 0, cam);
+    const scaleMat = emis(0x3ddc84, 0.6); put(box(0.012, 0.012, 0.42, scaleMat, false), -0.25, C.y + 0.005, 0, vf);
+    // 피킹 길 (바닥 띠) · 자동화는 레일
+    put(box(G.laneX[1] - G.laneX[0] + 0.6, 0.008, 0.9, std(0x2a3340, { transparent: true, opacity: 0.6 })), (G.laneX[0] + G.laneX[1]) / 2, 0.006, G.lane, g);
+    if (mode === 'smart') put(box(G.laneX[1] - G.laneX[0] + 0.5, 0.05, 0.14, MAT.steel), (G.laneX[0] + G.laneX[1]) / 2, 0.025, G.lane, g).name = 'SpsRail';
+    // 흐름 랙 3대 (바깥쪽 보충 · 셀 쪽 꺼냄 · 2단 · 칸마다 표시등) — 도어트림 셋째 자리는 플렉시블 피더
+    const lights = [], stock = [];
+    G.racks.forEach((x, i) => {
+      if (p === 'doortrim' && i === 2) {
+        const F = put(new THREE.Group(), x, 0, G.rackZ - 0.2, g); F.name = 'FlexFeeder';
+        put(box(0.9, 0.82, 0.6, MAT.dark), 0, 0.41, 0, F);
+        const plate = emis(0xbfe8ff, 0.5); put(box(0.6, 0.02, 0.4, plate, false), 0, 0.83, 0, F);   // 진동판 (아래 백라이트)
+        for (let k = 0; k < 7; k++) put(fitPart('P_Switch', 0.07), -0.22 + (k % 4) * 0.14, 0.84, -0.1 + Math.floor(k / 4) * 0.18, F).rotation.y = k * 1.3;
+        for (const sx of [-1, 1]) put(box(0.04, 0.9, 0.04, MAT.dark), sx * 0.4, 1.27, 0.25, F);
+        put(box(0.84, 0.05, 0.05, MAT.dark), 0, 1.72, 0.25, F); const fc = emis(0x37e8ff, 0.6); put(box(0.12, 0.08, 0.1, MAT.dark), 0, 1.66, 0.12, F).add(put(cyl(0.025, 0.025, 0.02, fc, 10), 0, -0.05, 0));
+        put(box(0.5, 0.35, 0.4, MAT.steel), 0, 0.85 + 0.175, 0.62, F);   // 스위치 상자 (뒤 · 바깥쪽에서 채움)
+        lights.push([plate]); stock.push([]); return;
+      }
+      const R = put(new THREE.Group(), x, 0, G.rackZ, g); R.name = 'FlowRack';
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) put(box(0.05, 1.3, 0.05, SPS_MAT.rack), sx * (G.rackW / 2 - 0.03), 0.65, sz * (G.rackD / 2 - 0.03), R);
+      const Ls = [], bins = [];
+      for (let lv = 0; lv < 2; lv++) {
+        const y = 0.55 + lv * 0.38, sh = put(box(G.rackW - 0.08, 0.03, G.rackD - 0.1, MAT.steel), 0, y, 0, R); sh.rotation.x = 0.12;   // 셀 쪽(−z)으로 기운 선반
+        for (const bx of [-0.4, 0, 0.4]) { const b = put(box(0.34, 0.16, G.rackD - 0.2, SPS_MAT.bin[i]), bx, y + 0.1, 0, R); b.rotation.x = 0.12; bins.push(b); }
+        const lm = emis(0xf5b82e, 0.15); put(box(G.rackW - 0.1, 0.03, 0.02, lm, false), 0, y - 0.03, -G.rackD / 2 - 0.01, R); Ls.push(lm);
+      }
+      lights.push(Ls); stock.push(bins);
+    });
+    // e-axle: 개봉대 (포장째 베어링·오일씰 → 포장 벗겨 담음 · 로트 스캐너) · 클린 부스 (비닐 커튼 3면 · 지붕 FFU · 셀 쪽은 트였다)
+    let scanMat = null, ffu = [];
+    if (p === 'eaxle') {
+      const D = put(new THREE.Group(), G.depack, 0, C.z, g); D.name = 'DepackTable';
+      put(box(0.6, 0.06, 0.45, MAT.steel), 0, 0.82, 0, D); for (const sx of [-1, 1]) for (const sz of [-1, 1]) put(box(0.04, 0.8, 0.04, MAT.dark), sx * 0.26, 0.4, sz * 0.19, D);
+      for (let k = 0; k < 2; k++) put(box(0.16, 0.1, 0.14, std(0xe8e2d0)), -0.16 + k * 0.2, 0.9, 0.1, D);   // 포장 상자 (베어링 · 오일씰)
+      scanMat = emis(0xff4040, 0.3); put(box(0.08, 0.12, 0.06, MAT.dark), 0.2, 0.92, -0.12, D).add(put(box(0.05, 0.02, 0.01, scanMat, false), 0, 0.02, -0.035));
+      const B = G.booth, H = B.h, wz = B.z1 - B.z0, wx = B.x1 - B.x0;
+      const bo = put(new THREE.Group(), 0, 0, 0, g); bo.name = 'CleanBooth';
+      for (const [x, z] of [[B.x0, B.z0], [B.x1, B.z0], [B.x0, B.z1], [B.x1, B.z1]]) put(box(0.07, H, 0.07, MAT.steel), x, H / 2, z, bo);
+      put(box(wx, 0.08, 0.07, MAT.steel), (B.x0 + B.x1) / 2, H, B.z0, bo); put(box(wx, 0.08, 0.07, MAT.steel), (B.x0 + B.x1) / 2, H, B.z1, bo);
+      for (const x of [B.x0, B.x1]) put(box(0.07, 0.08, wz, MAT.steel), x, H, (B.z0 + B.z1) / 2, bo);
+      const cur = (w, x, z, ry) => { const m = put(new THREE.Mesh(new THREE.PlaneGeometry(w, H - 0.25), SPS_MAT.curtain), x, (H - 0.25) / 2 + 0.2, z, bo); m.rotation.y = ry; m.name = 'BoothCurtain'; };
+      cur(wz, B.x0, (B.z0 + B.z1) / 2, Math.PI / 2); cur(wz, B.x1, (B.z0 + B.z1) / 2, Math.PI / 2); cur(wx, (B.x0 + B.x1) / 2, B.z1, 0);
+      for (const x of [B.x0 + wx * 0.25, B.x0 + wx * 0.75]) { const f = put(box(1.1, 0.22, 1.1, MAT.steel), x, H + 0.15, (B.z0 + B.z1) / 2, bo); const m = emis(0x9fe8ff, 0.25); put(box(0.9, 0.01, 0.9, m, false), 0, -0.115, 0, f); ffu.push(m); }
+    }
+    // 트레이: 담는 중 1개 + 서열 버퍼 4칸 (지금 셀이 꺼내 가는 키트 + 버퍼 3개)
+    const trays = Array.from({ length: 5 }, () => spsTray(g, p));
+    // 피킹 로봇: 피지컬AI = AMMR (바퀴로 움직이며 두 팔) · 자동화 = 레일 위 협동로봇 · 레거시 = 작업자 — 셀 그룹에 (z × 쪽 부호)
+    let picker;
+    if (mode === 'traditional') { picker = { worker: makeWorker(0x3d8bfd) }; put(picker.worker, 0, 0, s * G.lane, cg); picker.worker.rotation.y = s > 0 ? 0 : Math.PI; }
+    else {
+      const ammr = mode === 'dark', r = makeRobot(ammr ? 'ammr' : 'cobot', MAT.orange); put(r.root, 0, ammr ? 0.06 : 0.6, s * G.lane, cg);
+      if (!ammr) put(box(0.6, 0.1, 0.5, MAT.dark), 0, -0.55, 0, r.root);   // 레일 캐리지
+      if (r.arm?.native) { const h = put(new THREE.Group(), 0, 0.02, 0, r.tip); h.visible = false; r.held = h; r.heldParts = SPS_KITS[p].map(([, mesh]) => put(fitPart(mesh, 0.12), 0, 0, 0, h)); }
+      r.spsPicker = true; picker = { robot: r };
+    }
+    out[p] = { s, g, trays, lights, stock, camMat, scaleMat, scanMat, ffu, picker };
+  }
+  return out;
 }
 
 // 부품압입셀: 양쪽 협동로봇이 힘제어로 압입 — 클립 피더 + 압입 툴 거치대 + 하중-변위 모니터
@@ -2501,7 +2613,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       return { v, g, el, lbl, yaw: v.heading };
     });
     this.carrierViews = sim.carriers.map((c) => {
-      const g = makeCarrierAMR();
+      const g = makeCarrierAMR(); addKitPockets(g);   // 서열 키팅 키트 포켓 (빈 채로 복귀)
       this.dyn.add(g);
       return { v: c, g, yaw: c.heading };
     });
@@ -2627,7 +2739,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       return flat(w, w / 8, new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }), x, z, 0.014);
     };
     const mix = ZONE_MIXES[sim.line.mix] ?? ZONE_MIXES['1:1'];
-    decal(`${ZONE_NAME} · 혼류 ${mix.label}`, 'rgba(55,232,255,0.9)', 16, -20.5, -5.6);
+    decal(`${ZONE_NAME} · 혼류 ${mix.label}`, 'rgba(55,232,255,0.9)', 9.5, -11.75, -6.5);   // 부품분류셀과 e-axle 조립셀 사이 북쪽 (부품분류셀 북쪽은 e-axle 키팅 구역 · 클린 부스)
     decal('▶ 도어트림 라인', 'rgba(245,189,92,0.95)', 12, 1, 1.6, 56);
     decal('▶ e-axle 라인', 'rgba(184,155,255,0.95)', 12, 1, -1.6, 56);
     if (!sim.useAMR) return;
@@ -2678,9 +2790,11 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       put(cyl(0.3, 0.3, 0.05, MAT.housing, 18), 0, 0, 0, bolts).rotation.z = Math.PI / 2;
       for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; put(cyl(0.035, 0.035, 0.06, MAT.bolt, 6), 0.03, Math.cos(a) * 0.22, Math.sin(a) * 0.22, bolts).rotation.z = Math.PI / 2; }
       const amr = makeCarrierAMR(); amr.position.y = -BELT_Y; amr.rotation.y = Math.PI / 2; g.add(amr);
+      // 서열 키팅 키트 포켓 + 칸마다 제품별 키트 부품 (보이는 것은 syncItems — 부품분류셀에서 실은 뒤 · 조립셀 로봇이 집기 전까지)
+      const kp = addKitPockets(amr), kit = Object.fromEntries(Object.entries(SPS_KITS).map(([p, list]) => [p, list.map(([, mesh], j) => { const o = put(fitPart(mesh, j < 2 ? 0.1 : 0.16, ZONE_COLOR[p]), ...KIT_POCKET[j], kp); if (j < 2) o.rotation.y = Math.PI / 2; o.visible = false; return o; })]));
       const dtImg = makeDoortrimPlate(); g.add(dtImg);   // 도어트림 실물 이미지 판 (부품분류셀부터)
       const eaImg = makeEaxlePlate(); g.add(eaImg);      // e-axle: Blender 입체 모델 (불러오지 못하면 실물 이미지 판) — 부품분류셀부터
-      g.userData = { base, part, carton, tag, panel, arm, clips, housing, bolts, amr, dtImg, eaImg };
+      g.userData = { base, part, carton, tag, panel, arm, clips, housing, bolts, amr, dtImg, eaImg, kit };
       this.dyn.add(g);
     }
     g.visible = true;
@@ -2736,14 +2850,22 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     part.material = item.painted ? MAT.painted : MAT.copper;
   }
 
+  // AMR 키트 포켓의 키트 부품: 부품분류셀이 버퍼에서 꺼내 실은 뒤(진행 SPS_LOAD~) · 조립셀 로봇이 칸마다 집어 가기 전까지 (js/sps.js)
+  kitVis(g, item, st) {
+    const K = g.userData.kit; if (!K) return;
+    const on = !!item.carrier && !!item.kit && !item.kitUsed && !item.scrap && (item.kitLoaded || (st?.type === 'sort' && st.item === item && (st.progress ?? 0) >= SPS_LOAD));
+    const taken = this.kitTaken?.get(item.id);
+    for (const [p, list] of Object.entries(K)) list.forEach((o, j) => (o.visible = on && p === item.product && !taken?.has(j)));
+  }
   syncItems() {
     const sim = this.sim, seen = new Set();
-    const place = (item, x, y = BELT_Y, z = 0, yaw = 0, inSort = false) => {
+    const place = (item, x, y = BELT_Y, z = 0, yaw = 0, inSort = false, st = null) => {
       let g = this.itemMeshes.get(item.id);
       if (!g) { g = this.getItemMesh(); this.itemMeshes.set(item.id, g); }
       seen.add(item.id);
       g.userData.itemId = item.id;
       this.styleItem(g, item, inSort);
+      this.kitVis(g, item, st);
       g.position.set(x, y, z);
       g.rotation.y = yaw;
     };
@@ -2760,9 +2882,9 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       const q = { x: from.x + (st.x - from.x) * k, z: from.z + (st.z - from.z) * k };
       let y = BELT_Y;
       if (st.state === 'BUSY' && (st.type === 'cnc' || st.type === 'press')) y += Math.sin(this.time * 60) * 0.006;
-      place(st.item, q.x, y, q.z, 0, st.type === 'sort');
+      place(st.item, q.x, y, q.z, 0, st.type === 'sort', st);
     }
-    for (const [id, g] of this.itemMeshes) if (!seen.has(id)) { g.visible = false; this.itemPool.push(g); this.itemMeshes.delete(id); }
+    for (const [id, g] of this.itemMeshes) if (!seen.has(id)) { g.visible = false; this.itemPool.push(g); this.itemMeshes.delete(id); this.kitTaken?.delete(id); }
   }
 
   // ── 이벤트 연출 ─────────────────────────────
@@ -3080,7 +3202,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
         const d = ((face - r.slot.yaw + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
         r.root.rotation.y = r.slot.yaw + u.turn * d;
       } else {
-        r.root.position.x = r.slot.x; r.root.position.z = r.slot.z + (r.slot.side * AMMR.pickZ - r.slot.z) * e;
+        r.root.position.x = r.slot.x; r.root.position.z = r.slot.z + ((pl?.pick?.z ?? r.slot.side * AMMR.pickZ) - r.slot.z) * e;
         r.root.rotation.y = r.slot.yaw + u.turn * Math.PI;
       }
       // 피지컬AI: 선반을 오가는 동안은 두 팔을 작업 자세(그리퍼 1.28m)로 들고 간다 — 기본 대기 자세(0.88m)로 선반 앞에 서면 그리퍼가 가운데 선반판(0.96m)에 닿는다
@@ -3142,6 +3264,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
         break;
       case 'pack':
       case 'sort': {
+        if (parts.sps) this.animSps(parts.sps, st, t);
         if (parts.markMat) parts.markMat.emissiveIntensity = st.lastMark && this.sim.time - st.lastMark.t < 1.2 ? 6 : 0.35;   // 시리얼 QR 라벨 판독 순간
         if (!parts.gateSign) break;
         // 대상물이 입구 게이트를 지나는 동안 스캔 → 판별 결과를 표시판·스캔 링 색으로 보여 준다
@@ -3269,7 +3392,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     const near0 = (z0, z1, f) => (f > 0 ? z0 : z1);
     const F = st.def.fasten, A = r.arm, n = st.fastenPts?.[i] ?? 0, P = r.root.parent;
     const home = r.fHome ??= workHome(r);
-    if (!busy || !st.item || !n) { r.fCur = r.fCur ? r.fCur.map((v, k) => v + (home[k] - v) * 0.15) : home.slice(); A.pose(...r.fCur); if (r.vla) r.vla.held.visible = false; return; }
+    if (!busy || !st.item || !n) { r.fCur = r.fCur ? r.fCur.map((v, k) => v + (home[k] - v) * 0.15) : home.slice(); A.pose(...r.fCur); if (r.vla) r.vla.held.visible = false; if (r.fKitHeld) r.fKitHeld.visible = false; return; }
     const it = st.item.id, inCell = this.sim.entryK(st) >= 1;   // 체결 점은 대상물이 셀 중앙에 다 들어온 뒤에 잡는다 (들어오는 중이면 상자가 입구 쪽으로 최대 2m 비켜 있다)
     const loc0 = (x, y, z) => r.root.worldToLocal(P.localToWorld(new THREE.Vector3(x, y, z)));
     // 부품 집는 곳: 피지컬AI는 로봇 옆 부품 선반, 자동화는 가장 가까운 셀 피더(랙·볼 피더) 윗면 가운데
@@ -3294,20 +3417,32 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       const span = xb - xa - inA - inB, pts = Array.from({ length: n }, (_, k) => span > 0 ? xa + inA + span * (n === 1 ? 0.5 : k / (n - 1)) : (xa + xb) / 2);   // 구간이 좁으면 가운데에 모아 이웃 구간을 넘지 않는다
       return r.fPlan = { item: it, pts: pts.map((x) => { const y = surfaceY(g, P, g.userData.amr, x, zP, y1); return [ik(loc(x, y + 0.1, zP)), ik(loc(x, y + 0.02, zP)), ik(loc(x, y + (F.kind === 'press' ? 0.01 : 0.008), zP)), ik(loc(x, y + 0.3, zP))]; }) };   // 그 자리 실제 윗면에 손끝 — 툴이 27° 기울어 손가락 모서리가 TCP보다 약 2cm 낮다: 닿음 +2cm · 압입 +1cm(1cm 누름) · 체결 +0.8cm(비트가 나사 머리에 닿음)
     })();
+    // 서열 키팅 (조립셀): 첫 점의 부품은 AMR 키트 포켓에서 — 로봇 자리 쪽 칸(뒤/앞 × 로봇 쪽)의 키트 부품을 위에서 곧게 집는다 (js/sps.js)
+    const kit = (() => {
+      const S = st.item; if ((st.id !== 'DT_ASSY' && st.id !== 'EA_ASSY') || !inCell || !S.kit || !S.kitLoaded || S.kitUsed) return null;
+      if (r.fKit?.item === it) return r.fKit;
+      const g = this.itemMeshes.get(it), K = g?.userData.kit?.[S.product]; if (!K) return null;
+      g.updateWorldMatrix(true, true);
+      const rl = g.worldToLocal(r.root.getWorldPosition(new THREE.Vector3())), j = (rl.x < 0 ? 0 : 2) + (rl.z < 0 ? 0 : 1), v = P.worldToLocal(K[j].getWorldPosition(new THREE.Vector3()));
+      return r.fKit = { item: it, j, up: A.ik(...loc0(v.x, v.y + 0.3, v.z).toArray(), true), grab: A.ik(...loc0(v.x, v.y + 0.07, v.z).toArray(), true) };
+    })();
     // 진행률 → 시간(명목 사이클 기준): 준비(정렬·선반 위로) → 점마다 [부품 선반으로 → 부품 1개 집기 → 점 위로 → 손끝 접촉 → 체결(비트 회전)/압입 → 들어 올림] → 복귀
     // 부품은 한 번에 1개만 — 점마다 선반을 다녀온다 (line.js fasten.per에 왕복 시간 포함)
     const T = fastenT(F, st.fastenPts), tau = p * T, lerp = (a, b, k) => a.map((v, j) => v + (b[j] - v) * k), ease = (k) => { k = Math.min(1, Math.max(0, k)); return k * k * (3 - 2 * k); };
     const [up, grab] = pick, seg = (f, a, b) => (f - a) / (b - a);
     let q, spin = 0, held = false;
-    if (tau < F.setup || !plan) q = lerp(home, up, ease(plan ? tau / F.setup : Math.min(1, tau / F.setup)));   // 점이 아직 없으면(대상물 진입 중) 선반 위에서 기다린다
+    let kitHeld = false;
+    if (tau < F.setup || !plan) q = lerp(home, kit ? kit.up : up, ease(plan ? tau / F.setup : Math.min(1, tau / F.setup)));   // 점이 아직 없으면(대상물 진입 중) 선반 위에서 기다린다 · 키트가 있으면 키트 포켓 위로
     else if (tau < F.setup + n * F.per) {
       // 선반 ↔ 점 이동은 대상물 0.3m 위 경유점(high)으로 — 관절 보간으로 곧장 가면 아래팔이 대상물 위로 처진다 · 점에서는 위에서 곧게 내려가고 올라온다
-      const u = (tau - F.setup) / F.per, k = Math.floor(u), f = u - k, [above, touch, work, high] = plan.pts[k], from = k ? plan.pts[k - 1][3] : up;
-      if (f < 0.15) q = lerp(from, up, ease(f / 0.15));                       // 부품 선반 위로 (첫 점은 이미 위에 있다)
-      else if (f < 0.22) q = lerp(up, grab, ease(seg(f, 0.15, 0.22)));        // 내려가 부품 1개 집기
-      else if (f < 0.28) q = grab;
-      else if (f < 0.35) q = lerp(grab, up, ease(seg(f, 0.28, 0.35)));
-      else if (f < 0.5) q = lerp(up, high, ease(seg(f, 0.35, 0.5)));          // 점 0.3m 위로 가져가
+      const u = (tau - F.setup) / F.per, k = Math.floor(u), f = u - k, [above, touch, work, high] = plan.pts[k], kk = k === 0 && kit;
+      const U = kk ? kit.up : up, Gr = kk ? kit.grab : grab, from = k ? plan.pts[k - 1][3] : U;
+      if (kk && f >= 0.25) { kitHeld = f < 0.85; (this.kitTaken ??= new Map()).has(it) || this.kitTaken.set(it, new Set()); this.kitTaken.get(it).add(kit.j); }   // 키트 칸에서 집어 감
+      if (f < 0.15) q = lerp(from, U, ease(f / 0.15));                        // 부품 선반(첫 점은 키트 포켓) 위로 (첫 점은 이미 위에 있다)
+      else if (f < 0.22) q = lerp(U, Gr, ease(seg(f, 0.15, 0.22)));           // 내려가 부품 1개 집기
+      else if (f < 0.28) q = Gr;
+      else if (f < 0.35) q = lerp(Gr, U, ease(seg(f, 0.28, 0.35)));
+      else if (f < 0.5) q = lerp(U, high, ease(seg(f, 0.35, 0.5)));           // 점 0.3m 위로 가져가
       else if (f < 0.57) q = lerp(high, above, ease(seg(f, 0.5, 0.57)));
       else if (f < 0.64) q = lerp(above, touch, ease(seg(f, 0.57, 0.64)));    // 손끝 접촉
       else if (f < 0.88) {
@@ -3327,7 +3462,10 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     const H = r.vla?.held ?? (r.fHeld ??= (() => {   // 자동화: 그리퍼에 집은 부품 1개 (스크류·볼트·클립·베어링)
       const name = { DT_FAST: 'P_Screw', EA_FAST: 'P_Bolt', DT_ASSY: 'P_Clip', EA_ASSY: 'P_Bearing' }[st.id], o = name && partClone(name);
       const g = o ? (o.scale.setScalar(1.3), o) : box(0.03, 0.02, 0.03, MAT.steel); g.position.set(0, 0.02, 0); r.tip.add(g); return g; })());
-    H.visible = held; if (r.vla) r.vla.lens.emissiveIntensity = held ? 1.2 : 4;
+    // 키트 부품을 든 동안은 그 부품 (선반 부품 대신)
+    const KH = kit && (r.fKitHeld ??= (() => { const h = put(new THREE.Group(), 0, 0.02, 0, r.tip); h.userData.parts = Object.fromEntries(Object.entries(SPS_KITS).map(([p, list]) => [p, list.map(([, mesh]) => { const c = partClone(mesh), o = c ? (c.scale.setScalar(1.3), put(c, 0, 0, 0, h)) : put(box(0.03, 0.02, 0.03, MAT.steel), 0, 0, 0, h); o.visible = false; return o; })])); return h; })());   // 선반 부품과 같은 크기 (fHeld)
+    if (r.fKitHeld) { r.fKitHeld.visible = true; for (const [p, list] of Object.entries(r.fKitHeld.userData.parts)) list.forEach((o, j) => (o.visible = !!KH && kitHeld && p === st.item?.product && j === kit.j)); }
+    H.visible = held && !kitHeld; if (r.vla) r.vla.lens.emissiveIntensity = held ? 1.2 : 4;
   }
 
   animVLA(r, st, busy, p, i) {
@@ -3357,6 +3495,66 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     V.held.visible = held;
     if (held && st.item?.product && V.held.material) V.held.material.color.setHex(st.item.product === 'eaxle' ? 0x9a6bff : 0xf0a030);
     V.lens.emissiveIntensity = scan ? 4 : 1.2;
+  }
+
+  // 서열 키팅 구역 (js/sps.js): 피킹 로봇이 부품마다 흐름 랙 칸 앞으로 가서 집고 담기 자리 트레이에 놓는다 → 검증(카메라 섬광 · 저울) → 트레이가 서열 버퍼로
+  // 버퍼 맨 앞(꺼내는 자리)에는 지금 부품분류셀이 꺼내 가는 키트 — AMMR이 집어 들면(왕복 피킹 중간) 사라지고, 진행 SPS_LOAD에 AMR 키트 포켓에 나타난다
+  animSps(S, st, t) {
+    const M = this.sim.sps; if (!M) return;
+    const G = SPS_GEO, C = G.conv, sm = (k) => { k = Math.min(1, Math.max(0, k)); return k * k * (3 - 2 * k); }, legacy = this.sim.mode.key === 'traditional';
+    const takeAt = st.ammr ? (AMMR_FETCH.driveOut + AMMR_FETCH.pick) / 2 : 0.3;
+    for (const [p, A] of Object.entries(S)) {
+      const sd = M.side[p], s = A.s, it = st.item;
+      // 트레이: 꺼내 가는 키트(버퍼 맨 앞) + 버퍼 + 담는 중 — 키트마다 같은 트레이가 자리로 미끄러진다
+      const head = it?.product === p && it.kit && !it.kitLoaded && (st.progress ?? 0) < takeAt && st.state !== 'IDLE' ? [it.kit] : [];
+      const list = [...head, ...sd.queue].slice(0, G.buf.length);
+      A.map ??= new Map(); const used = new Set();
+      const trayOf = (k) => { let tr = A.map.get(k.id); if (!tr) { tr = A.trays.find((x) => ![...A.map.values()].includes(x)); if (!tr) return null; A.map.set(k.id, tr); tr.position.set(G.build, C.y, C.z); } used.add(k.id); return tr; };
+      list.forEach((k, i) => { const tr = trayOf(k); if (!tr) return; tr.visible = true; tr.position.x += (G.buf[i] - tr.position.x) * 0.12; tr.position.y = C.y; tr.position.z = C.z; tr.userData.parts.forEach((o) => (o.visible = true)); });
+      const nPicked = sd.kit ? Math.min(4, Math.floor(sd.prog / 0.2 + 1e-9)) : 0;
+      if (sd.kit) { const tr = trayOf(sd.kit); if (tr) { tr.visible = true; tr.position.set(G.build, C.y, C.z); tr.userData.parts.forEach((o, j) => (o.visible = j < nPicked)); } }
+      for (const [id, tr] of A.map) if (!used.has(id)) { tr.visible = false; A.map.delete(id); }
+      // 검증 (카메라 섬광 · 저울) · 흐름 랙 재고(상자 수) · 자동화 표시등 · 개봉대 로트 스캐너 · 클린 부스 FFU
+      const picking = sd.phase === 'pick' && sd.kit, j = picking ? Math.min(3, Math.floor(sd.prog / 0.2)) : -1, f = picking ? sd.prog / 0.2 - j : 0, part = j >= 0 ? SPS_KITS[p][j] : null;
+      const ver = sd.phase === 'verify';
+      A.camMat.emissiveIntensity = ver ? 4 + Math.sin(t * 40) * 2 : 0.6; A.scaleMat.emissiveIntensity = ver ? 2.5 : 0.6;
+      A.stock.forEach((bins, k) => { const n = Math.ceil((sd.stock[k] / 48) * bins.length); bins.forEach((b, q) => (b.visible = q < n)); });
+      A.lights.forEach((Ls, k) => Ls.forEach((m, lv) => (m.emissiveIntensity = Ls.length === 1 ? (part?.[2] === k && f > 0.3 && f < 0.55 ? 2.5 : 0.5) : this.sim.mode.key === 'smart' && part?.[2] === k && lv === 1 && f < 0.55 ? 3 : 0.15)));
+      if (A.scanMat) A.scanMat.emissiveIntensity = part?.[5] && f > 0.4 && f < 0.55 && !legacy ? 4 : 0.3;
+      A.ffu.forEach((m) => (m.emissiveIntensity = 0.3 + Math.sin(t * 2) * 0.05));
+      // 피킹 로봇
+      const rackX = part ? G.racks[part[2]] + (p === 'doortrim' && part[2] === 2 ? 0 : [-0.4, 0, 0.4][j % 3]) : G.build, X0 = G.build;
+      const xAt = !part ? X0 : f < 0.3 ? X0 + (rackX - X0) * sm(f / 0.3) : f < 0.55 ? rackX : f < 0.85 ? rackX + (X0 - rackX) * sm((f - 0.55) / 0.3) : X0;
+      const toRack = !part ? 0 : f < 0.3 ? sm(f / 0.15) : f < 0.55 ? 1 : 1 - sm((f - 0.55) / 0.2);   // 1 = 흐름 랙 쪽을 봄 · 0 = 컨베이어 쪽
+      const P = A.picker;
+      if (P.worker) {
+        const w = P.worker; w.position.x = xAt; w.rotation.y = (s > 0 ? Math.PI : 0) + toRack * Math.PI;
+        const reach = part && ((f > 0.32 && f < 0.52) || f > 0.87) ? 1 : 0; w.userData.armR.rotation.x += ((reach ? -1.2 : 0) - w.userData.armR.rotation.x) * 0.2; w.userData.armL.rotation.x = w.userData.armR.rotation.x * 0.6;
+        continue;
+      }
+      const r = P.robot;
+      if (r.body) {   // AMMR: 바퀴로 x 이동 · 몸을 돌려 두 손으로 집고 놓음
+        r.root.position.x = xAt; r.root.rotation.y = (s > 0 ? Math.PI : 0) + toRack * Math.PI;
+        const reach = !part ? 0 : f < 0.3 ? sm(f / 0.3) : f < 0.55 ? 1 : f < 0.85 ? 1 - sm((f - 0.55) / 0.3) * 0.5 : 0.5 + Math.sin(((f - 0.85) / 0.15) * Math.PI) * 0.5;
+        r.arms?.forEach((a, k) => { const sd2 = k ? -1 : 1, q0 = [sd2 * 0.3, 0.85, 1.25, 0.75], q1 = [sd2 * 0.22, 1.05, 1.15, 0.95]; const q = q0.map((v, n) => v + (q1[n] - v) * reach); a.pose(q[0], q[1], q[2], q[3], 0, 0); });
+        if (r.bin) r.bin.visible = !!part && f >= 0.45 && f < 0.92;
+        continue;
+      }
+      const Arm = r.arm; r.root.position.x = xAt; if (!Arm?.native) { r.anim(!!part, t, sd.prog); continue; }
+      const Pp = r.root.parent, loc = (x, y, z) => r.root.worldToLocal(Pp.localToWorld(new THREE.Vector3(x, y, s * z)));   // z는 키팅 구역 좌표(양수 = 셀 바깥쪽)
+      const ik = (x, y, z) => { const v = loc(x, y, z); return Arm.ik(v.x, v.y, v.z, true); };
+      r.spsHome ??= ik(X0, 1.3, G.lane - 0.3);
+      let q = r.spsHome;
+      if (part) {
+        const flex = p === 'doortrim' && part[2] === 2, by = flex ? 0.86 : 0.55 + 0.38 + 0.2, bz = flex ? G.rackZ - 0.25 : G.rackZ - G.rackD / 2 + 0.18;
+        const key = `${sd.kit.id}:${j}`; if (r.spsKey !== key) { r.spsKey = key; r.spsQ = { appr: ik(rackX, by + 0.3, bz), in: ik(rackX, by, bz), up: ik(G.build - 0.165 + j * 0.11, C.y + 0.3, C.z), dn: ik(G.build - 0.165 + j * 0.11, C.y + 0.1, C.z) }; }
+        const Q = r.spsQ, lerp = (a, b, k) => a.map((v, n) => v + (b[n] - v) * sm(k));
+        q = f < 0.25 ? r.spsHome : f < 0.32 ? lerp(r.spsHome, Q.appr, (f - 0.25) / 0.07) : f < 0.42 ? lerp(Q.appr, Q.in, (f - 0.32) / 0.1) : f < 0.52 ? lerp(Q.in, Q.appr, (f - 0.42) / 0.1) : f < 0.6 ? lerp(Q.appr, r.spsHome, (f - 0.52) / 0.08)
+          : f < 0.82 ? r.spsHome : f < 0.9 ? lerp(r.spsHome, Q.up, (f - 0.82) / 0.08) : f < 0.95 ? lerp(Q.up, Q.dn, (f - 0.9) / 0.05) : lerp(Q.dn, r.spsHome, (f - 0.95) / 0.05);
+      }
+      Arm.pose(...q);
+      if (r.held) { r.held.visible = !!part && f >= 0.42 && f < 0.95; r.heldParts?.forEach((o, k) => (o.visible = k === j)); }
+    }
   }
 
   // 피지컬AI AMMR: 작업 중 두 팔이 번갈아 플랫폼 위 부품 빈에서 집어 대상물에 조립 (빈은 선반 왕복으로 채움)

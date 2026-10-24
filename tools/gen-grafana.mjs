@@ -78,6 +78,7 @@ pid = 0;
 const machVar = { name: 'machine', label: '가공기', type: 'query', datasource: DS, query: 'import "influxdata/influxdb/schema"\nschema.tagValues(bucket: "raw", tag: "asset", predicate: (r) => r._measurement == "machine", start: -1d)', refresh: 2, includeAll: true, multi: true, current: { text: 'All', value: '$__all' }, allValue: '.*', sort: 1 };
 const mTs = (field) => `from(bucket: "raw") |> ${R} |> filter(fn: (r) => r._measurement == "machine" and r._field == "${field}" and r.asset =~ /^\${machine:regex}$/) |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset })) |> group(columns: ["_field"])`;
 const wTs = (meas, field) => `from(bucket: "raw") |> ${R} |> filter(fn: (r) => r._measurement == "${meas}" and r._field == "${field}") |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset })) |> group(columns: ["_field"])`;   // 세척기 (자산 1대)
+const wTs2 = (meas, fields) => `from(bucket: "raw") |> ${R} |> filter(fn: (r) => r._measurement == "${meas}" and (${fields.map((f) => `r._field == "${f}"`).join(' or ')})) |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset + " " + r._field })) |> group(columns: ["_field"])`;   // 자산 1대 · 지표 여러 개
 const machine = dash('mf-machine', '메타팩토리 · 적응가공 가공기 상태 감시', [
   ts('이상 점수 (엣지 AI)', { x: 0, y: 0, w: 12, h: 8 }, mTs('anomaly'), { thresholds: [{ color: 'transparent', value: null }, { color: 'orange', value: 0.6 }, { color: 'red', value: 0.8 }] }),
   ts('잔여 수명 RUL — 공구 · 주축 (분)', { x: 12, y: 0, w: 12, h: 8 }, `from(bucket: "raw") |> ${R} |> filter(fn: (r) => r._measurement == "machine" and (r._field == "rul_tool_min" or r._field == "rul_spindle_min") and r.asset =~ /^\${machine:regex}$/) |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.asset + (if r._field == "rul_tool_min" then " 공구" else " 주축") })) |> group(columns: ["_field"])`, { unit: 'm' }),
@@ -117,7 +118,11 @@ const sensor = dash('mf-sensors', '메타팩토리 · 환경 · 설비 센서', 
   ts('C01 보울 피더 진동 (mm/s · 막힘 전조)', { x: 0, y: 26, w: 8, h: 8 }, wTs('kit', 'feedVib'), { thresholds: [{ color: 'transparent', value: null }, { color: 'orange', value: 9 }, { color: 'red', value: 12 }] }),
   ts('C01 흐름 랙 최소 재고 (%)', { x: 8, y: 26, w: 8, h: 8 }, wTs('kit', 'stock'), { thresholds: [{ color: 'transparent', value: null }, { color: 'red', value: 10 }, { color: 'orange', value: 25 }] }),
   ts('C01 키트 무게 (g · 키트마다)', { x: 16, y: 26, w: 8, h: 8 }, wTs('kit_part', 'weight_g')),
-], { vars: [zoneVar, metricVar], zoneAnno: true, from: 'now-15m', desc: '환경(온습도·진동·PM2.5 등)·설비 센서 — 셀 엣지 묶음 metafactory/sensors/v1 · 유연생산 C01 키팅 (metafactory/kit/v1)' });
+  // 정밀조립Zone 서열 키팅 (js/sps.js · metafactory/sps/v1): 서열 버퍼(도어트림 · e-axle) · 흐름 랙·라인사이드 최소 재고 · e-axle 클린 부스 입자
+  ts('정밀조립 서열 버퍼 (키트 수 · 도어트림 · e-axle)', { x: 0, y: 34, w: 8, h: 8 }, wTs2('sps', ['bufDT', 'bufEA']), { thresholds: [{ color: 'transparent', value: null }, { color: 'red', value: 0 }, { color: 'transparent', value: 1 }] }),
+  ts('정밀조립 흐름 랙 · 라인사이드 최소 재고 (%)', { x: 8, y: 34, w: 8, h: 8 }, wTs2('sps', ['stock', 'line']), { thresholds: [{ color: 'transparent', value: null }, { color: 'red', value: 5 }, { color: 'orange', value: 20 }] }),
+  ts('e-axle 클린 부스 입자 (0.5µm 개/ft³)', { x: 16, y: 34, w: 8, h: 8 }, wTs('sps', 'particle'), { thresholds: [{ color: 'transparent', value: null }, { color: 'orange', value: 8000 }, { color: 'red', value: 10000 }] }),
+], { vars: [zoneVar, metricVar], zoneAnno: true, from: 'now-15m', desc: '환경(온습도·진동·PM2.5 등)·설비 센서 — 셀 엣지 묶음 metafactory/sensors/v1 · 유연생산 C01 키팅 (metafactory/kit/v1) · 정밀조립 서열 키팅 (metafactory/sps/v1)' });
 
 // ⑤ Zone 운영 분석 — OEE · 손실·NG 파레토 · 관리도(I-MR) · 산점도 (앱 「Zone 대시보드」 창과 같은 계산 — js/zonekpi.js가 metafactory/oee · quality로 보냄)
 pid = 0;
