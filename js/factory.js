@@ -772,7 +772,7 @@ const COBOT_JOINT = std(0x2a7fff, { roughness: 0.35 });
 
 // 양팔 로봇(RB-Y1) 접촉 작업: 대상물이 셀에 서 있는 동안 이동 베이스가 대상물 쪽으로 다가가(차체 앞 0.95m 이상 — AMR 차체와 닿지 않게) 상체를 숙이고,
 // 두 손을 대상물 가까운 쪽 윗모서리에 댄다 (IK). 작업 역할은 손을 모서리를 따라 움직이고, 고정 역할은 그대로 잡고 있는다. ap(0 → 1)가 다가감·숙임·손 뻗기의 진행
-// o: { slot: {x, z} 부모 로컬 기본 자리, box: {min, max} 부모 로컬 대상물 상자, ap, hold, t }
+// o: { slot: {x, z} 부모 로컬 기본 자리, box: {min, max} 부모 로컬 대상물 상자, ap, hold, t, fixX, holdArm(그 팔만 고정) }
 const AMMR_LEAN = [0, 0.35, 0.15, 0, 0, 0];   // 몸통 숙임 (torso_1·2 앞으로 — 어깨 약 0.5m 앞 · 0.12m 아래)
 function ammrContact(r, o) {
   if (!r.body || !r.arms?.[0]?.ik) return false;
@@ -780,7 +780,7 @@ function ammrContact(r, o) {
   const near = f > 0 ? z0 : z1, w = Math.max(0.05, Math.min(0.22, (x1 - x0) / 2 - 0.06));
   const tx = o.fixX ? o.slot.x : Math.min(Math.max(o.slot.x, x0 + w + 0.06), x1 - w - 0.06), tz = near - f * 0.5;   // 두 손 사이가 대상물 폭 안에 오도록 옆으로만 맞추고(fixX: 옆 장애물이 있으면 그대로), 가까운 모서리 0.5m 앞에 선다
   const stopZ = f > 0 ? Math.min(tz, -0.95) : Math.max(tz, 0.95);   // AMR 차체와 닿지 않게 셀 중심에서 0.95m 안으로는 들어가지 않는다
-  const key = [x0, y0, z0, x1, y1, z1, o.slot.x, o.slot.z].map((v) => v.toFixed(2)).join() + (o.hold ? 'h' : 'w') + (o.fixX ? 'x' : '');
+  const key = [x0, y0, z0, x1, y1, z1, o.slot.x, o.slot.z].map((v) => v.toFixed(2)).join() + (o.hold ? 'h' : 'w') + (o.fixX ? 'x' : '') + (o.holdArm ?? '');
   if (r.contactKey !== key) {   // 손 경유점은 대상물이 바뀔 때만 푼다 (다 다가가 숙인 자세에서)
     const keep = r.root.position.clone();
     r.root.position.set(tx, keep.y, stopZ); r.body.pose(...AMMR_LEAN); r.root.updateWorldMatrix(true, true);
@@ -791,7 +791,7 @@ function ammrContact(r, o) {
     const pt = (lat, inset) => tall ? new THREE.Vector3(cl(tx + lat), y0 + (y1 - y0) * 0.6, near - f * 0.012) : new THREE.Vector3(cl(tx + lat), y1 + 0.012, near + f * inset);
     const loc = (p) => r.root.worldToLocal(P.localToWorld(p.clone())), nrm = (p) => loc(p.clone().add(tall ? new THREE.Vector3(0, 0, -f) : new THREE.Vector3(0, 1, 0))).sub(loc(p));
     r.contactQ = r.arms.map((a, k) => {
-      const sd = (k ? -1 : 1) * f, A = pt(sd * w, 0.06), B = o.hold ? A : tall ? A.clone().add(new THREE.Vector3(0, 0.08, 0)) : pt(sd * Math.max(0.04, w - 0.1), 0.14);   // 왼팔(k 0)은 로봇의 왼쪽 · 작업 손은 모서리를 따라(높은 대상물은 옆면을 위아래로) 움직인다
+      const sd = (k ? -1 : 1) * f, A = pt(sd * w, 0.06), B = o.hold || o.holdArm === k ? A : tall ? A.clone().add(new THREE.Vector3(0, 0.08, 0)) : pt(sd * Math.max(0.04, w - 0.1), 0.14);   // 왼팔(k 0)은 로봇의 왼쪽 · 작업 손은 모서리를 따라(높은 대상물은 옆면을 위아래로) 움직인다
       const q = (p) => { const L = loc(p), d = nrm(p); return a.ik(L.x, L.y, L.z, d); };
       return { idle: a.home, a: q(A), b: q(B) };
     });
@@ -800,7 +800,7 @@ function ammrContact(r, o) {
   r.root.position.x = o.slot.x + (tx - o.slot.x) * o.ap; r.root.position.z = o.slot.z + (stopZ - o.slot.z) * o.ap; r.lean = o.ap;
   r.body.pose(...AMMR_LEAN.map((v, i) => v * o.ap + (i === 5 && !o.hold ? Math.sin(o.t * 1.6) * 0.06 * o.ap : 0)));
   r.arms.forEach((a, k) => {
-    const K = r.contactQ[k], s = o.hold ? 0 : Math.sin(o.t * 3 + k * Math.PI) * 0.5 + 0.5;
+    const K = r.contactQ[k], s = o.hold || o.holdArm === k ? 0 : Math.sin(o.t * 3 + k * Math.PI) * 0.5 + 0.5;   // holdArm: 그 팔은 소재를 누른 채 (한 손 고정 · 한 손 작업)
     a.nativePose(...K.idle.map((v, j) => v + (K.a[j] + (K.b[j] - K.a[j]) * s - v) * o.ap));
   });
   return true;

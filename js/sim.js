@@ -16,6 +16,7 @@ import { SensorNet } from './sensors.js';
 import { MachineMonitor } from './machmon.js';
 import { WasherMonitor } from './washer.js';
 import { CmmCellMonitor } from './cmmcell.js';
+import { MatlCellMonitor } from './matlcell.js';
 import { ZoneKpi } from './zonekpi.js';
 import { CapaManager } from './capa.js';
 import { FactoryOS } from './factoryos.js';
@@ -234,8 +235,8 @@ function buildZoneCells(sim) {
       ? (row < 0 ? { x: x + 0.9, z: z - half - 0.7, aisle: 'BB' } : { x: x - 3.4, z, aisle: 'BB' })   // 가운데·남쪽 줄은 서쪽 셀 사이 틈으로 (뒤 통로 B·출하 쪽 혼잡 구간을 지나지 않는다)
       // 적응가공: 가공셀 머시닝센터는 Zone 안쪽(가운데 줄 쪽)에 있어 바깥 가장자리는 셀 판(2.3m) — 그 0.6m 밖에 선다 (앞 통로 F 차로 · A-2 AMR 복귀로 z 28.5와 떨어짐)
       // 가운데 줄(①소재 식별 · ⑥CMM)은 북쪽 — 셀 옆(동·서)은 AMR이 셀을 드나드는 길
-      // ⑥CMM은 북쪽 측정실(z −3.6)·머시닝센터(z −3.2) 사이 틈 밖 z −4.4 (zones.js CMMC) · ③디버링셀은 남쪽 부스·세척기(z ~3.1) 밖
-      : (row < 0 ? { x: x + 0.9, z: z - 2.9, aisle: 'F' } : row > 0 ? { x: x + 0.9, z: z + (c.type === 'deburr' ? 3.5 : 2.9), aisle: 'FF' } : { x, z: z - (c.type === 'cmm' ? 4.4 : 2.9), aisle: 'F' });
+      // ⑥CMM은 북쪽 측정실(z −3.6)·머시닝센터(z −3.2) 사이 틈 밖 z −4.4 (zones.js CMMC) · ①소재 식별셀은 스캔 부스(z −3.6)·격리 통(z −3.4) 밖 z −4.2 (MATC) · ③디버링셀은 남쪽 부스·세척기(z ~3.1) 밖
+      : (row < 0 ? { x: x + 0.9, z: z - 2.9, aisle: 'F' } : row > 0 ? { x: x + 0.9, z: z + (c.type === 'deburr' ? 3.5 : 2.9), aisle: 'FF' } : { x, z: z - (c.type === 'cmm' ? 4.4 : c.type === 'matid' ? 4.2 : 2.9), aisle: 'F' });
     const name = `${Z.code} ${c.label}`;
     // 헤밍 프레스는 셀 판 뒤로 0.75m 나와(zones.js HEM) 정비 인력은 그 뒤에 선다 — 점검 자리(정비 자리 옆 1.6m)는 프레스 옆이라 그대로
     const back = Z.key === 'flex' && row < 0 && c.type === 'hem' ? 0.55 : 0;
@@ -687,7 +688,8 @@ export class Simulation {
     new QualityComm(this);   // 불량 판정 리포트 → 메인 서버 → RCA 서버 통신 · 품질 통신 pcap (js/qcomm.js)
     new FactoryOS(this);   // Factory OS 계층: 공장 오케스트레이터(FacOS) · 정밀조립 Manufacturing Agent · 셀 OCS · A2A 메시지 (js/factoryos.js)
     new WasherMonitor(this);   // 적응가공 유압블록 세척기 공정 데이터 · 청정도 · 필터 정비 요청 (js/washer.js)
-    new CmmCellMonitor(this);   // 적응가공 CMM 셀 측정실·온도 보정·파지·리워크 데이터 (js/cmmcell.js)
+    new CmmCellMonitor(this);
+    new MatlCellMonitor(this);   // 적응가공 소재 식별셀 ID·재질·3D 스캔·가공 여유 데이터 (js/matlcell.js)   // 적응가공 CMM 셀 측정실·온도 보정·파지·리워크 데이터 (js/cmmcell.js)
     new MachineMonitor(this);   // 적응가공 가공기 상태 감시 · 공구 상태 · 엣지 AI 예지보전 → 공장 오케스트레이터 보고 · 서버 전송 · AAS (js/machmon.js)
     new ZoneKpi(this, seed);   // Zone 운영 분석: OEE · 손실·NG 파레토 · 관리도 · 공정–품질 상관 (js/zonekpi.js — Zone 대시보드 · 설비 대시보드)
   }
@@ -1169,6 +1171,7 @@ export class Simulation {
     this.machmon?.tick(dt);
     this.washer?.tick(dt);
     this.cmm?.tick(dt);
+    this.matl?.tick(dt);
     this.zkpi?.tick();
     this.orch.update();
     // 자재 공급이 재개되면 공급 차질 인시던트를 닫는다

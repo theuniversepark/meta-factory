@@ -31,27 +31,32 @@ export const CMM_SENSORS = [
 const legA = (t, s, put) => (put
   ? [[t, 'tuckA', 'hand'], [t + s, 'overA', 'hand'], [t + 2 * s, 'amr', 'amr'], [t + 3 * s, 'overA', 'amr'], [t + 4 * s, 'tuckA', 'amr']]
   : [[t, 'tuckA', 'amr'], [t + s, 'overA', 'amr'], [t + 2 * s, 'amr', 'hand'], [t + 3 * s, 'overA', 'hand'], [t + 4 * s, 'tuckA', 'hand']]);
-const legS = (X, t, s, put) => {
-  const T = X === 'cmm' ? 'C' : 'M', a = put ? 'hand' : X, b = put ? X : 'hand';
+const legS = (X, T, t, s, put) => {
+  const a = put ? 'hand' : X, b = put ? X : 'hand';
   return [[t, `tuck${T}`, a], [t + s, `mid${T}`, a], [t + 2 * s, `ent${T}`, a], [t + 3 * s, X, b], [t + 4 * s, `ent${T}`, b], [t + 5 * s, `mid${T}`, b], [t + 6 * s, `tuck${T}`, b]];
 };
 // 셀 진행률 구간: blow(에어 블로·온도 측정 — 남쪽 로봇) · meas(CMM 측정 — 문 닫힘) · mark(합격 각인) · mc(머시닝센터 재가공) · hand(남쪽 로봇 접촉 리워크)
-// steps: [역(A · C · M), 시작 진행률, 놓기(1)/집기(0)] — 문은 로봇이 그 역에 드나드는 동안만 열림 (cmmDoors)
+// steps: [역 글자(A = AMR · 그 밖은 ST), 시작 진행률, 놓기(1)/집기(0)] — 문은 로봇이 그 역에 드나드는 동안만 열림 (doors · 문 없는 역은 open)
 const PLAN = {
   ok: { s: 0.02, blow: [0.02, 0.13], steps: [['A', 0.14, 0], ['C', 0.25, 1], ['C', 0.76, 0], ['A', 0.91, 1]], meas: [[0.39, 0.7]], mark: [0.7, 0.745] },
   mc: { s: 0.01, blow: [0.01, 0.06], steps: [['A', 0.06, 0], ['C', 0.115, 1], ['C', 0.34, 0], ['M', 0.415, 1], ['M', 0.62, 0], ['C', 0.695, 1], ['C', 0.88, 0], ['A', 0.955, 1]], meas: [[0.19, 0.33], [0.77, 0.845]], mark: [0.845, 0.87], mc: [0.49, 0.61] },
   hand: { s: 0.01, blow: [0.01, 0.06], steps: [['A', 0.06, 0], ['C', 0.115, 1], ['C', 0.34, 0], ['A', 0.415, 1], ['A', 0.63, 0], ['C', 0.685, 1], ['C', 0.875, 0], ['A', 0.95, 1]], meas: [[0.19, 0.33], [0.76, 0.84]], mark: [0.84, 0.865], hand: [0.465, 0.62] },
 };
 const DOOR_LEAD = 0.012;   // 문: 접은 자세에서 내려오기 0.012 전에 열리기 시작(0.01에 다 열림) · 다시 접은 뒤 0.012에 다 닫힘
-function build(P) {
+// 이송 6축 경로 만들기 (CMM 셀 · 소재 식별셀 js/matlcell.js 같이 씀): ST = { 역 글자: 역 이름 } · open = 문 없는 역 이름
+export function buildXferPlan(P, ST, open = []) {
   const seq = [[0, 'tuckA', 'amr']];
-  for (const [st, t, put] of P.steps) seq.push(...(st === 'A' ? legA(t, P.s, put) : legS(st === 'C' ? 'cmm' : 'mc', t, P.s, put)));
+  for (const [T, t, put] of P.steps) seq.push(...(T === 'A' ? legA(t, P.s, put) : legS(ST[T], T, t, P.s, put)));
   seq.push([1, 'tuckA', 'amr']);
-  const doors = { cmm: [], mc: [] };
-  for (const [st, t] of P.steps) if (st !== 'A') doors[st === 'C' ? 'cmm' : 'mc'].push([t - DOOR_LEAD, t + 6 * P.s + DOOR_LEAD]);
+  const doors = Object.fromEntries(Object.values(ST).filter((x) => !open.includes(x)).map((x) => [x, []]));
+  for (const [T, t] of P.steps) if (T !== 'A' && doors[ST[T]]) doors[ST[T]].push([t - DOOR_LEAD, t + 6 * P.s + DOOR_LEAD]);
+  return { ...P, seq, doors };
+}
+function build(P) {
+  const X = buildXferPlan(P, { C: 'cmm', M: 'mc' });
   // 브리지가 지그 위에 있는 구간 (측정 · 이어지는 각인을 한 구간으로)
   const bridge = [...P.meas, P.mark].sort((a, b) => a[0] - b[0]).reduce((o, w) => { const l = o.at(-1); if (l && w[0] <= l[1] + 1e-9) l[1] = Math.max(l[1], w[1]); else o.push([...w]); return o; }, []);
-  return { ...P, seq, doors, bridge };
+  return { ...X, bridge };
 }
 export const CMM_PLANS = Object.fromEntries(Object.entries(PLAN).map(([k, P]) => [k, build(P)]));
 export const cmmPlan = (item) => CMM_PLANS[item?.cmm?.kind ?? (item?.rework ? 'mc' : 'ok')];

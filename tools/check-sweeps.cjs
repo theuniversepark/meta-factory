@@ -5,6 +5,8 @@
 //  ③ 레거시 지게차: 충전 자리·미니로드 출고 지게차 자리에서 제자리 한 바퀴, 진입 직선 — 차체·포크 ↔ 시설
 //  ④ 적응가공 ⑥CMM(피지컬AI·자동화): 정상품·재가공·접촉 리워크 각각 진행률 0~1을 801점 — 이송 6축 ↔ 측정실(유리벽·문·브리지)·리워크 머시닝센터·셀 설비, 남쪽 로봇 ↔ 설비,
 //     로봇 ↔ 로봇, 든 소재·AMR ↔ 설비, 정비·사족보행 자리, AMR이 셀에 들어오고(③·⑤에서) 적재장으로 나가는 길
+//  ⑥ 적응가공 ①소재 식별셀(피지컬AI·자동화): 합격·불합격(예비 소재 교체) 각각 801점 — 이송 6축 ↔ 스캔 부스(벽·문)·격리 랙·셀 설비, 스캔 로봇 ↔ 부스·턴테이블 소재,
+//     남쪽 로봇 ↔ 설비, 로봇 ↔ 로봇, 든 소재·AMR ↔ 설비, 정비·사족보행 자리, AMR이 투입구에서 들어오고 두 가공 줄로 나가는 길
 //  ⑤ 적응가공 ③유압블록 디버링셀(피지컬AI·자동화): 진행률 0~1을 601점 — 텐딩 6축 ↔ 사선홀 머시닝센터 · 이송 6축 ↔ 워터젯 부스·세척기(문·고정구·벽)·셀 설비, 로봇 ↔ 로봇, 든 블록·AMR ↔ 설비,
 //     정비·필터 교체 자리 ↔ 세척기·레일, AMR이 셀을 나가는 경로(→ ⑥CMM, 5cm 간격 · 꺾이는 곳은 앞뒤 방향) ↔ 이송 로봇·세척기·겐트리
 // 실행: npm run check:sweeps   결과: outputs/sweeps/report.json
@@ -66,11 +68,11 @@ for(const Q of P){const near=all.filter(o=>o.B.max[0]>Q.x-3.2&&o.B.min[0]<Q.x+3.
 vv.g.position.copy(p0.p);vv.g.rotation.y=p0.r;document.getElementById('playBtn').click();
 return {name:'레거시 지게차 자리',poses:P.reduce((n,q)=>n+q.yaws.length,0),hits:[...res.entries()].map(([k,h])=>({k,...h})).sort((a,b)=>b.max-a.max)};})()`;
 
-const CMM = `(async()=>{const THREE=await import('three');${LIB}${under}
+const CMM = (prod) => `(async()=>{const THREE=await import('three');${LIB}${under}
 const t=window.__twin,v=t.view,wait=ms=>new Promise(r=>setTimeout(r,ms));document.querySelector('[data-speed="10"]')?.click();
 const z=t.xzones.zones.find(z=>z.Z.key==='adapt'),c=z.order.find(c=>c.id==='CMM');let car=null;
-for(let k=0;k<1200;k++){car=z.carriers.find(q=>q.at===c.id&&q.state==='work'&&q.pm);if(car&&c.state==='BUSY'&&(c.progress??0)<0.2)break;car=null;await wait(100);}
-if(!car)return {err:'CMM에 소재 없음'};document.getElementById('playBtn').click();await wait(200);
+for(let k=0;k<2400;k++){car=z.carriers.find(q=>q.at===c.id&&q.state==='work'&&q.pm);if(car&&c.state==='BUSY'&&(c.progress??0)<0.2&&c.item?.product==='${prod}')break;car=null;await wait(100);}
+if(!car)return {err:'CMM에 ${prod} 없음'};document.getElementById('playBtn').click();await wait(200);
 const p0=c.progress,X=c.robots.find(r=>r.xfer),it=c.item,save={cmm:it.cmm,rw:it.rework};if(!X||!c.parts.room||!c.parts.rwMc)return {err:'측정실·머시닝센터·이송 로봇 없음'};
 const WORKAT=/CmmFixture|McFixture/;   // 그리퍼가 측정실 지그·바이스 위 소재에 닿는 것은 작업 접촉
 const TOOL=/ToolFlange|ToolTCP|J6_Origin|J5_Origin|WristCamera|Gripper|Finger|tool_left|tool_right|EE_|[LR]_J[67]/;
@@ -104,7 +106,48 @@ for(const path of paths)for(let s=0;s<path.length-1;s++){const [ax,az]=path[s],[
 car.g.position.copy(g0.p);car.g.rotation.y=g0.r;
 c.progress=p0;z.animCell(c,t.sim.time,0.016,0.016);document.getElementById('playBtn').click();
 for(const k of ['ok:cmm','mc:cmm','mc:mc','hand:cmm'])if(!inside[k])add('이송 로봇이 '+k+' 역 안으로 들어가지 않음',1,0);
-return {name:'적응가공 CMM 측정실·리워크기·이송 6축',note:'역 안 구간 '+JSON.stringify(inside)+' · AMR 드나드는 길 '+amrN+'자세',hits:[...res.entries()].map(([k,h])=>({k,...h})).sort((a,b)=>b.max-a.max)};})()`;
+return {name:'적응가공 CMM 측정실·리워크기·이송 6축 ${prod}',note:'역 안 구간 '+JSON.stringify(inside)+' · AMR 드나드는 길 '+amrN+'자세',hits:[...res.entries()].map(([k,h])=>({k,...h})).sort((a,b)=>b.max-a.max)};})()`;
+
+const MATL = (prod) => `(async()=>{const THREE=await import('three');${LIB}${under}
+const t=window.__twin,v=t.view,wait=ms=>new Promise(r=>setTimeout(r,ms));document.querySelector('[data-speed="10"]')?.click();
+const z=t.xzones.zones.find(z=>z.Z.key==='adapt'),c=z.order.find(c=>c.id==='MATL');let car=null;
+for(let k=0;k<2400;k++){car=z.carriers.find(q=>q.at===c.id&&q.state==='work'&&q.pm);if(car&&c.state==='BUSY'&&(c.progress??0)<0.2&&c.item?.product==='${prod}')break;car=null;await wait(100);}
+if(!car)return {err:'소재 식별셀에 ${prod} 없음'};document.getElementById('playBtn').click();await wait(200);
+const p0=c.progress,X=c.robots.find(r=>r.xfer),SB=c.robots.find(r=>r.scanBot),it=c.item,save=it.matl;if(!X||!SB||!c.parts.scanBooth||!c.parts.qrack)return {err:'스캔 부스·격리 랙·이송 로봇·스캔 로봇 없음'};
+const WORKAT=/ScanTable|RackShelf/;   // 그리퍼가 턴테이블·교체 작업대 위 소재에 닿는 것은 작업 접촉
+const TOOL=/ToolFlange|ToolTCP|J6_Origin|J5_Origin|WristCamera|Gripper|Finger|tool_left|tool_right|EE_|[LR]_J[67]/;
+const inR=(m)=>c.robots.find(r=>under(m,r.root)),fixed=[];c.g.traverse(m=>{if(solid(m)&&!inR(m)&&!under(m,car.g)){const B=obb(m);if(B&&B.max[1]>0.08)fixed.push(m);}});
+const res=new Map(),add=(k,pen,p)=>{const h=res.get(k);if(!h||pen>h.max)res.set(k,{max:+pen.toFixed(3),p:+p.toFixed(3)});};
+const pair=(a,b,k,p)=>{const A=obb(a),B=obb(b);if(!A||!B||!box(A,B))return;const pen=sat(A,B);if(pen>=0.02&&real(a,b))add(k+' '+nameOf(a).split('<')[0]+' | '+nameOf(b).split('<')[0]+' @'+[B.c.x,B.c.y,B.c.z].map(x=>x.toFixed(2)).join(','),pen,p);};
+const inside={};let scanOn=0;
+for(const kind of ['ok','reject']){it.matl={...(save??{}),kind,reason:kind==='reject'?'defect':null,views:save?.views||7};
+ for(let i=0;i<=800;i++){const p=i/800;c.progress=p;z.animCell(c,t.sim.time,0.016,0.016);v.scene.updateMatrixWorld(true);
+  if(X.tendInside){inside[kind+':'+X.xferLoc]=(inside[kind+':'+X.xferLoc]??0)+1;if(X.xSeg.includes('scan')&&c.parts.scanBooth.doorK<0.99)add('문이 덜 열린 채 이송 6축이 스캔 부스 안 ['+kind+']',1,p);}
+  if(SB.tool?.children.some(m=>m.visible&&m.material?.blending===THREE.AdditiveBlending))scanOn++;
+  const RM=c.robots.map(r=>{const a=[];r.root.traverse(m=>{if(solid(m))a.push(m);});return a;}),C=[];car.g.traverse(m=>{if(solid(m)&&m.visible!==false)C.push(m);});
+  if(X.tendHeld?.visible)X.tendHeld.traverse(m=>{if(solid(m)&&!C.includes(m))C.push(m);});
+  RM.forEach((ms,j)=>{const R0=c.robots[j],nm=(R0.xfer?'이송6축':R0.scanBot?'스캔로봇':'남쪽로봇')+'['+kind+']';for(const a of ms)for(const b of fixed){if(TOOL.test(nameOf(a))&&WORKAT.test(nameOf(b)))continue;pair(a,b,nm+'↔설비',p);}
+   for(const a of ms){if(TOOL.test(nameOf(a))&&!R0.scanBot)continue;for(const b of C)pair(a,b,nm+' 몸·팔↔AMR·소재',p);}
+   for(let k=j+1;k<RM.length;k++)for(const a of ms)for(const b of RM[k])pair(a,b,nm+'↔로봇'+k,p);});
+  for(const a of C)for(const b of fixed){if(WORKAT.test(nameOf(b)))continue;pair(a,b,'AMR·소재['+kind+']↔설비',p);}}}
+it.matl=save;
+const zc=t.sim.zoneCell('adapt','MATL'),spots=[['정비 자리',zc.svc,0.35,0.35],['사족보행 점검 자리',zc.scan,0.6,0.3]];
+c.progress=0.5;z.animCell(c,t.sim.time,0.016,0.016);v.scene.updateMatrixWorld(true);
+for(const [nm,s,hx,hz] of spots){const S={min:[s.x-hx,0,s.z-hz],max:[s.x+hx,1.0,s.z+hz]};for(const b of fixed){const B=obb(b);if(!B||!box(S,B))continue;add(nm+' ↔ '+nameOf(b).split('<')[0]+' @'+[B.c.x,B.c.z].map(x=>x.toFixed(2)).join(','),Math.min(S.max[0]-B.min[0],B.max[0]-S.min[0],S.max[2]-B.min[2],B.max[2]-S.min[2]),0);}}
+// AMR이 투입구에서 들어오는 길(곧게)과 두 가공 줄로 나가는 길(셀 가운데 → x+2.3 → 대각선) — 셀 5m 안
+c.progress=0;z.animCell(c,t.sim.time,0.016,0.016);
+const A0=z.Z.cells.MATL,paths=[[[z.Z.src.x,0],[A0.x,0]]];for(const id of ['HB_MILL','RC_MILL']){const B=z.Z.cells[id],x0=A0.x+2.3,ex=B.x-2;paths.push([[A0.x,A0.z],[x0,A0.z],[Math.max(x0,ex-3),B.z],[ex,B.z]]);}
+const g0={p:car.g.position.clone(),r:car.g.rotation.y},robM=c.robots.flatMap(r=>{const a=[];r.root.traverse(m=>{if(solid(m))a.push(m);});return a;});let amrN=0;
+for(const path of paths)for(let s=0;s<path.length-1;s++){const [ax,az]=path[s],[bx,bz]=path[s+1],L=Math.hypot(bx-ax,bz-az),hd=Math.atan2(bx-ax,bz-az),prev=s?Math.atan2(ax-path[s-1][0],az-path[s-1][1]):hd;
+ for(let d=0;d<=L;d+=0.05){const px=ax+(bx-ax)*d/L,pz=az+(bz-az)*d/L;if(Math.hypot(px-A0.x,pz-A0.z)>5.5)continue;
+  for(const h of d<0.3?[prev,hd]:[hd]){car.g.position.x=px;car.g.position.z=pz;car.g.rotation.y=h;v.scene.updateMatrixWorld(true);amrN++;
+   const C=[];car.g.traverse(m=>{if(solid(m)&&m.visible!==false)C.push(m);});
+   for(const a of C){for(const b of fixed)pair(a,b,'AMR 드나드는 길↔설비',d+s*10);for(const b of robM)pair(a,b,'AMR 드나드는 길↔로봇',d+s*10);}}}}
+car.g.position.copy(g0.p);car.g.rotation.y=g0.r;
+c.progress=p0;z.animCell(c,t.sim.time,0.016,0.016);document.getElementById('playBtn').click();
+for(const k of ['ok:scan','reject:scan','reject:rack'])if(!inside[k])add('이송 로봇이 '+k+' 역 안으로 들어가지 않음',1,0);
+if(!scanOn)add('스캔 로봇이 스캔(패턴 빛)하지 않음',1,0);
+return {name:'적응가공 소재 식별셀 스캔 부스·격리 랙·이송 6축·스캔 로봇 ${prod}',note:'역 안 구간 '+JSON.stringify(inside)+' · 스캔 빛 '+scanOn+'점 · AMR 드나드는 길 '+amrN+'자세',hits:[...res.entries()].map(([k,h])=>({k,...h})).sort((a,b)=>b.max-a.max)};})()`;
 
 const WASHER = `(async()=>{const THREE=await import('three');${LIB}${under}
 const t=window.__twin,v=t.view,wait=ms=>new Promise(r=>setTimeout(r,ms));document.querySelector('[data-speed="10"]')?.click();
@@ -151,7 +194,7 @@ app.whenReady().then(async () => {
     for (let k = 0; k < 90; k++) { if (await js('!!window.__twin?.RENDER.loaded')) break; await wait(500); }
     if (!await js('!!window.__twin?.RENDER.loaded')) throw Error('Blender assets not loaded');
     const report = [];
-    const ALL = [['smart', HEM('hood')], ['smart', HEM('door')], ['dark', AMMR], ['traditional', FORKLIFT], ['dark', CMM], ['smart', CMM], ['dark', WASHER], ['smart', WASHER]];
+    const ALL = [['smart', HEM('hood')], ['smart', HEM('door')], ['dark', AMMR], ['traditional', FORKLIFT], ['dark', CMM('hblock')], ['smart', CMM('rcover')], ['dark', WASHER], ['smart', WASHER], ['dark', MATL('hblock')], ['smart', MATL('hblock')], ['dark', MATL('rcover')], ['smart', CMM('hblock')], ['dark', CMM('rcover')], ['smart', MATL('rcover')]];
     const only = process.env.SWEEPS?.split(',').map(Number);   // 일부만: SWEEPS=4,5 (0부터 — 위 목록 순서)
     for (const [mode, code] of only ? ALL.filter((_, i) => only.includes(i)) : ALL) {
       await js(`document.querySelector('[data-mode=${mode}]').click()`); await wait(1500);
@@ -163,7 +206,7 @@ app.whenReady().then(async () => {
     }
     fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify({ pen: PEN, report, errors }, null, 2));
     const total = report.reduce((n, r) => n + r.violations, 0);
-    console.log(total ? `FAIL: ${total}건 (outputs/sweeps/report.json)` : 'PASS: 헤밍·AMMR 피킹·레거시 지게차 자리·적응가공 CMM·디버링셀 머시닝센터·부스·세척기 전 구간 간섭 없음');
+    console.log(total ? `FAIL: ${total}건 (outputs/sweeps/report.json)` : 'PASS: 헤밍·AMMR 피킹·레거시 지게차 자리·적응가공 CMM·디버링셀 머시닝센터·부스·세척기·소재 식별셀 전 구간 간섭 없음');
     clearTimeout(timer); app.exit(total ? 1 : 0);
   } catch (e) { console.error(e.stack); clearTimeout(timer); app.exit(1); }
 });

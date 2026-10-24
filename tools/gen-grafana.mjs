@@ -100,7 +100,11 @@ const machine = dash('mf-machine', '메타팩토리 · 적응가공 가공기 �
   ts('CMM 측정실 온도 (°C · 20 ± 1)', { x: 0, y: 48, w: 8, h: 8 }, wTs('cmm', 'room'), { thresholds: [{ color: 'transparent', value: null }, { color: 'orange', value: 20.6 }, { color: 'red', value: 21 }] }),
   ts('CMM 소재 온도 (°C · 소재마다)', { x: 8, y: 48, w: 8, h: 8 }, wTs('cmm_part', 'partTemp_C')),
   ts('CMM 온도 보정 뒤 남은 오차 (µm · 소재마다)', { x: 16, y: 48, w: 8, h: 8 }, wTs('cmm_part', 'residual_um')),
-], { vars: [machVar], from: 'now-30m', desc: '적응가공 가공기 4대 — 주축 부하·진동·AE·베어링 온도·공구 마모 → 엣지 AI 이상 점수·RUL·판단 (metafactory/machmon/v1) · 유압블록 세척기 공정·청정도 (metafactory/washer/v1) · CMM 측정실·온도 보정 (metafactory/cmm/v1)' });
+  // 소재 식별셀 (js/matlcell.js · metafactory/matl/v1): 소재별 최소 가공 여유 · 스캔 뷰 수(피지컬AI 능동 스캔 5~9 · 자동화 12) · 무게
+  ts('소재 최소 가공 여유 (mm · 소재마다)', { x: 0, y: 56, w: 8, h: 8 }, wTs('matl_part', 'minAllow_mm'), { thresholds: [{ color: 'transparent', value: null }, { color: 'red', value: 0.6 }] }),
+  ts('소재 3D 스캔 뷰 수 (소재마다)', { x: 8, y: 56, w: 8, h: 8 }, wTs('matl_part', 'views')),
+  ts('소재 무게 (kg · 소재마다)', { x: 16, y: 56, w: 8, h: 8 }, wTs('matl_part', 'weight_kg')),
+], { vars: [machVar], from: 'now-30m', desc: '적응가공 가공기 4대 — 주축 부하·진동·AE·베어링 온도·공구 마모 → 엣지 AI 이상 점수·RUL·판단 (metafactory/machmon/v1) · 유압블록 세척기 공정·청정도 (metafactory/washer/v1) · CMM 측정실·온도 보정 (metafactory/cmm/v1) · 소재 식별·가공 여유 (metafactory/matl/v1)' });
 
 // ④ 환경 · 설비 센서
 pid = 0;

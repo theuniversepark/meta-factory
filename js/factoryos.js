@@ -253,7 +253,7 @@ export class AdaptOrch extends ZoneOrch {
   afterCell(cell, item, rng = Math.random) {
     if (!this.machining(cell)) return null;
     const t = this.tool(cell); t.parts++;
-    t.wear += (1 / t.life) * (0.8 + rng() * 0.4) * (t.cond > 1 ? 0.8 : 1);
+    t.wear += (1 / t.life) * (0.8 + rng() * 0.4) * (t.cond > 1 ? 0.8 : 1) * ((cell.def?.type ?? cell.type) === 'mill5' ? item?.matl?.wearMul ?? 1 : 1);   // 소재 식별셀 가공 여유 → 첫 절입량 (피지컬AI: 주물 표피 과부하 −10% · js/matlcell.js)
     let out = null;
     if (t.wear >= 1) { this.breaks++; out = 'break'; this.note(`${cell.id} 공구 파손 (${t.id}) — 가공품 ${item.id} 리워크 · 긴급 공구 교환`); item.toolBreak = true; this.startChange(cell, true); return out; }
     if (t.wear >= 0.88 && !t.changing) { this.startChange(cell, false); out = 'change'; }

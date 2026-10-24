@@ -109,6 +109,18 @@ export function attachDeburrSpindle(arm) {
   if (g) g.userData.spin = (dt) => { bit.rotation.y += dt * 60; };
   return g;
 }
+// LIBS 재질 분석 프로브 (소재 식별셀 협동로봇): 분석 헤드 + 앞 노즐(아르곤 퍼지 콘) — 노즐 끝이 TCP · 측정 순간 노즐 빛 flash(on)
+export function attachLibsProbe(arm) {
+  let tipMat = null;
+  const g = mount(arm, (g) => {
+    box(0.1, 0.04, 0.1, M.arm, 0, 0.02, 0, g);
+    box(0.09, 0.07, 0.09, M.body, 0, 0.075, 0, g);                                   // 분석 헤드 (레이저 · 분광 광섬유)
+    cyl(0.03, 0.016, 0.03, M.blue, 0, 0.125, 0, g);                                   // 아르곤 퍼지 콘
+    tipMat = std(0xff6a3d, { emissive: 0xff6a3d, emissiveIntensity: 0.2 }); cyl(0.008, 0.008, 0.01, tipMat, 0, 0.145, 0, g);   // 노즐 창 (끝 = TCP 0.15)
+  });
+  if (g) g.userData.flash = (on) => { tipMat.emissiveIntensity = on ? 4 : 0.2; };
+  return g;
+}
 // CMM 셀 협동로봇 복합 툴: 디버링 스핀들(버 끝 = TCP) + 동축 에어 블로 링 + 옆 접촉 온도 프로브 — 측정 전 블로·소재 온도 측정 · 1차 측정 NG 버·표면 접촉 리워크
 export function attachCmmPrepTool(arm) {
   let bit = null;

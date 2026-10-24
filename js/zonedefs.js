@@ -168,7 +168,9 @@ export const EXTRA_ZONES = [
     // 셀 전체를 왼쪽으로 2.5m — ①소재 식별셀(x −19)을 투입구(x −28)에서 9m, 정밀조립Zone 부품분류셀과 같은 세로줄·같은 간격으로 (AMR 투입 → 첫 셀 동선 단축)
     // 오른쪽 끝(자체 복귀로 x 21)은 정밀조립Zone AMR 복귀로(x 26.2)와 5.2m 띄운다 · 셀 중심 간격 9 ~ 10m
     cells: {
-      MATL: { no: '1', type: 'matid', label: '소재 식별·3D측정셀', product: 'shared', use: '소재 판별·가공여유 측정', x: -19, z: 0, cycle: 8, robot: ['cobot', 2, 'ammr', 2] },
+      // ID 판독 게이트(팔레트 RFID · 주조 각인 DPM/OCR) · 3D 스캔 부스(북서 — 턴테이블·저울 · 스캔 로봇 aux2) · 격리 랙(북동) ← 이송 6축(aux · AMR 정북) · 남쪽 협동로봇/양팔 로봇: LIBS 재질 분석 접촉
+      // 공정 순서는 js/matlcell.js MATL_PLANS · 설비는 zones.js buildMatId
+      MATL: { no: '1', type: 'matid', label: '소재 식별·3D측정셀', product: 'shared', use: '소재 판별·가공여유 측정', x: -19, z: 0, cycle: 8, robot: ['cobot', 1, 'ammr', 1], aux: ['articulated', 1, '스캔 부스·격리 랙 이송'], aux2: ['cobot', 1, '스캔 로봇'] },
       HB_MILL: { no: '2', type: 'mill5', label: '유압블록 5축 가공셀', product: 'hblock', use: '6면 밀링·드릴·탭', x: -9, z: BOT, cycle: 16, robot: ['articulated', 1] },
       // 사선홀 머시닝센터(VF-2 + 4축 틸팅 로터리 · 북쪽) ← 텐딩 6축(셀 로봇) · 워터젯 디버링 부스(남서) · 세척기(남동) ← 이송 6축(aux)
       // 진행률 0 ~ TEND_END: 머신텐딩(AMR → 기계 → AMR) · 그 뒤: 이송(AMR → 부스 → 세척기 → AMR) (zones.js buildXDrill · buildWjBooth · buildWasher · js/washer.js)
@@ -243,6 +245,6 @@ export const zoneCellRobots = (c, modeKey) => (modeKey === 'traditional' ? { kin
 export const TEND_END = 0.48;
 export const cellTendQ = (type, p) => (type === 'deburr' ? Math.min(1, p / TEND_END) : p);   // 셀 진행률 → 머신텐딩 진행률
 // 셀 설비에 딸린 로봇 (레시피 대수와 따로 · 레거시는 사람이 옮긴다): 유압블록 디버링셀 부스·세척기 이송 6축
-export const zoneCellAux = (c, modeKey) => (modeKey === 'traditional' || !c.aux ? 0 : c.aux[1]);
+export const zoneCellAux = (c, modeKey) => (modeKey === 'traditional' || !c.aux ? 0 : c.aux[1] + (c.aux2?.[1] ?? 0));   // 셀 설비에 딸린 로봇 (이송 6축 · 스캔 부스 로봇)
 export const zoneRobotUid = (Z, cellId, i) => `${Z.uidp}-RB-${cellId}-${i + 1}`;   // 설비 고유 ID는 영문 (FLX 유연생산 · ADP 적응가공)
 export const zoneAmrUid = (Z, i) => `${Z.uidp}-AM-${String(i + 1).padStart(2, '0')}`;

@@ -16,13 +16,14 @@ const zoneOf = (key) => (key === 'insp' ? { key: 'insp', name: '정밀검사Zone
 function limits(key, c) {
   if (key === 'insp') return { kinds: ['articulated'], max: c.type === 'oins' ? 1 : c.type === 'dock' || c.type === 'judge' ? 0 : 2, min: 0, lockKind: true };
   if (c.type === 'mill5' || c.type === 'turn' || c.type === 'deburr') return { kinds: ['articulated'], max: 1, min: 1, lockKind: true, why: c.type === 'deburr' ? '머신텐딩 6축 1대 (부스·세척기 이송 6축은 설비에 딸림)' : '머신텐딩 — 6축 1대가 문 열림에 맞춰 넣고 뺀다' };
+  if (c.type === 'matid') return { kinds: ['cobot'], max: 1, min: 1, lockKind: true, why: '남쪽 도킹 정면 1대 — LIBS 재질 분석 접촉 (스캔 부스 이송 6축 · 스캔 로봇은 설비에 딸림)' };
   if (c.type === 'cmm') return { kinds: ['cobot'], max: 1, min: 1, lockKind: true, why: '남쪽 도킹 정면 1대 — 에어 블로·온도 측정 · 접촉 리워크 (측정실·리워크기 이송 6축은 설비에 딸림)' };
   if (c.type === 'vision') return { kinds: ['none'], max: 0, min: 0, lockKind: true, why: '비전·치수 게이지 셀 (로봇 없음)' };
   const max = MAX_BY_TYPE[c.type] ?? 2;
   return { kinds: ['cobot', 'articulated'], max, min: 1, lockKind: false, why: max < 4 ? `셀 설비 자리 기준 최대 ${max}대 (간섭 점검 — 그 이상은 로봇이 설비·옆 로봇과 겹침)` : null };
 }
 // 셀 종류별 최대 로봇 대수 — 로봇 자리(셀 네 귀퉁이)와 셀 설비가 겹치지 않는 대수 (tools/check-collisions.cjs COLLIDE_PRE로 최대 대수 점검)
-const MAX_BY_TYPE = { kit: 2, locate: 2, spot: 4, seal: 3, hem: 1, mount: 4, rework: 1, matid: 4, deburr: 2 };
+const MAX_BY_TYPE = { kit: 2, locate: 2, spot: 4, seal: 3, hem: 1, mount: 4, rework: 1, deburr: 2 };
 // 처음 정의 (기본 레시피) — 모듈을 읽는 순간의 값
 const DEFAULTS = Object.fromEntries(RECIPE_ZONES.map((k) => [k, recipeOf(k)]));
 export const defaultRecipe = (key) => clone(DEFAULTS[key]);

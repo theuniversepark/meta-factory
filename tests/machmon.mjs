@@ -35,8 +35,8 @@ const req = fac.request, esc = s.fos.bus.log.find((m) => m.type === 'decision.re
 check('주축 점검 판단 → 정비 인력 요청 · 결정 요청 → 공장 오케스트레이터 승인', mon.stats.spindleReq >= 1 && !!req && !!esc && dec?.verdict === '승인', `요청 ${req?.kind ?? '-'} · 결정 ${dec?.verdict ?? '-'}`);
 console.log('== 서버 묶음 · AAS');
 const tap = []; mon.onItem = (x) => tap.push(x); run(6); mon.onItem = null;
-// 세척기(js/washer.js) · CMM 셀(js/cmmcell.js)도 같은 묶음 길을 쓴다 — 토픽은 가공기 감시 · 세척기 · CMM 중 하나
-check('패킷 캡처 연결: 묶음에 쌓는 메시지를 같은 토픽으로 onItem에도 (pcap)', tap.length > 0 && tap.some((x) => x.topic.startsWith('metafactory/machmon/v1/adapt/')) && tap.every((x) => /^metafactory\/(machmon|washer|cmm)\/v1\/adapt\//.test(x.topic) && mon.outbox.includes(x)), `${tap.length}건`);
+// 세척기(js/washer.js) · CMM 셀(js/cmmcell.js) · 소재 식별셀(js/matlcell.js)도 같은 묶음 길을 쓴다 — 토픽은 가공기 감시 · 세척기 · CMM · 소재 식별 중 하나
+check('패킷 캡처 연결: 묶음에 쌓는 메시지를 같은 토픽으로 onItem에도 (pcap)', tap.length > 0 && tap.some((x) => x.topic.startsWith('metafactory/machmon/v1/adapt/')) && tap.every((x) => /^metafactory\/(machmon|washer|cmm|matl)\/v1\/adapt\//.test(x.topic) && mon.outbox.includes(x)), `${tap.length}건`);
 const box = mon.take(5000);
 check('서버 묶음: 측정(5초) + 판단 기록 · MQTT 토픽', box.some((x) => x.kind === 'sample' && x.topic === 'metafactory/machmon/v1/adapt/HB_MILL') && box.some((x) => x.kind === 'record'), `${box.length}건`);
 const env = machineEnvironment(mon, 'HB_MILL'), xml = toXML(env), sms = env.submodels.map((x) => x.idShort);
