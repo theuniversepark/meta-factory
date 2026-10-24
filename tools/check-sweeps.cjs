@@ -7,6 +7,8 @@
 //     로봇 ↔ 로봇, 든 소재·AMR ↔ 설비, 정비·사족보행 자리, AMR이 셀에 들어오고(③·⑤에서) 적재장으로 나가는 길
 //  ⑥ 적응가공 ①소재 식별셀(피지컬AI·자동화): 합격·불합격(예비 소재 교체) 각각 801점 — 이송 6축 ↔ 스캔 부스(벽·문)·격리 랙·셀 설비, 스캔 로봇 ↔ 부스·턴테이블 소재,
 //     남쪽 로봇 ↔ 설비, 로봇 ↔ 로봇, 든 소재·AMR ↔ 설비, 정비·사족보행 자리, AMR이 투입구에서 들어오고 두 가공 줄로 나가는 길
+//  ⑦ 유연생산 C01 공급·키팅(피지컬AI·자동화 × 후드·도어): 801점 — 장착 협동로봇 ↔ 라인사이드 컨베이어·보울 피더·트레이, 키팅 피킹 로봇 ↔ 흐름 랙·조립대·검증대,
+//     로봇 ↔ 로봇, AMR·판넬 ↔ 설비, 정비·사족보행 자리, AMR이 투입구에서 오고 C02로 나가는 길
 //  ⑤ 적응가공 ③유압블록 디버링셀(피지컬AI·자동화): 진행률 0~1을 601점 — 텐딩 6축 ↔ 사선홀 머시닝센터 · 이송 6축 ↔ 워터젯 부스·세척기(문·고정구·벽)·셀 설비, 로봇 ↔ 로봇, 든 블록·AMR ↔ 설비,
 //     정비·필터 교체 자리 ↔ 세척기·레일, AMR이 셀을 나가는 경로(→ ⑥CMM, 5cm 간격 · 꺾이는 곳은 앞뒤 방향) ↔ 이송 로봇·세척기·겐트리
 // 실행: npm run check:sweeps   결과: outputs/sweeps/report.json
@@ -149,6 +151,39 @@ for(const k of ['ok:scan','reject:scan','reject:rack'])if(!inside[k])add('이송
 if(!scanOn)add('스캔 로봇이 스캔(패턴 빛)하지 않음',1,0);
 return {name:'적응가공 소재 식별셀 스캔 부스·격리 랙·이송 6축·스캔 로봇 ${prod}',note:'역 안 구간 '+JSON.stringify(inside)+' · 스캔 빛 '+scanOn+'점 · AMR 드나드는 길 '+amrN+'자세',hits:[...res.entries()].map(([k,h])=>({k,...h})).sort((a,b)=>b.max-a.max)};})()`;
 
+const KIT = (prod) => `(async()=>{const THREE=await import('three');${LIB}${under}
+const t=window.__twin,v=t.view,wait=ms=>new Promise(r=>setTimeout(r,ms));document.querySelector('[data-speed="10"]')?.click();
+const z=t.xzones.zones.find(z=>z.Z.key==='flex'),c=z.order.find(c=>c.id==='C01');let car=null;
+for(let k=0;k<2400;k++){car=z.carriers.find(q=>q.at===c.id&&q.state==='work'&&q.pm);if(car&&c.state==='BUSY'&&(c.progress??0)<0.2&&c.item?.product==='${prod}')break;car=null;await wait(100);}
+if(!car)return {err:'C01에 ${prod} 없음'};document.getElementById('playBtn').click();await wait(200);
+const p0=c.progress,PK=c.robots.find(r=>r.kitPicker);if(!PK||!c.parts.kit)return {err:'키팅 피킹 로봇·키팅 구역 없음'};
+const WORKAT=/KitTray|KitPart|FlowRack/;   // 그리퍼가 트레이 부품·흐름 랙 상자 안에 닿는 것은 작업 접촉 (팔·몸은 따짐)
+const TOOL=/ToolFlange|ToolTCP|J6_Origin|J5_Origin|WristCamera|Gripper|Finger|EndEffector|tool_left|tool_right|EE_|[LR]_J[67]|Bracket/;
+const inR=(m)=>c.robots.find(r=>under(m,r.root)),fixed=[];c.g.traverse(m=>{if(solid(m)&&!inR(m)&&!under(m,car.g)){const B=obb(m);if(B&&B.max[1]>0.08)fixed.push(m);}});
+const res=new Map(),add=(k,pen,p)=>{const h=res.get(k);if(!h||pen>h.max)res.set(k,{max:+pen.toFixed(3),p:+p.toFixed(3)});};
+const pair=(a,b,k,p)=>{const A=obb(a),B=obb(b);if(!A||!B||!box(A,B))return;const pen=sat(A,B);if(pen>=0.02&&real(a,b))add(k+' '+nameOf(a).split('<')[0]+' | '+nameOf(b).split('<')[0]+' @'+[B.c.x,B.c.y,B.c.z].map(x=>x.toFixed(2)).join(','),pen,p);};
+for(let i=0;i<=800;i++){const p=i/800;c.progress=p;z.animCell(c,t.sim.time,0.016,0.016);v.scene.updateMatrixWorld(true);
+ const RM=c.robots.map(r=>{const a=[];r.root.traverse(m=>{if(solid(m))a.push(m);});return a;}),C=[];car.g.traverse(m=>{if(solid(m)&&m.visible!==false)C.push(m);});
+ RM.forEach((ms,j)=>{const nm=c.robots[j].kitPicker?'피킹로봇':'장착로봇'+j;for(const a of ms)for(const b of fixed){if(TOOL.test(nameOf(a))&&WORKAT.test(nameOf(b)))continue;pair(a,b,nm+'↔설비',p);}
+  for(const a of ms){if(TOOL.test(nameOf(a)))continue;for(const b of C)pair(a,b,nm+' 몸·팔↔AMR·판넬',p);}
+  for(let k=j+1;k<RM.length;k++)for(const a of ms)for(const b of RM[k])pair(a,b,nm+'↔로봇'+k,p);});
+ for(const a of C)for(const b of fixed)pair(a,b,'AMR·판넬↔설비',p);}
+const zc=t.sim.zoneCell('flex','C01'),spots=[['정비 자리',zc.svc,0.35,0.35],['사족보행 점검 자리',zc.scan,0.6,0.3]];
+v.scene.updateMatrixWorld(true);
+for(const [nm,s,hx,hz] of spots){const S={min:[s.x-hx,0,s.z-hz],max:[s.x+hx,1.0,s.z+hz]};for(const b of fixed){const B=obb(b);if(!B||!box(S,B))continue;add(nm+' ↔ '+nameOf(b).split('<')[0]+' @'+[B.c.x,B.c.z].map(x=>x.toFixed(2)).join(','),Math.min(S.max[0]-B.min[0],B.max[0]-S.min[0],S.max[2]-B.min[2],B.max[2]-S.min[2]),0);}}
+// AMR이 투입구에서 C01로 오는 길(북쪽으로 꺾여 올라옴)과 C02로 나가는 길 — 셀 6m 안
+c.progress=0;z.animCell(c,t.sim.time,0.016,0.016);
+const A0=z.Z.cells.C01,S0=z.Z.src,B2=z.Z.cells.C02,x0=S0.x+3.0,ex=A0.x-2,paths=[[[S0.x,S0.z],[x0,S0.z],[Math.max(x0,ex-3),A0.z],[ex,A0.z],[A0.x,A0.z]],[[A0.x,A0.z],[B2.x,B2.z]]];
+const g0={p:car.g.position.clone(),r:car.g.rotation.y},robM=c.robots.flatMap(r=>{const a=[];r.root.traverse(m=>{if(solid(m))a.push(m);});return a;});let amrN=0;
+for(const path of paths)for(let s=0;s<path.length-1;s++){const [ax,az]=path[s],[bx,bz]=path[s+1],L=Math.hypot(bx-ax,bz-az),hd=Math.atan2(bx-ax,bz-az),prev=s?Math.atan2(ax-path[s-1][0],az-path[s-1][1]):hd;
+ for(let d=0;d<=L;d+=0.05){const px=ax+(bx-ax)*d/L,pz=az+(bz-az)*d/L;if(Math.hypot(px-A0.x,pz-A0.z)>6)continue;
+  for(const h of d<0.3?[prev,hd]:[hd]){car.g.position.x=px;car.g.position.z=pz;car.g.rotation.y=h;v.scene.updateMatrixWorld(true);amrN++;
+   const C=[];car.g.traverse(m=>{if(solid(m)&&m.visible!==false)C.push(m);});
+   for(const a of C){for(const b of fixed)pair(a,b,'AMR 드나드는 길↔설비',d+s*10);for(const b of robM)pair(a,b,'AMR 드나드는 길↔로봇',d+s*10);}}}}
+car.g.position.copy(g0.p);car.g.rotation.y=g0.r;
+c.progress=p0;z.animCell(c,t.sim.time,0.016,0.016);document.getElementById('playBtn').click();
+return {name:'유연생산 C01 공급·키팅 ${prod}',note:'AMR 드나드는 길 '+amrN+'자세',hits:[...res.entries()].map(([k,h])=>({k,...h})).sort((a,b)=>b.max-a.max)};})()`;
+
 const WASHER = `(async()=>{const THREE=await import('three');${LIB}${under}
 const t=window.__twin,v=t.view,wait=ms=>new Promise(r=>setTimeout(r,ms));document.querySelector('[data-speed="10"]')?.click();
 const z=t.xzones.zones.find(z=>z.Z.key==='adapt'),c=z.order.find(c=>c.id==='HB_DEBR');let car=null;
@@ -194,7 +229,7 @@ app.whenReady().then(async () => {
     for (let k = 0; k < 90; k++) { if (await js('!!window.__twin?.RENDER.loaded')) break; await wait(500); }
     if (!await js('!!window.__twin?.RENDER.loaded')) throw Error('Blender assets not loaded');
     const report = [];
-    const ALL = [['smart', HEM('hood')], ['smart', HEM('door')], ['dark', AMMR], ['traditional', FORKLIFT], ['dark', CMM('hblock')], ['smart', CMM('rcover')], ['dark', WASHER], ['smart', WASHER], ['dark', MATL('hblock')], ['smart', MATL('hblock')], ['dark', MATL('rcover')], ['smart', CMM('hblock')], ['dark', CMM('rcover')], ['smart', MATL('rcover')]];
+    const ALL = [['smart', HEM('hood')], ['smart', HEM('door')], ['dark', AMMR], ['traditional', FORKLIFT], ['dark', CMM('hblock')], ['smart', CMM('rcover')], ['dark', WASHER], ['smart', WASHER], ['dark', MATL('hblock')], ['smart', MATL('hblock')], ['dark', MATL('rcover')], ['smart', CMM('hblock')], ['dark', CMM('rcover')], ['smart', MATL('rcover')], ['dark', KIT('hood')], ['smart', KIT('door')], ['dark', KIT('door')], ['smart', KIT('hood')]];
     const only = process.env.SWEEPS?.split(',').map(Number);   // 일부만: SWEEPS=4,5 (0부터 — 위 목록 순서)
     for (const [mode, code] of only ? ALL.filter((_, i) => only.includes(i)) : ALL) {
       await js(`document.querySelector('[data-mode=${mode}]').click()`); await wait(1500);
@@ -206,7 +241,7 @@ app.whenReady().then(async () => {
     }
     fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify({ pen: PEN, report, errors }, null, 2));
     const total = report.reduce((n, r) => n + r.violations, 0);
-    console.log(total ? `FAIL: ${total}건 (outputs/sweeps/report.json)` : 'PASS: 헤밍·AMMR 피킹·레거시 지게차 자리·적응가공 CMM·디버링셀 머시닝센터·부스·세척기·소재 식별셀 전 구간 간섭 없음');
+    console.log(total ? `FAIL: ${total}건 (outputs/sweeps/report.json)` : 'PASS: 헤밍·AMMR 피킹·레거시 지게차 자리·적응가공 CMM·디버링셀 머시닝센터·부스·세척기·소재 식별셀·유연생산 C01 키팅 전 구간 간섭 없음');
     clearTimeout(timer); app.exit(total ? 1 : 0);
   } catch (e) { console.error(e.stack); clearTimeout(timer); app.exit(1); }
 });

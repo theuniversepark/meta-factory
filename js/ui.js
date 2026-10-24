@@ -3,6 +3,7 @@ import { machmonHtml } from './machmonview.js';
 import { washerHtml } from './washerview.js';
 import { cmmHtml } from './cmmview.js';
 import { matlHtml } from './matlview.js';
+import { kitHtml } from './kitview.js';
 import { MODES, ST_LABEL, RAW_CAP, FG_CAP, MAINT_KO } from './sim.js';
 import { STATION_TYPES, ROBOT_KINDS } from './line.js';
 import { compareModes } from './compare.js';
@@ -430,7 +431,8 @@ export class UI {
     const mm = (st.zone === 'adapt' && sim.machmon?.has(st.cellId) ? machmonHtml(sim.machmon, st.cellId, { fmt: this.mmFmt, ver: this.aasVer?.() ?? '3.1', note: this.mmNote?.id === st.cellId ? this.mmNote.text : '', server: this.mmServer !== false }) : '')
       + (st.zone === 'adapt' && d.wash && sim.washer ? washerHtml(sim.washer) : '')   // 유압블록 디버링셀 세척기 (js/washerview.js)
       + (st.zone === 'adapt' && d.type === 'cmm' && sim.cmm ? cmmHtml(sim.cmm) : '')   // CMM 셀 측정실·피지컬AI (js/cmmview.js)
-      + (st.zone === 'adapt' && d.type === 'matid' && sim.matl ? matlHtml(sim.matl) : '');   // 소재 식별셀 ID·재질·3D 스캔·피지컬AI (js/matlview.js)
+      + (st.zone === 'adapt' && d.type === 'matid' && sim.matl ? matlHtml(sim.matl) : '')   // 소재 식별셀 ID·재질·3D 스캔·피지컬AI (js/matlview.js)
+      + (st.zone === 'flex' && d.type === 'kit' && sim.kit ? kitHtml(sim.kit) : '');   // C01 공급·키팅 (js/kitview.js)
     el.classList.toggle('machine', !!mm);   // 가공기는 로봇 창처럼 넓게 — 셀 정보 | 상태 감시·AAS 저장 2열 (저장 버튼까지 한 화면)
     el.innerHTML = `<h3>${esc(st.name)}<button data-act="close">✕</button></h3>
       <div class="zc-split"><div class="zc-col">

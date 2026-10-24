@@ -113,7 +113,11 @@ const sensor = dash('mf-sensors', '메타팩토리 · 환경 · 설비 센서', 
   ts('센서 측정값 (지표별 · 센서별)', { x: 0, y: 0, w: 24, h: 14 }, `from(bucket: "raw") |> ${R} |> filter(fn: (r) => r._measurement == "sensor" and r._field == "v" and ${zoneF} and r.m =~ /^\${metric:regex}$/) |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false) |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: r.m + " · " + r.s + " (" + r.u + ")" })) |> group(columns: ["_field"])`),
   panel('table', '센서 최신값', { x: 0, y: 14, w: 24, h: 12 }, `from(bucket: "raw") |> range(start: -5m) |> filter(fn: (r) => r._measurement == "sensor" and r._field == "v" and ${zoneF} and r.m =~ /^\${metric:regex}$/) |> last() |> group() |> keep(columns: ["zone", "cell", "s", "m", "u", "_value", "_time"]) |> sort(columns: ["zone", "cell", "m"])`,
     { fieldConfig: { defaults: {}, overrides: [{ matcher: { id: 'byName', options: '_value' }, properties: [{ id: 'displayName', value: '값' }, { id: 'decimals', value: 2 }] }, { matcher: { id: 'byName', options: 's' }, properties: [{ id: 'displayName', value: '센서' }] }, { matcher: { id: 'byName', options: 'm' }, properties: [{ id: 'displayName', value: '지표' }] }, { matcher: { id: 'byName', options: 'u' }, properties: [{ id: 'displayName', value: '단위' }] }, { matcher: { id: 'byName', options: '_time' }, properties: [{ id: 'displayName', value: '수신' }] }] }, options: { showHeader: true, cellHeight: 'sm' } }),
-], { vars: [zoneVar, metricVar], zoneAnno: true, from: 'now-15m', desc: '환경(온습도·진동·PM2.5 등)·설비 센서 — 셀 엣지 묶음 metafactory/sensors/v1' });
+  // 유연생산 C01 공급·키팅 (js/kitcell.js · metafactory/kit/v1): 보울 피더 진동(막힘 전조) · 흐름 랙 최소 재고 · 키트별 무게
+  ts('C01 보울 피더 진동 (mm/s · 막힘 전조)', { x: 0, y: 26, w: 8, h: 8 }, wTs('kit', 'feedVib'), { thresholds: [{ color: 'transparent', value: null }, { color: 'orange', value: 9 }, { color: 'red', value: 12 }] }),
+  ts('C01 흐름 랙 최소 재고 (%)', { x: 8, y: 26, w: 8, h: 8 }, wTs('kit', 'stock'), { thresholds: [{ color: 'transparent', value: null }, { color: 'red', value: 10 }, { color: 'orange', value: 25 }] }),
+  ts('C01 키트 무게 (g · 키트마다)', { x: 16, y: 26, w: 8, h: 8 }, wTs('kit_part', 'weight_g')),
+], { vars: [zoneVar, metricVar], zoneAnno: true, from: 'now-15m', desc: '환경(온습도·진동·PM2.5 등)·설비 센서 — 셀 엣지 묶음 metafactory/sensors/v1 · 유연생산 C01 키팅 (metafactory/kit/v1)' });
 
 // ⑤ Zone 운영 분석 — OEE · 손실·NG 파레토 · 관리도(I-MR) · 산점도 (앱 「Zone 대시보드」 창과 같은 계산 — js/zonekpi.js가 metafactory/oee · quality로 보냄)
 pid = 0;

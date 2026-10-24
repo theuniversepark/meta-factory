@@ -17,6 +17,7 @@ import { MachineMonitor } from './machmon.js';
 import { WasherMonitor } from './washer.js';
 import { CmmCellMonitor } from './cmmcell.js';
 import { MatlCellMonitor } from './matlcell.js';
+import { KitMonitor } from './kitcell.js';
 import { ZoneKpi } from './zonekpi.js';
 import { CapaManager } from './capa.js';
 import { FactoryOS } from './factoryos.js';
@@ -689,7 +690,8 @@ export class Simulation {
     new FactoryOS(this);   // Factory OS 계층: 공장 오케스트레이터(FacOS) · 정밀조립 Manufacturing Agent · 셀 OCS · A2A 메시지 (js/factoryos.js)
     new WasherMonitor(this);   // 적응가공 유압블록 세척기 공정 데이터 · 청정도 · 필터 정비 요청 (js/washer.js)
     new CmmCellMonitor(this);
-    new MatlCellMonitor(this);   // 적응가공 소재 식별셀 ID·재질·3D 스캔·가공 여유 데이터 (js/matlcell.js)   // 적응가공 CMM 셀 측정실·온도 보정·파지·리워크 데이터 (js/cmmcell.js)
+    new MatlCellMonitor(this);
+    new KitMonitor(this);   // 유연생산 C01 키팅 구역·키트 검증·보울 피더·흐름 랙 재고 데이터 (js/kitcell.js)   // 적응가공 소재 식별셀 ID·재질·3D 스캔·가공 여유 데이터 (js/matlcell.js)   // 적응가공 CMM 셀 측정실·온도 보정·파지·리워크 데이터 (js/cmmcell.js)
     new MachineMonitor(this);   // 적응가공 가공기 상태 감시 · 공구 상태 · 엣지 AI 예지보전 → 공장 오케스트레이터 보고 · 서버 전송 · AAS (js/machmon.js)
     new ZoneKpi(this, seed);   // Zone 운영 분석: OEE · 손실·NG 파레토 · 관리도 · 공정–품질 상관 (js/zonekpi.js — Zone 대시보드 · 설비 대시보드)
   }
@@ -1172,6 +1174,7 @@ export class Simulation {
     this.washer?.tick(dt);
     this.cmm?.tick(dt);
     this.matl?.tick(dt);
+    this.kit?.tick(dt);
     this.zkpi?.tick();
     this.orch.update();
     // 자재 공급이 재개되면 공급 차질 인시던트를 닫는다

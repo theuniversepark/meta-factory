@@ -123,7 +123,9 @@ export const EXTRA_ZONES = [
     flow: '투입 → C01 키팅 → C02 보정 → C03 용접 → C04 실링 → C05 헤밍 → <span class="t-ea">(도어) C10 장착</span> → C06 검사 → <span class="t-ng">(NG) C07 재작업</span> → 구분 적재',
     // 출하 도크(x 22.5) 왼쪽, 왼쪽 세로 통로(x −35.5) 오른쪽에 들어가도록 셀 간격을 9m → 8.5m로 좁혔다 (flexible-manufacturing과 셀 순서·흐름 동일)
     cells: {
-      C01: { type: 'kit', label: '공급·키팅', product: 'shared', use: '부품 ID 인식·혼류 판별·키팅', x: -19, z: TOP, side: -1, cycle: 58, robot: ['cobot', 2, 'ammr', 2] },
+      // C01: 남쪽 키팅 구역(흐름 랙 3대 · 키트 조립대 · 검증대) → 라인사이드 컨베이어(트레이 정지 2곳 · 보울 피더) → 남쪽 협동로봇 2대가 트레이에서 집어 판넬에 장착
+      // 키팅 피킹 로봇(picker): 자동화 = 레일 협동로봇 · 피지컬AI = AMMR (js/kitcell.js · zones.js buildKit)
+      C01: { type: 'kit', label: '공급·키팅', product: 'shared', use: '키팅·키트 검증·부품 장착', x: -19, z: TOP, side: -1, cycle: 58, robot: ['cobot', 2], picker: ['cobot', 1, 'ammr', 1, '키팅 구역 피킹'] },
       C02: { type: 'locate', label: '안착·보정', product: 'shared', use: '지그 안착·비전 6DoF 보정', x: -10.5, z: TOP, side: -1, cycle: 42, robot: ['articulated', 1] },
       C03: { type: 'spot', label: '가접·본용접', product: 'shared', use: '스폿용접 2대 협업', x: -2, z: TOP, side: -1, cycle: 109, robot: ['articulated', 2] },
       C04: { type: 'seal', label: '실링', product: 'shared', use: '실러 도포·비드 검사', x: 6.5, z: TOP, side: -1, cycle: 46, robot: ['articulated', 1] },
@@ -245,6 +247,6 @@ export const zoneCellRobots = (c, modeKey) => (modeKey === 'traditional' ? { kin
 export const TEND_END = 0.48;
 export const cellTendQ = (type, p) => (type === 'deburr' ? Math.min(1, p / TEND_END) : p);   // 셀 진행률 → 머신텐딩 진행률
 // 셀 설비에 딸린 로봇 (레시피 대수와 따로 · 레거시는 사람이 옮긴다): 유압블록 디버링셀 부스·세척기 이송 6축
-export const zoneCellAux = (c, modeKey) => (modeKey === 'traditional' || !c.aux ? 0 : c.aux[1] + (c.aux2?.[1] ?? 0));   // 셀 설비에 딸린 로봇 (이송 6축 · 스캔 부스 로봇)
+export const zoneCellAux = (c, modeKey) => (modeKey === 'traditional' ? 0 : (c.aux ? c.aux[1] + (c.aux2?.[1] ?? 0) : 0) + (c.picker ? c.picker[1] : 0));   // 셀 설비에 딸린 로봇 (이송 6축 · 스캔 부스 로봇 · 키팅 피킹)
 export const zoneRobotUid = (Z, cellId, i) => `${Z.uidp}-RB-${cellId}-${i + 1}`;   // 설비 고유 ID는 영문 (FLX 유연생산 · ADP 적응가공)
 export const zoneAmrUid = (Z, i) => `${Z.uidp}-AM-${String(i + 1).padStart(2, '0')}`;

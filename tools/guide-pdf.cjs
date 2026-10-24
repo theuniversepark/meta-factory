@@ -14,6 +14,8 @@ const EMOJI = /(?:\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?(?:\u20
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const unesc = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
 
+// PDF 내보내기 옵션: 그림 JPEG 품질 85 · 200 DPI로 줄임 (본문 폭 6.2인치 그림 ≈ 1240px) — 공유 아티팩트 파일 한도(15MB) 안에 들도록
+const PDF_FILTER = 'pdf:writer_pdf_Export:' + JSON.stringify({ Quality: { type: 'long', value: '85' }, ReduceImageResolution: { type: 'boolean', value: 'true' }, MaxImageResolution: { type: 'long', value: '200' } });
 function soffice() {
   for (const c of [process.env.SOFFICE, 'soffice', '/Applications/LibreOffice.app/Contents/MacOS/soffice', 'C:\\Program Files\\LibreOffice\\program\\soffice.exe'].filter(Boolean)) {
     try { if (spawnSync(c, ['--version'], { timeout: 20000 }).status === 0) return c; } catch { /* 다음 후보 */ }
@@ -51,7 +53,7 @@ function splitEmojiRuns(xml) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'metafactory-guide-')), docx = path.join(tmp, 'USER_GUIDE.docx');
   try {
     fs.writeFileSync(docx, await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
-    const r = spawnSync(soffice(), ['--headless', '--convert-to', 'pdf', '--outdir', tmp, docx], { encoding: 'utf8', timeout: 600000 });
+    const r = spawnSync(soffice(), ['--headless', '--convert-to', PDF_FILTER, '--outdir', tmp, docx], { encoding: 'utf8', timeout: 600000 });
     const pdf = path.join(tmp, 'USER_GUIDE.pdf');
     if (r.status !== 0 || !fs.existsSync(pdf)) throw new Error(`PDF 변환 실패: ${r.stderr || r.stdout || r.status}`);
     fs.mkdirSync(path.dirname(OUT), { recursive: true }); fs.copyFileSync(pdf, OUT);
