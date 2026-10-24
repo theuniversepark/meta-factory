@@ -15,7 +15,7 @@ const zoneOf = (key) => (key === 'insp' ? { key: 'insp', name: '정밀검사Zone
 // 셀 종류별 제약: 머신텐딩(5축·선반)은 6축 1대 고정 · 비전 게이지 셀은 로봇 없음 고정 · 정밀검사는 6축 0~2대(O-INSPECT 1대)
 function limits(key, c) {
   if (key === 'insp') return { kinds: ['articulated'], max: c.type === 'oins' ? 1 : c.type === 'dock' || c.type === 'judge' ? 0 : 2, min: 0, lockKind: true };
-  if (c.type === 'mill5' || c.type === 'turn') return { kinds: ['articulated'], max: 1, min: 1, lockKind: true, why: '머신텐딩 — 6축 1대가 문 열림에 맞춰 넣고 뺀다' };
+  if (c.type === 'mill5' || c.type === 'turn' || c.type === 'deburr') return { kinds: ['articulated'], max: 1, min: 1, lockKind: true, why: c.type === 'deburr' ? '머신텐딩 6축 1대 (부스·세척기 이송 6축은 설비에 딸림)' : '머신텐딩 — 6축 1대가 문 열림에 맞춰 넣고 뺀다' };
   if (c.type === 'vision') return { kinds: ['none'], max: 0, min: 0, lockKind: true, why: '비전·치수 게이지 셀 (로봇 없음)' };
   const max = MAX_BY_TYPE[c.type] ?? 2;
   return { kinds: ['cobot', 'articulated'], max, min: 1, lockKind: false, why: max < 4 ? `셀 설비 자리 기준 최대 ${max}대 (간섭 점검 — 그 이상은 로봇이 설비·옆 로봇과 겹침)` : null };

@@ -1,6 +1,6 @@
 {
   "name": "meta-factory",
-  "version": "1.0.35",
+  "version": "1.0.36",
   "description": "제조공정·스마트팩토리·다크팩토리 3D 시뮬레이션 에이전트",
   "main": "electron/main.mjs",
   "scripts": {

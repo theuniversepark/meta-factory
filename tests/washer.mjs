@@ -2,7 +2,7 @@
 // 차압이 요청선을 넘으면 필터 교체 정비 요청 → 정비 인력이 필터 유닛 앞으로 출동 → 교체(셀 정지) → 차압 회복 · FAC 설비보전 기록,
 // 레거시는 차압 센서가 없어 경보선에서 교체, 세척 단계별 센서값, 데이터(MQTT 토픽) · CMM 품질 표본 · 세척기 진행률을 확인한다. 실행: npm test
 import { Simulation, MAINT_KO } from '../js/sim.js';
-import { WASH_SPEC, WASH_SENSORS, WASH_TOPIC, washQ, washPhase } from '../js/washer.js';
+import { WASH_SPEC, WASH_SENSORS, WASH_TOPIC, washQ, washPhase, boothPhase } from '../js/washer.js';
 import { QSPEC } from '../js/zonekpi.js';
 import { EXTRA_ZONES, zoneCellAux } from '../js/zonedefs.js';
 let pass = 0, fail = 0;
@@ -11,11 +11,11 @@ const items = (W, n, from = 0) => { const out = []; for (let k = 0; k < n; k++) 
 
 console.log('== 구성');
 const D = EXTRA_ZONES.find((z) => z.key === 'adapt').cells.HB_DEBR;
-check('유압블록 디버링셀에 세척기 · 이송 6축 1대 (레거시는 없음)', D.wash === true && zoneCellAux(D, 'dark') === 1 && zoneCellAux(D, 'smart') === 1 && zoneCellAux(D, 'traditional') === 0);
+check('유압블록 디버링셀: 셀 로봇 = 텐딩 6축 1대 · 부스·세척기 이송 6축 1대 (레거시는 없음)', D.wash === true && D.robot.join() === 'articulated,1' && zoneCellAux(D, 'dark') === 1 && zoneCellAux(D, 'smart') === 1 && zoneCellAux(D, 'traditional') === 0);
 check('센서 6종 · 정비 종류 이름', WASH_SENSORS.length === 6 && MAINT_KO.filter === '세척기 필터 교체');
 check('Zone 대시보드 품질 특성에 청정도 (최대 입자 · 잔류 오염량)', QSPEC.adapt.particle?.usl === WASH_SPEC.maxParticle && QSPEC.adapt.residue?.usl === WASH_SPEC.maxResidue);
-check('세척기 진행률: 드릴·디버링 중 0 · 이송 0.14 · 세척 끝 0.89 · 끝 1', washQ(0.5) === 0 && Math.abs(washQ(0.8) - 0.14) < 1e-9 && Math.abs(washQ(0.9) - 0.89) < 1e-9 && washQ(1) === 1);
-check('세척 단계: 고압수 디버링 → 랜스 세척 → 건조', washPhase(0.3) === 'hp' && washPhase(0.5) === 'lance' && washPhase(0.7) === 'dry' && washPhase(0.05) === null && washPhase(0.9) === null);
+check('이송 진행률: 머신텐딩(앞 절반) 동안 0 · 뒤 절반 0 ~ 1', washQ(0.3) === 0 && washQ(0.5) === 0 && Math.abs(washQ(0.75) - 0.5) < 1e-9 && washQ(1) === 1);
+check('세척 단계: 고압 분사 → 랜스 세척 → 건조 (부스 워터젯 디버링 뒤)', washPhase(0.73) === 'hp' && washPhase(0.78) === 'lance' && washPhase(0.82) === 'dry' && washPhase(0.35) === null && washPhase(0.9) === null && boothPhase(0.35) === 'wj' && boothPhase(0.73) === null);
 
 console.log('== 새 필터: 청정도 규격 안 · 재세척 드묾');
 const s = new Simulation('dark', 11, { quiet: true }), W = s.washer, fac = s.zoneCell('adapt', 'HB_DEBR');
@@ -34,7 +34,7 @@ const late = mid.slice(-25), rwLate = late.filter((it) => it.wash.passes > 1).le
 check('차압 요청선(0.9bar)에서 필터 교체 정비 요청', fac.request?.kind === 'filter' && reqAt >= WASH_SPEC.dpRequest && reqAt < WASH_SPEC.dpRequest + 0.05, `요청 때 차압 ${reqAt?.toFixed(3)}bar`);
 check('막히기 직전 25개 재세척이 새 필터 때보다 많음 (IoT는 그래도 소수)', rwLate > 0 && rwLate / 25 > rw0 / 40 && rwLate <= 12, `새 필터 ${rw0}/40 → 막힘 ${rwLate}/25`);
 check('정비 요청 이벤트 · 로그 · FAC 정비요청 (세척기 백필터 교체)', W.events[0]?.kind === 'request' && sent.some((x) => x.topic === `${WASH_TOPIC}/event`) && s.fac.db.mr.some((m) => m.name.includes('세척기 백필터 교체')));
-check('필터 교체는 필터 유닛 앞(세척기 동쪽)으로 · 점검 자리는 세척기 반대쪽', fac.svcWash && fac.svcWash.x > fac.x + 5 && fac.scan.x < fac.svc.x, `필터 유닛 앞 (${fac.svcWash?.x.toFixed(1)}, ${fac.svcWash?.z.toFixed(1)})`);
+check('필터 교체는 필터 유닛 앞(세척기 동쪽)으로 · 점검 자리는 세척기 반대쪽', fac.svcWash && fac.svcWash.x > fac.x + 4.5 && fac.scan.x < fac.svc.x, `필터 유닛 앞 (${fac.svcWash?.x.toFixed(1)}, ${fac.svcWash?.z.toFixed(1)})`);
 
 console.log('== 정비 인력 출동 → 교체 → 차압 회복');
 const dpBefore = W.dp; let maintSeen = false, t = 0;
@@ -51,15 +51,15 @@ W.cond = WASH_SPEC.condBath + 50; W.maintained();
 check('전도도 기준 초과면 세척액 교체', W.cond < WASH_SPEC.cond0 + 30 && W.stats.bathChanges === 1);
 
 console.log('== 세척 단계별 센서값');
-const cell = { id: 'HB_DEBR', state: 'BUSY', progress: 0.825, fault: null, halt: false };   // q ≈ 0.33 → 고압수 디버링
+const cell = { id: 'HB_DEBR', state: 'BUSY', progress: 0.865, fault: null, halt: false };   // q 0.73 → 고압 분사 세척
 s.xzones = { byKey: (k) => (k === 'adapt' ? { cells: { HB_DEBR: cell } } : null) };
 W.acc = 1; W.tick(0); const hp = { ...W.latest };
-cell.progress = 0.88; W.acc = 1; W.tick(0); const dry = { ...W.latest };
+cell.progress = 0.91; W.acc = 1; W.tick(0); const dry = { ...W.latest };
 cell.state = 'IDLE'; W.acc = 1; W.tick(0); const idle = { ...W.latest };
-check('고압수 디버링 중 압력 ≈ 600bar · 유량 ≈ 120L/min', hp.phase === 'hp' && hp.pressure > 560 && hp.flow > 110, `${hp.pressure}bar · ${hp.flow}L/min`);
+check('고압 분사 세척 중 압력 ≈ 600bar · 유량 ≈ 120L/min', hp.phase === 'hp' && hp.pressure > 560 && hp.flow > 110, `${hp.pressure}bar · ${hp.flow}L/min`);
 check('건조 중 열풍 ≈ 80°C · 펌프 멈춤', dry.phase === 'dry' && dry.dryTemp > 75 && dry.pressure < 10, `${dry.dryTemp}°C`);
 check('대기 중 압력·유량 0 근처 · 경보 없음', idle.pressure < 10 && idle.flow === 0 && Object.values(W.levels).every((l) => l === 'ok'));
-W.dp = 1.25; cell.state = 'BUSY'; cell.progress = 0.825; W.acc = 1; W.tick(0);
+W.dp = 1.25; cell.state = 'BUSY'; cell.progress = 0.865; W.acc = 1; W.tick(0);
 check('차압 경보 · 막힌 필터로 압력 떨어짐', W.levels.dp === 'alarm' && W.latest.pressure < 560, `${W.latest.pressure}bar`);
 check('샘플 MQTT (5초)', sent.some((x) => x.topic === WASH_TOPIC && x.kind === 'sample'));
 

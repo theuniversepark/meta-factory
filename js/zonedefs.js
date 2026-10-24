@@ -170,8 +170,9 @@ export const EXTRA_ZONES = [
     cells: {
       MATL: { no: '1', type: 'matid', label: '소재 식별·3D측정셀', product: 'shared', use: '소재 판별·가공여유 측정', x: -19, z: 0, cycle: 8, robot: ['cobot', 2, 'ammr', 2] },
       HB_MILL: { no: '2', type: 'mill5', label: '유압블록 5축 가공셀', product: 'hblock', use: '6면 밀링·드릴·탭', x: -9, z: BOT, cycle: 16, robot: ['articulated', 1] },
-      // 세척: 셀 오른쪽 바깥 밀폐형 고압수 디버링·세척기 — 6축 이송 로봇(aux)이 AMR 지그 ↔ 세척기 고정구로 옮긴다 (zones.js buildWasher · js/washer.js)
-      HB_DEBR: { no: '3', type: 'deburr', label: '유압블록 사선·디버링셀', product: 'hblock', use: '사선홀·디버링·세척', x: 1, z: BOT, cycle: 14, robot: ['cobot', 2], wash: true, aux: ['articulated', 1, '세척기 이송'] },
+      // 사선홀 머시닝센터(VF-2 + 4축 틸팅 로터리 · 북쪽) ← 텐딩 6축(셀 로봇) · 워터젯 디버링 부스(남서) · 세척기(남동) ← 이송 6축(aux)
+      // 진행률 0 ~ TEND_END: 머신텐딩(AMR → 기계 → AMR) · 그 뒤: 이송(AMR → 부스 → 세척기 → AMR) (zones.js buildXDrill · buildWjBooth · buildWasher · js/washer.js)
+      HB_DEBR: { no: '3', type: 'deburr', label: '유압블록 사선·디버링셀', product: 'hblock', use: '사선홀 가공·워터젯 디버링·세척', x: 1, z: BOT, cycle: 14, robot: ['articulated', 1], wash: true, aux: ['articulated', 1, '부스·세척기 이송'] },
       RC_MILL: { no: '4', type: 'mill5', label: '리어커버 정밀절삭셀', product: 'rcover', use: '5축 정밀 절삭', x: -9, z: TOP, side: -1, cycle: 18, robot: ['articulated', 1] },
       RC_TURN: { no: '5', type: 'turn', label: '리어커버 선삭·AI품질셀', product: 'rcover', use: '보어 선삭·품질예측', x: 1, z: TOP, side: -1, cycle: 14, robot: ['articulated', 1] },
       CMM: { no: '6', type: 'cmm', label: '초정밀 측정·리워크셀', product: 'shared', use: 'CMM 판정·리워크', x: 10, z: 0, cycle: 10, robot: ['cobot', 2, 'ammr', 2] },
@@ -236,7 +237,10 @@ export const extraCellBoxes = () => EXTRA_ZONES.flatMap((Z) => Object.entries(Z.
 // 확장 Zone 셀 로봇 · 운반 AMR 고유 ID (정밀조립 RB-셀-번호 · AM-번호와 같은 꼴, Zone 코드 접두) — 3D 화면(zones.js)·DataHub·FAC이 같은 규칙을 쓴다
 // 셀 로봇 수는 단계마다 다르다: robot [종류, 대수, 피지컬AI 종류, 피지컬AI 대수] — 레거시는 작업자라 로봇이 없다
 export const zoneCellRobots = (c, modeKey) => (modeKey === 'traditional' ? { kind: null, count: 0 } : modeKey === 'dark' && c.robot[2] ? { kind: c.robot[2], count: c.robot[3] } : { kind: c.robot[0], count: c.robot[0] === 'none' ? 0 : c.robot[1] });
-// 셀 설비에 딸린 로봇 (레시피 대수와 따로 · 레거시는 사람이 옮긴다): 유압블록 디버링셀 세척기 이송 6축
+// 유압블록 사선·디버링셀: 셀 진행률 0 ~ TEND_END는 머신텐딩(사선홀 가공), 그 뒤는 이송 6축이 부스·세척기로 (zones.js · js/machmon.js · js/washer.js)
+export const TEND_END = 0.48;
+export const cellTendQ = (type, p) => (type === 'deburr' ? Math.min(1, p / TEND_END) : p);   // 셀 진행률 → 머신텐딩 진행률
+// 셀 설비에 딸린 로봇 (레시피 대수와 따로 · 레거시는 사람이 옮긴다): 유압블록 디버링셀 부스·세척기 이송 6축
 export const zoneCellAux = (c, modeKey) => (modeKey === 'traditional' || !c.aux ? 0 : c.aux[1]);
 export const zoneRobotUid = (Z, cellId, i) => `${Z.uidp}-RB-${cellId}-${i + 1}`;   // 설비 고유 ID는 영문 (FLX 유연생산 · ADP 적응가공)
 export const zoneAmrUid = (Z, i) => `${Z.uidp}-AM-${String(i + 1).padStart(2, '0')}`;

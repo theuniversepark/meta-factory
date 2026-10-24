@@ -10,9 +10,9 @@ import { blenderOn, cloneAsset, RENDER } from './blender.js';
 import { makeProductMachine } from './product-machines.js';
 import { attachSpotGun, attachSealGun, attachVacuumGripper, attachNutrunner, attachScanner, attachDeburrSpindle, attachAirNozzle, holdPart, makeHose, processMarks } from './endeffectors.js';
 import { pointAt, pathLength, ROBOT_KINDS, PARALLEL_GAIN } from './line.js';
-import { EXTRA_ZONES, ZONE_FAC, zoneRobotUid, zoneAmrUid, ZONE_FG_CAP, zonePack, zoneCtl } from './zonedefs.js';
+import { EXTRA_ZONES, ZONE_FAC, zoneRobotUid, zoneAmrUid, ZONE_FG_CAP, zonePack, zoneCtl, cellTendQ, TEND_END } from './zonedefs.js';
 import { BATTERY, moverRadius, moverWidth } from './sim.js';
-import { washQ, washPhase } from './washer.js';
+import { washQ, washPhase, boothPhase } from './washer.js';
 export { EXTRA_ZONES };
 
 const { std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, makeRobot, ammrContact, contactBox, surfaceY, supportBox, pointWork, alignTool, makeSparks, stepSparks, makeWorker, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK, makeArm, ARM_JOINTS, buildWeld, buildGate, buildVision } = KIT;
@@ -149,11 +149,11 @@ function buildRework(g) {
 }
 // 휴머노이드는 셀 바닥(0.06m)에 서서 AMR 통로 경계선(±0.78m) 바로 바깥 — 두 손이 AMR 위 대상물(폭 ±0.29m · 윗면 1.11m) 가장자리와 윗면에 닿는 거리
 const HUM_SLOT_Z = 0.88;
-// 확장 Zone 6축·협동로봇 접촉 작업 구간(셀 진행률)과 방식 — 헤밍 램(0.45~0.85) · CMM 탐침(0.3~0.6) · 디버링 드릴(0.12~0.42)·세척기 이송(0.72~)과 겹치지 않게
+// 확장 Zone 6축·협동로봇 접촉 작업 구간(셀 진행률)과 방식 — 헤밍 램(0.45~0.85) · CMM 탐침(0.3~0.6) · 과 겹치지 않게
 const CELL_WORK = {
   kit: { from: 0.1, to: 0.85, kind: 'touch' }, locate: { from: 0.1, to: 0.85, kind: 'touch' }, spot: { from: 0.08, to: 0.9, kind: 'press' }, seal: { from: 0.1, to: 0.85, kind: 'trace' },
   hem: { from: 0.08, to: 0.42, kind: 'press' }, mount: { from: 0.1, to: 0.85, kind: 'screw' }, rework: { from: 0.1, to: 0.85, kind: 'press' },
-  matid: { from: 0.1, to: 0.85, kind: 'scan' }, deburr: { from: 0.45, to: 0.7, kind: 'trace' }, cmm: { from: 0.06, to: 0.28, kind: 'trace' },   // 소재 3D 스캔(닿지 않음) · 가장자리 디버링 · 측정 전 에어 블로
+  matid: { from: 0.1, to: 0.85, kind: 'scan' }, cmm: { from: 0.06, to: 0.28, kind: 'trace' },   // 소재 3D 스캔(닿지 않음) · 가장자리 디버링 · 측정 전 에어 블로
 };
 // 머신텐딩 배치 (adaptive-machining TEND): 로봇 −z 1.25m (문 중심선 x −0.1 위 — 팔이 문 열림 폭 1.3m 가운데로 드나든다), 머시닝센터 −z 3.25m (통로 반대쪽, 앞면 −z 2.25m), 테이블 앞 −z 3.05m
 const TEND = { robot: { x: -0.1, z: -1.25 }, mc: { z: -3.25 }, table: { x: -0.1, z: -3.05 } };
@@ -199,6 +199,33 @@ function tendPose(r, p, doorK = 1) {
   const A = J[a], B = J[b], yaw = (q) => (Math.abs(q) > 3 ? PI : q);
   const q = A.map((v, j) => (j === 0 ? yaw(v) + (yaw(B[0]) - yaw(v)) * k : v + (B[j] - v) * k));
   if (r.arm.native) r.arm.pose(...q); else r.arm.pose(q[0], q[1], q[2], q[3], 0, (a === 'table' || b === 'table') ? k * 0.6 : 0);
+}
+// 디버링셀 이송 6축 경로 (q = washQ(p) · 0 ~ 1): [진행률, 자세, 그 구간 동안 블록 위치] — 자세 사이는 관절 보간
+// 몸을 돌릴 때(AMR ↔ 부스 ↔ 세척기)는 팔을 세워 접은 자세(tuck·)에서만 돈다 · 부스(q 0.3 ~ 0.41) · 세척기(q 0.72 ~ 0.85) 동안 그 앞에서 접고 기다린다
+// 접은 자세 ↔ 문 앞(ent)은 로봇 가까이 문 높이로 먼저 내려(mid·) 뻗는다 — 접은 자세에서 바로 뻗으면 든 블록이 높이 지나가며 문 윗부분에 닿는다
+// 블록 위치: amr(AMR 지그) · hand(그리퍼) · booth(부스 고정구) · wash(세척기 고정구) — 집는 순간이 'hand' 구간의 시작 (washer.js washPhase · boothPhase와 같은 진행률)
+const XFER_SEQ = [
+  [0, 'tuckA', 'amr'], [0.03, 'overA', 'amr'], [0.06, 'amr', 'hand'], [0.09, 'overA', 'hand'], [0.12, 'tuckA', 'hand'],
+  [0.16, 'tuckB', 'hand'], [0.175, 'midB', 'hand'], [0.19, 'entB', 'hand'], [0.22, 'booth', 'booth'], [0.25, 'entB', 'booth'], [0.265, 'midB', 'booth'], [0.28, 'tuckB', 'booth'],
+  [0.42, 'tuckB', 'booth'], [0.435, 'midB', 'booth'], [0.45, 'entB', 'booth'], [0.48, 'booth', 'hand'], [0.51, 'entB', 'hand'], [0.525, 'midB', 'hand'], [0.54, 'tuckB', 'hand'],
+  [0.58, 'tuckW', 'hand'], [0.595, 'midW', 'hand'], [0.61, 'entW', 'hand'], [0.64, 'wash', 'wash'], [0.67, 'entW', 'wash'], [0.685, 'midW', 'wash'], [0.7, 'tuckW', 'wash'],
+  [0.86, 'tuckW', 'wash'], [0.875, 'midW', 'wash'], [0.89, 'entW', 'wash'], [0.91, 'wash', 'hand'], [0.93, 'entW', 'hand'], [0.94, 'midW', 'hand'], [0.95, 'tuckW', 'hand'],
+  [0.97, 'tuckA', 'hand'], [0.98, 'overA', 'hand'], [0.99, 'amr', 'amr'], [0.995, 'overA', 'amr'], [1, 'tuckA', 'amr'],
+];
+// 문은 로봇이 드나드는 동안만 열림 (부스 · 세척기) — 접은 자세에서 내려오기 전에 다 열리고, 다시 접은 뒤에 닫힌다 · 진행률로 정해 배속과 관계없다
+export const XFER_DOOR = { booth: [[0.155, 0.295], [0.415, 0.555]], wash: [[0.575, 0.715], [0.855, 0.96]] };
+const doorK = (q, R) => Math.max(0, ...R.map(([a, b]) => Math.min(1, (q - a) / 0.01, (b - q) / 0.01)));
+function xferPose(r, q) {
+  if (!r.xJ) {
+    const P = r.xferPts, ik = (p) => (r.arm.native ? r.arm.ik(...p) : armIK(r.scale ?? 1, ...p)), J = Object.fromEntries(Object.entries(P).map(([k, p]) => [k, ik(p)]));
+    const tuck = (j) => (r.arm.native ? [j[0], ...TEND_TUCK.slice(1)] : j);
+    r.xJ = { ...J, tuckA: tuck(J.amr), tuckB: tuck(J.booth), tuckW: tuck(J.wash) };
+  }
+  let i = 0; while (i < XFER_SEQ.length - 2 && q >= XFER_SEQ[i + 1][0]) i++;
+  const [q0, a, loc] = XFER_SEQ[i], [q1, b] = XFER_SEQ[i + 1], k0 = Math.min(1, Math.max(0, (q - q0) / Math.max(1e-6, q1 - q0))), k = k0 * k0 * (3 - 2 * k0);
+  r.xferLoc = loc; r.tendInside = ['booth', 'wash'].includes(a) || ['booth', 'wash'].includes(b);
+  const A = r.xJ[a], B = r.xJ[b], j = A.map((v, n) => v + (B[n] - v) * k);
+  if (r.arm.native) r.arm.pose(...j); else r.arm.pose(j[0], j[1], j[2], j[3], 0, 0);
 }
 function mcEnclosure(g, w, d, h, z, col) {
   const G = put(new THREE.Group(), 0, 0, z, g);
@@ -262,26 +289,75 @@ function buildTurn(g, cell) {
   return { door: E.door, chuck, turret, tz, coolant: put(makeSparks(0x9fe8ff, 40, 0.035), 0, 0, 0, E.G), chips: put(makeSparks(0xb8bec6, 30, 0.03), 0, 0, 0, E.G), ...mcExtras(E) };
 }
 // 사선가공·디버링: 문형 사선 드릴 헤드 + 양쪽 협동로봇 디버링 + 출구 세척·에어 블로 터널
-// 사선 드릴 문형: 대기(DEBR.rest)일 때 날 끝이 1.86m — 세척기 이송 로봇이 AMR 위 블록을 들어 올려도 날·주축에 닿지 않는다 (문형 0.3m 높임)
-const DEBR = { rest: 2.6, drill: 1.85, beam: 3.1 };
+// ③ 유압블록 사선·디버링셀 — 실제 라인 구성: 사선홀 머시닝센터(북쪽 · 머신텐딩 TEND 배치) ← 텐딩 6축(셀 로봇)
+//   + 워터젯 디버링 부스(남서) · 밀폐 세척기(남동) ← 이송 6축(설비에 딸린 로봇 · AMR 정남쪽 0.4m 받침대)
 function buildDeburr(g, def) {
-  for (const z of [-1.5, 1.5]) put(box(0.14, DEBR.beam - 0.1, 0.14, MAT.steel), -0.35, (DEBR.beam - 0.1) / 2, z, g);
-  put(box(0.22, 0.22, 3.14, MAT.steel), -0.35, DEBR.beam, 0, g);
-  const head = put(new THREE.Group(), -0.35, DEBR.rest, 0, g);
-  put(box(0.3, 0.35, 0.3, MAT.accent), 0, 0.15, 0, head); put(box(0.08, 1.2, 0.08, MAT.steel), 0, 0.85, 0, head);
-  // 사선 주축(헤드 바로 아래에 붙음) + 드릴: 헤드가 내려오면(y 1.85) 날 끝이 지그 위 소재 윗면(약 1.13m)에 닿는다 — 대기(y 2.6) 때는 소재 위 0.75m
-  const spin = put(new THREE.Group(), 0, -0.02, 0, head); spin.rotation.z = 0.5;
-  put(cyl(0.07, 0.07, 0.5, MAT.dark, 14), 0, -0.25, 0, spin);
-  const bit = put(cyl(0.025, 0.04, 0.32, MAT.steel, 10), 0, -0.66, 0, spin);
-  for (const z of [-1.0, 1.0]) { const f = put(box(0.45, 0.7, 0.4, MAT.white), -2.07, 0.35, z, g); for (let k = 0; k < 3; k++) put(cyl(0.025, 0.025, 0.18, MAT.steel, 8), -0.12 + k * 0.12, 0.44, 0, f); }   // 공구 거치대 — 디버링 협동로봇(x −1.3) 작업 반경 밖으로
-  return { head, bit, ...(def?.wash ? { washer: buildWasher(g) } : {}) };
+  const M = buildXDrill(g, def);
+  return { ...M, ...(def?.wash ? { washer: buildWasher(g), booth: buildWjBooth(g) } : {}) };
 }
-// 밀폐형 고압수 디버링·세척기 (로봇 투입형 — 고압수 디버링 · 랜스 분사 세척 · 헹굼 · 열풍 건조) + 동쪽 탱크·필터 유닛 · 지붕 미스트 집진기 · 경광등 · HMI
-// 셀 오른쪽 바깥(캐빈 x 2.28 ~ 4.48, z 1.17 ~ 3.17 · 셀 로컬): 문(서쪽 · 폭 1.6m)이 위로 열리면 이송 로봇이 고정구에 블록을 넣고 뺀다
-// 고정구(WASH.fix)는 AMR 정차 자리(셀 가운데) → 이송 로봇(WASH.robot) 직선(40°) 연장선 위 — 머신텐딩 경로(TEND_SEQ)가 AMR(로봇 뒤 1.57m) ↔ 기계(로봇 앞 1.8m)로 곧게 돈다
-// 로봇 받침(약 0.68m) 가장자리는 AMR 통로(±0.475m)에서 0.2m — AMR은 기본 경로(셀 가운데 → +x)로 그대로 지나간다 · 2m 넘게 뻗으면 블록을 집을 때 아래팔이 블록에 닿는다
-// 이송 로봇은 0.4m 받침대 위 — 아래팔이 위에서 비스듬히 내려와 AMR 위 블록을 집는다 (바닥 높이면 아래팔이 블록 윗면을 쓴다)
-export const WASH = { robot: { x: 1.2, z: 1.01, y: 0.4 }, fix: { x: 2.58, y: 0.98, z: 2.17 }, cab: { x: 3.38, z: 2.17, w: 2.2, d: 2.0, h: 2.4 }, door: { w: 1.6, y0: 0.45, h: 1.5 } };
+// 사선홀 머시닝센터: Haas VF-2(3축 수직 · 공식 사양) + 4축 틸팅 로터리 크래들 — 크래들을 기울여 블록 옆면에 사선홀을 뚫는다 (가공 중에만 기울임 · 문 열 때는 수평)
+// 크래들 높이만큼 소재·집는 자리(fixture)를 올린다 — 텐딩 로봇 경유점은 고정구 위치에서 계산 (buildCrew)
+function buildXDrill(g, cell) {
+  const product = makeProductMachine('vf2', g, [0, 0, TEND.mc.z]);
+  if (!product) return buildMill5(g, cell);   // 모델이 없으면 간이 머시닝센터
+  const Mc = product.machine; Mc.configureWorkpiece(PRODUCT_DIM[cell.product]);
+  const F = Mc.nodes.Fixture, part = F?.getObjectByName('ProcessWorkpiece');
+  if (F && part) {
+    const cradle = put(new THREE.Group(), 0, 0.07, 0, F); cradle.name = 'TiltCradle';
+    for (const sx of [-1, 1]) put(box(0.05, 0.16, 0.34, MAT.dark), sx * 0.38, 0.03, 0, F);   // 틸팅 축받이 (좌우)
+    put(cyl(0.16, 0.16, 0.05, MAT.steel, 20), 0, -0.02, 0, cradle);   // 로터리 원판
+    cradle.add(part); cradle.add(Mc.fixture);
+    Mc.cradle = cradle;
+  }
+  // 기계 앞면·오른쪽 옆면 (셀 로컬) — 상태 감시 센서 자리 (addCMSensors)
+  g.updateWorldMatrix(true, true); const bb = new THREE.Box3().setFromObject(product.machine.root), inv = g.matrixWorld.clone().invert(); bb.applyMatrix4(inv);
+  return { ...product, front: bb.max.z, side: bb.max.x };
+}
+// 워터젯 디버링 부스 (로봇 투입형): 밀폐 캐빈 · 롤업 셔터(동쪽 — 이송 로봇 쪽) · 회전 고정구 · 워터젯 노즐 헤드(교차홀마다 고압수로 버 제거) · 관찰창 · 미스트 집진기 · 경광등 · HMI
+// + 서쪽 고압 인텐시파이어 펌프 유닛 — 셀 남서쪽 (캐빈 x −2.85 ~ −1.45, z 1.0 ~ 2.6 · 셀 로컬) · AMR 들어오는 길(z ±0.475)과 0.5m 이상
+export const WJB = { fix: { x: -1.75, y: 0.98, z: 1.8 }, cab: { x: -2.15, z: 1.8, w: 1.4, d: 1.6, h: 2.5 }, door: { w: 1.1, y0: 0.5, h: 1.7 } };   // 문 위 끝 2.2m — 접은 자세에서 내려오는 든 블록이 말린 셔터 아래를 지난다
+function buildWjBooth(g) {
+  const C = WJB.cab, D = WJB.door, W = put(new THREE.Group(), C.x, 0, C.z, g); W.name = 'WaterjetBooth';
+  const hx = C.w / 2, hz = C.d / 2, top = C.h, body = std(0xb9c3cc, { metalness: 0.55, roughness: 0.35 }), frame = std(0x2f6f8f, { metalness: 0.4, roughness: 0.45 }), wall = (w, h, d, x, y, z, m = body) => put(box(w, h, d, m), x, y, z, W);
+  wall(C.w, 0.3, C.d, 0, 0.15, 0, MAT.dark);   // 받침 (배수 · 칩 받이)
+  wall(0.06, top - 0.3, C.d, -hx + 0.03, 0.3 + (top - 0.3) / 2, 0);   // 서쪽 벽
+  wall(C.w, top - 0.3, 0.06, 0, 0.3 + (top - 0.3) / 2, -hz + 0.03);   // 북쪽 벽
+  wall(C.w, 0.6, 0.06, 0, 0.6, hz - 0.03); wall(C.w, top - 1.7, 0.06, 0, 1.7 + (top - 1.7) / 2, hz - 0.03);   // 남쪽 벽 — 가운데 관찰창
+  for (const sx of [-1, 1]) wall(0.3, 0.8, 0.06, sx * (hx - 0.15), 1.3, hz - 0.03);
+  put(box(C.w - 0.6, 0.8, 0.03, MAT.glass, false), 0, 1.3, hz - 0.03, W);
+  wall(C.w, 0.08, C.d, 0, top - 0.04, 0);   // 지붕
+  const sw = (C.d - D.w) / 2;   // 동쪽(문) 면
+  for (const s of [-1, 1]) wall(0.06, top - 0.3, sw, hx - 0.03, 0.3 + (top - 0.3) / 2, s * (D.w / 2 + sw / 2));
+  wall(0.06, D.y0 - 0.3, D.w, hx - 0.03, 0.3 + (D.y0 - 0.3) / 2, 0); wall(0.06, top - D.y0 - D.h, D.w, hx - 0.03, D.y0 + D.h + (top - D.y0 - D.h) / 2, 0);
+  const door = put(new THREE.Group(), hx + 0.04, D.y0 + D.h, 0, W), shutter = put(new THREE.Group(), 0, 0, 0, door);   // 롤업 셔터
+  put(box(0.05, D.h + 0.06, D.w + 0.06, frame), 0, -(D.h + 0.06) / 2, 0, shutter); put(box(0.02, 0.35, 0.5, MAT.glass, false), 0.03, -D.h * 0.38, 0, shutter);
+  put(cyl(0.08, 0.08, D.w + 0.12, frame, 14), 0.04, 0.1, 0, door).rotation.x = PI / 2;
+  // 회전 고정구 (블록을 놓는 자리) · 워터젯 노즐 헤드 (위에서 내려와 교차홀마다)
+  const fx = WJB.fix.x - C.x, fz = WJB.fix.z - C.z;
+  put(cyl(0.07, 0.09, WJB.fix.y - 0.35, MAT.steel, 12), fx, 0.3 + (WJB.fix.y - 0.35) / 2, fz, W);
+  const fixture = put(new THREE.Group(), fx, WJB.fix.y, fz, W); fixture.name = 'BoothFixture';
+  put(cyl(0.26, 0.26, 0.05, frame, 24), 0, -0.025, 0, fixture);
+  const head = put(new THREE.Group(), fx - 0.1, 1.85, fz, W); put(box(0.14, 0.18, 0.14, MAT.accent), 0, 0, 0, head);
+  const nozzle = put(new THREE.Group(), 0, -0.09, 0, head); put(cyl(0.012, 0.02, 0.32, MAT.steel, 8), 0, -0.16, 0, nozzle);
+  put(box(0.06, 0.5, 0.06, MAT.steel), 0, 0.33, 0, head);   // 노즐 상하축
+  const lightMat = emis(0x9fe8ff, 0.2); put(box(0.8, 0.03, 0.25, lightMat, false), 0, top - 0.12, 0, W);
+  const spray = put(makeSparks(0xc8f3ff, 90, 0.03), 0, 0, 0, W);
+  const mc = put(new THREE.Group(), -0.2, top, -0.3, W); put(box(0.6, 0.4, 0.5, frame), 0, 0.2, 0, mc);   // 미스트 집진기
+  const lamp = put(new THREE.Group(), hx - 0.12, top, -hz + 0.12, W); put(cyl(0.02, 0.02, 0.3, MAT.dark, 6), 0, 0.15, 0, lamp);
+  const lampMats = [0x3ddc84, 0xf5b82e, 0xff5a5a].map((c, k) => { const m = emis(c, 0.25); put(cyl(0.05, 0.05, 0.09, m, 12), 0, 0.34 + k * 0.095, 0, lamp); return m; });
+  const screen = emis(0x3ddc84, 1.2), hmi = put(new THREE.Group(), hx + 0.12, 1.4, hz - 0.12, W); hmi.rotation.y = PI / 2;   // 동쪽 면 남쪽 끝 (문 옆)
+  put(box(0.36, 0.3, 0.14, MAT.dark), 0, 0, 0, hmi); put(box(0.3, 0.22, 0.02, screen, false), 0, 0.01, 0.08, hmi);
+  // 고압 인텐시파이어 펌프 유닛 (서쪽 · 캐빈과 배관)
+  const U = put(new THREE.Group(), -hx - 0.45, 0, 0, W); U.name = 'WaterjetPump';
+  put(box(0.7, 1.0, 1.1, std(0x3c6e9e, { metalness: 0.3, roughness: 0.5 })), 0, 0.5, 0, U);
+  put(cyl(0.09, 0.09, 0.7, MAT.steel, 12), 0, 1.15, -0.2, U).rotation.x = PI / 2;   // 증압 실린더
+  const gaugeMat = emis(0x3ddc84, 1.2), gauge = put(new THREE.Group(), 0.36, 0.8, 0.3, U); put(cyl(0.06, 0.06, 0.04, MAT.dark, 14), 0, 0, 0, gauge).rotation.z = PI / 2; put(box(0.01, 0.08, 0.08, gaugeMat, false), 0.025, 0, 0, gauge);
+  return { root: W, door, shutter, fixture, head, nozzle, lightMat, spray, lampMats, screen, gaugeMat, doorK: 0 };
+}
+// 밀폐 세척기 (로봇 투입형 — 고압 분사 세척 · 랜스 분사 세척 · 열풍 건조 · 디버링은 워터젯 부스) + 동쪽 탱크·필터 유닛 · 지붕 미스트 집진기 · 경광등 · HMI
+// 셀 남동쪽(캐빈 x 1.5 ~ 3.7, z 1.1 ~ 3.1 · 셀 로컬): 문(서쪽 · 폭 1.8m)이 위로 열리면 이송 로봇이 고정구에 블록을 넣고 뺀다
+// 이송 로봇(WASH.robot)은 AMR 정남쪽 1.5m · 0.4m 받침대 위 — 받침 가장자리가 AMR 통로(±0.475m)에서 0.7m · AMR 블록(뒤 · 북쪽) · 부스(서쪽 1.8m) · 세척기(동쪽 1.9m)를 돌아 가며
+export const WASH = { robot: { x: 0, z: 1.5, y: 0.4 }, fix: { x: 1.8, y: 0.98, z: 2.1 }, cab: { x: 2.6, z: 2.1, w: 2.2, d: 2.0, h: 2.4 }, door: { w: 1.8, y0: 0.45, h: 1.5 } };   // 문 폭 1.8m — 로봇이 문을 18° 비스듬히 보아 든 블록 모서리가 옆판 쪽으로 쓸린다
 const WASH_MAT = { body: std(0xc9ced4, { metalness: 0.6, roughness: 0.35 }), frame: std(0x5a6470, { metalness: 0.5, roughness: 0.4 }), tank: std(0x3c6e9e, { metalness: 0.3, roughness: 0.5 }) };
 function buildWasher(g) {
   const C = WASH.cab, D = WASH.door, W = put(new THREE.Group(), C.x, 0, C.z, g); W.name = 'Washer';
@@ -378,23 +454,23 @@ function addCMSensors(g, def, parts) {
   const M = put(new THREE.Group(), 0, 0, 0, g); M.name = 'ConditionMonitoring';
   const dev = (parent, x, y, z) => { const o = put(new THREE.Group(), x, y, z, parent); return o; };
   const sensorPod = (parent, x, y, z) => { const o = dev(parent, x, y, z); put(cyl(0.025, 0.025, 0.05, CM_MAT.sensor, 10), 0, 0, 0, o); put(cyl(0.006, 0.006, 0.12, CM_MAT.body, 6), 0, 0.08, 0, o); return o; };   // 가속도계·AE·온도: 금색 센서 + 케이블
-  const front = def.type === 'mill5' ? -1.78 : def.type === 'turn' ? -2.08 : 0, side = def.type === 'mill5' ? 1.85 : 2.01;   // 기계 앞면(문) z · 오른쪽 옆면 x (UMC-1250 · ST-40 모델 실측, 셀 로컬)
+  const front = parts?.front ?? (def.type === 'mill5' ? -1.78 : def.type === 'turn' ? -2.08 : 0), side = parts?.side ?? (def.type === 'mill5' ? 1.85 : 2.01);   // 디버링셀 VF-2는 모델에서 잰 값 (buildXDrill)   // 기계 앞면(문) z · 오른쪽 옆면 x (UMC-1250 · ST-40 모델 실측, 셀 로컬)
   // 공구 검사 카메라: 문 위 앞판에서 안쪽 아래(공구 교환 위치)를 본다 · 링 조명
-  const cam = dev(M, def.type === 'deburr' ? -0.35 : -1.25, def.type === 'deburr' ? 2.92 : def.type === 'turn' ? 2.2 : 2.55, def.type === 'deburr' ? 0.35 : front + 0.09);   // 문(x −0.55~0.65 · 열리면 오른쪽) 왼쪽 위 — 로봇이 드나드는 문 앞을 비운다
+  const cam = dev(M, -1.25, def.type === 'turn' ? 2.2 : 2.55, front + 0.09);   // 문(x −0.55~0.65 · 열리면 오른쪽) 왼쪽 위 — 로봇이 드나드는 문 앞을 비운다
   put(box(0.12, 0.09, 0.16, CM_MAT.body), 0, 0, 0, cam); const ln = put(cyl(0.03, 0.03, 0.04, CM_MAT.lens, 12), 0, -0.05, 0.05, cam); ln.rotation.x = -0.6;
   put(new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.008, 6, 16), CM_MAT.led), 0, -0.07, 0.07, cam).rotation.x = Math.PI / 2 - 0.6;
   // 주축 머리 센서: 머시닝센터 Head · 선반 Turret · 디버링 head (없으면 기계 위 앞쪽)
   const head = parts?.head ?? parts?.machine?.nodes?.Head ?? parts?.turret ?? parts?.machine?.nodes?.Turret ?? null;
   if (head) { sensorPod(head, 0.12, 0.05, 0.12); sensorPod(head, -0.12, 0.05, 0.12); sensorPod(head, 0, 0.12, -0.12); }
   else for (const x of [-0.3, 0, 0.3]) sensorPod(M, x, 2.2, front - 0.3);
-  if (def.type !== 'deburr') {
+  {
     // 절삭유 유량계 (기계 왼쪽 아래 배관) · 레이저 공구 측정기 (테이블 옆 — 문 안쪽)
     const fl = dev(M, -1.6, 0.35, front + 0.1); put(box(0.14, 0.14, 0.14, CM_MAT.pipe), 0, 0, 0, fl); put(cyl(0.025, 0.025, 0.5, std(0x9aa3ad, { metalness: 0.7 }), 8), 0, 0, 0, fl).rotation.z = Math.PI / 2; put(box(0.06, 0.04, 0.01, CM_MAT.led, false), 0, 0.04, 0.075, fl);
     const ls = dev(M, -1.25, 1.0, front + 0.06);   // 레이저 공구 측정기 (앞면 왼쪽 · 공구 교환 위치와 같은 높이 표시) put(box(0.08, 0.12, 0.06, CM_MAT.body), 0, 0, 0, ls); put(box(0.08, 0.12, 0.06, CM_MAT.body), 0.2, 0, 0, ls); put(box(0.2, 0.004, 0.004, emis(0xff3030, 3), false), 0.1, 0.03, 0, ls);   // 송·수광부 + 레이저 빔
   }
   // 엣지 AI 박스 (IPC): 기계 오른쪽 옆면 · 상태 LED · 안테나 (5G 모뎀)
-  const ipc = dev(M, def.type === 'deburr' ? -0.35 : side + 0.07, def.type === 'deburr' ? 1.0 : 1.3, def.type === 'deburr' ? -1.64 : front - 0.8);   // 오른쪽 옆면 · 디버링은 드릴 문형 북쪽 기둥 (남쪽은 세척기 이송 로봇 자리)
-  ipc.rotation.y = def.type === 'deburr' ? Math.PI : Math.PI / 2;   // 옆면에 붙여 바깥을 봄
+  const ipc = dev(M, side + 0.07, 1.3, front - 0.8);   // 오른쪽 옆면
+  ipc.rotation.y = Math.PI / 2;   // 옆면에 붙여 바깥을 봄
   put(box(0.24, 0.3, 0.12, CM_MAT.body), 0, 0, 0, ipc); put(box(0.18, 0.04, 0.01, CM_MAT.led, false), 0, 0.08, 0.065, ipc); put(cyl(0.006, 0.006, 0.16, CM_MAT.body, 6), 0.08, 0.23, 0, ipc);
   return M;
 }
@@ -526,7 +602,7 @@ class ExtraZone {
     const edge = new THREE.MeshBasicMaterial({ color: 0x37e8ff, transparent: true, opacity: 0.55 });
     for (let x = F.x0; x < F.x1; x += 1.6) for (const z of [F.z0, F.z1]) flat(Math.min(1.0, F.x1 - x), 0.12, edge, x + 0.5, z, 0.012);
     for (let z = F.z0; z < F.z1; z += 1.6) for (const x of [F.x0, F.x1]) flat(0.12, Math.min(1.0, F.z1 - z), edge, x, z + 0.5, 0.012);
-    for (const c of Object.values(Z.cells)) flat(5.0, c.type === 'cmm' ? 6.0 : 4.6, new THREE.MeshStandardMaterial({ color: PC[c.product] ?? PC.shared, transparent: true, opacity: 0.3, roughness: 0.9, depthWrite: false }), c.x, c.z, 0.01);
+    for (const c of Object.values(Z.cells)) flat(5.0, c.type === 'cmm' || c.type === 'deburr' ? 6.0 : 4.6, new THREE.MeshStandardMaterial({ color: PC[c.product] ?? PC.shared, transparent: true, opacity: 0.3, roughness: 0.9, depthWrite: false }), c.x, c.z, 0.01);
     // Zone 이름·라인 설명: 셀·AMR 길을 비킨 빈 바닥 (Z.floor — 정밀조립Zone 바닥 글씨와 같은 꼴: 왼쪽 정렬 · 라인 색)
     const FL = Z.floor;
     this.titleAt = { x: FL.title.x, z: FL.title.z };
@@ -812,9 +888,8 @@ class ExtraZone {
         continue;
       }
       if (!count || kind === 'none') { c.rb.textContent = c.def.type === 'vision' ? '📷 비전·치수 게이지' : ''; continue; }
-      const tend = c.def.type === 'mill5' || c.def.type === 'turn';
+      const tend = c.def.type === 'mill5' || c.def.type === 'turn' || c.def.type === 'deburr';   // 머신텐딩 (디버링셀: 사선홀 머시닝센터)
       const slots = tend ? [[TEND.robot.x, TEND.robot.z, PI]] : [[-0.75, -1.75, 0], [-0.75, 1.75, PI], [0.95, -1.75, 0], [0.95, 1.75, PI]];
-      if (c.def.type === 'deburr') slots.forEach((s) => (s[0] = -1.3));
       if (c.def.type === 'cmm' && kind === 'ammr') slots.forEach((s) => (s[0] = 0));   // CMM 양팔 로봇(피지컬AI): 도킹 정면(x 0) — 넓힌 문형 다리(z ±2.7) 안쪽 · 협동로봇(자동화)은 x −0.75 그대로
       if (c.def.type === 'hem') slots[0] = [HEM.robot.x, HEM.robot.z, 0];
       if (c.def.type === 'hem') put(box(0.45, HEM.robot.y - 0.06, 0.45, MAT.dark), HEM.robot.x, (HEM.robot.y + 0.06) / 2, HEM.robot.z, c.robotsG);   // 헤밍 로봇 받침대   // 헤밍: 프레스 앞(통로 쪽) 비스듬히 — AMR 위 패널과 프레스 베드 양쪽에 닿는 자리 (프레스 기둥 사이 앞쪽으로 팔이 들어간다)
@@ -830,7 +905,6 @@ class ExtraZone {
           else if (c.def.type === 'hem') r.tool = attachVacuumGripper(r.arm);
           else if (c.def.type === 'kit') { r.held = holdPart(r.tip, 'bracket'); r.tool = r.held; }   // 키팅: 기본 그리퍼로 브래킷을 하나씩
           else if (c.def.type === 'matid') r.tool = attachScanner(r.arm);   // 적응가공 소재 식별·3D 측정: 3D 스캐너
-          else if (c.def.type === 'deburr') r.tool = attachDeburrSpindle(r.arm);   // 디버링: 고속 스핀들 + 버
           else if (c.def.type === 'cmm') r.tool = attachAirNozzle(r.arm);   // 측정 전 에어 블로
           else if (c.def.type === 'mount') { attachNutrunner(r.arm); r.held = holdPart(r.tip, 'hinge'); r.tool = r.held; }   // 정밀 장착: 그리퍼 + 너트러너 — 힌지를 놓고 그 자리에서 체결
         }
@@ -851,30 +925,33 @@ class ExtraZone {
           if (c.def.type === 'turn') target[1] += 0.21; else target[2] -= 0.12;
           r.machineTargets = { ...TEND_PTS, table: target, entry: [target[0], target[1] + .12, Math.max(.5, target[2] - .48)] };
         }
-        if (tend && r.arm) r.anim = (busy, t, p) => { const M = c.parts.machine, dk = Math.min(M?.doorK ?? c.doorK ?? 1, M?.headHome ?? 1); if (busy) tendPose(r, p, dk); else if (c.state !== 'BUSY') tendPose(r, 0, dk); };   // 문이 열리고 스핀들 헤드가 맨 위(원점)로 올라간 뒤에 들어간다
+        if (tend && r.arm) r.anim = (busy, t, p) => { const M = c.parts.machine, dk = Math.min(M?.doorK ?? c.doorK ?? 1, M?.headHome ?? 1); if (busy) tendPose(r, cellTendQ(c.def.type, p), dk); else if (c.state !== 'BUSY') tendPose(r, 0, dk); };   // 디버링셀은 앞부분(TEND_END)에 머신텐딩   // 문이 열리고 스핀들 헤드가 맨 위(원점)로 올라간 뒤에 들어간다
         const sp = idPlate(c.robotUids[i]); sp.position.set(0, kind === 'ammr' ? 2.55 : 2.35, 0); r.root.add(sp); sp.visible = this.labelsOn ?? true; c.plates.push(sp);   // 로봇 위 ID 명판 (정밀조립 셀 로봇과 같은 모양 · 라벨 버튼으로 켜고 끔)
       }
-      // 세척기 이송 로봇 (셀 설비에 딸린 6축 · 레시피 대수와 따로 · zonedefs aux): AMR 지그 → 세척기 고정구 → AMR 지그 — 머신텐딩 경로(tendPose)를 세척기 진행률(washQ)로 돈다
-      // AMR 정차 자리 → 로봇 → 고정구가 한 직선이라 AMR은 로봇 바로 뒤(−z), 고정구는 바로 앞(+z) · 문(c.parts.washer.doorK)이 다 열린 뒤에만 들어간다
-      const Wp = c.parts.washer;
-      if (c.def.aux && Wp) {
-        const i = c.robots.length, r = makeRobot(c.def.aux[0], MAT.orange), A = WASH.robot, back = Math.hypot(A.x, A.z);
+      // 부스·세척기 이송 6축 (셀 설비에 딸린 로봇 · 레시피 대수와 따로 · zonedefs aux): AMR 지그 → 워터젯 부스 → 세척기 → AMR 지그 (XFER_SEQ · xferPose)
+      // AMR 정남쪽 0.4m 받침대 위에서 AMR(북쪽)을 보고 선다 — 부스(서쪽) · 세척기(동쪽)는 팔을 세워 접은 자세에서 몸을 돌려 간다
+      const Wp = c.parts.washer, Bp = c.parts.booth;
+      if (c.def.aux && Wp && Bp) {
+        const i = c.robots.length, r = makeRobot(c.def.aux[0], MAT.orange), A = WASH.robot;
         put(box(0.62, A.y, 0.62, MAT.dark), A.x, A.y / 2, A.z, c.robotsG);   // 받침대
-        put(r.root, A.x, A.y, A.z, c.robotsG); r.root.rotation.y = Math.atan2(WASH.fix.x - A.x, WASH.fix.z - A.z);
+        put(r.root, A.x, A.y, A.z, c.robotsG); r.root.rotation.y = Math.atan2(-A.x, -A.z);   // AMR 쪽을 본다
         r.root.updateWorldMatrix(true, true);
-        // 경유점 높이는 머신텐딩(루트 0.15m)과 같은 공장 높이로 — 받침대만큼 낮춘다 · 손끝 = 고정구 윗면 + 블록 높이 0.13 + 2cm
-        const dy = A.y - 0.15, target = r.root.worldToLocal(Wp.fixture.getWorldPosition(new THREE.Vector3())).toArray(); target[1] = WASH.fix.y + 0.025 + 0.15 - A.y;
-        // 블록 가운데보다 로봇 쪽 G m를 잡는다 (팔을 덜 뻗어 아래팔이 블록 윗면을 쓸지 않게) — 든 블록은 손끝에서 그만큼 바깥에 그린다 (tendPart gripOff)
-        const G = 0.22; target[2] -= G; r.gripOff = G; r.swing = 0.12;
-        r.machineTargets = { ...TEND_PTS, home: [0, TEND_PTS.home[1] - dy, TEND_PTS.home[2]], table: target, entry: [target[0], target[1] + 0.12, Math.max(0.5, target[2] - 0.48)], amr: [0, TEND_PTS.amr[1] - dy, -back + G], over: [0, TEND_PTS.over[1] - dy, -back + 0.35 + G] };
-        r.washXfer = true; r.kind ??= c.def.aux[0];
-        r.anim = (busy, t, p) => { if (busy) tendPose(r, washQ(p), Wp.doorK); else if (c.state !== 'BUSY') tendPose(r, 0, Wp.doorK); };
+        // 경유점 (로봇 루트 기준): 집는 곳은 블록 가운데보다 로봇 쪽 G m (팔을 덜 뻗게 · 든 블록은 손끝에서 그만큼 바깥에 그린다 — tendPart와 같은 gripOff)
+        // 높이는 머신텐딩(루트 0.15m)과 같은 공장 높이 — 받침대만큼 낮춘다 · 부스·세척기는 고정구 윗면 + 블록 높이 0.13 + 2cm
+        const G = 0.22, dy = A.y - 0.15, loc = (o) => r.root.worldToLocal(o.getWorldPosition(new THREE.Vector3())), toward = (v, k) => { const d = Math.hypot(v.x, v.z); return [v.x * (d - k) / d, v.z * (d - k) / d]; };
+        const av = r.root.worldToLocal(c.robotsG.localToWorld(new THREE.Vector3(0, 0, 0))), [ax, az] = toward(av, G), [ox, oz] = toward(av, G + 0.35);
+        // 문 앞(ent)은 고정구에서 0.75m — 든 블록(가로 0.66m)이 문 밖으로 다 나온 뒤에 팔을 접어 올린다 (0.48m면 블록 끝이 문 안에 걸린 채 올라가 문 윗부분에 닿는다)
+        const st = (fix, fy) => { const v = loc(fix), d = Math.hypot(v.x, v.z), [tx, tz] = toward(v, G), [ex, ez] = toward(v, G + 0.75), y = fy + 0.025 + 0.15 - A.y; return { at: [tx, y, tz], ent: [ex, y + 0.12, ez], mid: [(v.x / d) * 0.7, y + 0.37, (v.z / d) * 0.7] }; };   // mid: 로봇에서 0.7m — 든 블록 끝이 문 면에서 떨어진 채 올라간다
+        const SB = st(Bp.fixture, WJB.fix.y), SW = st(Wp.fixture, WASH.fix.y);
+        r.xferPts = { amr: [ax, TEND_PTS.amr[1] - dy, az], overA: [ox, TEND_PTS.over[1] - dy, oz], booth: SB.at, entB: SB.ent, midB: SB.mid, wash: SW.at, entW: SW.ent, midW: SW.mid };
+        r.gripOff = G; r.swing = 0.12; r.washXfer = true; r.kind ??= c.def.aux[0];
+        r.anim = (busy, t, p) => { if (busy) xferPose(r, washQ(p)); else if (c.state !== 'BUSY') xferPose(r, 0); };
         if (dark && !r.wristCameraAnchor && r.tip) { const cam = put(box(0.07, 0.05, 0.06, MAT.dark), 0.07, 0.02, 0, r.tip.parent); put(cyl(0.018, 0.018, 0.02, emis(0x37e8ff, 1.5), 10), 0, 0.035, 0, cam); r.wristCam = true; }
         r.root.traverse((o) => { o.userData.stationId = this.sid(c); o.userData.robotIdx = i; });
         r.phase = i * 1.3; c.robots.push(r); c.robotUids.push(zoneRobotUid(this.Z, c.id, i));
         const sp = idPlate(c.robotUids[i]); sp.position.set(0, 2.35, 0); r.root.add(sp); sp.visible = this.labelsOn ?? true; c.plates.push(sp);
       }
-      c.rb.textContent = `🤖 ${ROBOT_SHORT[kind] ?? kind}×${count}${c.def.aux && Wp ? ` + ${ROBOT_SHORT[c.def.aux[0]] ?? c.def.aux[0]}×${c.def.aux[1]} (${c.def.aux[2]})` : ''}`;
+      c.rb.textContent = `🤖 ${ROBOT_SHORT[kind] ?? kind}×${count}${c.def.aux && Wp && Bp ? ` + ${ROBOT_SHORT[c.def.aux[0]] ?? c.def.aux[0]}×${c.def.aux[1]} (${c.def.aux[2]})` : ''}`;
     }
   }
 
@@ -1324,12 +1401,21 @@ class ExtraZone {
     const q = p < 0.08 ? home.map((v, k) => v + (ik(0.3)[k] - v) * sm(0.02, 0.08, p)) : p < 0.45 ? ik(0.3) : p < 0.52 ? ik(0.3 * (1 - sm(0.45, 0.52, p))) : p < 0.78 ? ik(0) : p < 0.86 ? ik(0.3 * sm(0.78, 0.86, p)) : ik(0.3).map((v, k) => v + (home[k] - v) * sm(0.86, 0.96, p));
     A.pose(...q); r.locCur = q.slice(); r.pwContact = p >= 0.52 && p < 0.78;
   }
-  // 세척기: 문(q < 0.15 · q > 0.85에만 열림 — 이송 로봇 경로와 같은 진행률) · 고압 노즐 회전·물보라 · 랜스 하강 · 건조 김 · 실내 조명 · 경광등 · HMI · 필터 차압계
-  // 정지·고장 중에는 그 자리 · 필터 교체(정비) 중에는 경광등 노랑 · 차압 경보면 빨강
-  animWasher(c, W, busy, p, t, rdt, dts) {
-    const q = busy ? washQ(p) : c.state === 'BUSY' ? null : 0, ph = q != null && busy ? washPhase(q) : null;
-    if (q != null) W.doorK = q < 0.13 || q > 0.87 ? 1 : q < 0.15 ? (0.15 - q) / 0.02 : q > 0.85 ? (q - 0.85) / 0.02 : 0;
-    W.shutter.scale.y = 1 - 0.95 * W.doorK;   // 롤업 셔터 (위 드럼 쪽으로 말림)
+  // 디버링셀 부스·세척기 (이송 진행률 q = washQ(p)): 문은 로봇이 드나드는 동안만 열림(XFER_DOOR) · 정지·고장 중에는 그 자리
+  //  부스(q 0.3 ~ 0.41): 고정구 회전 · 워터젯 노즐 헤드가 교차홀을 따라 움직이며 고압수 · 실내 조명 · 펌프 압력계
+  //  세척기(q 0.72 ~ 0.85): 고압 분사(노즐 회전) → 랜스 → 건조 김 · 필터 교체(정비) 중 경광등 노랑 · 차압 경보면 빨강
+  animXfer(c, P, busy, p, t, rdt, dts) {
+    const W = P.washer, B = P.booth, q = busy ? washQ(p) : c.state === 'BUSY' ? null : 0, ph = q != null && busy ? washPhase(q) : null, wj = q != null && busy && boothPhase(q);
+    if (q != null) { W.doorK = doorK(q, XFER_DOOR.wash); B.doorK = doorK(q, XFER_DOOR.booth); }
+    W.shutter.scale.y = 1 - 0.95 * W.doorK; B.shutter.scale.y = 1 - 0.95 * B.doorK;   // 롤업 셔터 (위 드럼 쪽으로 말림)
+    // 워터젯 부스
+    const bf = { x: WJB.fix.x - WJB.cab.x, z: WJB.fix.z - WJB.cab.z }, u = wj ? (q - 0.3) / 0.11 : 0;
+    B.head.position.set(bf.x - 0.1 + (wj ? Math.sin(u * PI * 4) * 0.18 : 0), wj ? 1.5 + Math.abs(Math.sin(u * PI * 8)) * 0.1 : 1.85, bf.z + (wj ? Math.cos(u * PI * 3) * 0.18 : 0));
+    if (wj) { B.fixture.rotation.y += dts * 1.2; B.nozzle.rotation.y += dts * 40; }
+    stepSparks(B.spray, !!wj, { x: B.head.position.x, y: WJB.fix.y + 0.2, z: B.head.position.z }, rdt, 2.2, -9);
+    B.lightMat.emissiveIntensity = wj ? 2.4 : 0.25; B.screen.emissive.setHex(wj ? 0x9fe8ff : 0x3ddc84); B.gaugeMat.emissive.setHex(wj ? 0x58c4ff : 0x3ddc84);
+    B.lampMats.forEach((m, k) => (m.emissiveIntensity = k === (wj ? 1 : 0) ? 2.5 : 0.25));
+    // 세척기
     if (ph === 'hp') W.hp.rotation.y += dts * 30;
     const ly = ph === 'lance' ? -0.55 + Math.abs(Math.sin(t * 5)) * 0.15 : 0; W.lance.position.y += (1.9 + ly - W.lance.position.y) * Math.min(1, rdt * 8);
     const f = { x: WASH.fix.x - WASH.cab.x, z: WASH.fix.z - WASH.cab.z };
@@ -1342,10 +1428,36 @@ class ExtraZone {
     W.screen.emissive.setHex(maint ? 0xf5b82e : ph === 'dry' ? 0xffb070 : ph ? 0x9fe8ff : 0x3ddc84);
     W.gaugeMat.emissive.setHex(lv === 'alarm' ? 0xff5a5a : lv === 'warn' ? 0xf5b82e : 0x3ddc84);
   }
+  // 디버링셀 이송 6축이 든 블록 (xferPose r.xferLoc): 그리퍼 끝(hand) · 부스 고정구(booth) · 세척기 고정구(wash) 위에 복제본을 둔다 — AMR 위에 없으면 true (tendPart가 지그만 남김)
+  chainPart(c, P, r) {
+    const car = this.carriers.find((k) => k.at === c.id && k.state === 'work' && k.pm), loc = c.state === 'BUSY' && car ? r.xferLoc ?? 'amr' : 'amr';
+    const FIX = /^(Jig_|Clamp_)/, holder = (pm) => { let h = null; pm.traverse((o) => { if (!h && o.children.some((ch) => FIX.test(ch.name))) h = o; }); return h; };
+    if (car?.pm && r.tendHeldKey !== car.item?.id) {   // 대상물마다 소재만 든 복제본 (지그·클램프는 AMR에 남는다) — 운반체 그룹 기준
+      r.tendHeld?.removeFromParent();
+      const cl = car.pm.clone(true), h = holder(car.pm), src = h ? h.children.filter((o) => !FIX.test(o.name)) : [car.pm];
+      cl.traverse((o) => { if (FIX.test(o.name)) o.visible = false; }); cl.visible = false; car.pm.parent.add(cl);
+      const bb = new THREE.Box3(); for (const o of src) bb.expandByObject(o); bb.applyMatrix4(car.pm.parent.matrixWorld.clone().invert());
+      r.tendHeld = cl; r.tendHeldKey = car.item?.id; r.tendTop = bb.isEmpty() ? 0.1 : bb.max.y - car.pm.position.y; r.tendBot = bb.isEmpty() ? 0 : bb.min.y - car.pm.position.y;
+    }
+    const H = r.tendHeld, par = car?.pm?.parent;
+    if (H && par && loc === 'hand') {   // 손끝 아래 · 로봇 쪽을 잡은 만큼(gripOff) 바깥에 — tendPart와 같은 식
+      const tip = par.worldToLocal(r.tip.getWorldPosition(new THREE.Vector3())), base = par.worldToLocal(r.root.getWorldPosition(new THREE.Vector3()));
+      const h = new THREE.Vector3(tip.x - base.x, 0, tip.z - base.z), rad = h.length(), k = 1 - Math.min(1, Math.max(0, (rad - 0.75) / 0.42));
+      if (rad > 1e-3) h.multiplyScalar(((r.swing ?? 0.32) * k * k * (3 - 2 * k) + (r.gripOff ?? 0)) / rad);
+      H.position.set(tip.x + h.x, tip.y - 0.02 - r.tendTop, tip.z + h.z); H.quaternion.copy(car.pm.quaternion);
+    }
+    if (H && par && (loc === 'booth' || loc === 'wash')) {   // 고정구 윗면에 놓인 채로
+      const f = par.worldToLocal((loc === 'booth' ? P.booth : P.washer).fixture.getWorldPosition(new THREE.Vector3()));
+      H.position.set(f.x, f.y + 0.025 - r.tendBot, f.z); H.quaternion.copy(car.pm.quaternion);
+    }
+    const away = !!car && loc !== 'amr';
+    if (H) H.visible = away;
+    return away;
+  }
   // 머신텐딩 소재 옮기기 (로봇 경로 구간 r.tendI — TEND_SEQ): 2~7 AMR에서 집어 들고 감 · 8~12 기계 안(척·테이블) · 13~18 꺼내 들고 옴 · 그 밖 AMR 지그 위
   // 대상물(AMR 위 제품)은 손에 들거나 기계 안에 있는 동안 지그에서 숨기고, 그리퍼 끝에 복제본을, 기계 안에는 기계 작업물을 보인다
-  // 세척기(fixture): 이송 로봇이 든 복제본을 세척 중에는 세척기 고정구 위에 그대로 둔다 (세척기에는 따로 작업물 모델이 없다)
-  tendPart(c, P, { r = c.robots[0], fixture = null } = {}) {
+  // hide: 다른 로봇(디버링셀 이송 6축)이 대상물을 가져가 있음 — 대상물은 숨기고 지그만 남긴다
+  tendPart(c, P, { r = c.robots[0], hide = false } = {}) {
     const car = this.carriers.find((k) => k.at === c.id && k.state === 'work' && k.pm), wp = P.machine ? (c.mcWp ??= P.machine.root.getObjectByName('ProcessWorkpiece')) : null;
     const i = c.state === 'BUSY' && car && r ? r.tendI ?? 0 : 0, held = (i >= 2 && i <= 7) || (i >= 13 && i <= 18), inMc = i >= 8 && i <= 12;
     // 대상물 모델에서 소재만 (지그 판·레일·클램프는 AMR에 남는다)
@@ -1374,13 +1486,9 @@ class ExtraZone {
         const h = holder(j); if (h) for (const o of h.children) o.visible = FIX.test(o.name); else j.visible = false;
         car.pm.parent.add(j); c.tendJig = j;
       }
-      car.pm.visible = !(held || inMc); c.tendJig.visible = held || inMc; c.tendJig.position.copy(car.pm.position); c.tendJig.quaternion.copy(car.pm.quaternion); c.tendPm = car.pm;
+      car.pm.visible = !(held || inMc || hide); c.tendJig.visible = held || inMc || hide; c.tendJig.position.copy(car.pm.position); c.tendJig.quaternion.copy(car.pm.quaternion); c.tendPm = car.pm;
     }
-    if (r?.tendHeld && inMc && car && fixture) {   // 세척기 고정구 윗면에 놓인 채로
-      const f = car.pm.parent.worldToLocal(fixture.getWorldPosition(new THREE.Vector3()));
-      r.tendHeld.position.set(f.x, f.y + 0.025 - r.tendBot, f.z); r.tendHeld.quaternion.copy(car.pm.quaternion);
-    }
-    if (r?.tendHeld) r.tendHeld.visible = (held || (inMc && !!fixture)) && !!car;
+    if (r?.tendHeld) r.tendHeld.visible = held && !!car;
     if (wp) wp.visible = inMc;
   }
   // 헤밍 프레스: 넣고 뺄 때 램을 0.5m 더 열고, 패널이 베드에 있을 때(0.48 ~ 0.62) 다이 아래면이 패널 윗면까지 내려와 누른 뒤 올라간다
@@ -1439,8 +1547,9 @@ class ExtraZone {
       if (r.slot && r.contactKey) { r.root.position.x = r.slot.x; r.root.position.z = r.slot.z; r.body?.pose(); }
       r.anim(busy, t + r.phase, p);
     });
-    if ((c.def.type === 'mill5' || c.def.type === 'turn') && P.machine) this.tendPart(c, P);
-    if (P.washer) { const r = c.robots.find((x) => x.washXfer); if (r) this.tendPart(c, P, { r, fixture: P.washer.fixture }); }   // 세척기 이송: AMR 지그 → 그리퍼 → 고정구 → 그리퍼 → AMR 지그 (지그·클램프는 AMR에 남는다)   // 머신텐딩 소재: AMR 지그 → 그리퍼 → 기계 → 그리퍼 → AMR 지그
+    // 디버링셀 이송 6축: AMR 지그 → 그리퍼 → 부스 → 세척기 → AMR 지그 / 머신텐딩: AMR 지그 → 그리퍼 → 기계 → 그리퍼 → AMR 지그 (지그·클램프는 AMR에 남는다)
+    const xr = P.washer ? c.robots.find((x) => x.washXfer) : null, away = xr ? this.chainPart(c, P, xr) : false;
+    if ((c.def.type === 'mill5' || c.def.type === 'turn' || c.def.type === 'deburr') && P.machine) this.tendPart(c, P, { hide: away });
     const ty = c.def.type, it = c.item, legacy = this.mode === 'traditional';
     if (P.gateSign) {
       const entering = busy && p < 0.18;
@@ -1452,7 +1561,14 @@ class ExtraZone {
     }
     if (P.markMat) P.markMat.emissiveIntensity = c.markT != null && this.time - c.markT < 1.2 ? 6 : 0.35;   // 시리얼 마킹·판독 순간
     if (ty === 'hem' && P.machine && c.robots.some((r) => r.tool)) { if (!c.halt && !this.halted) this.hemPress(c, busy && !c.fault, p, dts); return; }
-    if (P.machine) { P.machine.update({ busy, progress: p, time: t, rdt, dts, frozen: !!c.halt || this.halted, fault: !!c.fault, open: c.robots.some((r) => r.tendInside) || undefined }); return; }   // 팔이 기계 안에 있으면 문을 열어 둔다
+    // 디버링셀은 앞부분(TEND_END)만 머시닝센터 가공 — 진행률을 나눠 주고, 틸팅 크래들은 가공 중에만 기울인다 · 그 뒤 부스·세척기 (animXfer)
+    const tq = cellTendQ(ty, p), tb = busy && (ty !== 'deburr' || p < TEND_END);
+    if (P.machine) {
+      P.machine.update({ busy: tb, progress: tq, time: t, rdt, dts, frozen: !!c.halt || this.halted, fault: !!c.fault, open: c.robots.some((r) => r.tendInside && !r.washXfer) || undefined });   // 팔이 기계 안에 있으면 문을 열어 둔다
+      if (P.machine.cradle && !c.halt) P.machine.cradle.rotation.x = P.machine.cutting ? Math.sin(tq * PI * 4) * 0.3 : 0;
+      if (P.washer && P.booth) this.animXfer(c, P, busy, p, t, rdt, dts);
+      return;
+    }
     switch (ty) {
       case 'locate': P.scan.visible = busy && p > 0.05 && p < 0.45; if (P.scan.visible) P.scan.position.x = Math.sin(p * PI * 6) * 0.7; break;   // 비전 측정 → 로봇 보정 (locateWork)
       case 'spot': stepSparks(P.sparks, legacy && busy && Math.sin(t * 6) > -0.3, { x: -0.3, y: BELT_Y + 0.45, z: 0 }, rdt, 2.2, -7); for (const r of c.robots) { if (r.sparks) stepSparks(r.sparks, !!r.weldOn && busy, r.sparkAt, rdt, 1.5, -9); if (r.flash && !busy) r.flash.visible = false; } break;   // 수작업(레거시)만 셀 가운데 — 로봇은 툴 끝 (toolMarks)
@@ -1461,30 +1577,24 @@ class ExtraZone {
       case 'mount': P.screen.emissive.setHex(busy && Math.sin(t * 10) > 0 ? 0xf5b82e : 0x3ddc84); break;
       case 'vision': { const sc = busy && !legacy; P.scan.visible = sc; if (sc) P.scan.position.x = Math.sin(p * PI * 2) * 0.6; P.ringMat.emissiveIntensity = sc && p > 0.45 && p < 0.55 ? 8 : 0.4; break; }
       case 'rework': stepSparks(P.sparks, busy && Math.sin(t * 5) > 0.2, { x: 0.2, y: 1.0, z: 2.0 }, rdt, 1.2, -6); break;
-      case 'mill5': case 'turn': {
-        const open = !it || p < 0.15 || p > 0.85 || c.robots.some((r) => r.tendInside) ? 1 : 0;
+      case 'mill5': case 'turn': case 'deburr': {   // 간이 머시닝센터 (모델이 없을 때) — 디버링셀은 tq · tb (앞부분만 가공)
+        const open = !it || tq < 0.15 || tq > 0.85 || c.robots.some((r) => r.tendInside && !r.washXfer) ? 1 : 0;
         c.doorK = (c.doorK ?? 0) + (open - (c.doorK ?? 0)) * Math.min(1, dts * 4); P.door.position.x = c.doorK * 1.25;
-        const cut = busy && p > 0.18 && p < 0.82;
-        if (ty === 'mill5') {
+        const cut = tb && tq > 0.18 && tq < 0.82;
+        if (ty !== 'turn') {
           if (cut) P.spindle.rotation.y += dts * 50;
           P.head.position.y += ((cut ? 1.85 + Math.sin(t * 3) * 0.05 : 2.05) - P.head.position.y) * Math.min(1, rdt * 5);
-          P.head.position.x = TEND.table.x + (cut ? Math.sin(p * PI * 9) * 0.2 : 0.7 * (busy ? 1 : 0));
-          P.cradle.rotation.x = cut ? Math.sin(p * PI * 4) * 0.35 : P.cradle.rotation.x * 0.9;
+          P.head.position.x = TEND.table.x + (cut ? Math.sin(tq * PI * 9) * 0.2 : 0.7 * (tb ? 1 : 0));
+          P.cradle.rotation.x = cut ? Math.sin(tq * PI * 4) * 0.35 : P.cradle.rotation.x * 0.9;
           if (cut) P.table.rotation.y += dts * 0.8;
         } else {
           if (cut) P.chuck.rotation.y += dts * 9;
-          P.turret.position.x = TEND.table.x + 0.9 - (cut ? 0.3 + Math.sin(p * PI * 5) * 0.12 : 0);
+          P.turret.position.x = TEND.table.x + 0.9 - (cut ? 0.3 + Math.sin(tq * PI * 5) * 0.12 : 0);
         }
         stepSparks(P.coolant, cut, { x: TEND.table.x, y: 1.25, z: P.tz }, rdt, 1.1, -4);
         stepSparks(P.chips, cut, { x: TEND.table.x, y: 1.15, z: P.tz }, rdt, 1.6, -8);
         P.screen.emissive.setHex(cut ? 0x58c4ff : 0x3ddc84); P.edgeLed.emissive.setHex(legacy ? 0x333333 : 0x3ddc84);
-        break;
-      }
-      case 'deburr': {
-        const drill = busy && p > 0.12 && p < 0.42;
-        P.head.position.y += ((drill ? DEBR.drill : DEBR.rest) - P.head.position.y) * Math.min(1, rdt * 6);
-        if (drill) P.bit.rotation.y += dts * 40;
-        if (P.washer) this.animWasher(c, P.washer, busy, p, t, rdt, dts);
+        if (P.washer && P.booth) this.animXfer(c, P, busy, p, t, rdt, dts);
         break;
       }
       case 'cmm': {

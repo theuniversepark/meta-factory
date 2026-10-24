@@ -4,7 +4,8 @@
 //  ② 정밀조립 AMMR(분류·포장셀): 선반 피킹 구간을 1×·3× 프레임 간격으로 — 팔 ↔ 셀(선반 기둥·빈) · 실제 재생 중 선반에 갈 때 슬롯 줄에서 비껴난 거리
 //  ③ 레거시 지게차: 충전 자리·미니로드 출고 지게차 자리에서 제자리 한 바퀴, 진입 직선 — 차체·포크 ↔ 시설
 //  ④ 적응가공 ⑥CMM(피지컬AI): 진행률 0~1을 501점 — 양팔 로봇 ↔ 문형 겐트리·셀 설비, 로봇 ↔ 로봇, AMR·소재 ↔ 설비, 정비·사족보행 자리 ↔ 레일·다리
-//  ⑤ 적응가공 ③유압블록 디버링셀 세척기(피지컬AI·자동화): 진행률 0~1을 601점 — 이송 6축 ↔ 세척기(문·고정구·벽)·셀 설비, 로봇 ↔ 로봇, 든 블록·AMR ↔ 설비, 정비·필터 교체 자리 ↔ 세척기
+//  ⑤ 적응가공 ③유압블록 디버링셀(피지컬AI·자동화): 진행률 0~1을 601점 — 텐딩 6축 ↔ 사선홀 머시닝센터 · 이송 6축 ↔ 워터젯 부스·세척기(문·고정구·벽)·셀 설비, 로봇 ↔ 로봇, 든 블록·AMR ↔ 설비,
+//     정비·필터 교체 자리 ↔ 세척기·레일, AMR이 셀을 나가는 경로(→ ⑥CMM, 5cm 간격 · 꺾이는 곳은 앞뒤 방향) ↔ 이송 로봇·세척기·겐트리
 // 실행: npm run check:sweeps   결과: outputs/sweeps/report.json
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs'), path = require('node:path');
@@ -93,7 +94,8 @@ const t=window.__twin,v=t.view,wait=ms=>new Promise(r=>setTimeout(r,ms));documen
 const z=t.xzones.zones.find(z=>z.Z.key==='adapt'),c=z.order.find(c=>c.id==='HB_DEBR');let car=null;
 for(let k=0;k<1500;k++){car=z.carriers.find(q=>q.at===c.id&&q.state==='work'&&q.pm);if(car&&c.state==='BUSY'&&(c.progress??0)<0.3)break;car=null;await wait(100);}
 if(!car)return {err:'디버링셀에 소재 없음'};document.getElementById('playBtn').click();await wait(200);
-const p0=c.progress,X=c.robots.find(r=>r.washXfer);if(!X||!c.parts.washer)return {err:'세척기·이송 로봇 없음'};
+const p0=c.progress,X=c.robots.find(r=>r.washXfer);if(!X||!c.parts.washer||!c.parts.booth)return {err:'부스·세척기·이송 로봇 없음'};
+const WORKAT=/ProcessWorkpiece|Fixture|TiltCradle|WashFixture|BoothFixture/;   // 그리퍼가 기계·부스·세척기 고정구 위 소재에 닿는 것은 작업 접촉
 const TOOL=/ToolFlange|ToolTCP|J6_Origin|J5_Origin|WristCamera|Gripper|Finger|tool_left|tool_right|EE_|[LR]_J[67]/;
 const inR=(m)=>c.robots.find(r=>under(m,r.root)),fixed=[];c.g.traverse(m=>{if(solid(m)&&!inR(m)&&!under(m,car.g)){const B=obb(m);if(B&&B.max[1]>0.08)fixed.push(m);}});   // 셀 바닥판(높이 0.06m)은 받침대가 서는 면 — 뺀다 (check-collisions와 같음)
 const res=new Map(),add=(k,pen,p)=>{const h=res.get(k);if(!h||pen>h.max)res.set(k,{max:+pen.toFixed(3),p:+p.toFixed(3)});};
@@ -103,15 +105,25 @@ for(let i=0;i<=600;i++){const p=i/600;c.progress=p;z.animCell(c,t.sim.time,0.016
  if(X.tendInside)inside++;doorMin=Math.min(doorMin,c.parts.washer.doorK);
  const RM=c.robots.map(r=>{const a=[];r.root.traverse(m=>{if(solid(m))a.push(m);});return a;}),C=[];car.g.traverse(m=>{if(solid(m)&&m.visible!==false)C.push(m);});
  if(X.tendHeld?.visible)X.tendHeld.traverse(m=>{if(solid(m)&&!C.includes(m))C.push(m);});
- RM.forEach((ms,j)=>{const nm=c.robots[j].washXfer?'이송6축':'협동'+j;for(const a of ms)for(const b of fixed)pair(a,b,nm+'↔설비',p);for(const a of ms){if(TOOL.test(nameOf(a)))continue;for(const b of C)pair(a,b,nm+' 몸·팔↔AMR·블록',p);}
+ RM.forEach((ms,j)=>{const nm=c.robots[j].washXfer?'이송6축':'텐딩6축';for(const a of ms)for(const b of fixed){if(TOOL.test(nameOf(a))&&WORKAT.test(nameOf(b)))continue;pair(a,b,nm+'↔설비',p);}for(const a of ms){if(TOOL.test(nameOf(a)))continue;for(const b of C)pair(a,b,nm+' 몸·팔↔AMR·블록',p);}
   for(let k=j+1;k<RM.length;k++)for(const a of ms)for(const b of RM[k])pair(a,b,nm+'↔로봇'+k,p);});
- for(const a of C)for(const b of fixed){if(/WashFixture/.test(nameOf(b)))continue;pair(a,b,'AMR·블록↔설비',p);}}
+ for(const a of C)for(const b of fixed){if(WORKAT.test(nameOf(b)))continue;pair(a,b,'AMR·블록↔설비',p);}}   // 든 블록 ↔ 고정구·기계 안 작업물(같은 블록을 넘겨줌)은 뺀다
 const zc=t.sim.zoneCell('adapt','HB_DEBR'),spots=[['정비 자리',zc.svc,0.35,0.35],['사족보행 점검 자리',zc.scan,0.6,0.3],['필터 교체 자리',zc.svcWash,0.35,0.35]];
 v.scene.updateMatrixWorld(true);
 for(const [nm,s,hx,hz] of spots){if(!s){add(nm+' 없음',1,0);continue;}const S={min:[s.x-hx,0,s.z-hz],max:[s.x+hx,1.0,s.z+hz]};for(const b of fixed){const B=obb(b);if(!B||!box(S,B))continue;add(nm+' ↔ '+nameOf(b).split('<')[0]+' @'+[B.c.x,B.c.z].map(x=>x.toFixed(2)).join(','),Math.min(S.max[0]-B.min[0],B.max[0]-S.min[0],S.max[2]-B.min[2],B.max[2]-S.min[2]),0);}}
+// AMR이 셀을 나가는 경로 (zones.js cellPath — 가운데 줄 셀로 합류: 셀 가운데 → x+2.3 → 합류 차로 → CMM 앞) — 셀을 벗어날 때까지
+c.progress=0;z.animCell(c,t.sim.time,0.016,0.016);
+const A=z.Z.cells.HB_DEBR,B=z.Z.cells.CMM,x0=A.x+2.3,ez=Math.sign(A.z-B.z)*0.75,ex=B.x-2,path=[[A.x,A.z],[x0,A.z],[Math.max(x0,ex-3),ez]];
+const g0={p:car.g.position.clone(),r:car.g.rotation.y},robM=c.robots.flatMap(r=>{const a=[];r.root.traverse(m=>{if(solid(m))a.push(m);});return a;});let amrN=0;
+for(let s=0;s<path.length-1;s++){const [ax,az]=path[s],[bx,bz]=path[s+1],L=Math.hypot(bx-ax,bz-az),hd=Math.atan2(bx-ax,bz-az),prev=s?Math.atan2(ax-path[s-1][0],az-path[s-1][1]):hd;
+ for(let d=0;d<=L;d+=0.05){const px=ax+(bx-ax)*d/L,pz=az+(bz-az)*d/L;if(Math.hypot(px-A.x,pz-A.z)>4.5)break;
+  for(const h of d<0.3?[prev,hd]:[hd]){car.g.position.x=px;car.g.position.z=pz;car.g.rotation.y=h;v.scene.updateMatrixWorld(true);amrN++;
+   const C=[];car.g.traverse(m=>{if(solid(m)&&m.visible!==false)C.push(m);});
+   for(const a of C){for(const b of fixed)pair(a,b,'AMR 나가는 길↔설비',d+s*10);for(const b of robM)pair(a,b,'AMR 나가는 길↔로봇',d+s*10);}}}}
+car.g.position.copy(g0.p);car.g.rotation.y=g0.r;
 c.progress=p0;z.animCell(c,t.sim.time,0.016,0.016);document.getElementById('playBtn').click();
 if(!inside)add('이송 로봇이 세척기 안으로 들어가지 않음',1,0);
-return {name:'적응가공 디버링셀 세척기·이송 로봇',note:'세척기 안 구간 '+inside+'점 · 문 최소 열림 '+doorMin.toFixed(2),hits:[...res.entries()].map(([k,h])=>({k,...h})).sort((a,b)=>b.max-a.max)};})()`;
+return {name:'적응가공 디버링셀 머시닝센터·부스·세척기',note:'세척기 안 구간 '+inside+'점 · 문 최소 열림 '+doorMin.toFixed(2)+' · AMR 나가는 길 '+amrN+'자세',hits:[...res.entries()].map(([k,h])=>({k,...h})).sort((a,b)=>b.max-a.max)};})()`;
 
 app.whenReady().then(async () => {
   try {
@@ -132,7 +144,7 @@ app.whenReady().then(async () => {
     }
     fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify({ pen: PEN, report, errors }, null, 2));
     const total = report.reduce((n, r) => n + r.violations, 0);
-    console.log(total ? `FAIL: ${total}건 (outputs/sweeps/report.json)` : 'PASS: 헤밍·AMMR 피킹·레거시 지게차 자리·적응가공 CMM·디버링셀 세척기 전 구간 간섭 없음');
+    console.log(total ? `FAIL: ${total}건 (outputs/sweeps/report.json)` : 'PASS: 헤밍·AMMR 피킹·레거시 지게차 자리·적응가공 CMM·디버링셀 머시닝센터·부스·세척기 전 구간 간섭 없음');
     clearTimeout(timer); app.exit(total ? 1 : 0);
   } catch (e) { console.error(e.stack); clearTimeout(timer); app.exit(1); }
 });

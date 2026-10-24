@@ -233,8 +233,8 @@ function buildZoneCells(sim) {
       ? (row < 0 ? { x: x + 0.9, z: z - half - 0.7, aisle: 'BB' } : { x: x - 3.4, z, aisle: 'BB' })   // 가운데·남쪽 줄은 서쪽 셀 사이 틈으로 (뒤 통로 B·출하 쪽 혼잡 구간을 지나지 않는다)
       // 적응가공: 가공셀 머시닝센터는 Zone 안쪽(가운데 줄 쪽)에 있어 바깥 가장자리는 셀 판(2.3m) — 그 0.6m 밖에 선다 (앞 통로 F 차로 · A-2 AMR 복귀로 z 28.5와 떨어짐)
       // 가운데 줄(①소재 식별 · ⑥CMM)은 북쪽 — 셀 옆(동·서)은 AMR이 셀을 드나드는 길
-      // ⑥CMM은 문형 겐트리 레일이 셀 판 밖 z ±2.9까지 나와(zones.js buildCMM) 그 0.6m 밖에 선다
-      : (row < 0 ? { x: x + 0.9, z: z - 2.9, aisle: 'F' } : row > 0 ? { x: x + 0.9, z: z + 2.9, aisle: 'FF' } : { x, z: z - (c.type === 'cmm' ? 3.5 : 2.9), aisle: 'F' });
+      // ⑥CMM은 겐트리 레일이 셀 판 밖 z ±2.9까지 나와(zones.js buildCMM) 그 0.6m 밖 · ③디버링셀은 남쪽 부스·세척기(z ~3.1) 밖
+      : (row < 0 ? { x: x + 0.9, z: z - 2.9, aisle: 'F' } : row > 0 ? { x: x + 0.9, z: z + (c.type === 'deburr' ? 3.5 : 2.9), aisle: 'FF' } : { x, z: z - (c.type === 'cmm' ? 3.5 : 2.9), aisle: 'F' });
     const name = `${Z.code} ${c.label}`;
     // 헤밍 프레스는 셀 판 뒤로 0.75m 나와(zones.js HEM) 정비 인력은 그 뒤에 선다 — 점검 자리(정비 자리 옆 1.6m)는 프레스 옆이라 그대로
     const back = Z.key === 'flex' && row < 0 && c.type === 'hem' ? 0.55 : 0;
@@ -246,7 +246,7 @@ function buildZoneCells(sim) {
       c: { fails: 0, down: 0, maint: 0 }, busy: false,
       // 세척기가 딸린 셀(유압블록 디버링셀): 점검 자리는 세척기 캐빈(셀 오른쪽 바깥) 반대쪽 · 필터 교체는 세척기 동쪽 필터 유닛 앞 (zones.js buildWasher)
       svc: { ...svc, z: svc.z - back, name }, scan: beside ? { x: svc.x, z: svc.z + 1.6, aisle: svc.aisle, name } : { x: svc.x + (c.wash ? -1.6 : 1.6), z: svc.z, aisle: svc.aisle, name },
-      ...(c.wash ? { svcWash: { x: x + 6.4, z: z + 2.2, aisle: svc.aisle, name: `${name} 세척기 필터 유닛` } } : {}),
+      ...(c.wash ? { svcWash: { x: x + 5.2, z: z + 2.1, aisle: svc.aisle, name: `${name} 세척기 필터 유닛` } } : {}),
     };
   }));
   return [...ext, ...insp()];   // 정밀검사 셀은 맨 뒤 (난수 순서 — 기존 Zone 셀 초기 건강도가 그대로)

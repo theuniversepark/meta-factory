@@ -1,5 +1,5 @@
-// 적응가공 유압블록 세척기 — 밀폐형 고압수 디버링·세척기(로봇 투입형) 공정 데이터 · 기술적 청정도 · 필터 정비 — DOM 없음 (헤드리스 시험 가능)
-//  · 공정: 고압수 디버링(교차홀 버 제거) → 랜스 분사 세척(홀마다) → 헹굼 → 열풍 건조. 6축 이송 로봇이 AMR 지그 ↔ 세척기 고정구로 옮긴다 (zones.js)
+// 적응가공 유압블록 세척기 — 밀폐형 세척기(로봇 투입형) 공정 데이터 · 기술적 청정도 · 필터 정비 — DOM 없음 (헤드리스 시험 가능)
+//  · 공정: (워터젯 디버링 부스에서 교차홀 버 제거 뒤) 고압 분사 세척 → 랜스 분사 세척(홀마다) → 열풍 건조. 6축 이송 로봇이 AMR → 부스 → 세척기 → AMR로 옮긴다 (zones.js)
 //  · 센서(WASH_SENSORS): 고압 펌프 압력 · 세척액 온도 · 전도도(세척액 오염) · 백필터 차압 · 분사 유량 · 건조 온도
 //  · 블록마다 청정도(ISO 16232 · VDA 19.1): 최대 금속 입자 크기(µm) · 잔류 오염량(mg) — 필터가 막히고 세척액이 오염될수록 나빠진다 → 규격 밖이면 한 번 더 세척(재세척)
 //  · 필터 정비: 차압이 기준을 넘으면 정비 요청(sim.requestTech 'filter') → 정비 인력 출동 → 교체(셀 정지) → FAC 설비보전 기록. 세척액이 오염됐으면 그때 같이 교체
@@ -10,7 +10,7 @@ const r2 = (v, d = 2) => Math.round(v * 10 ** d) / 10 ** d;
 
 export const WASH_CELL = 'HB_DEBR';
 export const WASH_SPEC = {
-  model: '로봇 투입형 고압수 디버링·세척기', process: '고압수 디버링 → 랜스 분사 세척 → 헹굼 → 열풍 건조', asset: `ADP-${WASH_CELL}-WASH`,
+  model: '로봇 투입형 밀폐 세척기', process: '고압 분사 세척 → 랜스 분사 세척 → 열풍 건조 (디버링은 워터젯 부스)', asset: `ADP-${WASH_CELL}-WASH`,
   pressure: 600, temp: 60, dryTemp: 80, flow: 120,   // bar · °C · °C · L/min (정격)
   dp0: 0.3, dpPerPass: 0.006, dpRequest: 0.9, dpAlarm: 1.2,   // 백필터 차압 (bar): 새 필터 · 세척 1회당 증가 · 정비 요청(IoT) · 경보(레거시 작업자 인지)
   cond0: 350, condPerPass: 1.2, condBath: 1000,   // 전도도 (µS/cm): 새 세척액 · 1회당 · 필터 교체 때 세척액도 바꾸는 기준
@@ -27,17 +27,14 @@ export const WASH_SENSORS = [
   { key: 'dryTemp', label: '건조 열풍 온도', unit: '°C', dev: '열전대', warn: { lo: 70 }, alarm: { lo: 60 } },
 ];
 export const WASH_TOPIC = `metafactory/washer/v1/adapt/${WASH_CELL}`;
-// 셀 진행률(p) → 세척기 동작 진행률(q): 드릴·디버링(~0.72) 동안은 0, 이송 로봇이 넣는 동안 0 ~ 0.14, 세척 0.14 ~ 0.89, 꺼내 AMR에 놓기 0.89 ~ 1
-// (q는 머신텐딩 경로 zones.js TEND_SEQ와 같은 진행률 — 문은 q < 0.15 · q > 0.85에만 열림)
-export function washQ(p) {
-  if (p < 0.72) return 0;
-  if (p < 0.8) return ((p - 0.72) / 0.08) * 0.14;
-  if (p < 0.9) return 0.14 + ((p - 0.8) / 0.1) * 0.75;
-  return 0.89 + ((Math.min(1, p) - 0.9) / 0.1) * 0.11;
-}
-// 세척기 안 단계 (q): 고압 디버링 · 랜스 세척 · 건조
-export const washPhase = (q) => (q > 0.16 && q < 0.42 ? 'hp' : q >= 0.42 && q < 0.62 ? 'lance' : q >= 0.62 && q < 0.84 ? 'dry' : null);
-export const WASH_PHASE_KO = { hp: '고압수 디버링', lance: '랜스 분사 세척', dry: '열풍 건조' };
+// 셀 진행률(p) → 이송 진행률(q): 앞 절반(XFER_START)은 사선홀 머신텐딩이라 0, 그 뒤 0 ~ 1 — 이송 6축 경로(zones.js XFER_SEQ)와 같은 진행률
+//  q 0.3 ~ 0.41 워터젯 디버링 부스 · 0.72 ~ 0.85 세척기 (문이 다 닫힌 뒤 · 문은 로봇이 드나드는 동안만 열림)
+export const XFER_START = 0.5;
+export const washQ = (p) => (p < XFER_START ? 0 : Math.min(1, (p - XFER_START) / (1 - XFER_START)));
+// 세척기 안 단계 (q): 고압 분사 세척 · 랜스 세척 · 건조 / 부스 (q): 워터젯 디버링
+export const washPhase = (q) => (q > 0.72 && q < 0.76 ? 'hp' : q >= 0.76 && q < 0.8 ? 'lance' : q >= 0.8 && q < 0.85 ? 'dry' : null);
+export const boothPhase = (q) => (q > 0.3 && q < 0.41 ? 'wj' : null);
+export const WASH_PHASE_KO = { hp: '고압 분사 세척', lance: '랜스 분사 세척', dry: '열풍 건조' };
 
 export class WasherMonitor {
   constructor(sim) {

@@ -6,7 +6,7 @@
 //  · 엣지 AI(1초): 정상 기준선 대비 이상 점수 · 공구 마모 추세 → 잔여 수명(RUL, 개·분) · 판단(정상/감시/교체 권고/즉시 교체 · 주축 점검)
 //    → 존에서 바로 실행(예지 공구 교환 · 주축 예지정비 요청) → 상위 공장 오케스트레이터(FacOS)에 상태 보고(A2A status) · 주축 정비는 결정 요청
 //  · 서버 전송: 묶음(outbox)을 앱 서버 /api/machmon/v1으로 (main.js) · AAS 환경(machineEnvironment): 명판·기술 데이터·운영 데이터·공구 상태·예지보전·시계열
-import { EXTRA_ZONES } from './zonedefs.js';
+import { EXTRA_ZONES, cellTendQ } from './zonedefs.js';
 import { MACHINE_SPECS, MACHINE_BY_TYPE } from './machine-specs.js';
 
 const mulberry = (a) => () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -17,7 +17,7 @@ export const MON_MACHINES = {
   HB_MILL: { proc: '5축 밀링·드릴·탭', rpm: 12000, tool: '초경 엔드밀 Ø10 · 드릴 Ø6.8' },
   RC_MILL: { proc: '5축 정밀 절삭', rpm: 15000, tool: '초경 볼엔드밀 Ø8' },
   RC_TURN: { proc: '보어 선삭', rpm: 3200, tool: 'CNMG 인서트 (보링바)' },
-  HB_DEBR: { proc: '사선홀 드릴·디버링', rpm: 9000, tool: '초경 드릴 Ø5 · 챔퍼 버' },
+  HB_DEBR: { proc: '사선홀 가공 (4축 틸팅)', rpm: 8100, tool: '초경 드릴 Ø5 · 챔퍼 커터' },
 };
 // 센서 (hi: 높으면 경보 · lo: 낮으면 경보) — 진동 경보는 ISO 10816-3 등급 C/D, 공구 마모 VB 300µm는 ISO 3685 공구 수명 기준
 export const MON_SENSORS = [
@@ -55,7 +55,7 @@ export class MachineMonitor {
   // 측정값 (1초) — 가공 중이면 공구 마모에 따라 부하·전류·진동·AE가 오르고, 설비 건강도가 낮으면 베어링 온도·진동이 오른다
   measure(M, dt) {
     const sim = this.sim, cell = sim.xzones?.byKey?.('adapt')?.cells?.[M.id], fac = sim.zoneCell?.('adapt', M.id), T = this.tool(M.id), spec = MON_MACHINES[M.id];
-    const cut = !!cell && cell.state === 'BUSY' && !cell.fault && !(cell.holdT > 0) && cell.progress > 0.18 && cell.progress < 0.82;
+    const q = cell ? cellTendQ(cell.def?.type, cell.progress) : 0, cut = !!cell && cell.state === 'BUSY' && !cell.fault && !(cell.holdT > 0) && q > 0.18 && q < 0.82;   // 디버링셀은 앞부분만 가공 (cellTendQ)
     const w = T ? Math.min(1.05, T.wear) : 0, h = fac ? fac.health / 100 : 1, bad = Math.max(0, 0.6 - h) / 0.6, cond = T?.cond ?? 1;
     M.spindle.heat += ((cut ? 1 : 0) - M.spindle.heat) * Math.min(1, dt / 90);   // 주축 열 (가공하면 천천히 오름)
     const n = (s) => s * this.g();

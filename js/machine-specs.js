@@ -1,6 +1,6 @@
 import SPECS from '../assets/machines/specs.json' with { type: 'json' };
 export const MACHINE_SPECS = Object.freeze(SPECS);
-export const MACHINE_BY_TYPE = Object.freeze({ cnc: 'vf2', mill5: 'umc1250', turn: 'st40', press: 'nc1', pressfit: 'ep347', hem: 'oden' });
+export const MACHINE_BY_TYPE = Object.freeze({ cnc: 'vf2', deburr: 'vf2', mill5: 'umc1250', turn: 'st40', press: 'nc1', pressfit: 'ep347', hem: 'oden' });
 export function machineTech(type) {
   const s = MACHINE_SPECS[MACHINE_BY_TYPE[type]]; if (!s) return {};
   return { ReferenceManufacturer: s.manufacturer, ReferenceModel: s.model, SpecificationSource: s.source, GeometryBasis: s.geometryBasis,
