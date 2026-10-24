@@ -148,7 +148,7 @@ function buildRework(g) {
 }
 // 휴머노이드는 셀 바닥(0.06m)에 서서 AMR 통로 경계선(±0.78m) 바로 바깥 — 두 손이 AMR 위 대상물(폭 ±0.29m · 윗면 1.11m) 가장자리와 윗면에 닿는 거리
 const HUM_SLOT_Z = 0.88;
-// 확장 Zone 6축·협동로봇 접촉 작업 구간(셀 진행률)과 방식 — 헤밍 램(0.45~0.85) · CMM 탐침(0.3~0.9) · 디버링 드릴(0.12~0.42)·세척(0.78~)과 겹치지 않게
+// 확장 Zone 6축·협동로봇 접촉 작업 구간(셀 진행률)과 방식 — 헤밍 램(0.45~0.85) · CMM 탐침(0.3~0.6) · 디버링 드릴(0.12~0.42)·세척(0.78~)과 겹치지 않게
 const CELL_WORK = {
   kit: { from: 0.1, to: 0.85, kind: 'touch' }, locate: { from: 0.1, to: 0.85, kind: 'touch' }, spot: { from: 0.08, to: 0.9, kind: 'press' }, seal: { from: 0.1, to: 0.85, kind: 'trace' },
   hem: { from: 0.08, to: 0.42, kind: 'press' }, mount: { from: 0.1, to: 0.85, kind: 'screw' }, rework: { from: 0.1, to: 0.85, kind: 'press' },
@@ -295,19 +295,22 @@ function buildMatId(g) {
   return { ...gate, gateTitle: '소재 식별 · 3D 측정' };
 }
 // 초정밀 측정·리워크: 판정 게이트 · 문형 CMM(AMR이 아래로 진입) · 리워크 스핀들
+// 문형 다리는 z ±2.7 — 양팔 로봇(AMMR, z ±1.9 · 도킹 정면 x 0)이 다리 안쪽에 선다 · 윗보 아랫면 2.82m (RB-Y1 키 1.4m 위로 여유)
+// 레일은 x −0.3 ~ 1.35: 측정은 도킹 위(x 0.15 ± 0.35), 양팔 로봇 작업 동안은 오른쪽 끝(CMM_PARK)으로 비킨다
+const CMM_PARK = 1.15;
 function buildCMM(g) {
   const gate = gateOf(g, -1.75, 0x58c4ff);
   const granite = std(0x3b3f45, { roughness: 0.35, metalness: 0.1 });
-  for (const z of [-1.25, 1.25]) put(box(1.25, 0.25, 0.3, granite), 0.325, 0.125, z, g);
+  for (const z of [-2.75, 2.75]) put(box(1.65, 0.25, 0.3, granite), 0.525, 0.125, z, g);
   const bridge = put(new THREE.Group(), 0.15, 0, 0, g);
-  for (const z of [-1.2, 1.2]) put(box(0.18, 2.3, 0.22, MAT.white), 0, 1.4, z, bridge);
-  put(box(0.24, 0.26, 2.6, MAT.white), 0, 2.55, 0, bridge);
-  const car = put(new THREE.Group(), 0, 2.55, 0, bridge);
+  for (const z of [-2.7, 2.7]) put(box(0.18, 2.7, 0.22, MAT.white), 0, 1.6, z, bridge);
+  put(box(0.24, 0.26, 5.6, MAT.white), 0, 2.95, 0, bridge);
+  const car = put(new THREE.Group(), 0, 2.95, 0, bridge);
   put(box(0.3, 0.34, 0.3, MAT.accent), 0, 0, 0, car);
   const quill = put(new THREE.Group(), 0, 0, 0, car);
   // 프로브 램: 캐리지를 관통하는 긴 봉 (위로 0.6m) — 측정 때 0.39m 내려가도 캐리지에서 빠지지 않고, 탐침 끝이 소재 윗면(약 1.13m)에 닿는다
-  put(box(0.1, 1.6, 0.1, MAT.steel), 0, -0.2, 0, quill);
-  const tipMat = emis(0xff4d6d, 1.5); put(mesh(new THREE.SphereGeometry(0.03, 12, 8), tipMat), 0, -1.02, 0, quill);
+  put(box(0.1, 2.0, 0.1, MAT.steel), 0, -0.4, 0, quill);
+  const tipMat = emis(0xff4d6d, 1.5); put(mesh(new THREE.SphereGeometry(0.03, 12, 8), tipMat), 0, -1.42, 0, quill);
   const rw = put(new THREE.Group(), 1.95, 0, -1.55, g);
   put(box(0.7, 0.9, 0.6, MAT.dark), 0, 0.45, 0, rw);
   const rwSpin = put(cyl(0.06, 0.08, 0.3, MAT.steel, 12), 0, 1.15, 0, rw);
@@ -472,7 +475,7 @@ class ExtraZone {
     const edge = new THREE.MeshBasicMaterial({ color: 0x37e8ff, transparent: true, opacity: 0.55 });
     for (let x = F.x0; x < F.x1; x += 1.6) for (const z of [F.z0, F.z1]) flat(Math.min(1.0, F.x1 - x), 0.12, edge, x + 0.5, z, 0.012);
     for (let z = F.z0; z < F.z1; z += 1.6) for (const x of [F.x0, F.x1]) flat(0.12, Math.min(1.0, F.z1 - z), edge, x, z + 0.5, 0.012);
-    for (const c of Object.values(Z.cells)) flat(5.0, 4.6, new THREE.MeshStandardMaterial({ color: PC[c.product] ?? PC.shared, transparent: true, opacity: 0.3, roughness: 0.9, depthWrite: false }), c.x, c.z, 0.01);
+    for (const c of Object.values(Z.cells)) flat(5.0, c.type === 'cmm' ? 6.0 : 4.6, new THREE.MeshStandardMaterial({ color: PC[c.product] ?? PC.shared, transparent: true, opacity: 0.3, roughness: 0.9, depthWrite: false }), c.x, c.z, 0.01);
     // Zone 이름·라인 설명: 셀·AMR 길을 비킨 빈 바닥 (Z.floor — 정밀조립Zone 바닥 글씨와 같은 꼴: 왼쪽 정렬 · 라인 색)
     const FL = Z.floor;
     this.titleAt = { x: FL.title.x, z: FL.title.z };
@@ -761,6 +764,7 @@ class ExtraZone {
       const tend = c.def.type === 'mill5' || c.def.type === 'turn';
       const slots = tend ? [[TEND.robot.x, TEND.robot.z, PI]] : [[-0.75, -1.75, 0], [-0.75, 1.75, PI], [0.95, -1.75, 0], [0.95, 1.75, PI]];
       if (c.def.type === 'deburr') slots.forEach((s) => (s[0] = -1.3));
+      if (c.def.type === 'cmm' && kind === 'ammr') slots.forEach((s) => (s[0] = 0));   // CMM 양팔 로봇(피지컬AI): 도킹 정면(x 0) — 넓힌 문형 다리(z ±2.7) 안쪽 · 협동로봇(자동화)은 x −0.75 그대로
       if (c.def.type === 'hem') slots[0] = [HEM.robot.x, HEM.robot.z, 0];
       if (c.def.type === 'hem') put(box(0.45, HEM.robot.y - 0.06, 0.45, MAT.dark), HEM.robot.x, (HEM.robot.y + 0.06) / 2, HEM.robot.z, c.robotsG);   // 헤밍 로봇 받침대   // 헤밍: 프레스 앞(통로 쪽) 비스듬히 — AMR 위 패널과 프레스 베드 양쪽에 닿는 자리 (프레스 기둥 사이 앞쪽으로 팔이 들어간다)
       for (let i = 0; i < count; i++) {
@@ -1332,8 +1336,10 @@ class ExtraZone {
         if (r.held) r.held.visible = !!r.pwHeld && !!wcar;   // 용접 불꽃·자국 · 실러 비드는 툴 끝이 대상물에 닿아 있는 동안 그 자리에
         return;
       }
-      const ap = car && r.slot ? sm(0.03, 0.1, p) * (1 - sm(0.88, 0.95, p)) : 0, box = ap > 0 ? contactBox(car.pm, r.root.parent) : null;
-      if (box && ammrContact(r, { slot: r.slot, box, ap, hold: i > 0, t: t + r.phase, fixX: c.def.type === 'cmm' })) return;   // CMM: 문형 다리(z ±1.2) 사이로 옆으로 비키지 않고 곧게 다가간다
+      // CMM: 겐트리 측정이 끝나고 오른쪽으로 비킨 뒤(0.62 ~) 다가가 작업하고, 겐트리가 레이저 각인하러 돌아오기 전(0.92) 제자리로
+      const [a0, a1, b0, b1] = c.def.type === 'cmm' ? [0.62, 0.68, 0.86, 0.92] : [0.03, 0.1, 0.88, 0.95];
+      const ap = car && r.slot ? sm(a0, a1, p) * (1 - sm(b0, b1, p)) : 0, box = ap > 0 ? contactBox(car.pm, r.root.parent) : null;
+      if (box && ammrContact(r, { slot: r.slot, box, ap, hold: i > 0, t: t + r.phase, fixX: c.def.type === 'cmm' })) return;   // CMM: 도킹 정면에서 옆으로 비키지 않고 곧게 다가간다
       if (r.slot && r.contactKey) { r.root.position.x = r.slot.x; r.root.position.z = r.slot.z; r.body?.pose(); }
       r.anim(busy, t + r.phase, p);
     });
@@ -1344,7 +1350,7 @@ class ExtraZone {
       P.scan.visible = entering; if (entering) P.scan.position.x = P.gateX + Math.sin(t * 9) * 0.12;
       const col = it ? (it.rework && ty === 'cmm' ? 0xf5b82e : PC[it.product]) : 0xffffff;
       P.ringMat.color.setHex(col); P.ringMat.emissive?.setHex(col); P.ringMat.emissiveIntensity = entering ? 6 : it ? 1.4 : 0.4;
-      const text = !it ? '대기 중' : ty === 'cmm' ? `${it.id} · ${this.Z.products[it.product].label} · ${it.rework ? '리워크 후 재측정' : p < 0.9 ? '측정 중' : '합격'}` : `${it.id} → ${this.Z.products[it.product].label} 라인`;
+      const text = !it ? '대기 중' : ty === 'cmm' ? `${it.id} · ${this.Z.products[it.product].label} · ${it.rework && p < 0.6 ? '리워크 후 재측정' : p < 0.6 ? '측정 중' : p < 0.94 ? '양팔 로봇 작업' : '합격'}` : `${it.id} → ${this.Z.products[it.product].label} 라인`;
       drawGate(P.gateSign, P.gateTitle, text, it ? hex(it.rework && ty === 'cmm' ? 0xf5b82e : PC[it.product]) : '#e6edf3');
     }
     if (P.markMat) P.markMat.emissiveIntensity = c.markT != null && this.time - c.markT < 1.2 ? 6 : 0.35;   // 시리얼 마킹·판독 순간
@@ -1386,12 +1392,16 @@ class ExtraZone {
         break;
       }
       case 'cmm': {
-        const meas = busy && p > 0.3 && p < 0.9;
-        P.bridge.position.x = 0.15 + (meas ? Math.sin(p * PI * 6) * 0.35 : 0);
-        P.car.position.z = meas ? Math.cos(p * PI * 7) * 0.3 : 0;
-        const tq = meas ? -(0.23 + 0.16 * Math.abs(Math.sin(p * PI * 14))) : 0;   // 탐침 끝 y 1.30 → 1.14 (소재 윗면 접촉) 반복
+        // 측정(0.3 ~ 0.6) → 오른쪽 끝으로 비킴(양팔 로봇 작업 0.62 ~ 0.94) → 도킹 위로 돌아와 합격 레이저 각인
+        // 겐트리 위치는 진행률로 정한다 (배속과 관계없이 양팔 로봇이 다가가기 0.62 전에 비켜 있다) · 정지·고장 중에는 그 자리
+        const meas = busy && p > 0.3 && p < 0.6, k = sm(0.6, 0.64, p) * (1 - sm(0.92, 0.97, p));
+        if (!c.halt && !c.fault) {
+          P.bridge.position.x = 0.15 + (meas ? Math.sin((p - 0.3) / 0.3 * PI * 3) * 0.35 : 0) + (c.state === 'BUSY' ? (CMM_PARK - 0.15) * k : 0);
+          P.car.position.z = meas ? Math.sin((p - 0.3) / 0.3 * PI * 6) * 0.3 : 0;   // 측정 시작·끝에 0 (캐리지가 튀지 않게)
+        }
+        const tq = meas ? -(0.23 + 0.16 * Math.abs(Math.sin((p - 0.3) / 0.3 * PI * 7))) : 0;   // 탐침 끝 y 1.30 → 1.14 (소재 윗면 접촉) 반복
         P.quill.position.y += (tq - P.quill.position.y) * Math.min(1, rdt * 8);
-        P.tipMat.emissiveIntensity = meas && Math.sin(p * PI * 14) > 0.9 ? 6 : 1.2;
+        P.tipMat.emissiveIntensity = meas && Math.sin((p - 0.3) / 0.3 * PI * 7) > 0.9 ? 6 : 1.2;
         const rw = busy && it?.rework && p < 0.6; if (rw) P.rwSpin.rotation.y += dts * 40;
         P.rwLamp.emissiveIntensity = rw ? 3 + Math.sin(t * 12) : 0.3;
         P.screen.emissive.setHex(it?.rework ? 0xf5b82e : 0x3ddc84);

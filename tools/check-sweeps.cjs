@@ -3,6 +3,7 @@
 //  ① 유연생산 C05 헤밍: 진행률 0~1을 601점 — 로봇 ↔ 프레스(기둥·램·다이), 패널·AMR ↔ 프레스, 로봇 팔 ↔ 잡은 패널 (후드·도어 각각)
 //  ② 정밀조립 AMMR(분류·포장셀): 선반 피킹 구간을 1×·3× 프레임 간격으로 — 팔 ↔ 셀(선반 기둥·빈) · 실제 재생 중 선반에 갈 때 슬롯 줄에서 비껴난 거리
 //  ③ 레거시 지게차: 충전 자리·미니로드 출고 지게차 자리에서 제자리 한 바퀴, 진입 직선 — 차체·포크 ↔ 시설
+//  ④ 적응가공 ⑥CMM(피지컬AI): 진행률 0~1을 501점 — 양팔 로봇 ↔ 문형 겐트리·셀 설비, 로봇 ↔ 로봇, AMR·소재 ↔ 설비, 정비·사족보행 자리 ↔ 레일·다리
 // 실행: npm run check:sweeps   결과: outputs/sweeps/report.json
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs'), path = require('node:path');
@@ -62,6 +63,30 @@ for(const Q of P){const near=all.filter(o=>o.B.max[0]>Q.x-3.2&&o.B.min[0]<Q.x+3.
 vv.g.position.copy(p0.p);vv.g.rotation.y=p0.r;document.getElementById('playBtn').click();
 return {name:'레거시 지게차 자리',poses:P.reduce((n,q)=>n+q.yaws.length,0),hits:[...res.entries()].map(([k,h])=>({k,...h})).sort((a,b)=>b.max-a.max)};})()`;
 
+const CMM = `(async()=>{const THREE=await import('three');${LIB}${under}
+const t=window.__twin,v=t.view,wait=ms=>new Promise(r=>setTimeout(r,ms));document.querySelector('[data-speed="10"]')?.click();
+const z=t.xzones.zones.find(z=>z.Z.key==='adapt'),c=z.order.find(c=>c.id==='CMM');let car=null;
+for(let k=0;k<1200;k++){car=z.carriers.find(q=>q.at===c.id&&q.state==='work'&&q.pm);if(car&&c.state==='BUSY'&&(c.progress??0)<0.2)break;car=null;await wait(100);}
+if(!car)return {err:'CMM에 소재 없음'};document.getElementById('playBtn').click();await wait(200);
+const p0=c.progress,R=c.robots.filter(r=>r.body);if(R.length!==2||R.some(r=>Math.abs(r.slot.x)>1e-6))return {err:'CMM 양팔 로봇 2대가 도킹 정면(x 0)에 없음 '+JSON.stringify(R.map(r=>r.slot))};
+const TOOL=/ToolFlange|ToolTCP|J6_Origin|J5_Origin|WristCamera|Gripper|Finger|tool_left|tool_right|EE_|[LR]_J[67]/,PROBE=/^$/;
+const inR=(m)=>c.robots.find(r=>under(m,r.root)),fixed=[];c.g.traverse(m=>{if(solid(m)&&!inR(m)&&!under(m,car.g))fixed.push(m);});
+const res=new Map(),add=(k,pen,p)=>{const h=res.get(k);if(!h||pen>h.max)res.set(k,{max:+pen.toFixed(3),p:+p.toFixed(3)});};
+const pair=(a,b,k,p)=>{const A=obb(a),B=obb(b);if(!A||!B||!box(A,B))return;const pen=sat(A,B);if(pen>=0.02&&real(a,b))add(k+' '+nameOf(a).split('<')[0]+' | '+nameOf(b).split('<')[0],pen,p);};
+let bxMin=9,bxMax=-9,parkAt=null;
+for(let i=0;i<=500;i++){const p=i/500;c.progress=p;z.animCell(c,t.sim.time,0.016,0.016);v.scene.updateMatrixWorld(true);
+ const bx=c.parts.bridge.position.x;bxMin=Math.min(bxMin,bx);bxMax=Math.max(bxMax,bx);if(parkAt==null&&R.some(r=>r.lean>0.01))parkAt={p,bx:+bx.toFixed(3)};
+ const RM=c.robots.map(r=>{const a=[];r.root.traverse(m=>{if(solid(m))a.push(m);});return a;}),C=[];car.g.traverse(m=>{if(solid(m))C.push(m);});
+ RM.forEach((ms,j)=>{for(const a of ms)for(const b of fixed)pair(a,b,'로봇'+j+'↔설비',p);for(const a of ms){if(TOOL.test(nameOf(a)))continue;for(const b of C)pair(a,b,'로봇'+j+' 몸·팔↔AMR·소재',p);}
+  for(let k=j+1;k<RM.length;k++)for(const a of ms)for(const b of RM[k])pair(a,b,'로봇'+j+'↔로봇'+k,p);});
+ for(const a of C)for(const b of fixed){if(/Quill|Probe/.test(nameOf(b)))continue;pair(a,b,'AMR·소재↔설비',p);}}
+// 정비 인력(반지름 0.35m)·사족보행(1.1×0.5m) 자리 — 겐트리 측정 위치·비킨 위치 둘 다
+const zc=t.sim.zoneCell('adapt','CMM'),spots=[['정비 자리',zc.svc,0.35,0.35],['사족보행 점검 자리',zc.scan,0.6,0.3]];
+for(const p of [0.45,0.8]){c.progress=p;z.animCell(c,t.sim.time,0.016,0.016);v.scene.updateMatrixWorld(true);
+ for(const [nm,s,hx,hz] of spots){const S={min:[s.x-hx,0,s.z-hz],max:[s.x+hx,1.0,s.z+hz]};for(const b of fixed){const B=obb(b);if(!B||!box(S,B))continue;add(nm+' ↔ '+nameOf(b).split('<')[0]+' @'+[B.c.x,B.c.z].map(x=>x.toFixed(2)).join(','),Math.min(S.max[0]-B.min[0],B.max[0]-S.min[0],S.max[2]-B.min[2],B.max[2]-S.min[2]),p);}}}
+c.progress=p0;z.animCell(c,t.sim.time,0.016,0.016);document.getElementById('playBtn').click();
+return {name:'적응가공 CMM 겐트리·양팔 로봇',note:'겐트리 x '+bxMin.toFixed(2)+'~'+bxMax.toFixed(2)+' · 양팔 로봇이 다가가기 시작할 때 겐트리 x '+(parkAt?.bx)+' (진행률 '+(parkAt?.p)+')',hits:[...res.entries()].map(([k,h])=>({k,...h})).sort((a,b)=>b.max-a.max)};})()`;
+
 app.whenReady().then(async () => {
   try {
     const { startServer } = await import(path.resolve(__dirname, '../server/app-server.mjs')); const { port } = await startServer({ port: 0 });
@@ -71,17 +96,17 @@ app.whenReady().then(async () => {
     for (let k = 0; k < 90; k++) { if (await js('!!window.__twin?.RENDER.loaded')) break; await wait(500); }
     if (!await js('!!window.__twin?.RENDER.loaded')) throw Error('Blender assets not loaded');
     const report = [];
-    for (const [mode, code] of [['smart', HEM('hood')], ['smart', HEM('door')], ['dark', AMMR], ['traditional', FORKLIFT]]) {
+    for (const [mode, code] of [['smart', HEM('hood')], ['smart', HEM('door')], ['dark', AMMR], ['traditional', FORKLIFT], ['dark', CMM]]) {
       await js(`document.querySelector('[data-mode=${mode}]').click()`); await wait(1500);
       const r = await js(code); if (r.err) throw Error(r.err);
       const bad = r.hits.filter((h) => h.max >= PEN), driftBad = r.drift != null && r.drift > 0.01;
       report.push({ mode, ...r, violations: bad.length + (driftBad ? 1 : 0) });
-      console.log(`== ${r.name} (${mode})  간섭 ${bad.length}건${r.drift != null ? ` · 슬롯 비낌 최대 ${r.drift}m` : ''}${r.poses ? ` · 자세 ${r.poses}개` : ''}${bad.length || driftBad ? '' : ' — 없음'}`);
+      console.log(`== ${r.name} (${mode})  간섭 ${bad.length}건${r.drift != null ? ` · 슬롯 비낌 최대 ${r.drift}m` : ''}${r.poses ? ` · 자세 ${r.poses}개` : ''}${r.note ? ` · ${r.note}` : ''}${bad.length || driftBad ? '' : ' — 없음'}`);
       for (const h of bad.slice(0, 15)) console.log(`  ${h.max.toFixed(3)}m  ${h.k}${h.p != null ? ` (진행률 ${h.p})` : ''}${h.yaw != null ? ` (방향 ${h.yaw}°)` : ''}`);
     }
     fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify({ pen: PEN, report, errors }, null, 2));
     const total = report.reduce((n, r) => n + r.violations, 0);
-    console.log(total ? `FAIL: ${total}건 (outputs/sweeps/report.json)` : 'PASS: 헤밍·AMMR 피킹·레거시 지게차 자리 전 구간 간섭 없음');
+    console.log(total ? `FAIL: ${total}건 (outputs/sweeps/report.json)` : 'PASS: 헤밍·AMMR 피킹·레거시 지게차 자리·적응가공 CMM 전 구간 간섭 없음');
     clearTimeout(timer); app.exit(total ? 1 : 0);
   } catch (e) { console.error(e.stack); clearTimeout(timer); app.exit(1); }
 });

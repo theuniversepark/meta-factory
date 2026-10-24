@@ -228,7 +228,8 @@ function buildZoneCells(sim) {
       ? (row < 0 ? { x: x + 0.9, z: z - half - 0.7, aisle: 'BB' } : { x: x - 3.4, z, aisle: 'BB' })   // 가운데·남쪽 줄은 서쪽 셀 사이 틈으로 (뒤 통로 B·출하 쪽 혼잡 구간을 지나지 않는다)
       // 적응가공: 가공셀 머시닝센터는 Zone 안쪽(가운데 줄 쪽)에 있어 바깥 가장자리는 셀 판(2.3m) — 그 0.6m 밖에 선다 (앞 통로 F 차로 · A-2 AMR 복귀로 z 28.5와 떨어짐)
       // 가운데 줄(①소재 식별 · ⑥CMM)은 북쪽 — 셀 옆(동·서)은 AMR이 셀을 드나드는 길
-      : (row < 0 ? { x: x + 0.9, z: z - 2.9, aisle: 'F' } : row > 0 ? { x: x + 0.9, z: z + 2.9, aisle: 'FF' } : { x, z: z - 2.9, aisle: 'F' });
+      // ⑥CMM은 문형 겐트리 레일이 셀 판 밖 z ±2.9까지 나와(zones.js buildCMM) 그 0.6m 밖에 선다
+      : (row < 0 ? { x: x + 0.9, z: z - 2.9, aisle: 'F' } : row > 0 ? { x: x + 0.9, z: z + 2.9, aisle: 'FF' } : { x, z: z - (c.type === 'cmm' ? 3.5 : 2.9), aisle: 'F' });
     const name = `${Z.code} ${c.label}`;
     // 헤밍 프레스는 셀 판 뒤로 0.75m 나와(zones.js HEM) 정비 인력은 그 뒤에 선다 — 점검 자리(정비 자리 옆 1.6m)는 프레스 옆이라 그대로
     const back = Z.key === 'flex' && row < 0 && c.type === 'hem' ? 0.55 : 0;
