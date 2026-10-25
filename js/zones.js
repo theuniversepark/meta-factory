@@ -1282,6 +1282,11 @@ class ExtraZone {
     });
     n.shown = null;
   }
+  // 투입 로봇이 아직 적재 준비가 안 됨 — 화면(실물 로봇 모델 · 역기구학)이 있고 자동화·피지컬AI 단계일 때만 (헤드리스 시뮬레이션·레거시는 기다리지 않는다)
+  loaderBusy() {
+    const L = this.src?.port?.loader; if (!L?.r?.arm?.ik || this.mode === 'traditional' || !L.auto.visible) return false;
+    return L.state !== 'ready';
+  }
   // 다음 투입 제품 (평준화 누적값을 바꾸지 않고 미리 봄) — 로봇이 그 제품 자재에서 집는다
   peekNext() {
     const w = this.mix, keys = Object.keys(w).filter((k) => w[k] > 0), tot = keys.reduce((a, k) => a + w[k], 0) || 1;
@@ -1300,7 +1305,7 @@ class ExtraZone {
     const padKey = (p, j, m) => `${p}:${j}:${m}`;
     const pick = (p) => {
       const D = n.side[p], S = sp[p], j = S.act, m = S.c[j], cont = D.C[j], v = cont.slots[m - 1]; if (!v) return null;
-      if (D.panel) return { x: v.x, y: v.y, z: v.z - SRC_GEO.side * D.top, kind: 'panel', rise: 0.62 };
+      if (D.panel) return { x: v.x, y: v.y, z: v.z - SRC_GEO.side * D.top, kind: 'panel', rise: 0.38 };   // 빗살(0.3m) 위로 뽑는 높이
       const o = { x: v.x, y: v.y + D.h, z: v.z, kind: 'lying', rise: 0.4 };
       if (m < cont.C && m % cont.per === 0 && !n.padDone.has(padKey(p, j, m))) {   // 위 층 트레이가 비었음 → 먼저 빈 트레이 스택으로
         const y = cont.trays[m / cont.per], S2 = SRC_GEO.stack;
@@ -1453,6 +1458,7 @@ class ExtraZone {
         break;
       }
       case 'load':
+        if (!c.cart && !c.loadGo) { if (this.loaderBusy()) break; c.loadGo = true; }   // 투입 로봇이 다음 자재를 들고 AMR 위에 와 있어야 적재 시작 (트레이 옮기기 · 꺼내는 중이면 AMR이 기다린다) — 시작한 적재는 끝까지
         c.timer -= dt;
         if (c.timer <= 0) {
           // 물류존 확장 선반에서 원재료 1개 · 부품 키트 1개를 꺼낸다 — 모자라면 입고될 때까지 투입 대기 (sim.js takeZoneStock)
@@ -1498,7 +1504,7 @@ class ExtraZone {
         }
         if (c.s < c.L - 1e-6) break;
         this.square(c);   // 셀·투입구·적재장 도착 → 셀 축(동서)에 반듯하게 선다 (대각 진입 방향 그대로 서지 않게)
-        if (c.target === 'SRC') { c.state = 'load'; c.timer = Z.load; break; }
+        if (c.target === 'SRC') { c.state = 'load'; c.timer = Z.load; c.loadGo = false; break; }
         if (c.target === 'SINK') { c.state = 'unload'; c.timer = Z.unload; c.at = 'SINK'; break; }
         const cell = this.cells[c.target]; c.at = c.target;
         const rw = Z.rework && cell.id === Z.rework.at && this.rng() < Z.rework.rate;

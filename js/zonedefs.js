@@ -130,7 +130,7 @@ export const EXTRA_ZONES = [
     mixes: { dt: { label: '후드만', w: { hood: 1, door: 0 } }, '2:1': { label: '2 : 1', w: { hood: 2, door: 1 } }, '1:1': { label: '1 : 1', w: { hood: 1, door: 1 } }, '1:2': { label: '1 : 2', w: { hood: 1, door: 2 } }, ea: { label: '도어만', w: { hood: 0, door: 1 } } },
     // 왼쪽 패널 셀 목록: 셀 id 또는 분기 [{ product, title, cells }] (flexible-manufacturing renderZoneCard와 같은 묶음)
     card: ['C01', 'C02', 'C03', 'C04', 'C05', [{ product: 'door', title: '도어만 · 확장 셀', cells: ['C10'] }], 'C06', [{ product: 'ng', title: 'NG 분기 · 재검 포함', cells: ['C07'] }]],
-    flow: '투입 → C01 키팅 → C02 보정 → C03 용접 → C04 실링 → C05 헤밍 → <span class="t-ea">(도어) C10 장착</span> → C06 검사 → <span class="t-ng">(NG) C07 재작업</span> → 구분 적재',
+    flow: '투입 → C01 키팅 → C02 보정 → C03 용접 → C04 실링 → C05 헤밍 → <span class="t-ea">(도어) C10 장착</span> → C06 검사 → <span class="t-ng">(NG) C07 수리·재검</span> → 구분 적재',
     // 출하 도크(x 22.5) 왼쪽, 왼쪽 세로 통로(x −35.5) 오른쪽에 들어가도록 셀 간격을 9m → 8.5m로 좁혔다 (flexible-manufacturing과 셀 순서·흐름 동일)
     cells: {
       // C01: 남쪽 키팅 구역(흐름 랙 3대 · 키트 조립대 · 검증대) → 라인사이드 컨베이어(트레이 정지 2곳 · 보울 피더) → 남쪽 협동로봇 2대가 트레이에서 집어 판넬에 장착
@@ -166,7 +166,7 @@ export const EXTRA_ZONES = [
       { z: 3.1, color: 'rgba(127,224,214,0.95)', text: '▶ 공용 라인  C01 키팅 → C02 보정 → C03 용접 → C04 실링 → C05 헤밍' },
       { z: 4.4, color: 'rgba(245,189,92,0.95)', text: '▶ 후드  헤밍 → C06 치수·외관검사 → 구분 적재' },
       { z: 5.7, color: 'rgba(184,155,255,0.95)', text: '▶ 도어  헤밍 → C10 정밀 장착 → C06 검사 → 구분 적재' },
-      { z: 7.0, color: 'rgba(255,128,128,0.95)', text: '▶ NG  C07 재작업 → C06 재검' },
+      { z: 7.0, color: 'rgba(255,128,128,0.95)', text: '▶ NG  C07 수리 부스 → 부스 재검·QR → 구분 적재' },
     ] },
   },
   {

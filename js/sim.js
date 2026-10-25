@@ -1235,6 +1235,7 @@ export class Simulation {
     if (this.releaseTimer >= this.releaseInterval) {
       const car = this.useAMR ? this.carriers.find((c) => c.state === 'atSrc') : null;
       if (this.useAMR && !car) { src.state = 'NOAMR'; src.c.blocked += dt; return; }
+      if (this.loaderGate && !this.loaderGate()) { src.state = 'BUSY'; return; }   // 투입 로봇셀(화면)이 자재를 지그에 내려놓은 뒤에 투입 — 헤드리스 시뮬레이션은 연결점이 없어 기다리지 않는다
       if (this.canSend(src.out)) {
         const product = this.mix ? this.nextProduct() : null;
         if (product) this.releasedBy[product]++;

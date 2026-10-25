@@ -1689,7 +1689,7 @@ function buildFasten(g, st) {
     put(box(0.7, 0.04, 0.4, MAT.steel), 0, 0.92, 0, tb);
     fillBins(['P_Bolt', 'P_Nut', 'P_Washer'].map((_, i) => put(box(0.2, 0.05, 0.3, std(0x2f6fd6)), -0.22 + i * 0.22, 0.965, 0, tb)), ['P_Bolt', 'P_Nut', 'P_Washer']);
   }
-  // e-axle 라인 끝 전수 시험 (EOL): 누설(냉각·오일 통로 공기 압력 강하) · 절연 저항·내전압(고전압 단자) 시험기 — 다축 너트러너가 올라간 뒤
+  // e-axle 라인 끝 전수 시험 (EOL): 누설(냉각·오일 통로 공기 압력 강하) · 절연 저항·내전압(고전압 단자) 시험기 — 로봇 볼트 체결이 끝난 뒤
   //  시험기 기둥의 승강 팔이 내려와 시험 헤드(누설 시험 플러그 · 고전압 프로브)를 e-axle 위 포트에 꽂는다 · 판정은 표시창 (합격 초록 · 불합격 빨강)
   let eol = null;
   if (st.def.product === 'eaxle') {
@@ -1861,12 +1861,12 @@ function instancedStock(baked, mats) {
 }
 // 자재 투입 로봇셀 (정밀조립 · js/loader.js): 실제 라인처럼 자재를 전용 회수 용기째 공급 — 원자재 하역(AGV · 셀 남쪽 4.5m) 쪽 남쪽 한 줄에 제품마다 용기 2자리(쓰는 중 · 대기)
 //  · e-axle 하우징: 대형 회수 용기(GLT) — 성형 포켓 2 × 2 × 3층(12개) · 층 사이 분리판 → 층이 비면 로봇이 분리판을 서쪽 끝 거치대로 옮긴다 (빈 GLT와 함께 회수)
-//  · 도어트림: 전용 회수 용기 — 칸막이에 세워 12장(앞면이 로봇 쪽) · 투입 스탠드(0.4m · 위치 핀) 위에 AGV가 내려놓는다
+//  · 도어트림: 전용 회수 용기 — 칸막이에 세워 12장(앞면이 로봇 쪽) · 투입 스탠드(0.75m · 위치 핀 — 판 가운데가 로봇 어깨 높이 근처라 툴을 수평으로 댄다) 위에 AGV가 내려놓는다
 //  그 앞 주행 레일(z 1.45) 위 고가반 6축이 쓰는 용기 앞으로 가서 꺼내고, 도어트림은 손목을 돌려 눕혀 AMR 지그에 수평으로 · 그리퍼는 동쪽 끝 툴 거치대에서 바꿔 끼움
 //  수십 개를 그리므로 모델을 재질별로 합쳐(bake) InstancedMesh로 그린다 — 용기마다 보이는 개수(count)가 그 용기의 남은 수
 export const SRC_GEO = {
   ea: { xs: [-1.3, 0.8], z: 2.85, px: 0.47, pz: 0.3, lv: 0.68, base: 0.15, per: 4, C: 12, h: 0.57 },   // 층 간격 0.68 — 하우징 받침(크래들)이 원점 아래로 약 7cm
-  dt: { xs: [2.45, 3.55], z0: 2.75, pitch: 0.08, n: 12, stand: 0.4, base: 0.12, th: 0.08, C: 12 },   // 맨 앞 칸은 레일에서 1m 넘게 — 더 가까우면 툴을 수평으로 댈 자세가 안 나온다
+  dt: { xs: [2.45, 3.55], z0: 2.75, pitch: 0.08, n: 12, stand: 0.75, base: 0.12, th: 0.08, C: 12 },   // 맨 앞 칸은 레일에서 1m 넘게 — 더 가까우면 툴을 수평으로 댈 자세가 안 나온다
   pad: { x: -3.35, z: 2.85, y: 0.75 },   // 분리판 거치대
 };
 function buildSourceZone(g) {
@@ -3411,7 +3411,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       else if (u.phase !== 'work' && !(st.vla && u.phase === 'pick')) r.anim(u.phase === 'pick', t + r.phase, p);
       r.bin.visible = u.carry && !r.spsXfer;   // 선반에서 가져온 부품 (플랫폼 트레이) — 부품분류셀은 손에 든 키트 트레이
     });
-    if (parts.fenceDoor) { const D = parts.fenceDoor, open = st.techOnSite || !!st.request || st.state === 'MAINT' || st.state === 'DOWN'; D.position.x += ((open ? D.userData.x1 : D.userData.x0) - D.position.x) * Math.min(1, rdt * 3); }   // 인터록 미닫이문: 정비 인력이 오면 열고(로봇 보호정지) 떠나면 닫힘 · 정비 요청이 나면 정비 인력이 오기 전에 미리 연다
+    if (parts.fenceDoor) { const D = parts.fenceDoor, open = st.techOnSite || st.state === 'MAINT' || st.state === 'DOWN'; D.position.x += ((open ? D.userData.x1 : D.userData.x0) - D.position.x) * Math.min(1, rdt * 6); }   // 인터록 미닫이문: 정비 인력이 오면 열고(로봇 보호정지) 떠나면 닫힘 — 일하는 중(정비 요청만 난 상태)에는 열지 않는다 (셀이 멈춘 뒤 · 정비 인력이 와서 연다)
     if (parts.racks?.length) {
       const frac = st.parts != null ? st.parts / (this.sim.mode.partsCap || 40) : 1;
       for (const rk of parts.racks) rk.bins.forEach((b, k) => (b.visible = k < Math.ceil(frac * rk.bins.length)));
@@ -3575,6 +3575,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
   //  e-axle GLT 한 층이 비면 꺼내기 전에 그 층 분리판을 거치대로 옮긴다
   animLoader(parts, st, dts) {
     const sim = this.sim, L = parts.loader, Z = parts.zoneStock, G = SRC_GEO, raw = sim.rawStock, T = sim.releaseInterval, k = Math.min(1, sim.releaseTimer / T);
+    sim.loaderGate = () => !L.r.arm.ik || !L.auto.visible || sim.mode.key === 'traditional' || (L.state === 'ready' && L.placeT >= 0.5);   // 투입: 로봇이 지그에 내려놓은 뒤
     const w = sim.mix ?? { doortrim: 1, eaxle: 1 }, tot = (w.doortrim || 0) + (w.eaxle || 0) || 1;
     const nDT = Math.min(2 * G.dt.C, Math.round(raw * (w.doortrim || 0) / tot)), nEA = Math.min(2 * G.ea.C, raw - nDT), n = { doortrim: nDT, eaxle: nEA };
     let next = sim.nextProduct?.() ?? 'doortrim'; if (!n[next]) next = n.doortrim ? 'doortrim' : n.eaxle ? 'eaxle' : null;
@@ -3585,7 +3586,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     const padKey = (j, c) => `${j}:${c}`, per = G.ea.per;
     const pick = (p) => {   // 쓰는 용기의 마지막 칸 — 하우징은 위에서 · 도어트림은 로봇 쪽 앞면 가운데
       const S = sp[p], j = S.act, cnt = S.c[j], cont = (p === 'eaxle' ? Z.ea : Z.dt)[j], v = cont.slots[cnt - 1]; if (!v) return null;
-      if (p === 'doortrim') return { x: v.x, y: v.y + 0.3, z: v.z - Z.th, kind: 'panel', rise: 0.62 };
+      if (p === 'doortrim') return { x: v.x, y: v.y + 0.3, z: v.z - Z.th, kind: 'panel', rise: 0.38 };   // 칸막이(0.3m) 위로 뽑는 높이
       const o = { x: v.x, y: v.y + G.ea.h - 0.02, z: v.z, kind: 'lying', rise: 0.45 }, lay = cnt / per;
       if (cnt < G.ea.C && cnt % per === 0 && !Z.padDone.has(padKey(j, cnt))) {   // 위 층이 비어 분리판이 드러남 → 먼저 거치대로
         const y = cont.pads[lay - 1].position.y, pileN = Z.padDone.size;

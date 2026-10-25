@@ -15,8 +15,8 @@ export const STATION_TYPES = {
   // 정밀조립 셀 — verify: 체결 토크·각도를 전수 판정해 불량을 걸러낸다(검사 겸용)
   sort:     { label: '부품 분류',   effect: 'sort',     cycle: 7,  wear: 0.14, idleKW: 0.8, busyKW: 3,  task: '비전 인식 기반 부품 피킹·분류·키팅' },
   pressfit: { label: '부품 압입',   effect: 'press',    cycle: 9,  wear: 0.3,  idleKW: 1.5, busyKW: 7,  task: '협동로봇 힘제어 압입 (하중-변위 모니터링)' },
-  screw:    { label: '스크류 체결', effect: 'fasten',   cycle: 12, wear: 0.24, idleKW: 1,   busyKW: 4,  task: '스크류 자동 체결·토크 판정', verify: true },
-  fasten:   { label: '부품 체결',   effect: 'fasten',   cycle: 12, wear: 0.28, idleKW: 1.5, busyKW: 6,  task: '다축 너트러너 볼트 체결·토크 판정', verify: true },
+  screw:    { label: '스크류 체결', effect: 'fasten',   cycle: 12, wear: 0.24, idleKW: 1,   busyKW: 4,  task: '스크류 자동 공급 체결·토크 판정 → 비전 나사 확인', verify: true },
+  fasten:   { label: '부품 체결',   effect: 'fasten',   cycle: 12, wear: 0.28, idleKW: 1.5, busyKW: 6,  task: '직각 서보 너트러너 볼트 체결·토크 판정 → EOL 누설·절연 시험', verify: true },
 };
 
 // factor: 사이클 배율(작을수록 빠름). 대수가 늘면 병렬 작업으로 사이클이 줄어든다.
@@ -115,7 +115,7 @@ export const AMMR_FETCH = { turnOut: 0.06, driveOut: 0.14, pick: 0.24, turnIn: 0
 // 점당 시간 = 부품 선반 왕복·집기(부품은 한 번에 1개) + 체결: 스크류·볼트 5.5초(왕복 2.5 + 착좌·런다운·토크 확인 3.0) · 클립 압입 4.5초 · 베어링·로터 압입 5.0초 — 로봇들은 각자 자기 점을 동시에 체결한다
 // 정밀조립 셀 실제 작업 시간 (초) [레거시, 자동화, 피지컬AI] — 셀 작업 요소를 실제 공장 기준으로 더한 값 (사용자 가이드 5.21)
 //  레거시: 숙련 작업자 (집기·놓기 2~3초 · 클립 압입 2.5초 · 전동 드라이버 나사 5초) + 여유율 15%
-//  자동화: 티칭한 6축(동작 1.5~2초) · 협동로봇(협동 속도 제한 · 동작 2~3초) · 서보 프레스·로터 삽입기·다축 너트러너
+//  자동화: 티칭한 6축(동작 1.5~2초) · 협동로봇(협동 속도 제한 · 동작 2~3초) · 서보 프레스·로터 삽입기·서보 너트러너
 //  피지컬AI: VLA 인식·계획 0.5~1초 + 동작 1.3~1.6배 · 다시 집기 5~10% — 빠르지는 않지만 티칭 없이 변종·유연물을 다룬다 · 로터·하우징은 6축(가반 60kg) · e-axle 완제품(약 75kg)은 고가반 6축
 //  SORT 판독 3 + 키트 부품 4개 옮겨 담기 + 빈 트레이 회수 · DT_ASSY 변종 부품 4 + 클립 12 · DT_FAST 스크류 6점 · EA_ASSY 베어링·오일씰 서보 압입 + 기어축 + 로터 삽입기
 //  EA_FAST 실러(FIPG)·비드 검사 + 하우징 결합 + 볼트 22개 · PACK 제품마다 (e-axle은 고가반 6축이 크레이트에 넣는다)
