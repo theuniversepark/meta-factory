@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { KIT } from './factory.js';
+import { buildLoader, stepLoader, loaderRobot, visibleTop } from './loader.js';
 import { blenderOn, cloneAsset, RENDER } from './blender.js';
 import { makeProductMachine } from './product-machines.js';
 import { attachSpotGun, attachSealGun, attachVacuumGripper, attachRollerHead, attachNutrunner, attachScanner, attachDeburrSpindle, attachCmmPrepTool, attachLibsProbe, holdPart, makeHose, processMarks } from './endeffectors.js';
@@ -19,6 +20,7 @@ import { KIT_PARTS, KIT_T } from './kitcell.js';
 export { EXTRA_ZONES };
 
 const { std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, AMMR_LEAN, makeRobot, ammrContact, contactBox, surfaceY, supportBox, pointWork, alignTool, makeSparks, stepSparks, makeWorker, workerCycle, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK, makeArm, ARM_JOINTS, buildWeld, buildGate, buildVision, heavyRobot, dockStation } = KIT;
+const c0cart = (o) => !!o.cart;   // 레거시: 작업자가 대차에 싣는다 (로봇 없음)
 const PI = Math.PI;
 const PC = { shared: 0x2bb3a6, hood: 0xf0a030, door: 0x9a6bff, hblock: 0xf0a030, rcover: 0x9a6bff, ng: 0xd23b3b };
 const USE_CLS = { hood: 'doortrim', hblock: 'doortrim', door: 'eaxle', rcover: 'eaxle' };   // 셀 라벨 색 (주황·보라)
@@ -713,37 +715,52 @@ const BUILD = { kit: buildKit, locate: buildLocate, spot: buildSpot, seal: build
   mill5: buildMill5, turn: buildTurn, deburr: buildDeburr, matid: buildMatId,
   cmm: (g) => { const P = buildCMM(g); return { ...P, markMat: addLaser(P.car) }; } };   // CMM 합격 즉시 DataMatrix 레이저 각인
 
-// 투입 스테이션(갠트리 로더) · 구분 적재장 — 두 Zone 공통 간이 형상
+// 투입 스테이션(투입 로봇셀) · 구분 적재장 — 두 Zone 공통 간이 형상
 // 자재 투입존 (정밀조립Zone 투입 스테이션과 같은 구성): 혼류 제품별로 양쪽에 따로 보관 (첫 제품 +z · 둘째 제품 −z) — 판넬(후드·도어)은 빗살 거치대에 세워 2열 × 10장,
 // 주조·단조 소재(유압블록·리어커버)는 팔레트에 4 × 3 × 2단 · 가운데는 AMR 지그 투입 위치 · 직교 3축 갠트리가 다음 투입 제품 쪽에서 집어 지그에 내려놓는다
-const SRC_SIDE = 20;   // 제품별 보관 칸 (sim.js ZONE_SRC.cap = 양쪽 합)
+const SRC_SIDE = 20;
+// 자재 투입 로봇셀 배치 (js/loader.js · 셀 로컬 · AMR 정차 = 원점): 자재는 북쪽(side −1) 한 줄 — 첫 제품 서쪽(x −0.85) · 둘째 제품 동쪽(x 2.05)
+//  판재(후드·도어): 빗살 랙 한 줄 20칸(7cm · 먼 칸 z ∓3.45부터 로봇 쪽 ∓2.12까지) · 주물(블록·커버): 팔레트 2 × 2 × 5단
+//  유연생산은 첫 셀(C01)이 북쪽 줄이라 AMR이 투입구를 나가 북동쪽으로 간다 — 레일·자재를 서쪽으로 1.6m (dx)
+export const SRC_GEO = {
+  side: -1, rackY: 0.55,   // 빗살 랙 받침 높이 — 패널 가운데가 로봇 어깨 높이 근처(후드 0.97 · 도어 1.24m)라 팔을 낮게 접지 않는다
+  dx: (Z) => (Z.key === 'flex' ? -1.6 : 0),   // 레일·바닥 (판재 랙은 열 자리를 따로 — stock)
+  stock(k, i, dx = 0) {
+    const sd = SRC_GEO.side, x = (i ? 2.05 : -0.85) + dx, [L, D, H] = PRODUCT_DIM[k];
+    if (k === 'hood' || k === 'door') {   // 판재: 빗살 랙 2열 × 10칸 (14cm — 후드 판 두께 약 0.12m) · 앞 칸이 레일에서 1m · 칸 순서 = 뒤 줄부터
+      const px = i ? 0.75 : -2.3, cols = [px - (L + 0.1) / 2, px + (L + 0.1) / 2], slots = [];
+      for (let r = 9; r >= 0; r--) for (const cx of cols) slots.push({ x: cx, y: SRC_GEO.rackY + 0.14 + D / 2, z: sd * (2.5 + r * 0.14) });
+      return { panel: true, x: px, cols, z: sd * 3.13, w: L + 0.2, h: H, slots };
+    }
+    const px = L + 0.1, pz = D + 0.1, lv = H + 0.02, slots = [];
+    for (let l = 0; l < 5; l++) for (const rz of [1, -1]) for (const cx of [-1, 1]) slots.push({ x: x + cx * px / 2, y: 0.12 + l * lv, z: sd * (2.78 + rz * pz / 2) });
+    return { panel: false, x, z: sd * 2.78, w: 2 * px + 0.1, h: H + 0.04, slots };
+  },
+};
+   // 제품별 보관 칸 (sim.js ZONE_SRC.cap = 양쪽 합)
 function buildPort(g, Z, kind) {
-  if (kind === 'src') {
-    put(box(4.2, 0.06, 6.8, MAT.dark), 0, 0.03, 0, g);
-    put(box(4.2, 0.01, 1.5, MAT.lane), 0, 0.065, 0, g);
-    const auto = put(new THREE.Group(), 0, 0, 0, g);
-    for (const x of [-1.95, 1.95]) for (const z of [-3.15, 3.15]) put(box(0.12, 3.0, 0.12, MAT.yellow ?? MAT.accent), x, 1.5, z, auto);
-    for (const z of [-3.15, 3.15]) { put(box(4.1, 0.14, 0.14, MAT.yellow ?? MAT.accent), 0, 3.0, z, auto); put(box(3.9, 0.03, 0.05, MAT.steel), 0, 3.09, z, auto); }
-    const bridge = put(new THREE.Group(), 0, 3.0, 0, auto);
-    put(box(0.18, 0.18, 6.5, MAT.dark), 0, 0.12, 0, bridge);
-    for (const z of [-3.15, 3.15]) put(box(0.3, 0.14, 0.26, MAT.orange), 0, 0.14, z, bridge);
-    const car = put(new THREE.Group(), 0, 0, 0, bridge);
-    put(box(0.4, 0.3, 0.4, MAT.orange), 0, -0.05, 0, car); put(box(0.18, 0.7, 0.18, MAT.dark), 0, 0.3, 0, car);
-    const lift = put(new THREE.Group(), 0, 0, 0, car);
-    put(box(0.08, 2.7, 0.08, MAT.steel), 0, -0.25, 0, lift); put(box(0.5, 0.08, 0.4, MAT.dark), 0, -1.6, 0, lift);
-    if (Z.products.hood || Z.products.door) for (const z of [-0.06, 0.06]) { put(box(0.42, 0.16, 0.025, MAT.steel), 0, -1.72, z, lift); for (const x of [-0.15, 0.15]) put(cyl(0.03, 0.03, 0.012, MAT.dark, 10), x, -1.74, z * 0.7, lift).rotation.x = PI / 2; }   // 패널 에지 클램프 그리퍼 (진공 패드 내장 — 빗살 거치대에 세운 패널 윗변을 양쪽에서 문다)
-    // 제품별 보관 구역 바닥색 · 거치대 · 바닥 이름 (혼류 구분)
+  if (kind === 'src') {   // 자재 투입 로봇셀 (js/loader.js): 원자재 하역(지게차 · 북쪽) 쪽 북쪽 한 줄에 자재 · 그 앞 주행 레일 위 고가반 6축 · 남쪽은 비움(라이트커튼)
+    const panel = !!(Z.products.hood || Z.products.door), sd = SRC_GEO.side, dx = SRC_GEO.dx(Z);
+    put(box(6.4, 0.06, 7.0, MAT.dark), 0.6 + dx, 0.03, sd * 1.1, g);
+    put(box(6.4, 0.01, 1.5, MAT.lane), 0.6 + dx, 0.065, 0, g);
+    const L = buildLoader(g, KIT, { side: sd, changer: false, railX: [-1.95 + dx, 3.25 + dx], tools: [{ key: 'tool', kind: panel ? 'vacuum' : 'jaw' }] });
+    for (const x of [-2.6 + dx, 3.9 + dx]) { put(box(0.07, 1.5, 0.07, MAT.yellow ?? MAT.accent), x, 0.85, -sd * 0.95, g); put(box(0.02, 1.4, 0.02, emis(0xff3b3b, 0.6), false), x, 0.85, -sd * 0.9, g); }   // 남쪽(열린 면) 라이트커튼 송·수광기
+    // 제품별 보관 구역 바닥색 · 거치대(판재 빗살 랙 · 주물 팔레트) · 바닥 이름 (혼류 구분)
     Object.keys(Z.products).forEach((k, i) => {
-      const z = i ? -2.15 : 2.15, panel = k === 'hood' || k === 'door';
-      const tint = put(new THREE.Mesh(new THREE.PlaneGeometry(3.9, 1.9), new THREE.MeshBasicMaterial({ color: PC[k], transparent: true, opacity: 0.32, depthWrite: false })), 0, 0.07, z, g); tint.rotation.x = -PI / 2;
-      if (panel) {   // 빗살 거치대
-        put(box(3.7, 0.08, 1.6, MAT.steel), 0, 0.04, z, g);
-        for (const cx of [-0.95, 0.95]) for (let j = 0; j <= 10; j++) for (const x of [-0.5, 0.5]) put(box(0.02, 0.5, 0.02, MAT.accent), cx + x, 0.33, z - 0.725 + j * 0.145, g);
-      } else put(box(3.6, 0.12, 1.6, MAT.pallet), 0, 0.06, z, g);
-      put(textPlane([Z.products[k].label], 2.4, 0.6, hex(PC[k])), 0, 0.08, i ? -3.65 : 3.65, g);
+      const S = SRC_GEO.stock(k, i, dx), z = S.z;
+      const tint = put(new THREE.Mesh(new THREE.PlaneGeometry(S.cols ? S.w * 2 + 0.2 : S.w + 0.3, 1.8), new THREE.MeshBasicMaterial({ color: PC[k], transparent: true, opacity: 0.32, depthWrite: false })), S.x, 0.07, z, g); tint.rotation.x = -PI / 2;
+      if (panel) {   // 빗살 랙 (한 줄 20칸 · 7cm 간격)
+        const RY = SRC_GEO.rackY;
+        for (const cx of S.cols) {   // 열마다 랙 받침 · 바닥판 · 양 끝 빗살 (0.3m)
+          put(box(S.w, RY + 0.08, 1.5, MAT.dark), cx, (RY + 0.08) / 2, z, g); put(box(S.w, 0.04, 1.5, MAT.steel), cx, RY + 0.06, z, g);
+          for (const x of [-S.w / 2 + 0.05, S.w / 2 - 0.05]) { put(box(0.05, 0.06, 1.45, MAT.dark), cx + x, RY + 0.11, z, g); for (let j = 0; j <= 10; j++) put(box(0.02, 0.3, 0.012, MAT.accent), cx + x, RY + 0.23, z - 0.7 + j * 0.14, g); }
+        }
+      } else put(box(S.w, 0.12, 1.6, MAT.pallet), S.x, 0.06, z, g);
+      put(textPlane([Z.products[k].label], 1.8, 0.45, hex(PC[k])), S.x, 0.08, sd * (S.cols ? 4.15 : 3.85), g);
     });
-    return { auto, bridge, car, lift };
-  } else if (Z.pack) {   // 포장·구분 적재: AMR 하역 자리 바닥판만 (팔레트·로봇은 ExtraZone.buildPack)
+    return { auto: L.auto, loader: L };
+  }
+  if (Z.pack) {   // 포장·구분 적재: AMR 하역 자리 바닥판만 (팔레트·로봇은 ExtraZone.buildPack)
     put(box(3.2, 0.06, 2.4, MAT.dark), 0, 0.03, 0, g);
     put(box(3.2, 0.01, 1.5, MAT.lane), 0, 0.065, 0, g);
   } else {
@@ -862,9 +879,9 @@ class ExtraZone {
     this.src = { id: 'SRC', def: Z.src, occ: null }; this.sink = { id: 'SINK', def: Z.sink, occ: null };
     for (const [n, kind] of [[this.src, 'src'], [this.sink, 'sink']]) {
       const g = put(new THREE.Group(), n.def.x, 0, n.def.z, this.G); g.rotation.y = n.def.rot ?? 0; n.port = buildPort(g, Z, kind);
-      if (kind === 'src') { n.stockG = put(new THREE.Group(), 0, 0, 0, g); n.heldG = put(new THREE.Group(), 0, 0, 0, n.port.lift); }
+      if (kind === 'src') n.stockG = put(new THREE.Group(), 0, 0, 0, g);
       const el = document.createElement('div'); el.className = 'st-label xz';
-      el.innerHTML = `<div class="nm"><span>${kind === 'src' ? '자재 투입 (갠트리 로더)' : Z.pack ? '포장·구분 적재 (제품별)' : '양품 구분 적재'}</span><i class="uid">${Z.uidp}-${kind === 'src' ? 'AS' : 'PL'}-01</i></div><div class="row"><span class="chip s-IDLE"></span></div>`;
+      el.innerHTML = `<div class="nm"><span>${kind === 'src' ? '자재 투입 로봇셀' : Z.pack ? '포장·구분 적재 (제품별)' : '양품 구분 적재'}</span><i class="uid">${Z.uidp}-${kind === 'src' ? 'AS' : 'PL'}-01</i></div><div class="row"><span class="chip s-IDLE"></span></div>`;
       const label = new CSS2DObject(el); label.position.set(0, 4.0, 0); g.add(label);
       Object.assign(n, { g, el, label, chip: el.querySelector('.chip') });
     }
@@ -1231,45 +1248,35 @@ class ExtraZone {
     }
   }
 
-  // 자재 투입존 보관 재고 (제품별 양쪽): Blender 모델이 늦게 들어오므로 실행마다 다시 채운다 · 칸 위치는 안쪽(지그 쪽)·아래 단부터
+  // 자재 투입존 보관 재고 (제품별 · 북쪽 한 줄): Blender 모델이 늦게 들어오므로 실행마다 다시 채운다 · 칸 순서 = 채우는 순서(먼 칸·아래 단부터) — 집는 것은 마지막 칸(로봇 쪽 · 맨 위)
   buildSrcStock() {
     const n = this.src; if (!n?.stockG) return;
-    n.stockG.clear(); n.heldG.clear(); n.side = {};
+    n.stockG.clear(); n.side = {};
+    const L = n.port.loader; for (const h of Object.values(L.held)) h.removeFromParent(); if (!L.r.arm.native && blenderOn()) loaderRobot(L); L.held = {};   // 실물 로봇 모델이 늦게 들어오면 그것으로
     Object.keys(this.Z.products).forEach((k, i) => {
-      const z0 = i ? -2.15 : 2.15, sg = Math.sign(z0), panel = k === 'hood' || k === 'door', D = PRODUCT_DIM[k][1], slots = [];
-      if (panel) { for (let j = 0; j < 10; j++) for (const cx of [-0.95, 0.95]) slots.push({ x: cx, y: 0.14 + D / 2, z: z0 - sg * 0.65 + sg * j * 0.145 }); }
-      else for (let L = 0; L < 2; L++) for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) slots.push({ x: -1.2 + c * 0.8, y: 0.12 + L * 0.32, z: z0 - sg * 0.5 + sg * r * 0.5 });
-      const place = (m, p) => { if (panel) m.rotation.x = -PI / 2; m.position.set(p.x, p.y, p.z); return m; };
-      const objs = slots.slice(0, SRC_SIDE).map((p) => { const m = place(makeProduct(k), p); n.stockG.add(m); return m; });
-      const held = makeProduct(k); if (panel) held.rotation.x = -PI / 2; held.position.y = -1.85 - (panel ? 0 : 0.1); held.visible = false; n.heldG.add(held);
-      n.side[k] = { objs, slots: slots.slice(0, SRC_SIDE), held, h: panel ? D : 0.25, panel };
+      const S = SRC_GEO.stock(k, i, SRC_GEO.dx(this.Z)), objs = S.slots.slice(0, SRC_SIDE).map((p) => { const m = makeProduct(k); if (S.panel) m.rotation.x = SRC_GEO.side < 0 ? PI / 2 : -PI / 2; m.position.set(p.x, p.y, p.z); n.stockG.add(m); return m; });   // 판재: 윗면이 로봇(통로) 쪽을 보게 세움
+      const held = makeProduct(k), top = visibleTop(held); L.setHeld(k, held, top);
+      n.side[k] = { objs, slots: S.slots.slice(0, SRC_SIDE), S, top };   // top: 판 윗면 높이 — 세운 판은 그만큼 통로 쪽이 앞면 (로봇이 흡착하는 면)
     });
     n.shown = null;
   }
-  // 다음 투입 제품 (평준화 누적값을 바꾸지 않고 미리 봄) — 갠트리가 그 제품 쪽 보관 구역에서 집는다
+  // 다음 투입 제품 (평준화 누적값을 바꾸지 않고 미리 봄) — 로봇이 그 제품 자재에서 집는다
   peekNext() {
     const w = this.mix, keys = Object.keys(w).filter((k) => w[k] > 0), tot = keys.reduce((a, k) => a + w[k], 0) || 1;
     return keys.reduce((a, b) => ((this.mixAcc[b] ?? 0) + w[b] / tot > (this.mixAcc[a] ?? 0) + w[a] / tot ? b : a), keys[0]);
   }
-  // 자재 투입존 화면: 투입구 원재료(sim.zoneRaw)를 혼류 비율로 양쪽에 나눠 보이고, 적재(load) 중이면 갠트리가 다음 제품 쪽 맨 위 칸에서 집어 가운데 지그로
-  animSrc() {
-    const n = this.src, P = n?.port, s = this.sim; if (!n?.side || !P) return;
+  // 자재 투입 로봇셀 화면: 투입구 원재료(sim.zoneRaw)를 혼류 비율로 나눠 보이고, 로봇이 다음 제품을 미리 집어 AMR 위에서 기다리다 적재(load) 동안 지그에 수평으로 내려놓는다
+  animSrc(dts = 0) {
+    const n = this.src, L = n?.port?.loader, s = this.sim; if (!n?.side || !L) return;
     const keys = Object.keys(this.Z.products), w = this.mix, tot = keys.reduce((a, k) => a + (w[k] || 0), 0) || 1;
     const buf = s?.zoneRaw?.[this.Z.key] ?? SRC_SIDE * 2;
     const cnt = {}; cnt[keys[0]] = Math.min(SRC_SIDE, Math.round(buf * (w[keys[0]] || 0) / tot)); cnt[keys[1]] = Math.min(SRC_SIDE, buf - cnt[keys[0]]);
-    const c = n.occ && n.occ.state === 'load' ? n.occ : null, k = c ? Math.min(1, Math.max(0, 1 - c.timer / this.Z.load)) : 0;
-    let next = this.peekNext(); if (!cnt[next]) next = keys.find((x) => cnt[x] > 0) ?? next;
-    const S = n.side[next], picked = c && k >= 0.36 ? 1 : 0;
-    for (const key of keys) { const v = Math.max(0, cnt[key] - (key === next ? picked : 0)); n.side[key].objs.forEach((o, i) => (o.visible = i < v)); }
-    const top = S.slots[Math.max(0, cnt[next] - 1)], pick = { x: top.x, z: top.z, y: top.y + S.h / 2 }, place = { x: 0, z: 0, y: BELT_Y + 0.05 + S.h / 2 }, UP = 2.45;
-    // 판재(후드 1.6m)는 세워 든 채 대차(1.3m)에 내려놓으면 한쪽 끝이 대차 손잡이 가로대(높이 1.15m)를 지난다 — 손잡이 반대쪽으로 0.12m 비켜 내려놓는다
-    if (c?.cart && S.panel) { const hd = P.bridge.parent.worldToLocal(c.g.localToWorld(new THREE.Vector3(0, 1.15, -0.72))); place.x -= Math.sign(hd.x - place.x) * 0.12; }
-    const K = [[0, 0, 0, 0], [0.18, 1, 0, 0], [0.3, 1, 1, 0], [0.36, 1, 1, 1], [0.48, 1, 0, 1], [0.7, 0, 0, 1], [0.84, 0, 1, 1], [1, 0, 1, 1]];
-    let a = K[0], b = K[0]; for (let i = 1; i < K.length; i++) if (k <= K[i][0]) { a = K[i - 1]; b = K[i]; break; }
-    const f = b[0] > a[0] ? (k - a[0]) / (b[0] - a[0]) : 0, pos = c ? a[1] + (b[1] - a[1]) * f : 0, low = c ? a[2] + (b[2] - a[2]) * f : 0, held = c ? (f < 1 ? a[3] : b[3]) : 0;
-    P.bridge.position.x = place.x + (pick.x - place.x) * pos; P.car.position.z = place.z + (pick.z - place.z) * pos;
-    const yLow = pos > 0.5 ? pick.y : place.y; P.lift.position.y = (UP + (yLow - UP) * low) - 1.15;
-    for (const key of keys) n.side[key].held.visible = !!held && key === next;
+    const c = n.occ && n.occ.state === 'load' && !c0cart(n.occ) ? n.occ : null, k = c ? Math.min(1, Math.max(0, 1 - c.timer / this.Z.load)) : null;
+    let next = this.peekNext(); if (!cnt[next]) next = keys.find((x) => cnt[x] > 0) ?? null;
+    const pick = (p) => { const D = n.side[p], v = D?.slots[cnt[p] - 1]; if (!v) return null; return D.S.panel ? { x: v.x, y: v.y, z: v.z - SRC_GEO.side * D.top, kind: 'panel', rise: 0.62 } : { x: v.x, y: v.y + D.S.h, z: v.z, kind: 'lying', rise: 0.4 }; };
+    const held = stepLoader(L, { next, pick, placeY: (p) => BELT_Y + 0.05 + (n.side[p]?.S.panel ? 0.16 : n.side[p]?.S.h ?? 0.2), placeK: k == null ? (L.state === 'ready' && L.placeT ? 1 : null) : Math.min(1, k / 0.9), dt: dts, frozen: this.halted || this.ctl?.stop, legacy: this.mode === 'traditional' });
+    L.placeT = k != null;
+    for (const key of keys) { const v = Math.max(0, cnt[key] - (held === key ? 1 : 0)); n.side[key].objs.forEach((o, i) => (o.visible = i < v)); }
   }
 
   // 셀 키 (DataHub 자산 id · 텔레메트리 ref.stationId): A_1_C03
@@ -1525,7 +1532,7 @@ class ExtraZone {
   // ── 화면 동기화 (rdt: 실제 초, t: 화면 시간) ─────────────────
   sync(rdt, t, dts) {
     this.animPack();
-    this.animSrc();
+    this.animSrc(dts);
     if (this.board2?.g.visible) {   // 전광판 0.5초마다 · 서버 상태등 깜빡임
       this.board2.t -= rdt; if (this.board2.t <= 0) { this.board2.t = 0.5; this.drawWall(); }
       this.srvLeds.forEach((m, i) => (m.emissiveIntensity = Math.sin(t * 6 + i * 1.7) > 0.2 ? 2 : 0.4));

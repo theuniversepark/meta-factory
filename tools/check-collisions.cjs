@@ -16,6 +16,7 @@ const reg=new Map(),R=(o,cls,label)=>{if(o&&!reg.has(o))reg.set(o,{cls,label});}
 const zonesAll=()=>[...t.xzones.zones,t.insp];
 const regAll=()=>{reg.clear();
  for(const sv of v.stationViews){(sv.parts.robots||[]).forEach((r,i)=>R(r.root,'robot',sv.st.id+'#'+i));Object.entries(sv.parts.arms||{}).forEach(([k,a])=>R(a.arm?.root,'robot',sv.st.id+'.'+k));(sv.parts.spsPickers||[]).forEach((r,k)=>R(r.root,'robot',sv.st.id+'.K'+(k+1)));}
+ for(const sv of v.stationViews)if(sv.parts.loader)R(sv.parts.loader.r.root,'robot',sv.st.id+'.loader');for(const z of t.xzones.zones)if(z.src?.port?.loader)R(z.src.port.loader.r.root,'robot',z.Z.key+'/SRC.loader');
  for(const z of zonesAll()){const zk=z.Z?.key??'insp';for(const c of z.order)c.robots.forEach((r,i)=>R(r.root,'robot',zk+'/'+c.id+'#'+i));
   Object.values(z.pack??{}).forEach((p,i)=>p.arm&&R(p.arm.root,'robot',zk+'/PACK#'+i));z.carriers.forEach(c=>R(c.g,'mover',zk+'/'+c.id));}
  for(const k of ['vehicleViews','carrierViews','techViews','helperViews','quadViews','workerViews'])for(const vv of v[k]??[])R(vv.g,'mover',vv.v.id);
