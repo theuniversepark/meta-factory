@@ -15,7 +15,7 @@ console.log('== 구성 (피지컬AI)');
     check(`${z}: 정비 인력 대기 자리 = 자기 Zone 정비실 양쪽 끝 충전 스테이션`, T.every((t) => { const l = techLocal(t.home, TECH_ROOMS[z]); return Math.abs(l.lz + 2.5) < 1e-6; }));
     check(`${z}: 드론은 자기 Zone 이착륙장`, D.every((d, i) => d.home.x === ZONE_FAC[z].pads[i].x && d.home.z === ZONE_FAC[z].pads[i].z));
   }
-  check('설비 관리 셀 20개 (유연생산 8 · 적응가공 6 · 정밀검사 6) 고장·정비 대상', s.zoneCells.length === 20 && s.zoneCells.filter((c) => c.zone === 'flex').length === 8 && s.zoneCells.filter((c) => c.zone === 'insp').length === 6);
+  check('설비 관리 셀 23개 (유연생산 8 · 적응가공 6 · 정밀검사 9) 고장·정비 대상', s.zoneCells.length === 23 && s.zoneCells.filter((c) => c.zone === 'flex').length === 8 && s.zoneCells.filter((c) => c.zone === 'insp').length === 9);
 }
 console.log('== 셀 고장 → 자기 Zone 정비 인력 출동·수리');
 for (const mode of ['smart', 'dark']) {

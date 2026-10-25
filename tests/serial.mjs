@@ -41,7 +41,7 @@ const s = new Simulation('smart', 5, { line: zoneLine(), quiet: true }), ag = ne
 let heldShipped = 0; const take0 = H.take.bind(H); H.take = (p, k, by) => { const r = take0(p, k, by); if (r?.units.some((u) => u.hold)) heldShipped++; return r; };
 run(s, ag, 7200);
 { const issued = T.recent.filter((r) => r.serial), qrOk = issued.slice(-20).every((r) => tryDecode(matrixOf(r), QRCodeReader) === r.mark.data);
-  check('투입 = WIP ID · 검사·포장셀 합격 = 시리얼 (판정 셀 PACK) · 시리얼 중복 없음', issued.length > 200 && T.recent.every((r) => r.wip) && issued.every((r) => r.mark.at === 'PACK' && r.tSerial >= r.t0) && new Set(issued.map((r) => r.serial)).size === issued.length, `발행 ${issued.length} · 투입 ${T.recent.length}`);
+  check('투입 = WIP ID · 검사·포장셀 합격 = 시리얼 (판정 셀 PACK) · 시리얼 중복 없음', issued.length > 100 &&   /* 실제 작업 시간(1.0.45) */ T.recent.every((r) => r.wip) && issued.every((r) => r.mark.at === 'PACK' && r.tSerial >= r.t0) && new Set(issued.map((r) => r.serial)).size === issued.length, `발행 ${issued.length} · 투입 ${T.recent.length}`);
   check('QR 라벨 내용 = GS1 Digital Link (01 → 10 → 21 · 11) · 실제 판독 일치', qrOk && issued.every((r) => r.mark.data === `https://id.meta-factory.example/01/${gtinOf(r.product)}/10/${r.plot}/21/${r.serial}?11=${r.pdate}`));
   const g = issued.map((r) => r.mark), re = g.filter((m) => m.tries > 1);
   check('판독 검증: 모든 마킹 등급 기록 · 합격(C 이상) 또는 재마킹 이력', g.every((m) => m.grades.length === m.tries && (m.ok ? 'ABC'.includes(m.grade) : true)) && re.every((m) => 'DF'.includes(m.grades[0])), `재마킹 ${re.length}건 · 등급 A ${g.filter((m) => m.grade === 'A').length}`);
@@ -112,7 +112,7 @@ console.log('== 확장 Zone (유연생산 QR · 적응가공 DataMatrix) — 화
 console.log('== 내려받기 (EPCIS 2.0 · CSV)');
 { const doc = serialEpcis(H, iso), ev = doc.epcisBody.eventList, csv = serialsCSV(H).split('\n');
   check('EPCIS: 시리얼 발행(commissioning) · 포장 묶음(AggregationEvent SSCC) · 출하(shipping) · 보류 · 폐기(decommissioning)', ['commissioning', 'packing', 'shipping', 'holding', ...(H.units.some((u) => u.disp?.d === 'scrap') ? ['decommissioning'] : [])].every((b) => ev.some((e) => e.bizStep?.endsWith(b))) && ev.some((e) => e.type === 'AggregationEvent' && /^urn:epc:id:sscc:8800000\.\d{10}$/.test(e.parentID)), `${ev.length}건`);
-  check('serials.csv: WIP ID · 시리얼 · GTIN · 마킹 · SSCC · 처분 열', csv[0].startsWith('wip_id,serial,zone,product,gtin') && csv.length > 300);
+  check('serials.csv: WIP ID · 시리얼 · GTIN · 마킹 · SSCC · 처분 열', csv[0].startsWith('wip_id,serial,zone,product,gtin') && csv.length > 150);
   const A = allFiles(T, iso).map((f) => f.path);
   check('불량 분석 전체 묶음에 serial_events.jsonld · serials.csv 포함', A.includes('serial_events.jsonld') && A.includes('serials.csv'));
 }

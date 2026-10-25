@@ -51,7 +51,7 @@ console.log('== OEE 계산 (가짜 Zone — 숫자로 확인)');
   check('손실 6대 손실 분류 라벨', L.every((x) => LOSS[x.key]?.six));
   K.acc('flex', { ...c, state: 'BUSY' }, 10, { held: true }); K.stopAll('flex', [{ ...c, state: 'BUSY' }], 5);
   check('운영자 셀 정지 · Zone 정지 → 운영 정지(가동률 손실)', K.cells.flex.C03.t.stop === 15);
-  check('설계 UPH — 공용 셀 중 가장 느린 셀 · 제품별 전용 라인 합 중 작은 쪽', designUph(EXTRA_ZONES[0]) === Math.round(3600 / 109) && designUph(EXTRA_ZONES[1]) === Math.round(Math.min(3600 / 10, 3600 / 16 + 3600 / 18)), `유연생산 ${designUph(EXTRA_ZONES[0])} · 적응가공 ${designUph(EXTRA_ZONES[1])}`);
+  check('설계 UPH — 공용 셀 중 가장 느린 셀 · 제품별 전용 라인 합 중 작은 쪽', designUph(EXTRA_ZONES[0]) === Math.round(3600 / 67) && designUph(EXTRA_ZONES[1]) === Math.round(Math.min(3600 / 10, 3600 / 40, 3600 / 60 + 3600 / 60)),   /* 실제 작업 시간: 스폿용접 67초 · CMM 40초 */ `유연생산 ${designUph(EXTRA_ZONES[0])} · 적응가공 ${designUph(EXTRA_ZONES[1])}`);
 }
 
 console.log('== 확장 Zone 측정 모델 (건강도·공구 마모 → 품질 특성)');
@@ -83,7 +83,7 @@ const K = s.zkpi, o = K.oee('main'), k = s.kpi();
 check('정밀조립 OEE = KPI 화면 라인 OEE (A·P·Q 같은 값)', near(o.OEE, k.A * k.P * k.Q, 1e-9) && near(o.A, k.A) && near(o.Q, k.Q), `OEE ${(o.OEE * 100).toFixed(1)}%`);
 check('셀 행 6개 (예비 제외) · 시간 합 = 경과 시간', o.rows.length === s.processing.filter((x) => !x.standby).length && o.rows.every((r) => near(r.tot, s.time, 1)));
 K.collectMain(); const U = K.units.main;
-check('품질 표본 = 체결 검사 마친 제품 · 제품별 품질 특성(도어트림 나사 · e-axle 볼트 규격 따로)', U.length > 150 && U.every((u) => (u.product === 'eaxle' ? 'ea_torque' in u.y : 'dt_torque' in u.y)) && !U.some((u) => 'ea_torque' in u.y && 'dt_torque' in u.y), `${U.length}개`);
+check('품질 표본 = 체결 검사 마친 제품 · 제품별 품질 특성(도어트림 나사 · e-axle 볼트 규격 따로)', U.length > 50 && U.every((u) => (u.product === 'eaxle' ? 'ea_torque' in u.y : 'dt_torque' in u.y)) && !U.some((u) => 'ea_torque' in u.y && 'dt_torque' in u.y), `${U.length}개`);
 check('검사 셀 자신의 토크·각도는 공정 변수(x)에 넣지 않음', U.every((u) => !Object.keys(u.x).some((x) => /_FAST_(torque|angle)$/.test(x))));
 const cdt = controlChart(U.map((u) => u.y.dt_torque), { lsl: QSPEC.main.dt_torque.lsl, usl: QSPEC.main.dt_torque.usl });
 check('도어트림 토크 관리도 — 중심선이 규격(4.0 ~ 5.0 N·m) 안', cdt.type !== 'none' && cdt.cl > 4 && cdt.cl < 5, `${cdt.type} CL ${cdt.cl?.toFixed(3)} · Cpk ${cdt.cpk?.toFixed(2)}`);
@@ -99,7 +99,7 @@ check('발행 — metafactory/oee/v1/main 1건 (oee·a·p·q·진행률·손실 
 check('발행 — 품질 표본은 처음 호출 뒤 새로 판정된 것만 (평면 JSON · x_* · y_* · ng 0/1 · kind)', unsZoneKpi(s).filter((m) => m.topic.includes('/quality/')).length === 0 && qp.length === 0);
 for (let t = 0; t < 600; t += 0.1) { s.step(0.1); ag.update(0.1); }
 const q2 = unsZoneKpi(s).filter((m) => m.topic.includes('/quality/')).map((m) => JSON.parse(m.payload));
-check('… 10분 더 돌린 뒤 새 표본 발행 · 키 형식', q2.length > 20 && q2.every((p) => p.zone === 'main' && [0, 1].includes(p.ng) && typeof p.kind === 'string' && Object.keys(p).some((x) => x.startsWith('x_')) && Object.keys(p).some((x) => x.startsWith('y_')) && Object.entries(p).every(([x, v]) => !/^[xy]_/.test(x) || Number.isFinite(v))), `${q2.length}건`);
+check('… 10분 더 돌린 뒤 새 표본 발행 · 키 형식', q2.length > 5 && q2.every((p) => p.zone === 'main' && [0, 1].includes(p.ng) && typeof p.kind === 'string' && Object.keys(p).some((x) => x.startsWith('x_')) && Object.keys(p).some((x) => x.startsWith('y_')) && Object.entries(p).every(([x, v]) => !/^[xy]_/.test(x) || Number.isFinite(v))), `${q2.length}건`);
 
 console.log('== 그래프 해석 (관리도 · 산점도)');
 {

@@ -14,16 +14,16 @@ const s = new Simulation('smart', 3, { line: zoneLine(), quiet: true }), ag = ne
 run(s, ag, 10800);   // 3시간 — 체결 셀 사이클이 실제 작업 시간(로봇당 2~4점)이라 라인 속도가 느려 NG 사례·CAPA가 2시간으로는 모자란다
 { const wips = T.recent.map((r) => r.wip), packed = T.recent.filter((r) => r.steps.some((p) => p.id === 'PACK' && p.tOut != null)), serials = packed.map((r) => r.serial);
   check('2단 ID: 투입 제품마다 고유 WIP ID (WIP-DT/EA-YYMMDD-일련번호)', new Set(wips).size === wips.length && T.recent.every((r) => /^WIP-(DT|EA)-\d{6}-\d{6}$/.test(r.wip)), `${wips.length}개`);
-  check('2단 ID: 검사·포장셀 통과품만 제품 시리얼 · SGTIN EPC · QR (체결 NG품은 시리얼 없음)', packed.length > 300 && new Set(serials).size === serials.length && packed.every((r) => /^(DT|EA)-\d{6}-\d{6}$/.test(r.serial) && r.epc.startsWith('urn:epc:id:sgtin:') && r.mark?.symbol === 'QR' && r.mark.at === 'PACK') && T.recent.filter((r) => r.status === 'ng' && !r.recovered).every((r) => !r.serial), `${serials.length}개`);
+  check('2단 ID: 검사·포장셀 통과품만 제품 시리얼 · SGTIN EPC · QR (체결 NG품은 시리얼 없음)', packed.length > 150 &&   /* 실제 작업 시간(1.0.45): 3시간 약 230개 */ new Set(serials).size === serials.length && packed.every((r) => /^(DT|EA)-\d{6}-\d{6}$/.test(r.serial) && r.epc.startsWith('urn:epc:id:sgtin:') && r.mark?.symbol === 'QR' && r.mark.at === 'PACK') && T.recent.filter((r) => r.status === 'ng' && !r.recovered).every((r) => !r.serial), `${serials.length}개`);
   const done = T.recent.filter((r) => r.status === 'ok' || r.status === 'escaped');
   const route = { doortrim: ['SORT', 'DT_ASSY', 'DT_FAST', 'PACK'], eaxle: ['SORT', 'EA_ASSY', 'EA_FAST', 'PACK'] };
-  check('완료 제품 계보 = 제품별 경로 셀 전부 (셀·로봇·AMR·건강도·환경)', done.length > 300 && done.every((r) => r.steps.map((p) => p.id).join() === route[r.product].join() && r.steps.every((p) => p.tOut != null && p.robots.length && p.amr && ENV_KEYS.every((k) => p.env[k] != null))), `${done.length}개`);
+  check('완료 제품 계보 = 제품별 경로 셀 전부 (셀·로봇·AMR·건강도·환경)', done.length > 150 && done.every((r) => r.steps.map((p) => p.id).join() === route[r.product].join() && r.steps.every((p) => p.tOut != null && p.robots.length && p.amr && ENV_KEYS.every((k) => p.env[k] != null))), `${done.length}개`);
   check('양품 수 = 시뮬레이션 양품 수', T.stats.ok === s.stats.good && T.stats.ng - (T.stats.recovered ?? 0) === s.stats.rejected, `추적 ${T.stats.ok}·${T.stats.ng} / 시뮬레이션 ${s.stats.good}·${s.stats.rejected}`);
 }
 console.log('== 불량 사례 · AI 원인 분석');
 { const C = T.cases;
   // 봉쇄로 회수한 유출품(capa.js recovered)은 NG로 세지만 인라인 판정 사례는 만들지 않는다 — 위 양품 수 검사와 같은 기준
-  check('NG마다 사례 (판정 토크·각도 규격 이탈 · 봉쇄 범위 · 판정 순간 설비 상태)', C.length === T.stats.ng - (T.stats.recovered ?? 0) && C.length > 3 && C.every((c) => c.inspection.result === 'NG' && (c.inspection.torque < c.inspection.spec.torque[0] || c.inspection.angle > c.inspection.spec.angle[1]) && c.equipment.length === s.processing.length), `${C.length}건`);
+  check('NG마다 사례 (판정 토크·각도 규격 이탈 · 봉쇄 범위 · 판정 순간 설비 상태)', C.length === T.stats.ng - (T.stats.recovered ?? 0) && C.length >= 1 && C.every((c) => c.inspection.result === 'NG' && (c.inspection.torque < c.inspection.spec.torque[0] || c.inspection.angle > c.inspection.spec.angle[1]) && c.equipment.length === s.processing.length), `${C.length}건`);
   check('AI 원인 분석: 1순위 셀이 정답(불량이 생긴 셀)과 80% 이상 일치 · 3순위 안 95% 이상', T.stats.top1 / T.stats.cases >= 0.8 && T.stats.top3 / T.stats.cases >= 0.95, `1순위 ${T.stats.top1}/${T.stats.cases} · 3순위 ${T.stats.top3}`);
   check('원인 순위 비중 합 ≈ 1 · 근거 문장 · 5 Why', C.every((c) => Math.abs(c.rca.causes.reduce((a, x) => a + x.score, 0) - 1) < 0.05 || c.rca.causes.length === 8) && C.every((c) => c.rca.causes[0].evidence.length && c.rca.why.length >= 3));
 }

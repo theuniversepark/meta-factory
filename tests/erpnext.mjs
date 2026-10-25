@@ -87,11 +87,11 @@ check('다시 준비해도 이미 있는 것은 건너뜀 (중복 생성 없음)
 const st0 = await R('GET', 'status');
 check('키·비밀 키는 응답에 나오지 않음 (여부만)', st0.apiKey === true && st0.apiSecret === true && !JSON.stringify(st0).includes('s1') && !JSON.stringify(st0).includes('"k1"'));
 
-console.log('== FAC 이벤트 → ERPNext 문서 (자동화 · 정밀조립 1시간)');
+console.log('== FAC 이벤트 → ERPNext 문서 (자동화 · 정밀조립 3시간)');
 await R('POST', 'config', { enabled: true });
 const s = new Simulation('smart', 3, { line: zoneLine(), quiet: true }), ag = new FactoryAgent(s), E = s.fac, sent = [];
 let master = false; const push = () => { const ev = [...(master ? [] : [E.master]), ...E.outbox.splice(0)]; master = true; sent.push(...ev); B.enqueue(E.run, ev); };
-for (let t = 0; t < 3600; t += 0.1) { s.step(0.1); ag.update(0.1); if (Math.round(t * 10) % 20 === 0) push(); }
+for (let t = 0; t < 10800; t += 0.1) { s.step(0.1); ag.update(0.1); if (Math.round(t * 10) % 20 === 0) push(); }   // 3시간 — 실제 작업 시간(1.0.45)으로 첫 오더(양품 100)가 2시간 넘어 끝난다
 E.closeWindow?.(); push();
 for (let i = 0; i < 600 && (await R('GET', 'status')).queued; i++) await wait(50);
 const S1 = await R('GET', 'status'), ty = (t) => sent.filter((e) => e.type === t);

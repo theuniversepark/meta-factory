@@ -10,7 +10,7 @@ import { blenderOn, cloneAsset, RENDER } from './blender.js';
 import { makeProductMachine } from './product-machines.js';
 import { attachSpotGun, attachSealGun, attachVacuumGripper, attachNutrunner, attachScanner, attachDeburrSpindle, attachCmmPrepTool, attachLibsProbe, holdPart, makeHose, processMarks } from './endeffectors.js';
 import { pointAt, pathLength, ROBOT_KINDS, PARALLEL_GAIN } from './line.js';
-import { EXTRA_ZONES, ZONE_FAC, zoneRobotUid, zoneAmrUid, ZONE_FG_CAP, zonePack, zoneCtl, cellTendQ, TEND_END } from './zonedefs.js';
+import { EXTRA_ZONES, ZONE_FAC, cellT, zoneRobotUid, zoneAmrUid, ZONE_FG_CAP, zonePack, zoneCtl, cellTendQ, TEND_END } from './zonedefs.js';
 import { BATTERY, moverRadius, moverWidth } from './sim.js';
 import { washQ, washPhase, boothPhase } from './washer.js';
 import { cmmPlan, cmmPhase, cmmDoorK, cmmBridgeOn, CMM_PHASE_KO } from './cmmcell.js';
@@ -719,8 +719,8 @@ function buildPort(g, Z, kind) {
 }
 
 // 지그 위 제품 — Blender 모델(assets/blender/*.glb)이 있으면 그것으로, 없으면 기본 도형
-const PRODUCT_DIM = { hood: [1.606, 0.555, 0.05], door: [1.25, 1.1, 0.05], hblock: [0.66, 0.62, 0.13], rcover: [0.46, 0.43, 0.19] };
-function makeProduct(kind) {
+export const PRODUCT_DIM = { hood: [1.606, 0.555, 0.05], door: [1.25, 1.1, 0.05], hblock: [0.66, 0.62, 0.13], rcover: [0.46, 0.43, 0.19] };
+export function makeProduct(kind) {
   const g = new THREE.Group();
   if (blenderOn() && RENDER.assets[kind]) {
     const A = cloneAsset(kind); g.add(A.root);
@@ -1060,7 +1060,9 @@ class ExtraZone {
     for (const c of this.order) {
       c.robotsG.clear(); c.workersG.clear(); c.robots = []; c.robotUids = []; c.plates = [];
       const R = c.def.robot, kind = dark && R[2] ? R[2] : R[0], count = dark && R[2] ? R[3] : R[1];
-      if (this.Z.parallel) {   // 유연생산: 레시피 사이클(로봇 1대 기준) × 로봇 종류 배율 ÷ 대수 병렬 이득 — 레거시는 작업자(최대 2명)
+      const T = cellT(c.def, modeKey);
+      if (T != null) c.cycle = T * (c.def.cycleK ?? 1);   // 실제 작업 시간 (zonedefs.js T) — 로봇 대수 효과(cycleK)만 곱한다
+      else if (this.Z.parallel) {   // 유연생산: 레시피 사이클(로봇 1대 기준) × 로봇 종류 배율 ÷ 대수 병렬 이득 — 레거시는 작업자(최대 2명)
         const n = legacy ? Math.max(1, Math.min(2, R[1] || 1)) : count, kf = legacy || !count || kind === 'none' ? 1 : ROBOT_KINDS[kind]?.factor ?? 1;
         c.cycle = (c.def.cycle * (MODE_MUL[modeKey] ?? 1) * kf) / (1 + PARALLEL_GAIN * Math.max(0, n - 1));
       } else c.cycle = c.def.cycle * (MODE_MUL[modeKey] ?? 1) * (c.def.cycleK ?? 1);   // cycleK: 공정 설계에서 바꾼 로봇 대수 효과 (js/zonerecipe.js · 기본 구성 = 1)

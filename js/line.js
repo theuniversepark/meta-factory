@@ -113,13 +113,29 @@ export const AMMR_FETCH = { turnOut: 0.06, driveOut: 0.14, pick: 0.24, turnIn: 0
 
 // fasten: 체결·압입 셀 — AMR이 들어오면 로봇마다 2~4점을 체결(압입)한다. 사이클 = 준비(부품 집기·정렬) + 로봇 중 가장 많은 점 수 × 점당 시간 + 후공정(전수 토크 판정)
 // 점당 시간 = 부품 선반 왕복·집기(부품은 한 번에 1개) + 체결: 스크류·볼트 5.5초(왕복 2.5 + 착좌·런다운·토크 확인 3.0) · 클립 압입 4.5초 · 베어링·로터 압입 5.0초 — 로봇들은 각자 자기 점을 동시에 체결한다
+// 정밀조립 셀 실제 작업 시간 (초) [레거시, 자동화, 피지컬AI] — 셀 작업 요소를 실제 공장 기준으로 더한 값 (사용자 가이드 5.21)
+//  레거시: 숙련 작업자 (집기·놓기 2~3초 · 클립 압입 2.5초 · 전동 드라이버 나사 5초) + 여유율 15%
+//  자동화: 티칭한 6축(동작 1.5~2초) · 협동로봇(협동 속도 제한 · 동작 2~3초) · 서보 프레스·로터 삽입기·다축 너트러너
+//  피지컬AI: VLA 인식·계획 0.5~1초 + 동작 1.3~1.6배 · 다시 집기 5~10% — 빠르지는 않지만 티칭 없이 변종·유연물을 다룬다 · 로터·하우징은 6축(가반 60kg) · e-axle 완제품(약 75kg)은 고가반 6축
+//  SORT 판독 3 + 키트 부품 4개 옮겨 담기 + 빈 트레이 회수 · DT_ASSY 변종 부품 4 + 클립 12 · DT_FAST 스크류 6점 · EA_ASSY 베어링·오일씰 서보 압입 + 기어축 + 로터 삽입기
+//  EA_FAST 실러(FIPG)·비드 검사 + 하우징 결합 + 볼트 22개 · PACK 제품마다 (e-axle은 고가반 6축이 크레이트에 넣는다)
+export const ZONE_T = {
+  SORT: [18, 25, 30], DT_ASSY: [35, 26, 37], DT_FAST: [21, 19, 26], EA_ASSY: [77, 51, 52], EA_FAST: [138, 61, 63],
+  PACK: { doortrim: [35, 37, 50], eaxle: [70, 53, 55] },
+};
+// 단계별 사이클 배율 (sim.js MODES cycleMul) — 실제 작업 시간(ZONE_T)은 이 배율을 나눠 넣어 시뮬레이션이 곱한 뒤에 그 값이 되게 한다
+export const MODE_CYCLE_MUL = { traditional: 1.22, smart: 1.0, dark: 0.92 };
+const MODE_I = { traditional: 0, smart: 1, dark: 2 };
+const tAt = (T, modeKey, product) => { const i = MODE_I[modeKey] ?? 1; if (Array.isArray(T)) return T[i]; const v = product ? [T[product]] : Object.values(T); return v.reduce((a, t) => a + t[i], 0) / v.length; };
+// 실제 작업 시간 기준 명목 사이클 — 공정 설계에서 바꾼 사이클(s.cycle)은 자동화 기준 시간 대비 비율로 모든 단계에 같이 적용
+export const realCycle = (s, modeKey, product) => tAt(s.T, modeKey, product) * (s.cycle / tAt(s.T, 'smart')) / (MODE_CYCLE_MUL[modeKey] ?? 1);
 const ZONE_RECIPES = [
-  { id: 'SORT', robot: { kind: 'ammr', count: 2 }, cycle: 7, kitXfer: true, task: '게이트 판별 → 그 제품 쪽 로봇이 키트 컨베이어에서 키트를 꺼내 AMR 키트 포켓에 부품 4개를 옮겨 담음' },
-  { id: 'DT_ASSY', robot: { kind: 'cobot', count: 4 }, cycle: 19.5, fasten: { setup: 6, per: 4.5, post: 0, min: 2, max: 4, kind: 'press' }, task: '양쪽 협동로봇이 패널에 암레스트·스피커그릴·스위치 조립, 클립 압입 (로봇당 2~4점)' },
-  { id: 'DT_FAST', robot: { kind: 'cobot', count: 2 }, cycle: 23, fasten: { setup: 2, per: 5.5, post: 4.5, min: 2, max: 4, kind: 'screw' }, task: '스크류 자동 체결 (로봇당 2~4점), 토크·각도 전수 판정' },
-  { id: 'EA_ASSY', robot: { kind: 'cobot', count: 4 }, cycle: 22, fasten: { setup: 7, per: 5.0, post: 0, min: 2, max: 4, kind: 'press' }, task: '양쪽 협동로봇이 베어링 압입·로터·감속기어 삽입, 하우징 결합 (로봇당 2~4점)' },
-  { id: 'EA_FAST', robot: { kind: 'articulated', count: 1 }, cycle: 26.5, fasten: { setup: 2, per: 5.5, post: 8, min: 2, max: 4, kind: 'screw' }, task: '로봇 볼트 체결(2~4점) 뒤 다축 너트러너 하우징 볼트 체결, 토크·각도 전수 판정' },
-  { id: 'PACK', robot: { kind: 'ammr', count: 2 }, cycle: 8, packXfer: true, task: '최종 외관·라벨 검사 → 그 제품 쪽 로봇이 접이식 상자를 펴서 제품을 넣고 뚜껑·QR 라벨 → 닫힌 상자를 AMR에' },
+  { id: 'SORT', robot: { kind: 'ammr', count: 2 }, cycle: 25, T: ZONE_T.SORT, kitXfer: true, task: '게이트 판별 → 그 제품 쪽 로봇이 키트 컨베이어에서 키트를 꺼내 AMR 키트 포켓에 부품 4개를 옮겨 담음' },
+  { id: 'DT_ASSY', robot: { kind: 'cobot', count: 4 }, cycle: 26, T: ZONE_T.DT_ASSY, fasten: { setup: 6, per: 4.5, post: 0, min: 2, max: 4, kind: 'press' }, task: '양쪽 협동로봇이 패널에 암레스트·스피커그릴·스위치 조립, 클립 압입 (로봇당 2~4점)' },
+  { id: 'DT_FAST', robot: { kind: 'cobot', count: 2 }, cycle: 19, T: ZONE_T.DT_FAST, fasten: { setup: 2, per: 5.5, post: 4.5, min: 2, max: 4, kind: 'screw' }, task: '스크류 자동 체결 (로봇당 2~4점), 토크·각도 전수 판정' },
+  { id: 'EA_ASSY', robot: { kind: 'articulated', count: 2 }, cycle: 51, T: ZONE_T.EA_ASSY, fasten: { setup: 7, per: 5.0, post: 0, min: 2, max: 4, kind: 'press' }, task: '6축 2대: 베어링·오일씰 서보 압입 · 기어축 · 로터 삽입기 (로봇당 2~4점)' },
+  { id: 'EA_FAST', robot: { kind: 'articulated', count: 1 }, cycle: 61, T: ZONE_T.EA_FAST, fasten: { setup: 2, per: 5.5, post: 8, min: 2, max: 4, kind: 'screw' }, task: '6축: 실러 도포·하우징 결합 → 볼트 2~4점 · 다축 너트러너, 토크·각도 전수 판정' },
+  { id: 'PACK', robot: { kind: 'ammr', count: 2 }, cycle: 45, T: ZONE_T.PACK, packXfer: true, task: '외관·라벨 검사 → 상자 펴고 제품·뚜껑·QR 라벨 → AMR에 (e-axle은 고가반 6축)' },
 ];
 
 export function zoneLine(mix = '1:1') {
@@ -164,13 +180,9 @@ const taskForMode = (s, modeKey) => (ROBOT_KINDS[s.robot?.kind]?.darkOnly && !am
 // 대상물이 나가고 다음 AMR이 들어온다 (복귀 시간이 없으면 팔이 아직 점 위에 있을 때 다음 AMR이 진입해 팔과 부딪힌다) · sim.js 사이클과 factory.js 동작이 같은 값을 쓴다
 export const FASTEN_RETRACT = 2.5;
 export const fastenT = (F, pts) => F.setup + Math.max(...pts) * F.per + Math.max(F.post, FASTEN_RETRACT);
-// 부품분류셀 키트 옮겨 싣기 명목 사이클 (초): 제품 쪽 로봇 1대가 키트를 가져와 부품 4개를 하나씩 키트 포켓에 넣는다 — 로봇이 여러 대여도 한 대상물은 그 제품 쪽 한 대가 하므로 대수로 줄지 않는다 (js/sps.js SORT_AMMR · SORT_ARM)
-export const SORT_CYCLE = 12;
-// 검사·포장셀 명목 사이클 (초): 상자 펴기 → 제품 넣기 → 뚜껑 → 라벨 → 닫힌 상자를 AMR에 — 제품 쪽 로봇 1대 (js/pack.js)
-export const PACK_CYCLE = 12;
+// 정밀조립 셀: 실제 작업 시간(ZONE_T) — 로봇 종류 배율·대수 병렬 이득 대신 셀 작업 요소를 더한 값 (부품분류셀·검사·포장셀은 그 제품 쪽 로봇 1대가 하므로 대수로 줄지 않는다)
 export function effCycle(s, modeKey = 'smart') {
-  if (s.packXfer) { const kind = robotForMode(s.robot, modeKey)?.kind ?? 'none'; return PACK_CYCLE * (modeKey === 'traditional' || kind === 'none' ? 1 : ROBOT_KINDS[kind].factor); }
-  if (s.kitXfer) { const kind = robotForMode(s.robot, modeKey)?.kind ?? 'none'; return SORT_CYCLE * (modeKey === 'traditional' || kind === 'none' ? 1 : ROBOT_KINDS[kind].factor); }
+  if (s.T) return realCycle(s, modeKey);
   if (s.fasten) return fastenT(s.fasten, [(s.fasten.min + s.fasten.max) / 2]);   // 체결 셀: 로봇마다 자기 점을 동시에 — 평균 점 수 기준 (실제 사이클은 대상물마다 sim.js fastenCycle)
   const n = Math.max(1, s.robot?.count ?? 0);
   const kind = robotForMode(s.robot, modeKey)?.kind ?? 'none';
@@ -206,7 +218,7 @@ export function normalizeLine(raw) {
     if (count > MAX_ROBOTS) { warnings.push(`${i + 1}번 공정: 로봇은 최대 ${MAX_ROBOTS}대 → ${MAX_ROBOTS}대로 조정`); count = MAX_ROBOTS; }
     let cycle = Number(s.cycle ?? s.cycle_s);
     if (!(cycle > 0)) cycle = T.cycle;
-    if (cycle < 2 || cycle > 40) { warnings.push(`${i + 1}번 공정: 사이클 ${cycle}초 → 2~40초로 조정`); cycle = Math.min(40, Math.max(2, cycle)); }
+    if (cycle < 2 || cycle > 300) { warnings.push(`${i + 1}번 공정: 사이클 ${cycle}초 → 2~300초로 조정`); cycle = Math.min(300, Math.max(2, cycle)); }
     const name = plainText(s.name, 20) || T.label;
     const task = plainText(s.task, 60) || T.task;
     let id = String(s.id ?? '').toUpperCase().replace(/[^A-Z0-9_]/g, '').slice(0, 10) || type.toUpperCase();
@@ -231,6 +243,8 @@ export function normalizeLine(raw) {
       if (cell && s.type !== cell.type) { warnings.push(`${cell.label}의 유형은 ${STATION_TYPES[cell.type].label}로 고정 → 되돌림`); s.type = cell.type; }
       if (cell) s.name = cell.label;   // 셀 이름도 고정 (저장된 예전 이름 — 예: 포장셀 → 검사·포장셀)
       if (s.id === 'PACK' && s.task === 'AMMR 양팔로 옆 선반에서 포장재를 가져와 제품별 포장·라벨') s.task = ZONE_RECIPES.find((r) => r.id === 'PACK').task;
+      const R0 = ZONE_RECIPES.find((r) => r.id === s.id);   // 실제 작업 시간: 예전 저장 레시피(시간표 없음)는 사이클을 새 기준 시간으로 되돌린다
+      if (R0?.T) { if (!src.find((x) => String(x.id ?? '').toUpperCase() === s.id)?.T) { s.cycle = R0.cycle; s.robot = { ...R0.robot }; s.task = R0.task; } s.T = R0.T; }   // 로봇 구성·하는 일도 새 기준 (e-axle 조립셀 6축 2대)
       const F = ZONE_RECIPES.find((r) => r.id === s.id)?.fasten;   // 체결·압입 점(2~4점) 설정은 셀에 고정 — 저장된 라인·편집 초안에 없어도 되살린다 (빠지면 점마다 선반 왕복 체결이 꺼진다)
       if (F) s.fasten = { ...F };
       if (s.id === 'PACK') { s.packXfer = true; if (/옆 선반 포장재를 가져와 제품별 포장/.test(s.task)) s.task = ZONE_RECIPES.find((r) => r.id === 'PACK').task; }   // 포장 옮겨 싣기 (저장된 예전 레시피에도)
@@ -365,6 +379,8 @@ export function buildStationDefs(line, modeKey) {
         : T.effect === 'inspect' ? `${s.name.replace(/^(AI|자동|로봇)\s*/, '')} (육안)`
         : manual ? `${s.name.replace(/^(협동로봇|로봇|AI|자동)\s*/, '')} (수작업)` : s.name,
       robot: { ...robotForMode(s.robot, modeKey) }, task: taskForMode(s, modeKey), baseCycle: s.cycle, cycle: effCycle(s, modeKey),
+      cycleBy: s.T && !Array.isArray(s.T) ? Object.fromEntries(Object.keys(s.T).map((p) => [p, realCycle(s, modeKey, p)])) : null,   // 제품마다 다른 셀 (검사·포장셀)
+      fastenK: s.T && s.fasten ? effCycle(s, modeKey) / fastenT(s.fasten, [(s.fasten.min + s.fasten.max) / 2]) : 1,   // 체결·압입 점 수에 따른 사이클을 실제 작업 시간에 맞춘 배율
       wear: T.wear, idleKW: T.idleKW, busyKW: T.busyKW, effect: T.effect, inspect: T.effect === 'inspect' || !!T.verify,
       fasten: s.fasten ?? null, defectMul: T.defectMul ?? 1, share: isZone(line) ? zoneShare(line, s.id) : 1, product: ZONE_CELLS[s.id] && isZone(line) ? ZONE_CELLS[s.id].product : null,
     });

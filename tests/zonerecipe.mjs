@@ -9,16 +9,19 @@ const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${
 console.log('== 레시피 읽기 · 기본값');
 for (const k of RECIPE_ZONES) {
   const r = recipeOf(k), n = k === 'insp' ? Object.keys(INSP_CELLS).length : Object.keys(EXTRA_ZONES.find((Z) => Z.key === k).cells).length;
-  check(`${r.name}: 셀 ${n}개 · 기본값과 차이 없음`, r.cells.length === n && !diffRecipe(defaultRecipe(k), r).length && r.cells.every((c) => c.par || recipeEff(c) === c.cycle));
+  check(`${r.name}: 셀 ${n}개 · 기본값과 차이 없음`, r.cells.length === n && !diffRecipe(defaultRecipe(k), r).length && r.cells.every((c) => c.par || recipeEff(c) === c.cycle || (c.T && Math.abs(recipeEff(c) - c.cycle) < 1e-9) || (c.T && !Array.isArray(c.T))));
 }
 { const r = recipeOf('flex'), e = (id, m) => recipeEff(r.cells.find((c) => c.id === id), m);   // 유연생산: 레시피 사이클은 로봇 1대 기준 (flexible-manufacturing ZONE_DESIGN 4장 실효 사이클)
-  check('유연생산 실효 사이클 = 레시피 × 로봇 배율 ÷ 병렬 이득 (C01 42.6 · C03 64.1 · C10 60.0초)', Math.abs(e('C01') - 42.6) < 0.05 && Math.abs(e('C03') - 64.1) < 0.05 && Math.abs(e('C10') - 60.0) < 0.05, `C01 ${e('C01').toFixed(1)} · C03 ${e('C03').toFixed(1)} · C10 ${e('C10').toFixed(1)} · 이론 UPH ${Math.round(recipeMetrics(r).uph)}`); }
+  check('유연생산 실효 사이클 = 실제 작업 시간 (레거시 · 자동화 · 피지컬AI — C03 스폿 122 · 67 · 67 · C07 재작업 90 · 40 · 60초)', ['traditional', 'smart', 'dark'].every((m, i) => Math.abs(e('C03', m) - [122, 67, 67][i]) < 0.05 && Math.abs(e('C07', m) - [90, 40, 60][i]) < 0.05) && Math.abs(e('C01') - 22) < 0.05,
+    `C01 ${e('C01').toFixed(1)} · C03 ${e('C03').toFixed(1)} · C10 ${e('C10').toFixed(1)} · 이론 UPH ${Math.round(recipeMetrics(r).uph)}`); }
+{ const a = recipeOf('adapt'), e = (id, m) => recipeEff(a.cells.find((c) => c.id === id), m);
+  check('적응가공 실효 사이클 = 운영 기준 시간 (소재 식별 10 · 5축·사선홀·정밀절삭 60 · 선삭·CMM 40초)', [['MATL', 10], ['HB_MILL', 60], ['HB_DEBR', 60], ['RC_MILL', 60], ['RC_TURN', 40], ['CMM', 40]].every(([id, v]) => Math.abs(e(id) - v) < 1e-9)); }
 console.log('== 제약');
 const f = recipeOf('flex'), set = (r, id, kv) => Object.assign(r.cells.find((c) => c.id === id).robot, kv);
-set(f, 'C06', { count: 2 }); set(f, 'C05', { count: 3 }); set(f, 'C03', { count: 9 }); f.cells.find((c) => c.id === 'C04').cycle = 999; f.cells.pop();
+set(f, 'C06', { count: 2 }); set(f, 'C05', { count: 3 }); set(f, 'C03', { count: 9 }); f.cells.find((c) => c.id === 'C04').cycle = 9999; f.cells.pop();
 let n = normalizeRecipe(f);
 const by = (r, id) => r.cells.find((c) => c.id === id);
-check('비전 게이지 셀은 로봇 없음 · 헤밍은 1대 · 최대 4대 · 사이클 2~300초', by(n.recipe, 'C06').robot.count === 0 && by(n.recipe, 'C05').robot.count === 1 && by(n.recipe, 'C03').robot.count === 4 && by(n.recipe, 'C04').cycle === 300, `경고 ${n.warnings.length}건`);
+check('비전 게이지 셀은 로봇 없음 · 헤밍은 1대 · 최대 4대 · 사이클 2~1200초', by(n.recipe, 'C06').robot.count === 0 && by(n.recipe, 'C05').robot.count === 1 && by(n.recipe, 'C03').robot.count === 4 && by(n.recipe, 'C04').cycle === 1200, `경고 ${n.warnings.length}건`);
 check('셀은 빼지 못함 (고정)', n.recipe.cells.length === recipeOf('flex').cells.length && n.warnings.some((w) => w.includes('고정')));
 const a = recipeOf('adapt'); set(a, 'HB_MILL', { kind: 'cobot', count: 3 });
 n = normalizeRecipe(a);

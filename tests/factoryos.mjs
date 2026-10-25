@@ -14,11 +14,11 @@ check('공장 → 셀 직접 명령 금지 (계층 건너뛰기) · 존 → 자�
 check('존 → 공장 결정 요청 허용 · 존 → 공장 명령 금지', allowed('zone:main', 'factory', 'decision.request') && !allowed('zone:main', 'factory', 'command'));
 console.log('== 자동화 3시간 (정밀조립)');
 const s = new Simulation('smart', 3, { line: zoneLine(), quiet: true }), ag = new FactoryAgent(s), F = s.fos;
-run(s, ag, 10800);   // 3시간 — 체결 셀 사이클(로봇당 2~4점 실제 작업 시간)로 오더(양품 100) 5건 종료까지 2시간이 모자란다
+run(s, ag, 10800);   // 3시간 — 실제 작업 시간(1.0.45 · 약 76대/시간)으로 오더(양품 100) 1건 이상 종료
 { const g = F.bus.send('zone:main', 'zone:insp', 'command', { text: '시험' });
   check('가드레일이 존 → 존 명령을 막고 기록', g.status === 'blocked' && F.bus.stats.blocked >= 1, g.why);
   const C = F.orders.filter((o) => o.status === 'closed');
-  check('오더 종료: 양품 100 · 정산 오차 0 · 고유 투입 = 양품 + 폐기 (불량 보충 투입)', C.length >= 5 && C.every((o) => o.recon.err === 0 && o.recon.good === 100 && o.recon.input === o.recon.good + o.recon.scrap + o.recon.wip + o.recon.pass + o.recon.hold), C.map((o) => `${o.id} ${o.recon.input}=${o.recon.good}+${o.recon.scrap}`).join(' · '));
+  check('오더 종료: 양품 100 · 정산 오차 0 · 고유 투입 = 양품 + 폐기 (불량 보충 투입)', C.length >= 1 && C.every((o) => o.recon.err === 0 && o.recon.good === 100 && o.recon.input === o.recon.good + o.recon.scrap + o.recon.wip + o.recon.pass + o.recon.hold), C.map((o) => `${o.id} ${o.recon.input}=${o.recon.good}+${o.recon.scrap}`).join(' · '));
   const flow = ['order.assign', 'order.ack', 'order.evidence', 'order.close'].every((t) => F.bus.stats.byType[t] > 0);
   check('오더 메시지: 배정 → 수락·계획 → 종료 증빙 → 종료', flow, JSON.stringify(F.bus.stats.byType));
   const R = F.main.reconcile();
@@ -31,7 +31,7 @@ run(s, ag, 10800);   // 3시간 — 체결 셀 사이클(로봇당 2~4점 실제
   check('공장 결정 메시지 필수 필드 (대상 · 권한자 · 버전 · 제약 · 재개 조건)', D.length > 0 && D.every((d) => d.target && d.authority && /^P-\d+$/.test(d.version) && 'constraints' in d && 'resume' in d), `${D.length}건 · ${[...new Set(D.map((d) => d.kind))].join(', ')}`);
   const sup = F.bus.log.filter((m) => m.body?.kind === 'maint-support');
   check('Zone 간 정비 지원은 공장 경유 (존 → 공장 결정 요청 → 공장 → 빌려주는 존 명령)', !sup.length || (sup.every((m) => m.to === 'factory' || m.from === 'factory') && F.bus.log.some((m) => m.from === 'factory' && m.body?.kind === 'lend')) || D.some((d) => d.kind === 'maint-support' && d.verdict === '불가'), `${sup.length}건`);
-  check('이상 판단 10초 (자동화 MES)', F.judge.n > 5 && F.judge.fast / F.judge.n >= 0.9, `${F.judge.fast}/${F.judge.n} · 평균 ${(F.judge.sum / F.judge.n).toFixed(1)}초`);
+  check('이상 판단 10초 (자동화 MES)', F.judge.n >= 3 && F.judge.fast / F.judge.n >= 0.9, `${F.judge.fast}/${F.judge.n} · 평균 ${(F.judge.sum / F.judge.n).toFixed(1)}초`);
 }
 console.log('== 8D 정책 승인 → 공장 결정 (사람 결정)');
 { const K = s.capa, k = K.pending[0];
@@ -93,7 +93,7 @@ console.log('== 확장 Zone 오케스트레이터 (유연생산 · 적응가공 
   const before = F.decisions.filter((d) => d.kind === 'tool-stock').length;
   for (let i = 0; i < 6; i++) AD.startChange(mc, false);
   check('공구 교환 누적 → 공장 결정 요청 (FAC 공구 발주)', F.decisions.filter((d) => d.kind === 'tool-stock').length > before);
-  check('정밀검사 Asset Management Agent: 검사 셀 건강도·가동 (설비 관리)', /가동 \d\/6/.test(F.insp.agents().find((a) => a.name === 'Asset Management Agent').stat));
+  check('정밀검사 Asset Management Agent: 검사 셀 건강도·가동 (설비 관리)', /가동 \d\/9/.test(F.insp.agents().find((a) => a.name === 'Asset Management Agent').stat));
 }
 console.log(`\n결과: ${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

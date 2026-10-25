@@ -26,7 +26,7 @@ check('RCA 결과: 우선순위 · 원인 · 봉쇄 · 대책 기한', cms.every
 
 console.log('== 품질 통신 pcap');
 const file = Q.pcap(), one = Q.pcap(cm.id), dv = new DataView(file.buffer);
-check('libpcap 헤더 · 사례별 추출이 전체의 일부', dv.getUint32(0, true) === 0xa1b2c3d4 && one.length > 24 && one.length < file.length, `전체 ${(file.length / 1024).toFixed(0)}KB · 사례 ${(one.length / 1024).toFixed(0)}KB`);
+check('libpcap 헤더 · 사례별 추출이 전체의 일부', dv.getUint32(0, true) === 0xa1b2c3d4 && one.length > 24 && (cms.length > 1 ? one.length < file.length : one.length <= file.length),   /* 실제 작업 시간(1.0.45): 사례가 1건뿐이면 전체 = 그 사례 */ `전체 ${(file.length / 1024).toFixed(0)}KB · 사례 ${(one.length / 1024).toFixed(0)}KB`);
 const cs = (b, s0, e0, init = 0) => { let x = init; for (let i = s0; i < e0; i += 2) x += (b[i] << 8) + (i + 1 < e0 ? b[i + 1] : 0); while (x >> 16) x = (x & 0xffff) + (x >> 16); return x; };
 let o = 24, n = 0, bad = 0, http = { req: 0, res: 0 }; const topics = new Set(), dec = new TextDecoder(), streams = new Map();
 const odv = new DataView(one.buffer);

@@ -98,7 +98,7 @@ export const zoneAreas = (key, { cams = true } = {}) => {   // cams: 로봇 비�
 //  · 정밀조립: 셀 영역과 앞뒤 통로(오른쪽 세로 통로까지) · 왼쪽 확장동의 정밀조립 시설(AMR 대기열·출동/복귀 차로 · 정비실 · 사족보행·드론 스테이션 · 왼쪽 벽 화면·서버)
 export const MAIN_AREAS = [{ x0: -36.8, x1: 31.6, z0: -13.2, z1: 11.2 }, { x0: BUILDING.x0, x1: -36.8, z0: -34.4, z1: 2.5 }];   // 왼쪽 확장동 정밀조립 시설은 유연생산 로봇 스테이션(z −34.4) 남쪽부터 — 그 북쪽 유연생산 정비실 앞 틈은 공용 바닥
 const inR = (p, r) => p.x > r.x0 && p.x < r.x1 && p.z > r.z0 && p.z < r.z1;
-const inspAreas = () => [{ ...INSP_AREA, x1: BUILDING.x1 }, box([-2.6, 5.2].flatMap((lx) => [-3.6, 0.4].map((lz) => techAt(lx, lz, TECH_ROOMS.insp))), 0.3)];
+const inspAreas = () => [{ ...INSP_AREA, x1: BUILDING.x1 }, INSP_SOUTH, box([-2.6, 5.2].flatMap((lx) => [-3.6, 0.4].map((lz) => techAt(lx, lz, TECH_ROOMS.insp))), 0.3)];
 // 적응가공Zone 동쪽 ~ 오른쪽 벽 (앞뒤 통로 사이): 적응가공 전광판·데이터 서버·로봇 비전 디스플레이가 걸린 벽 앞까지 적응가공 관할
 const adaptEast = () => { const r = zoneRect(EXTRA_ZONES.find((z) => z.key === 'adapt'), 1); return { x0: r.x1, x1: BUILDING.x1, z0: r.z0, z1: fr(9) }; };
 export const camArea = (p) => (inspAreas().some((r) => inR(p, r)) ? 'insp' : null) ?? ['flex', 'adapt'].find((k) => zoneAreas(k).some((r) => inR(p, r)) || (k === 'adapt' && inR(p, adaptEast()))) ?? (MAIN_AREAS.some((r) => inR(p, r)) ? 'main' : 'shared');
@@ -108,6 +108,14 @@ export const areaZone = (p) => ['flex', 'adapt'].find((k) => zoneAreas(k).some((
 export const zoneCtl = () => ({ stop: false, hold: new Set(), speed: 1, feed: false });
 
 const TOP = -4.6, BOT = 4.6, MID = 0, PI = Math.PI;
+// 셀 실제 작업 시간 T [레거시, 자동화, 피지컬AI] (초) — 제품마다 다르면 { 제품: [...] } (정밀검사) · 레시피 기준 사이클(cycle)은 자동화 시간
+//  유연생산: 실제 차체 부품 공정 작업 요소 (스폿 약 45타점 × 2.8초 ÷ 6축 2대 · 실러 3.5m @150mm/s · 헤밍 프레스 · 비전 게이지 갭·단차 30점 …)
+//  적응가공: 운영 기준 시간 (소재 식별 10 · 5축·사선홀·정밀절삭 60 · 선삭·CMM 40) — 레거시는 수동 셋업·텐딩만큼 더 · 피지컬AI는 텐딩 6축 그대로
+//  피지컬AI는 같은 산업용 로봇·전용기가 하는 공정(용접·실링·헤밍·가공)은 같고, AMMR·휴머노이드가 손으로 하는 공정은 동작이 1.3~1.6배 (VLA 인식·다시 집기)
+//  공정 설계에서 바꾼 기준 사이클(cycle)은 자동화 시간 대비 비율로 모든 단계에 같이 적용 · cycleK: 로봇 대수 효과
+export const MODE_IDX = { traditional: 0, smart: 1, dark: 2 };
+const tOf = (T, i, product) => (Array.isArray(T) ? T[i] : product && T[product] ? T[product][i] : Object.values(T).reduce((a, t) => a + t[i], 0) / Object.keys(T).length);
+export const cellT = (d, modeKey, product) => (d.T ? tOf(d.T, MODE_IDX[modeKey] ?? 1, product) * (d.cycle / tOf(d.T, 1)) : null);
 // 셀 구성·제품·사이클·로봇은 상위 폴더 flexible-manufacturing(유연생산Zone)·adaptive-machining(적응가공Zone) 프로젝트를 따른다
 // 좌표는 Zone 로컬 (origin = Zone 가운데). robot: [자동화 종류, 대수, 피지컬AI 종류, 대수] — 레거시는 작업자
 export const EXTRA_ZONES = [
@@ -125,14 +133,14 @@ export const EXTRA_ZONES = [
     cells: {
       // C01: 남쪽 키팅 구역(흐름 랙 3대 · 키트 조립대 · 검증대) → 라인사이드 컨베이어(트레이 정지 2곳 · 보울 피더) → 남쪽 협동로봇 2대가 트레이에서 집어 판넬에 장착
       // 키팅 피킹 로봇(picker): 자동화 = 레일 협동로봇 · 피지컬AI = AMMR (js/kitcell.js · zones.js buildKit)
-      C01: { type: 'kit', label: '공급·키팅', product: 'shared', use: '키팅·키트 검증·부품 장착', x: -19, z: TOP, side: -1, cycle: 58, robot: ['cobot', 2], picker: ['cobot', 1, 'ammr', 1, '키팅 구역 피킹'] },
-      C02: { type: 'locate', label: '안착·보정', product: 'shared', use: '지그 안착·비전 6DoF 보정', x: -10.5, z: TOP, side: -1, cycle: 42, robot: ['articulated', 1] },
-      C03: { type: 'spot', label: '가접·본용접', product: 'shared', use: '스폿용접 2대 협업', x: -2, z: TOP, side: -1, cycle: 109, robot: ['articulated', 2] },
-      C04: { type: 'seal', label: '실링', product: 'shared', use: '실러 도포·비드 검사', x: 6.5, z: TOP, side: -1, cycle: 46, robot: ['articulated', 1] },
-      C05: { type: 'hem', label: '헤밍', product: 'shared', use: '헤밍 프레스 결합', x: 15, z: TOP, side: -1, cycle: 52, robot: ['articulated', 1] },
-      C10: { type: 'mount', label: '정밀 장착', product: 'door', use: '도어 전용 · 힌지·스트라이커 장착', x: 14, z: MID, rot: PI, side: -1, cycle: 102, robot: ['articulated', 2] },
-      C06: { type: 'vision', label: '치수·외관검사', product: 'shared', use: '갭·단차·외관 판정 (NG → C07)', x: 6.5, z: BOT, rot: PI, side: -1, cycle: 30, robot: ['none', 0] },
-      C07: { type: 'rework', label: 'NG·재작업', product: 'ng', use: 'NG 재용접·재도포 보수 → 재검', x: -2, z: MID, rot: PI, side: -1, cycle: 120, robot: ['articulated', 1, 'humanoid', 1] },
+      C01: { type: 'kit', label: '공급·키팅', product: 'shared', use: '키팅·키트 검증·부품 장착', x: -19, z: TOP, side: -1, cycle: 22, T: [17, 22, 22], robot: ['cobot', 2], picker: ['cobot', 1, 'ammr', 1, '키팅 구역 피킹'] },
+      C02: { type: 'locate', label: '안착·보정', product: 'shared', use: '지그 안착·비전 6DoF 보정', x: -10.5, z: TOP, side: -1, cycle: 20, T: [35, 20, 22], robot: ['articulated', 1] },
+      C03: { type: 'spot', label: '가접·본용접', product: 'shared', use: '스폿용접 2대 협업', x: -2, z: TOP, side: -1, cycle: 67, T: [122, 67, 67], robot: ['articulated', 2] },
+      C04: { type: 'seal', label: '실링', product: 'shared', use: '실러 도포·비드 검사', x: 6.5, z: TOP, side: -1, cycle: 32, T: [56, 32, 32], robot: ['articulated', 1] },
+      C05: { type: 'hem', label: '헤밍', product: 'shared', use: '헤밍 프레스 결합', x: 15, z: TOP, side: -1, cycle: 28, T: [41, 28, 28], robot: ['articulated', 1] },
+      C10: { type: 'mount', label: '정밀 장착', product: 'door', use: '도어 전용 · 힌지·스트라이커 장착', x: 14, z: MID, rot: PI, side: -1, cycle: 30, T: [52, 30, 30], robot: ['articulated', 2] },
+      C06: { type: 'vision', label: '치수·외관검사', product: 'shared', use: '갭·단차·외관 판정 (NG → C07)', x: 6.5, z: BOT, rot: PI, side: -1, cycle: 16, T: [52, 16, 16], robot: ['none', 0] },
+      C07: { type: 'rework', label: 'NG·재작업', product: 'ng', use: 'NG 재용접·재도포 보수 → 재검', x: -2, z: MID, rot: PI, side: -1, cycle: 40, T: [90, 40, 60], robot: ['articulated', 1, 'humanoid', 1] },
     },
     routes: { hood: ['C01', 'C02', 'C03', 'C04', 'C05', 'C06'], door: ['C01', 'C02', 'C03', 'C04', 'C05', 'C10', 'C06'] },
     src: { x: -26.5, z: 0 }, sink: { x: 24.6, z: BOT, rot: PI },   // 구분 적재(포장)는 Zone 오른쪽 끝 — 투입(왼쪽) → 공정 → 적재(오른쪽)
@@ -172,16 +180,16 @@ export const EXTRA_ZONES = [
     cells: {
       // ID 판독 게이트(팔레트 RFID · 주조 각인 DPM/OCR) · 3D 스캔 부스(북서 — 턴테이블·저울 · 스캔 로봇 aux2) · 격리 랙(북동) ← 이송 6축(aux · AMR 정북) · 남쪽 협동로봇/양팔 로봇: LIBS 재질 분석 접촉
       // 공정 순서는 js/matlcell.js MATL_PLANS · 설비는 zones.js buildMatId
-      MATL: { no: '1', type: 'matid', label: '소재 식별·3D측정셀', product: 'shared', use: '소재 판별·가공여유 측정', x: -19, z: 0, cycle: 8, robot: ['cobot', 1, 'ammr', 1], aux: ['articulated', 1, '스캔 부스·격리 랙 이송'], aux2: ['cobot', 1, '스캔 로봇'] },
-      HB_MILL: { no: '2', type: 'mill5', label: '유압블록 5축 가공셀', product: 'hblock', use: '6면 밀링·드릴·탭', x: -9, z: BOT, cycle: 16, robot: ['articulated', 1] },
+      MATL: { no: '1', type: 'matid', label: '소재 식별·3D측정셀', product: 'shared', use: '소재 판별·가공여유 측정', x: -19, z: 0, cycle: 10, T: [46, 10, 11], robot: ['cobot', 1, 'ammr', 1], aux: ['articulated', 1, '스캔 부스·격리 랙 이송'], aux2: ['cobot', 1, '스캔 로봇'] },
+      HB_MILL: { no: '2', type: 'mill5', label: '유압블록 5축 가공셀', product: 'hblock', use: '6면 밀링·드릴·탭', x: -9, z: BOT, cycle: 60, T: [65, 60, 60], robot: ['articulated', 1] },
       // 사선홀 머시닝센터(VF-2 + 4축 틸팅 로터리 · 북쪽) ← 텐딩 6축(셀 로봇) · 워터젯 디버링 부스(남서) · 세척기(남동) ← 이송 6축(aux)
       // 진행률 0 ~ TEND_END: 머신텐딩(AMR → 기계 → AMR) · 그 뒤: 이송(AMR → 부스 → 세척기 → AMR) (zones.js buildXDrill · buildWjBooth · buildWasher · js/washer.js)
-      HB_DEBR: { no: '3', type: 'deburr', label: '유압블록 사선·디버링셀', product: 'hblock', use: '사선홀 가공·워터젯 디버링·세척', x: 1, z: BOT, cycle: 14, robot: ['articulated', 1], wash: true, aux: ['articulated', 1, '부스·세척기 이송'] },
-      RC_MILL: { no: '4', type: 'mill5', label: '리어커버 정밀절삭셀', product: 'rcover', use: '5축 정밀 절삭', x: -9, z: TOP, side: -1, cycle: 18, robot: ['articulated', 1] },
-      RC_TURN: { no: '5', type: 'turn', label: '리어커버 선삭·AI품질셀', product: 'rcover', use: '보어 선삭·품질예측', x: 1, z: TOP, side: -1, cycle: 14, robot: ['articulated', 1] },
+      HB_DEBR: { no: '3', type: 'deburr', label: '유압블록 사선·디버링셀', product: 'hblock', use: '사선홀 가공·워터젯 디버링·세척', x: 1, z: BOT, cycle: 60, T: [77, 60, 60], robot: ['articulated', 1], wash: true, aux: ['articulated', 1, '부스·세척기 이송'] },
+      RC_MILL: { no: '4', type: 'mill5', label: '리어커버 정밀절삭셀', product: 'rcover', use: '5축 정밀 절삭', x: -9, z: TOP, side: -1, cycle: 60, T: [68, 60, 60], robot: ['articulated', 1] },
+      RC_TURN: { no: '5', type: 'turn', label: '리어커버 선삭·AI품질셀', product: 'rcover', use: '보어 선삭·품질예측', x: 1, z: TOP, side: -1, cycle: 40, T: [47, 40, 40], robot: ['articulated', 1] },
       // 항온 측정실(브리지형 CMM · 북서) · 리워크 머시닝센터(북동) ← 이송 6축(aux · AMR 정북) · 남쪽 협동로봇(자동화)/양팔 로봇(피지컬AI): 에어 블로·소재 온도 측정 · 접촉 리워크
       // 공정 순서는 js/cmmcell.js CMM_PLANS · 설비는 zones.js buildCMM
-      CMM: { no: '6', type: 'cmm', label: '초정밀 측정·리워크셀', product: 'shared', use: 'CMM 판정·리워크', x: 10, z: 0, cycle: 10, robot: ['cobot', 1, 'ammr', 1], aux: ['articulated', 1, '측정실·리워크기 이송'] },
+      CMM: { no: '6', type: 'cmm', label: '초정밀 측정·리워크셀', product: 'shared', use: 'CMM 판정·리워크', x: 10, z: 0, cycle: 40, T: [62, 40, 42], robot: ['cobot', 1, 'ammr', 1], aux: ['articulated', 1, '측정실·리워크기 이송'] },
     },
     routes: { hblock: ['MATL', 'HB_MILL', 'HB_DEBR', 'CMM'], rcover: ['MATL', 'RC_MILL', 'RC_TURN', 'CMM'] },
     src: { x: -28, z: 0 }, sink: { x: 18, z: 0 },
@@ -204,20 +212,38 @@ export const EXTRA_ZONES = [
 // 확장 Zone 셀·차로 영역 (월드 좌표) — 현장 이벤트·비켜서기 자리·CCTV 장애물 판정에 쓴다
 // 확장 Zone 포장·구분 적재: 제품별 팔레트 적재 한도 (4 × 2 × 3단) · 로봇(적재장 쪽 1.25m) · 출하 지게차 집는 자리(팔레트 바깥 1.9m — 통로에서 곧장 들어와 팔레트를 마주 본다)
 // 정밀검사존 영역 (inspzone.js) — 오른쪽 세로 통로(x 30)와 오른쪽 벽 사이 · 뒤쪽 통로(z −32)와 앞쪽 통로(z 9) 사이 · CCTV는 적응가공Zone 전광판에 함께 (cctvview.js camZone)
+//  남쪽 시험동: 앞쪽 통로(z 9) 건너 빈 바닥(z 11.5 ~ 27.35) — 기능·누설 시험 · 청정도 분석 · 산업용 CT (적응가공 서버 랙(벽 x 47.35)은 비킨다)
 export const INSP_AREA = { x0: 31.6, x1: 47.6, z0: -30.5, z1: 7.5 };
+export const INSP_SOUTH = { x0: 32.0, x1: 46.2, z0: 11.5, z1: 27.35 };   // 남쪽 끝은 CT 셀 바닥 끝까지 (그 뒤 띠는 적응가공 관할 — 차폐 캐비닛 뒤라 정밀검사 천장 카메라로 못 본다)
 // 정밀검사Zone 셀 (월드 좌표 — inspzone.js 흐름 · sim.js 설비 관리(건강도·고장·정비) 공용): 두 줄(x 35 · 43.5) 사이 가운데 x 39.25가 AMR 차로
+//  T: 제품마다 실제 검사 시간 [레거시, 자동화, 피지컬AI] (초) · cycle: 대표(자동화 평균) — 재포장(REPACK)은 판정 셀에서 합격일 때만 더한다
+//  robots: 셀 6축 대수 (heavy: 고가반 6축 — e-axle 75kg · 레거시는 검사원)
 export const INSP_CELLS = {
-  DOCK: { no: '0', type: 'dock', label: '시료 접수·도킹', use: 'AMR 도킹 · 제품 ID·공정이력 확인 · 검사 레시피 Task 생성', x: 35, z: -25, cycle: 8 },
-  VIS: { no: '1', type: 'vision', label: '로봇형 비전 검사 Cell', use: 'ABIS 표면결함 · AIMAX 기준홀·Feature 편차', x: 43.5, z: -25, cycle: 40, robots: 1 },
-  SCAN: { no: '2', type: 'scan', label: '3D 스캔·초음파 용접검사 Cell', use: 'ScanBox 3D 형상·치수 · 용접부 초음파(UT) NDT', x: 43.5, z: -15, cycle: 90, robots: 2 },
-  OINS: { no: '3', type: 'oins', label: 'O-INSPECT 정밀 재측정', use: '정반 안착 · 접촉·광학 복합 정밀측정 · 재측정', x: 35, z: -15, cycle: 110, robots: 1 },
-  ATOS: { no: '4', type: 'atos', label: 'ATOS 3D 형상편차', use: '블루라이트 Point Cloud · CAD 대비 형상편차', x: 35, z: -5, cycle: 60, robots: 1 },
-  JUDGE: { no: '5', type: 'judge', label: 'AI 판정·결과 버퍼', use: 'OK · 판정 불확실 · NG → QMS 저장 · 선행공정 환류', x: 43.5, z: -5, cycle: 10 },
+  DOCK: { no: '0', type: 'dock', label: '시료 접수·개봉', use: 'AMR 도킹 · ID·공정이력 확인 · 포장 개봉(뚜껑·완충재 · 상자는 반납) · 검사 레시피', x: 35, z: -25, cycle: 20, robots: 1, heavy: true,
+    T: { doortrim: [35, 30, 40], eaxle: [80, 50, 60], hood: [15, 8, 8], door: [15, 8, 8], hblock: [15, 8, 8], rcover: [15, 8, 8] } },
+  VIS: { no: '1', type: 'vision', label: '로봇형 비전 외관 Cell', use: 'ABIS 표면결함 · 분광 색차 · AIMAX 기준홀·Feature', x: 43.5, z: -25, cycle: 66, robots: 1,
+    T: { doortrim: [140, 57, 60], eaxle: [140, 57, 60], hood: [190, 75, 78], door: [190, 75, 78] } },
+  SCAN: { no: '2', type: 'scan', label: '3D 스캔·초음파 용접검사 Cell', use: 'ScanBox 갭·단차·형상 · 스폿 용접부 위상배열 초음파(PAUT)', x: 43.5, z: -15, cycle: 130, robots: 2,
+    T: { hood: [700, 130, 135], door: [700, 130, 135] } },
+  OINS: { no: '3', type: 'oins', label: 'O-INSPECT 정밀측정', use: '정반 안착 · 홀 위치·보어·평면도 · 나사 게이지', x: 35, z: -15, cycle: 450, robots: 1,
+    T: { hblock: [900, 510, 520], rcover: [700, 390, 400] } },
+  ATOS: { no: '4', type: 'atos', label: 'ATOS 3D 형상편차', use: '블루라이트 Point Cloud · 검사 지그 · 사진측량 · CAD 대비 편차', x: 35, z: -5, cycle: 152, robots: 1,
+    T: { doortrim: [300, 140, 150], eaxle: [400, 190, 200], rcover: [300, 126, 130] } },
+  JUDGE: { no: '5', type: 'judge', label: 'AI 판정·보고·재포장', use: 'OK · 판정 불확실 · NG → QMS 성적서 · 합격품 재포장 · NG 격리', x: 43.5, z: -5, cycle: 10, robots: 1, heavy: true,
+    T: { doortrim: [60, 10, 10], eaxle: [60, 10, 10], hood: [60, 10, 10], door: [60, 10, 10], hblock: [60, 10, 10], rcover: [60, 10, 10] } },
+  FUNC: { no: '6', type: 'func', label: '기능·누설 시험 Cell', use: '스위치 작동력·도통 · 공기 누설 · 절연저항 · 볼트 잔류 토크 감사', x: 35, z: 15, cycle: 71, robots: 1,
+    T: { doortrim: [78, 52, 60], eaxle: [150, 100, 110], rcover: [90, 60, 65] } },
+  CLEAN: { no: '7', type: 'clean', label: '청정도 분석 Cell', use: 'ISO 16232 압력 세정 추출 · 여과 · 자동 입자 분석 현미경', x: 43, z: 15, cycle: 460, robots: 1,
+    T: { hblock: [900, 460, 480] } },
+  CT: { no: '8', type: 'ct', label: '산업용 CT Cell', use: '225kV CT · 내부 유로·교차홀 버 · 다이캐스팅 기공', x: 43, z: 25, cycle: 460, robots: 1,
+    T: { hblock: [560, 520, 520], rcover: [440, 400, 400] } },
 };
+// 합격 시 재포장 시간 (판정 셀 — 새 포장재 · 「정밀검사 합격」 라벨) [레거시, 자동화, 피지컬AI] · 포장 없이 온 시료(유연생산·적응가공)는 없음
+export const INSP_REPACK = { doortrim: [30, 25, 35], eaxle: [60, 45, 50] };
 // 시설 코드용 Zone 보기 (드론 순찰 경로 · Zone 영역 · 이름) — 확장 Zone(EXTRA_ZONES)과 같은 꼴 (원점 기준 로컬 좌표)
 const IO = { x: 39.6, z: -11.5 };
 export const INSP_ZONE = {
-  key: 'insp', code: '정밀검사', uidp: 'QIS', name: '정밀검사Zone', origin: IO, foot: { x0: 31.6 - IO.x, x1: 47.6 - IO.x, z0: -30.5 - IO.z, z1: 7.5 - IO.z },
+  key: 'insp', code: '정밀검사', uidp: 'QIS', name: '정밀검사Zone', origin: IO, foot: { x0: 31.6 - IO.x, x1: 47.6 - IO.x, z0: -30.5 - IO.z, z1: INSP_SOUTH.z1 - IO.z },
   cells: Object.fromEntries(Object.entries(INSP_CELLS).map(([k, c]) => [k, { ...c, x: c.x - IO.x, z: c.z - IO.z }])),
   src: { x: INSP_CELLS.DOCK.x - IO.x, z: INSP_CELLS.DOCK.z - IO.z }, sink: { x: INSP_CELLS.JUDGE.x - IO.x, z: INSP_CELLS.JUDGE.z - IO.z },
 };
@@ -226,7 +252,7 @@ export const INSP_FAC = { quads: [{ x: 42.3, z: 5.0 }, { x: 44.3, z: 5.0 }], qua
 export const zoneDef = (k) => EXTRA_ZONES.find((Z) => Z.key === k) ?? (k === 'insp' ? INSP_ZONE : null);
 export const facOf = (k) => ZONE_FAC[k] ?? (k === 'insp' ? INSP_FAC : null);
 export const INSP_SERVER = { x: 47.35, z: 3.6, rot: -Math.PI / 2 };   // 정밀검사 데이터 서버 랙 4대 — 오른쪽 벽에 붙여 (적응가공 서버와 같은 꼴 · 적응가공·정밀검사 CCTV 전광판 아래), 앞면 = 건물 안쪽
-export const inInsp = (p) => p.x > INSP_AREA.x0 && p.x < BUILDING.x1 && p.z > INSP_AREA.z0 && p.z < INSP_AREA.z1;
+export const inInsp = (p) => (p.x > INSP_AREA.x0 && p.x < BUILDING.x1 && p.z > INSP_AREA.z0 && p.z < INSP_AREA.z1) || (p.x > INSP_SOUTH.x0 && p.x < INSP_SOUTH.x1 && p.z > INSP_SOUTH.z0 && p.z < INSP_SOUTH.z1);
 export const ZONE_FG_CAP = 24;
 export const zonePack = (Z) => Z.pack && Object.entries(Z.pack.pallets).map(([p, q]) => {
   const sd = Math.sign(q.z - Z.sink.z) || -1, o = Z.origin;

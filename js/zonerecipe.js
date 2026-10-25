@@ -1,7 +1,7 @@
 // Zone 셀 레시피 — 공정 설계 도크가 왼쪽에서 고른 Zone(유연생산 · 적응가공 · 정밀검사)의 셀 구성을 편집할 때 쓰는 모델 (브라우저·서버 공용, DOM 없음)
 // 셀 배치·유형·흐름(routes)은 바닥에 고정 — 편집하는 것: 셀 이름 · 하는 일 · 기준 사이클 · 로봇 종류·대수 (셀 종류별 제약)
 // 로봇 대수 효과: 기본 대수 대비 병렬 처리 이득(line.js PARALLEL_GAIN)만큼 사이클이 줄거나 늘어난다 — def.cycleK (기본 구성 = 1, 기존 시뮬레이션 그대로)
-import { EXTRA_ZONES, INSP_CELLS } from './zonedefs.js';
+import { EXTRA_ZONES, INSP_CELLS, cellT } from './zonedefs.js';
 import { PARALLEL_GAIN, ROBOT_KINDS, plainText } from './line.js';
 
 export const RECIPE_ZONES = ['flex', 'adapt', 'insp'];
@@ -12,9 +12,9 @@ const gain = (n) => 1 + PARALLEL_GAIN * Math.max(0, n - 1);
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const zoneOf = (key) => (key === 'insp' ? { key: 'insp', name: '정밀검사Zone', cells: INSP_CELLS, routes: { sample: Object.keys(INSP_CELLS) }, mixes: null } : EXTRA_ZONES.find((Z) => Z.key === key));
 
-// 셀 종류별 제약: 머신텐딩(5축·선반)은 6축 1대 고정 · 비전 게이지 셀은 로봇 없음 고정 · 정밀검사는 6축 0~2대(O-INSPECT 1대)
+// 셀 종류별 제약: 머신텐딩(5축·선반)은 6축 1대 고정 · 비전 게이지 셀은 로봇 없음 고정 · 정밀검사는 6축 0~2대(O-INSPECT · 접수·판정 · 시험동 셀은 1대)
 function limits(key, c) {
-  if (key === 'insp') return { kinds: ['articulated'], max: c.type === 'oins' ? 1 : c.type === 'dock' || c.type === 'judge' ? 0 : 2, min: 0, lockKind: true };
+  if (key === 'insp') return { kinds: ['articulated'], max: ['oins', 'dock', 'judge', 'func', 'clean', 'ct'].includes(c.type) ? 1 : 2, min: 0, lockKind: true };   // 접수·판정은 고가반 6축 1대 (개봉·재포장)
   if (c.type === 'mill5' || c.type === 'turn' || c.type === 'deburr') return { kinds: ['articulated'], max: 1, min: 1, lockKind: true, why: c.type === 'deburr' ? '머신텐딩 6축 1대 (부스·세척기 이송 6축은 설비에 딸림)' : '머신텐딩 — 6축 1대가 문 열림에 맞춰 넣고 뺀다' };
   if (c.type === 'matid') return { kinds: ['cobot'], max: 1, min: 1, lockKind: true, why: '남쪽 도킹 정면 1대 — LIBS 재질 분석 접촉 (스캔 부스 이송 6축 · 스캔 로봇은 설비에 딸림)' };
   if (c.type === 'cmm') return { kinds: ['cobot'], max: 1, min: 1, lockKind: true, why: '남쪽 도킹 정면 1대 — 에어 블로·온도 측정 · 접촉 리워크 (측정실·리워크기 이송 6축은 설비에 딸림)' };
@@ -32,7 +32,7 @@ export function recipeOf(key) {
   const Z = zoneOf(key); if (!Z) return null;
   const cells = Object.entries(Z.cells).map(([id, c]) => {
     const L = limits(key, c), R = key === 'insp' ? ['articulated', c.robots ?? 0] : c.robot ?? ['none', 0];
-    return { id, no: c.no ?? id, type: c.type, name: c.label, task: c.use, product: c.product ?? 'shared', cycle: c.cycle, robot: { kind: key === 'insp' ? 'articulated' : R[0], count: R[1] }, alt: R[2] ? { kind: R[2], count: R[3], label: ALT_LABEL[R[2]] ?? R[2] } : null, base: c.baseCount ?? R[1], lim: L, par: !!Z.parallel };
+    return { id, no: c.no ?? id, type: c.type, name: c.label, task: c.use, product: c.product ?? 'shared', cycle: c.cycle, robot: { kind: key === 'insp' ? 'articulated' : R[0], count: R[1] }, alt: R[2] ? { kind: R[2], count: R[3], label: ALT_LABEL[R[2]] ?? R[2] } : null, base: c.baseCount ?? R[1], lim: L, par: !!Z.parallel, T: c.T ?? null };
   });
   return { zone: key, name: Z.name, cells, routes: Z.routes, mix: Z.mix ?? null };
 }
@@ -45,8 +45,8 @@ export function normalizeRecipe(r) {
   const cells = cur.cells.map((base) => {
     const c = byId[base.id]; if (!c) { warnings.push(`${base.name}: 셀은 바닥에 고정 — 빼지 않고 그대로 둡니다`); return base; }
     const L = base.lim, out = { ...base, name: plainText(c.name ?? base.name, 24) || base.name, task: plainText(c.task ?? base.task, 60) };
-    const cy = Number(c.cycle); out.cycle = Number.isFinite(cy) ? Math.round(Math.min(300, Math.max(2, cy)) * 10) / 10 : base.cycle;
-    if (Number.isFinite(cy) && cy !== out.cycle) warnings.push(`${out.name}: 기준 사이클 ${cy}초 → ${out.cycle}초 (2~300초)`);
+    const cy = Number(c.cycle); out.cycle = Number.isFinite(cy) ? Math.round(Math.min(1200, Math.max(2, cy)) * 10) / 10 : base.cycle;
+    if (Number.isFinite(cy) && cy !== out.cycle) warnings.push(`${out.name}: 기준 사이클 ${cy}초 → ${out.cycle}초 (2~1200초)`);
     let kind = c.robot?.kind ?? base.robot.kind, count = Math.round(Number(c.robot?.count ?? base.robot.count));
     if (!L.kinds.includes(kind)) { if (kind !== base.robot.kind) warnings.push(`${out.name}: ${L.why ?? '로봇 종류 고정'} — ${ZR_KINDS[kind] ?? kind}는 쓸 수 없어 ${ZR_KINDS[base.robot.kind]}`); kind = base.robot.kind; }
     if (!Number.isFinite(count)) count = base.robot.count;
@@ -73,6 +73,7 @@ export function diffRecipe(a, b) {
 
 // 실효 사이클(셀 1개) · 셀 부하(혼류 비율 × 경로) · 병목 · 이론 UPH
 export const recipeEff = (c, mode = 'smart') => {
+  if (c.T) return cellT(c, mode) * (c.robot.count && c.base ? gain(c.base) / gain(c.robot.count) : 1);   // 실제 작업 시간 (zonedefs.js T)
   if (c.par) {   // 유연생산: 레시피 사이클은 로봇 1대 기준 — × 로봇 종류 배율 ÷ 대수 병렬 이득 (zones.js buildCrew와 같은 식)
     const R = mode === 'dark' && c.alt ? c.alt : c.robot, kf = mode === 'traditional' || !R.count ? 1 : ROBOT_KINDS[R.kind]?.factor ?? 1;
     return (c.cycle * (MODE_MUL[mode] ?? 1) * kf) / gain(R.count);
