@@ -1747,11 +1747,35 @@ export class Simulation {
     let st = list[q.round % list.length];
     for (let k = 0; k < list.length && taken.has(st); k++) st = list[++q.round % list.length];
     q.round += 1; q.target = st;
-    q.setTask(`순찰 점검 → ${st.name}`, [
-      { go: st.scan ?? this.patrolSpot(st) },
-      { do: () => { q.scanning = st; } },
-      { wait: 4, done: () => { q.scanning = null; this.patrolScan(q, st); } },
-    ]);
+    // 꼼꼼한 순찰: 셀 가장자리를 따라 점검 자리 2~3곳을 차례로 — 자리마다 점검 항목이 다르다 (열화상 · 진동 · 소음·누설)
+    // 공정 방해 금지: 자리로 옮기기 전에 그 자리 1.6m 안에 AMR·지게차·사람·다른 로봇이 있으면 비킬 때까지 기다린다(최대 25초) · 정비 중인 정비 자리는 건너뛴다
+    const pts = this.patrolPoints(st), steps = [];
+    pts.forEach((p, i) => {
+      if (i && !(pts[i - 1].x === p.x && pts[i - 1].z === p.z)) { let w0 = null; steps.push({ until: () => { w0 ??= this.time; return this.patrolClear(q, p) || this.time - w0 > 25; }, task: `순찰 점검 대기 — ${st.name} (공정 우선)` }); }
+      const same = i && pts[i - 1].x === p.x && pts[i - 1].z === p.z;   // 같은 자리에서 다음 항목이면 움직이지 않는다
+      steps.push(...(same ? [] : [i ? { go: p, via: [] } : { go: p }]), { do: () => { q.scanning = st; q.scanItem = p.item; } }, { wait: p.secs, done: () => { (q.scanItems ??= []).push(p.item); } });
+    });
+    steps.push({ do: () => { q.scanning = null; q.scanItem = null; this.patrolScan(q, st, q.scanItems ?? []); q.scanItems = []; } });
+    q.setTask(`순찰 점검 → ${st.name} (${pts.length}곳)`, steps);
+  }
+  // 순찰 점검 자리 (셀 가장자리를 따라): 기존 점검 자리(scan) → 정비 자리(svc · 정비 중이면 빼고) → 그 반대편 — 모두 셀 판 밖 같은 줄 위
+  patrolPoints(st) {
+    const P0 = st.scan ?? this.patrolSpot(st), S = st.svc ?? (st.def ? svcLoc(st) : null), out = [{ ...P0, item: '로봇 관절·감속기 열화상', secs: 5 }];
+    const main = !st.zone, special = main && this.zone && (st.id === 'SORT' || st.id === 'PACK');   // 부품분류(키팅 구역)·검사·포장(포장대)은 셀 앞이 설비 — 두 자리만
+    // 적응가공 ①소재 식별 · ⑥CMM: 북쪽에 스캔 부스·측정실·엣지 서버·격리 통이 붙어 가장자리를 따라 걷지 못한다 — 한자리에서 세 항목을 차례로
+    if (st.zone === 'adapt' && (st.cellId === 'MATL' || st.cellId === 'CMM')) return ['로봇 관절·감속기 열화상', '제어반·모터 진동 · 전류', '배관·케이블 · 소음(누설)'].map((item) => ({ ...P0, item, secs: 5 }));
+    if (S && !st.techOnSite && !st.request && Math.hypot(S.x - P0.x, S.z - P0.z) > 0.8) out.push({ ...S, aisle: P0.aisle, item: '제어반·모터 진동 · 전류', secs: 5 });
+    if (S && !special && !st.def?.wash && !(st.svcWash)) {   // 반대편: 정비 자리에서 점검 자리 반대쪽으로 같은 거리 (세척기 셀은 세척기 캐빈 쪽이라 뺀다)
+      const dx = S.x - P0.x, dz = S.z - P0.z, L = Math.hypot(dx, dz);
+      if (L > 0.8) { const k = Math.min(2.0, L) / L; out.push({ x: S.x + dx * k, z: S.z + dz * k, aisle: P0.aisle, name: P0.name, item: '배관·케이블 · 소음(누설)', secs: 5 }); }
+    }
+    return out;
+  }
+  // 점검 자리가 비었나 (공정 이동체 우선): 1.6m 안에 다른 이동체(AMR · 지게차 · 사람 · 휴머노이드 · 다른 사족보행 · 확장 Zone AMR)가 없으면
+  patrolClear(q, p) {
+    for (const m of [...this.movers, ...(this.extMovers ?? [])]) { if (m === q || m.id === q.id) continue; if (Math.hypot(m.x - p.x, m.z - p.z) < 1.6) return false; }
+    for (const c of this.carriers ?? []) if (Math.hypot(c.x - p.x, c.z - p.z) < 1.6) return false;
+    return true;
   }
   // 정밀조립 셀 순찰 점검 자리: 정비 위치(0.9)와 떨어진 셀 옆 모서리(3.0m) — 그 모서리에 AMMR 부품 선반이 있거나 운반 AMR 길이 1.2m 안으로 지나면 안쪽(1.95m)으로
   // (분류셀 출구에서 도어트림 줄로 비스듬히 오르는 AMR 길이 모서리 자리 0.85m 옆을 지나, 서 있는 사족보행 다리가 지나가는 AMR 차체에 닿았다)
@@ -1763,10 +1787,10 @@ export class Simulation {
     const nearAmr = this.conveyors.some((c) => c.path.some((q, i) => i > 0 && seg(c.path[i - 1], q) < 1.2));
     return st.ammrRacks?.some((r) => r.mode === 'x' && r.dir > 0 && r.side > 0) || nearAmr ? at(1.95) : p;
   }
-  patrolScan(q, st) {
-    st.lastScan = this.time;
+  patrolScan(q, st, items = []) {
+    st.lastScan = this.time; st.scanItems = items;
     this.stats.scans = (this.stats.scans ?? 0) + 1;
-    const rec = (result) => { (this.scanLog ??= []).push({ t: this.time, by: q.id, st: st.name, health: Math.round(st.health), drift: Math.round(st.drift * 100), result }); if (this.scanLog.length > 60) this.scanLog.shift(); if (result !== '정상' && result !== '점검 생략') this.stats['scan_' + result] = (this.stats['scan_' + result] ?? 0) + 1; };
+    const rec = (result) => { (this.scanLog ??= []).push({ t: this.time, by: q.id, st: st.name, health: Math.round(st.health), drift: Math.round(st.drift * 100), result, items: items.length }); if (this.scanLog.length > 60) this.scanLog.shift(); if (result !== '정상' && result !== '점검 생략') this.stats['scan_' + result] = (this.stats['scan_' + result] ?? 0) + 1; };
     if (st.request || st.state === 'DOWN' || st.state === 'MAINT') return rec('점검 생략');
     // 혼합형 다중 에이전트: 순찰 보고는 정비·품질 에이전트 제안으로 메인 조정자에 올라간다 (agentHub) — 단일 에이전트는 바로 처리
     if (st.health < this.mode.pmThreshold + this.mode.scanPm && this.agentHub?.report({ kind: 'pm', st, prio: 5, critical: st.health <= this.mode.pmThreshold - 7, why: `${q.id} 열화상·진동 스캔 — 건강도 ${st.health.toFixed(0)}%`, by: 'maint', source: q.id })) {
