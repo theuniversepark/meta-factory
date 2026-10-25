@@ -182,7 +182,7 @@ export const LOC = {
   SRC: { x: -26, z: 4.2, aisle: 'F', name: '투입구' },
   SINK: { x: 29, z: 4.2, aisle: 'F', name: '완제품 적재장' },
   TECH: { ...techAt(-0.8, -3.0), aisle: TECH_ROOM.aisle, name: '정비실' },   // 왼쪽 확장동 AMR 스테이션 옆, 정밀조립Zone 뒤 통로(B)로 드나든다 (zonedefs.js TECH_ROOM)
-  CTRL: { x: -13.5, z: bk(-12.5), aisle: 'BB', name: '관제실' },   // 중앙 관제 디스플레이(x −13.5) 가운데 앞
+  CTRL: { x: -13.5, z: bk(-10.7), aisle: 'BB', name: '관제실' },   // 중앙 관제 디스플레이(x −13.5) 가운데 앞 — 유연생산 AMR 스테이션 복귀 차로(z −34.9)보다 북쪽 (그 위에 서면 돌아오는 AMR 지그와 겹친다)
 };
 // AGV(레거시는 지게차) 충전 패드: 왼쪽 확장동 위쪽, 앞 통로(z 9) 바로 북쪽에 동서로 한 줄 — 자재창고(물류존)·투입구(AS/RS) 사이 가운데쯤
 // post: 충전 기둥 z (통로 반대쪽)
@@ -235,11 +235,11 @@ function buildZoneCells(sim) {
   const ext = EXTRA_ZONES.flatMap((Z) => Object.entries(Z.cells).map(([id, c]) => {
     const x = Z.origin.x + c.x, z = Z.origin.z + c.z, half = c.type === 'mill5' || c.type === 'turn' ? 4.3 : 2.3, row = c.z < -1 ? -1 : c.z > 1 ? 1 : 0;
     const svc = Z.key === 'flex'
-      ? (row < 0 ? { x: x + 0.9, z: z - half - 0.7, aisle: 'BB' } : { x: x - 3.4, z, aisle: 'BB' })   // 가운데·남쪽 줄은 서쪽 셀 사이 틈으로 (뒤 통로 B·출하 쪽 혼잡 구간을 지나지 않는다)
-      // 적응가공: 가공셀 머시닝센터는 Zone 안쪽(가운데 줄 쪽)에 있어 바깥 가장자리는 셀 판(2.3m) — 그 0.6m 밖에 선다 (앞 통로 F 차로 · A-2 AMR 복귀로 z 28.5와 떨어짐)
+      ? (row < 0 ? { x: x + (c.type === 'hem' ? 1.6 : 0.9), z: z - half - 0.7, aisle: 'BB' } : { x: x - 3.4, z, aisle: 'BB' })   // 헤밍은 프레스 기둥(x +1.06 ~ +1.2) 옆 — 0.9면 수리하는 팔꿈치가 기둥에 들어간다   // 가운데·남쪽 줄은 서쪽 셀 사이 틈으로 (뒤 통로 B·출하 쪽 혼잡 구간을 지나지 않는다)
+      // 적응가공: 가공셀 머시닝센터는 Zone 안쪽(가운데 줄 쪽)에 있어 바깥 가장자리는 셀 판(2.3m) — 그 0.25m 밖에 선다 (가공 줄을 ±4.95로 벌려도 월드 자리는 그대로 — 북쪽 모니터링 순찰길 z 11.2 · A-2 AMR 복귀로 z 28.5와 떨어짐)
       // 가운데 줄(①소재 식별 · ⑥CMM)은 북쪽 — 셀 옆(동·서)은 AMR이 셀을 드나드는 길
       // ⑥CMM은 북쪽 측정실(z −3.6)·머시닝센터(z −3.2) 사이 틈 밖 z −4.4 (zones.js CMMC) · ①소재 식별셀은 스캔 부스(z −3.6)·격리 통(z −3.4) 밖 z −4.2 (MATC) · ③디버링셀은 남쪽 부스·세척기(z ~3.1) 밖
-      : (row < 0 ? { x: x + 0.9, z: z - 2.9, aisle: 'F' } : row > 0 ? { x: x + 0.9, z: z + (c.type === 'deburr' ? 3.5 : 2.9), aisle: 'FF' } : { x, z: z - (c.type === 'cmm' ? 4.4 : c.type === 'matid' ? 4.2 : 2.9), aisle: 'F' });
+      : (row < 0 ? { x: x + 0.9, z: z - 2.55, aisle: 'F' } : row > 0 ? { x: x + 0.9, z: z + (c.type === 'deburr' ? 3.4 : 2.55), aisle: 'FF' } : { x, z: z - (c.type === 'cmm' ? 4.4 : c.type === 'matid' ? 4.2 : 2.9), aisle: 'F' });
     const name = `${Z.code} ${c.label}`;
     // 헤밍 프레스는 셀 판 뒤로 0.75m 나와(zones.js HEM) 정비 인력은 그 뒤에 선다 — 점검 자리(정비 자리 옆 1.6m)는 프레스 옆이라 그대로
     const back = Z.key === 'flex' && row < 0 && c.type === 'hem' ? 0.55 : 0;
@@ -538,8 +538,9 @@ export class Simulation {
     // 출하 지게차 상차 위치: 구분 적재장 앞쪽(도어트림 구역)·뒤쪽(e-axle 구역)
     const sinkDef = this.stations[this.stations.length - 1].def;
     // 구분 적재장 팔레트(4열 × 2줄, z ±1.85 ~ ±3.45) 바깥 4.3m에서 포크(앞 0.75 ~ 1.9m)를 팔레트 밑으로 넣는다
-    this.loc.PICK_DT = isZone(this.line) ? localLoc(sinkDef, 0, 4.3, '도어트림 적재 구역') : { ...this.loc.SINK, name: '완제품 적재장' };
-    this.loc.PICK_EA = localLoc(sinkDef, 0, -4.3, 'e-axle 적재 구역');
+    // 출하 지게차가 서는 자리: 팔레트 중심에서 4.6m (포크 1.9m가 팔레트 앞쪽에 들어간다) — 4.3m면 집고 돌 때 카운터웨이트가 바깥 줄 포장 상자(도어트림 0.86m · 3.41m까지)를 쓴다
+    this.loc.PICK_DT = isZone(this.line) ? localLoc(sinkDef, 0, 4.6, '도어트림 적재 구역') : { ...this.loc.SINK, name: '완제품 적재장' };
+    this.loc.PICK_EA = localLoc(sinkDef, 0, -4.6, 'e-axle 적재 구역');
 
     this.vehicles = [];
     for (let i = 0; i < m.vehicles; i++) {

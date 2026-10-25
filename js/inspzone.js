@@ -73,14 +73,17 @@ function setPacked(m, closed) {
 // ── 셀 설비 모델 (셀 중심 기준 · AMR은 동서(x) 방향으로 셀 가운데 정차) ─────────────────
 // 접수·개봉 · 판정·재포장 셀 공통 배치: 고가반 6축(북쪽 x 0.3) · 임시 받침대(북서) · 포장재 랙(북동)
 const XFER = { robot: { x: 0.3, z: -1.95 }, table: { x: -1.0, z: -2.0, y: 0.75 }, rack: { x: 1.6, z: -1.6, y: 0.62 } };
-function xferFixtures(g, rackLabel) {
+// 접수·개봉 셀은 남쪽에 (검사 AMR이 뒤쪽 통로 대기 줄에서 북쪽으로 들어온다 — 북쪽에 두면 들어오는 AMR·시료가 로봇·받침대에 걸린다)
+const XFER_S = { robot: { x: 0.3, z: 1.95, yaw: Math.PI }, table: { x: -1.0, z: 2.0, y: 0.75 }, rack: { x: 1.6, z: 1.6, y: 0.62 } };
+const xferOf = (type) => (type === 'dock' ? XFER_S : XFER);
+function xferFixtures(g, rackLabel, XFER) {
   put(box(0.8, 0.75, 0.6, MAT.steel), XFER.table.x, 0.375, XFER.table.z, g);   // 임시 받침대 (제품을 잠시 내려놓는다)
   const rack = put(new THREE.Group(), XFER.rack.x, 0, XFER.rack.z, g);
   for (const y of [0.3, XFER.rack.y]) put(box(1.2, 0.04, 0.9, MAT.steel), 0, y, 0, rack);
   for (const [x, z] of [[-0.58, -0.43], [0.58, -0.43], [-0.58, 0.43], [0.58, 0.43]]) put(box(0.04, XFER.rack.y + 0.04, 0.04, MAT.steel), x, (XFER.rack.y + 0.04) / 2, z, rack);
   const stacks = { doortrim: put(new THREE.Group(), -0.3, XFER.rack.y + 0.02, 0, rack), eaxle: put(new THREE.Group(), 0.3, XFER.rack.y + 0.02, 0, rack) };   // 상자·뚜껑 더미 (제품별)
   for (const [k, st] of Object.entries(stacks)) for (let i = 0; i < 6; i++) { const B = PACK_BOX[k]; put(box(Math.min(0.55, B.w * 0.5), 0.05, Math.min(0.8, B.d), i % 2 ? LID_MAT[k] : BOX_MAT[k]), 0, 0.025 + i * 0.055, 0, st).visible = false; }
-  const lab = put(textPlane([rackLabel], 1.3, 0.3), XFER.rack.x, 1.35, XFER.rack.z + 0.46, g); lab.rotation.x = 0;
+  const lab = put(textPlane([rackLabel], 1.3, 0.3), XFER.rack.x, 1.35, XFER.rack.z + Math.sign(XFER.rack.z) * 0.46, g); lab.rotation.x = 0; if (XFER.rack.z > 0) lab.rotation.y = Math.PI;
   return { stacks };
 }
 function buildDock(g) {
@@ -88,8 +91,8 @@ function buildDock(g) {
   put(box(0.24, 0.24, 2.74, MAT.steel), -1.5, 2.3, 0, g);
   const reader = emis(0x37e8ff, 1.2);
   for (const z of [-0.9, 0.9]) { const r = put(box(0.2, 0.16, 0.12, MAT.dark), -1.5, 2.08, z, g); put(box(0.14, 0.04, 0.02, reader, false), 0, -0.04, z > 0 ? -0.07 : 0.07, r); }
-  const term = put(box(0.6, 1.2, 0.4, MAT.dark), 1.7, 0.6, 1.7, g), screen = emis(0x3ddc84, 1.2); put(box(0.46, 0.32, 0.02, screen, false), 0, 0.35, 0.21, term);
-  return { reader, screen, ...xferFixtures(g, '포장재 반납 (접어서 회수)') };
+  const term = put(box(0.6, 1.2, 0.4, MAT.dark), -2.0, 0.6, 1.95, g), screen = emis(0x3ddc84, 1.2); put(box(0.46, 0.32, 0.02, screen, false), 0, 0.35, -0.21, term);   // 접수 단말 (남서)
+  return { reader, screen, ...xferFixtures(g, '포장재 반납 (접어서 회수)', XFER_S) };
 }
 function buildVisionCell(g) {
   // ABIS 조명 터널 (AMR이 지나가는 문형 조명) · AIMAX 고정 카메라 2대 · 분광 색차계 (로봇 손목 카메라 옆)
@@ -146,7 +149,7 @@ function buildJudge(g) {
   for (const [x, zz] of [[-0.58, -0.28], [0.58, -0.28], [-0.58, 0.28], [0.58, 0.28]]) put(box(0.04, 1.2, 0.04, MAT.steel), x, 0.6, zz, s);
   put(box(1.2, 0.08, 0.02, emis(0xff4d4d, 1.2), false), 0, 1.2, -0.31, s);
   const ng = [0, 1, 2, 3, 4, 5].map((i) => { const b = put(box(0.3, 0.18, 0.3, std(0xd96a6a)), -0.4 + (i % 3) * 0.4, (i < 3 ? 0.35 : 0.95) + 0.11, 0, s); b.visible = false; return b; });
-  const X = xferFixtures(g, '새 포장재 매거진');
+  const X = xferFixtures(g, '새 포장재 매거진', XFER);
   for (const st of Object.values(X.stacks)) st.children.forEach((b) => (b.visible = true));
   return { leds, screen, shelves: { ng }, ...X };
 }
@@ -413,7 +416,7 @@ export class InspZone {
       if (legacy && n) { const w = makeWorker(); put(w, -0.6, 0, -1.9, c.workersG); c.rb.textContent = ty === 'dock' || ty === 'judge' ? '👷 검사원×1 · 호이스트' : '👷 검사원×1'; continue; }
       if (!n) { c.rb.textContent = ''; continue; }
       // 마주 보는 두 로봇은 x를 0.7m 엇갈려 둔다 — 같은 x면 대기·작업 자세에서 끝단 센서(스캐너·카메라 헤드)가 셀 가운데에서 서로 맞닿는다
-      const slots = CAB[ty] ? [[CAB[ty].robot.x, CAB[ty].robot.z, 0]] : ty === 'dock' || ty === 'judge' ? [[XFER.robot.x, XFER.robot.z, 0]] : [[-0.95, -1.75, 0], [-0.25, 1.75, PI]];
+      const slots = CAB[ty] ? [[CAB[ty].robot.x, CAB[ty].robot.z, 0]] : ty === 'dock' || ty === 'judge' ? [[xferOf(ty).robot.x, xferOf(ty).robot.z, xferOf(ty).robot.yaw ?? 0]] : [[-0.95, -1.75, 0], [-0.25, 1.75, PI]];
       for (let i = 0; i < n; i++) {
         const r = c.def.heavy ? KIT.heavyRobot(MAT.orange) : makeRobot(ty === 'clean' ? 'cobot' : 'articulated', MAT.orange), [x, z, yaw] = slots[i];
         put(r.root, x, 0.15, z, c.robotsG); r.root.rotation.y = yaw; r.phase = i * 1.7;
@@ -662,7 +665,7 @@ export class InspZone {
   planXfer(cell, a, kind) {
     const m = a.pm, U = m?.userData; cell.xfer = null; if (!U?.box) return;
     const base = new THREE.Vector3(a.x, BELT_Y, a.z), B = U.B, at = (dy) => base.clone().setY(base.y + dy);   // AMR 정차 자리 (화면 AMR은 몇 프레임 늦게 따라온다)
-    const Lw = (x, y, z) => cell.g.localToWorld(new THREE.Vector3(x, y, z)), tbl = Lw(XFER.table.x, XFER.table.y, XFER.table.z);
+    const XFER = xferOf(cell.def.type), Lw = (x, y, z) => cell.g.localToWorld(new THREE.Vector3(x, y, z)), tbl = Lw(XFER.table.x, XFER.table.y, XFER.table.z);
     const rk = (dy = 0) => Lw(XFER.rack.x, XFER.rack.y + 0.36 + dy, XFER.rack.z);   // 랙 더미 위 (뚜껑 먼저 · 그 위에 상자)
     cell.xfer = kind === 'unpack'
       ? [{ w: [0.06, 0.3], o: U.lid, h: B.lid, from: at(B.h), to: rk() }, { w: [0.32, 0.56], o: U.prod, h: U.h, from: at(0.02), to: tbl },
@@ -703,7 +706,7 @@ export class InspZone {
     for (const r of cell.robots) { r.root.updateWorldMatrix(true, true); const g = (v, dy) => ikW(r, v.clone().setY(v.y + h + 0.01 + dy)); r.cabJ = { aU: g(base, 0.35), a: g(base, 0), b: g(tb, 0) }; r.cabJ.home = r.arm.home?.slice() ?? r.cabJ.aU; }
   }
   push(it, res) { this.recent.unshift({ id: it.id, zone: it.zone, product: it.product, res, t: this.time }); this.recent.length = Math.min(this.recent.length, 6); }
-  attach(c) { const m = makeSample(c.item.product); setPacked(m, true); m.position.set(0, BELT_Y, 0); c.g.add(m); c.pm = m; }   // 정밀조립 시료는 포장 상자째 · 유연생산·적응가공은 지그째
+  attach(c) { const m = makeSample(c.item.product); setPacked(m, true); m.position.set(0, BELT_Y, 0); m.rotation.y = PI / 2; c.g.add(m); c.pm = m; }   // 제품 긴 쪽을 AMR 긴 쪽(진행 방향)으로 — 후드(1.6m)가 옆으로 삐져나와 셀 로봇에 닿지 않게   // 정밀조립 시료는 포장 상자째 · 유연생산·적응가공은 지그째
   detach(c) { if (c.pm) { c.g.remove(c.pm); c.pm = null; } }
   // 앞길에 다른 이동체 (시뮬레이션 이동체 · 다른 Zone AMR · 다른 검사 AMR)
   blocked(c) {

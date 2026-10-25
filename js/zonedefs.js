@@ -108,6 +108,8 @@ export const areaZone = (p) => ['flex', 'adapt'].find((k) => zoneAreas(k).some((
 export const zoneCtl = () => ({ stop: false, hold: new Set(), speed: 1, feed: false });
 
 const TOP = -4.6, BOT = 4.6, MID = 0, PI = Math.PI;
+// 적응가공 가공 줄: 두 줄의 가공기가 가운데에서 등을 맞댄다 — 5축 UMC-1250 두 대는 뒤 전장함(0.26m)끼리 마주 보므로 ±4.95 · 사선홀 VF-2 ↔ 선반 ST-40은 ±4.7 (±4.6이면 전장함·뒤 주물이 7~15cm 겹친다)
+const ATOP = -4.95, ABOT = 4.95, ATOP2 = -4.7, ABOT2 = 4.7;
 // 셀 실제 작업 시간 T [레거시, 자동화, 피지컬AI] (초) — 제품마다 다르면 { 제품: [...] } (정밀검사) · 레시피 기준 사이클(cycle)은 자동화 시간
 //  유연생산: 실제 차체 부품 공정 작업 요소 (스폿 약 45타점 × 2.8초 ÷ 6축 2대 · 실러 3.5m @150mm/s · 헤밍 프레스 · 비전 게이지 갭·단차 30점 …)
 //  적응가공: 운영 기준 시간 (소재 식별 10 · 5축·사선홀·정밀절삭 60 · 선삭·CMM 40) — 레거시는 수동 셋업·텐딩만큼 더 · 피지컬AI는 텐딩 6축 그대로
@@ -181,12 +183,12 @@ export const EXTRA_ZONES = [
       // ID 판독 게이트(팔레트 RFID · 주조 각인 DPM/OCR) · 3D 스캔 부스(북서 — 턴테이블·저울 · 스캔 로봇 aux2) · 격리 랙(북동) ← 이송 6축(aux · AMR 정북) · 남쪽 협동로봇/양팔 로봇: LIBS 재질 분석 접촉
       // 공정 순서는 js/matlcell.js MATL_PLANS · 설비는 zones.js buildMatId
       MATL: { no: '1', type: 'matid', label: '소재 식별·3D측정셀', product: 'shared', use: '소재 판별·가공여유 측정', x: -19, z: 0, cycle: 10, T: [46, 10, 11], robot: ['cobot', 1, 'ammr', 1], aux: ['articulated', 1, '스캔 부스·격리 랙 이송'], aux2: ['cobot', 1, '스캔 로봇'] },
-      HB_MILL: { no: '2', type: 'mill5', label: '유압블록 5축 가공셀', product: 'hblock', use: '6면 밀링·드릴·탭', x: -9, z: BOT, cycle: 60, T: [65, 60, 60], robot: ['articulated', 1] },
+      HB_MILL: { no: '2', type: 'mill5', label: '유압블록 5축 가공셀', product: 'hblock', use: '6면 밀링·드릴·탭', x: -9, z: ABOT, cycle: 60, T: [65, 60, 60], robot: ['articulated', 1] },
       // 사선홀 머시닝센터(VF-2 + 4축 틸팅 로터리 · 북쪽) ← 텐딩 6축(셀 로봇) · 워터젯 디버링 부스(남서) · 세척기(남동) ← 이송 6축(aux)
       // 진행률 0 ~ TEND_END: 머신텐딩(AMR → 기계 → AMR) · 그 뒤: 이송(AMR → 부스 → 세척기 → AMR) (zones.js buildXDrill · buildWjBooth · buildWasher · js/washer.js)
-      HB_DEBR: { no: '3', type: 'deburr', label: '유압블록 사선·디버링셀', product: 'hblock', use: '사선홀 가공·워터젯 디버링·세척', x: 1, z: BOT, cycle: 60, T: [77, 60, 60], robot: ['articulated', 1], wash: true, aux: ['articulated', 1, '부스·세척기 이송'] },
-      RC_MILL: { no: '4', type: 'mill5', label: '리어커버 정밀절삭셀', product: 'rcover', use: '5축 정밀 절삭', x: -9, z: TOP, side: -1, cycle: 60, T: [68, 60, 60], robot: ['articulated', 1] },
-      RC_TURN: { no: '5', type: 'turn', label: '리어커버 선삭·AI품질셀', product: 'rcover', use: '보어 선삭·품질예측', x: 1, z: TOP, side: -1, cycle: 40, T: [47, 40, 40], robot: ['articulated', 1] },
+      HB_DEBR: { no: '3', type: 'deburr', label: '유압블록 사선·디버링셀', product: 'hblock', use: '사선홀 가공·워터젯 디버링·세척', x: 1, z: ABOT2, cycle: 60, T: [77, 60, 60], robot: ['articulated', 1], wash: true, aux: ['articulated', 1, '부스·세척기 이송'] },
+      RC_MILL: { no: '4', type: 'mill5', label: '리어커버 정밀절삭셀', product: 'rcover', use: '5축 정밀 절삭', x: -9, z: ATOP, side: -1, cycle: 60, T: [68, 60, 60], robot: ['articulated', 1] },
+      RC_TURN: { no: '5', type: 'turn', label: '리어커버 선삭·AI품질셀', product: 'rcover', use: '보어 선삭·품질예측', x: 1, z: ATOP2, side: -1, cycle: 40, T: [47, 40, 40], robot: ['articulated', 1] },
       // 항온 측정실(브리지형 CMM · 북서) · 리워크 머시닝센터(북동) ← 이송 6축(aux · AMR 정북) · 남쪽 협동로봇(자동화)/양팔 로봇(피지컬AI): 에어 블로·소재 온도 측정 · 접촉 리워크
       // 공정 순서는 js/cmmcell.js CMM_PLANS · 설비는 zones.js buildCMM
       CMM: { no: '6', type: 'cmm', label: '초정밀 측정·리워크셀', product: 'shared', use: 'CMM 판정·리워크', x: 10, z: 0, cycle: 40, T: [62, 40, 42], robot: ['cobot', 1, 'ammr', 1], aux: ['articulated', 1, '측정실·리워크기 이송'] },
@@ -197,7 +199,7 @@ export const EXTRA_ZONES = [
     ret: [{ x: 21, z: 0 }, { x: 21, z: 9 }, { x: -33.6, z: 9 }, { x: -33.6, z: 0 }],   // 적재 → 동쪽 끝 → 앞쪽(시설 통로 쪽) 복귀로 → 투입 왼쪽 진입로
     rework: { at: 'CMM', rate: 0.06, mul: 2 },   // 리워크: 1차 측정 → 재가공(머시닝센터)·접촉 리워크 → 재측정 — 셀 시간 2배
     amr: { count: 15, speed: 1.6, ret: 2.6 }, load: 4, unload: 4,
-    foot: { x0: -34.1, x1: 21.6, z0: -7.2, z1: 9.6 },
+    foot: { x0: -34.1, x1: 21.6, z0: -7.5, z1: 9.6 },
     // 포장·구분 적재: 제품별 적재 팔레트(적재장 북쪽 — 동쪽은 자체 복귀로) · 팔레타이징 로봇 · 출하 지게차는 앞쪽 통로(z 9)에서 내려와 실어 간다
     pack: { pallets: { hblock: { x: 16.6, z: -2.5 }, rcover: { x: 19.6, z: -2.5 } }, aisle: 'F' },
     // 바닥 Zone 이름·라인 설명: 소재 식별셀 앞 빈 바닥 (x −31 ~ −12) · 두 가공 줄 사이에 라인 이름 (정밀조립Zone과 같은 꼴 — 위 줄 리어커버 · 아래 줄 유압블록)

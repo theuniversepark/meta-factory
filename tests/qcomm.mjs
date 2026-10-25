@@ -10,6 +10,7 @@ const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${
 
 console.log('== 불량 판정 리포트 흐름 (피지컬AI 3시간)');
 const s = new Simulation('dark', 5, { line: zoneLine(), quiet: true }), ag = new FactoryAgent(s); s.capa.auto = true;
+s.mode = { ...s.mode, defectBase: s.mode.defectBase * 4 };   // 실제 작업 시간(1.0.45)은 생산이 느려 불량 사례가 드물다 — 리포트 흐름을 보려고 불량률만 올린다
 // 사례별 pcap이 전체의 일부인지 보려면 사례가 2건 이상, 8D 종결 보고를 보려면 종결된 사례가 1건 이상 있어야 한다 — 3시간에 모자라면(난수 흐름에 따라) 6시간까지 더 돌린다
 const closedN = () => [...s.qcomm.cases.values()].filter((x) => x.status === 'closed').length;
 for (let t = 0; t < 3 * 3600 || ((s.trace.cases.length < 2 || !closedN()) && t < 6 * 3600); t += 0.1) { s.step(0.1); ag.update(0.1); }

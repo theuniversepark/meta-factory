@@ -1739,8 +1739,9 @@ function buildPack(g, st, sim) {
       for (const o of [tBox, tProd, tLid, tLabel, ...Object.values(hand)]) o.visible = false;
       pack[k] = { s, B, folded, lids, plabel, tBox, tProd, tLid, tLabel, hand, lidY: ly, lidAt: L, LY };
     }
-    for (const z of [-0.85, 0.85]) put(box(0.12, 1.9, 0.12, MAT.steel), 1.45, 1.0, z, g);
-    const head = put(box(0.6, 0.45, 1.8, MAT.white), 1.45, 2.0, 0, g);
+    // 출구 문형(외관 검사·QR 판독): x 1.8 — 1.45면 e-axle 고가반 6축이 AMR 위로 크레이트를 내릴 때 그리퍼가 머리 아래를 친다
+    for (const z of [-0.85, 0.85]) put(box(0.12, 1.9, 0.12, MAT.steel), 1.8, 1.0, z, g);
+    const head = put(box(0.6, 0.45, 1.8, MAT.white), 1.8, 2.0, 0, g);
     put(box(0.62, 0.1, 1.82, MAT.accent), 0, -0.25, 0, head);
     // 검사·포장셀: 최종 외관 검사·QR 라벨 판독 카메라 (출구 문형 — 마킹·판독 순간 밝아짐, js/serial.js)
     const markMat = emis(0x37e8ff, 0.35), rd = put(new THREE.Group(), -0.05, -0.36, 0.5, head); rd.name = 'CodeReader';

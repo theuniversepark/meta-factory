@@ -49,9 +49,9 @@ for (const mode of ['smart', 'dark']) {
 console.log('== 헤밍셀 정비 자리 (프레스가 셀 판 뒤로 나온 만큼 더 뒤)');
 {
   const s = new Simulation('smart', 1, { line: zoneLine(), quiet: true });
-  const top = s.zoneCells.filter((c) => c.zone === 'flex' && c.svc.aisle === 'BB' && Math.abs(c.svc.x - c.x - 0.9) < 1e-9);
+  const top = s.zoneCells.filter((c) => c.zone === 'flex' && c.svc.aisle === 'BB' && c.svc.z < c.z);   // 북쪽 줄 (C05 헤밍은 프레스 기둥 옆 x +1.6)
   const hem = top.find((c) => c.cellId === 'C05'), other = top.find((c) => c.cellId !== 'C05');
-  check('C05 정비 자리만 0.55m 더 뒤 (뒤쪽 시설 통로 가장자리 안) · 점검 자리는 그대로', hem && other && Math.abs((hem.svc.z - hem.z) - (other.svc.z - other.z) + 0.55) < 1e-9 && hem.svc.z > AISLE.BB + 1.3 + 0.35 && Math.abs((hem.scan.z - hem.z) - (other.scan.z - other.z)) < 1e-9, hem && `C05 정비 z ${hem.svc.z.toFixed(2)} · 점검 z ${hem.scan.z.toFixed(2)}`);
+  check('C05 정비 자리만 0.55m 더 뒤 (뒤쪽 시설 통로 가장자리 안) · 프레스 기둥 옆(x +1.6) · 점검 자리는 그대로', hem && other && Math.abs(hem.svc.x - hem.x - 1.6) < 1e-9 && Math.abs((hem.svc.z - hem.z) - (other.svc.z - other.z) + 0.55) < 1e-9 && hem.svc.z > AISLE.BB + 1.3 + 0.35 && Math.abs((hem.scan.z - hem.z) - (other.scan.z - other.z)) < 1e-9, hem && `C05 정비 z ${hem.svc.z.toFixed(2)} · 점검 z ${hem.scan.z.toFixed(2)}`);
 }
 
 console.log(`\n결과: ${pass} PASS / ${fail} FAIL`);
