@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { moverRadius, BATTERY } from './sim.js';
 import { NR } from './net5g.js';
 import { AMMR } from './line.js';
+import { SPS_PHASE_KO, SPS_KITS } from './sps.js';
 const AMMR_PHASE = { work: '작업 위치 (셀 도킹)', turnOut: '부품 선반 쪽으로 회전', driveOut: '부품 선반으로 주행', pick: '선반에서 양팔 피킹', turnIn: '셀 쪽으로 회전', driveIn: '부품을 들고 작업 위치로 복귀' };
 
 const DEG = 180 / Math.PI;
@@ -293,6 +294,21 @@ export class RobotTelemetry {
       const cobot = r.kind === 'cobot';
       const safety = !cobot ? null : near < 1.0 ? ['보호 정지', 'bad'] : near < 2.0 ? ['협동 감속 50%', 'warn'] : ['정상 속도 100%', 'ok'];
       const vib = 0.6 + (100 - st.health) * 0.045 + (busy ? 0.4 : 0);
+      if (r.spsPicker) {   // 부품분류셀 서열 키팅 구역 피킹 로봇 (js/sps.js)
+        const sd = this.view.sim.sps?.side[r.spsPicker], P = r.spsPicker === 'doortrim' ? '도어트림' : 'e-axle', uid = st.spsUids?.[r.spsPicker === 'doortrim' ? 0 : 1];
+        const j = sd?.kit && sd.phase === 'pick' ? Math.min(3, Math.floor(sd.prog / 0.2)) : -1;
+        out.title = `${uid ? `[${uid}] ` : ''}${st.name} 키팅 구역 (${P}) · ${ROBOT_LABEL[r.kind]}`;
+        out.status = [['상태', sd ? `${SPS_PHASE_KO[sd.phase] ?? sd.phase}${sd.kit ? ` · 키트 ${sd.kit.id} ${Math.round(sd.prog * 100)}%` : ''}` : '대기', sd?.phase === 'stockout' ? 'bad' : sd?.phase === 'pick' || sd?.phase === 'verify' ? 'ok' : ''],
+          ['하는 일', `흐름 랙에서 ${P} 키트 부품 4개를 집어 담기 자리 트레이에 담음 → 검증대 → 서열 버퍼`],
+          ['지금 집는 부품', j >= 0 ? `${SPS_KITS[r.spsPicker][j][0]} (${j + 1}/4 · ${SPS_KITS[r.spsPicker][j][4]})` : '-'],
+          ['서열 버퍼', sd ? `${sd.queue.length}개${sd.queue.length ? ` — ${sd.queue.map((k) => k.variant).join(' / ')}` : ''}` : '-'],
+          ['피킹 방식', r.kind === 'ammr' ? 'VLA 범용 파지 · 빈 피킹 (처음 보는 부품도 무교시)' : '레일 위 협동로봇 · 표시등 피킹 (티칭 위치)'],
+          ['정격 가반하중', `${r.payload} kg${r.payloadBasis ? ` · ${r.payloadBasis}` : ' (툴·카메라 포함)'}`]];
+        if (r.spec) out.status.push(['기준 로봇', `${r.spec.manufacturer} ${r.spec.model}`], ['리치', `${Math.round(r.spec.reach * 1000)} mm`]);
+        const xyz = (p) => `${p.x.toFixed(0)} / ${p.y.toFixed(0)} / ${p.z.toFixed(0)} mm`;
+        out.sections.push({ title: 'TCP (툴 끝점, 베이스 기준)', rows: !this.tcp ? [] : this.tcp2 ? [['왼팔 X / Y / Z', xyz(this.tcp)], ['왼팔 TCP 속도', `${this.tcp.speed.toFixed(0)} mm/s`], ['오른팔 X / Y / Z', xyz(this.tcp2)], ['오른팔 TCP 속도', `${this.tcp2.speed.toFixed(0)} mm/s`]] : [['X / Y / Z', xyz(this.tcp)], ['TCP 속도', `${this.tcp.speed.toFixed(0)} mm/s`]] });
+        return out;
+      }
       out.title = `${st.robotUids?.[this.ref.idx] ? `[${st.robotUids[this.ref.idx]}] ` : ''}${st.name} · ${ROBOT_LABEL[r.kind]} ${R.view ? '' : `#${this.ref.idx + 1}`}`;
       out.status = [['상태', busy ? `가동 (진행 ${(p * 100).toFixed(0)}%)` : st.state === 'DOWN' ? '설비 고장 — 정지' : st.state === 'MAINT' ? '정비 중 — 정지' : st.state === 'ESTOP' ? '비상정지 — 동력 차단' : st.state === 'PSTOP' ? '보호정지 — 자세 유지' : st.state === 'CHECK' ? '자가진단 중' : st.state === 'CSTOP' ? '사이클 정지' : '대기'], ['정격 가반하중', `${r.payload} kg${r.payloadBasis ? ` · ${r.payloadBasis}` : ' (툴·카메라 포함)'}`]];
       if (r.spec) out.status.push(['기준 로봇', `${r.spec.manufacturer} ${r.spec.model}`], ['리치', `${Math.round(r.spec.reach * 1000)} mm`]);
@@ -305,8 +321,9 @@ export class RobotTelemetry {
       const u = r.dual ? st.ammr?.[this.ref.idx] : null;
       if (u) { const bs = this.batterySection(u, 'ammr', u.chgNow, u.phase !== 'work'); if (bs) out.sections.unshift(bs); const ns = this.netSection(u); if (ns) out.sections.splice(1, 0, ns); }
       if (u) out.status.push(['이동 플랫폼', AMMR_PHASE[u.phase] ?? u.phase, u.phase === 'work' ? '' : 'ok'], ['배터리', `${u.battery.toFixed(0)}%${u.chgNow ? ' · 도킹 충전 중' : ''}`, u.battery < BATTERY.ammr.low ? 'bad' : ''],
-        ['양팔', u.carry ? '선반에서 가져온 부품 파지' : u.phase === 'work' && st.state === 'BUSY' ? '조립·체결 작업' : '대기'],
-        ['부품 선반 재고', st.parts != null ? `${st.parts}개` : '충분 (상시 보충)'], ['선반 왕복', `${u.trips}회`]);
+        ...(st.type === 'sort' && this.view.sim.sps?.on   // 부품분류셀: 선반 대신 키트 컨베이어(서열 버퍼)에서 키트 트레이를 꺼내 AMR 키트 포켓에 싣는다
+          ? [['양팔', u.carry ? '키트 컨베이어에서 꺼낸 키트 트레이' : u.phase === 'work' && st.state === 'BUSY' ? '작업물 고정 · ID 태그' : '대기'], ['서열 버퍼', `${this.view.sim.sps.side[u.side > 0 ? 'doortrim' : 'eaxle']?.queue.length ?? 0}개 (${u.side > 0 ? '도어트림' : 'e-axle'})`], ['키트 왕복', `${u.trips}회`]]
+          : [['양팔', u.carry ? '선반에서 가져온 부품 파지' : u.phase === 'work' && st.state === 'BUSY' ? '조립·체결 작업' : '대기'], ['부품 선반 재고', st.parts != null ? `${st.parts}개` : '충분 (상시 보충)'], ['선반 왕복', `${u.trips}회`]]));
       else if (r.kind === 'humanoid') out.status.push(['보행', '셀 작업 위치에 양발로 서서 작업']);
       else if (r.dual) out.status.push(['이동 플랫폼', '셀 도킹 (위치 고정)']);
       if (st.gate && st.item?.id === st.gate.id && st.gate.role) { const lead = this.view.sim.isLead(st, this.ref.idx); out.status.push(['게이트 결정', st.gate.text], ['이 로봇 역할', lead ? `주 작업 — ${st.gate.role.lead}` : `보조 — ${st.gate.role.support}`, lead ? 'ok' : '']); }

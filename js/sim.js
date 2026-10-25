@@ -711,6 +711,8 @@ export class Simulation {
       st.robotUids = Array.from({ length: st.def.robot?.count ?? 0 }, (_, i) => `RB-${two(k + 1)}-${i + 1}`);
     });
     (this.standby ?? []).forEach((st, k) => { st.uid = `CL-S${k + 1}`; });
+    // 부품분류셀 키팅 구역 피킹 로봇 (도어트림 K1 · e-axle K2 — 셀 로봇 다음 번호로 클릭·정보 창 · 레거시는 작업자)
+    for (const st of this.processing) if (this.zone && st.id === 'SORT' && this.mode.key !== 'traditional') st.spsUids = ['RB-01-K1', 'RB-01-K2'];
     this.sinkRobotUids = this.zone ? ['RB-PL-1', 'RB-PL-2'] : [];
     this.carriers.forEach((m, i) => { m.uid = `AM-${two(i + 1)}`; });
     this.vehicles.forEach((m, i) => { m.uid = `${m.kind === 'agv' ? 'AG' : 'FL'}-${two(i + 1)}`; });
@@ -1308,6 +1310,8 @@ export class Simulation {
     if (st.gateLog.length > 40) st.gateLog.shift();
   }
   // 게이트 결정에서 이 로봇이 주 작업을 맡는가 (게이트가 없는 셀은 모두 주 작업)
+  // 게이트 결정의 주 작업 로봇 가운데 첫 로봇 (부품분류셀에서 키트를 AMR에 옮겨 싣는 로봇)
+  isLeadFirst(st) { return !st.gate || !st.item || st.gate.id !== st.item.id ? 0 : st.gate.lead[0] ?? 0; }
   isLead(st, i) { return !st.gate || !st.item || st.gate.id !== st.item.id || st.gate.lead.includes(i); }
 
   // ── AMMR: 대상물마다 부품 선반에서 부품을 가져와 작업 ─────────────────

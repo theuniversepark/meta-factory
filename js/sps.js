@@ -60,7 +60,7 @@ export const SPS_PHASE_KO = { pick: '흐름 랙에서 피킹', verify: '검증 (
 export const SPS_GEO = {
   conv: { z: 3.3, x0: -1.15, x1: 1.95, y: 0.86, w: 0.5 }, buf: [-0.75, -0.25, 0.25, 0.75], build: 1.4, pickZ: 2.5,
   lane: 4.2, laneX: [-1.75, 1.75], racks: [-1.75, -0.2, 1.3], rackZ: 5.4, rackW: 1.3, rackD: 0.9, depack: -1.65,
-  booth: { x0: -2.85, x1: 2.05, z0: 3.62, z1: 6.15, h: 2.55 },
+  booth: { x0: -2.85, x1: 2.4, z0: 3.62, z1: 6.15, h: 2.55 },   // 동쪽 끝은 e-axle 피킹 로봇이 셋째 랙 끝 칸(x 1.7)에 팔을 뻗어도 모서리 기둥에 닿지 않게
 };
 // 부품분류셀 진행률: 버퍼에서 키트를 꺼내 AMR 키트 포켓에 싣는 순간 (line.js AMMR_FETCH.place와 같은 값)
 export const SPS_LOAD = 0.5;
