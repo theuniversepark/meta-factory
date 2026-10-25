@@ -777,7 +777,8 @@ export class Simulation {
   // 슬롯 배치는 factory.js placeRobots와 같다.
   planAmmrRacks(st) {
     const zone = this.zone, zr = 1.7;
-    const slots = zone ? [[-0.75, -1], [-0.75, 1], [0.95, -1], [0.95, 1]] : [[-0.6, -1], [0.6, 1], [1.3, -1], [-1.3, 1]];
+    const fc = zone && (st.id === 'DT_FAST' || st.id === 'EA_FAST'), x0 = fc ? 0 : -0.75;   // 체결셀(머리 위 갠트리 없음): 앞 두 대는 AMR 도킹 영역 가운데 맞은편 (factory.js placeRobots)
+    const slots = zone ? [[x0, -1], [x0, 1], [0.95, -1], [0.95, 1]] : [[-0.6, -1], [0.6, 1], [1.3, -1], [-1.3, 1]];
     // 부품분류셀: 선반 대신 셀 양옆 키팅 구역의 키트 컨베이어(서열 버퍼) — 로봇은 자기 쪽 컨베이어 앞까지 나가 키트를 꺼낸다 (js/sps.js SPS_GEO)
     // 검사·포장셀: 선반 대신 셀 밖 포장대 · 매거진 · 뚜껑 랙 (js/pack.js) — 대기 자리는 AMR 가운데 맞은편, 포장대 앞까지 나간다
     if (zone && st.id === 'PACK') {

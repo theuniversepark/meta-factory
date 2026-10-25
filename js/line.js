@@ -132,9 +132,9 @@ export const realCycle = (s, modeKey, product) => tAt(s.T, modeKey, product) * (
 const ZONE_RECIPES = [
   { id: 'SORT', robot: { kind: 'ammr', count: 2 }, cycle: 25, T: ZONE_T.SORT, kitXfer: true, task: '게이트 판별 → 그 제품 쪽 로봇이 키트 컨베이어에서 키트를 꺼내 AMR 키트 포켓에 부품 4개를 옮겨 담음' },
   { id: 'DT_ASSY', robot: { kind: 'cobot', count: 4 }, cycle: 26, T: ZONE_T.DT_ASSY, fasten: { setup: 6, per: 4.5, post: 0, min: 2, max: 4, kind: 'press' }, task: '양쪽 협동로봇이 패널에 암레스트·스피커그릴·스위치 조립, 클립 압입 (로봇당 2~4점)' },
-  { id: 'DT_FAST', robot: { kind: 'cobot', count: 2 }, cycle: 19, T: ZONE_T.DT_FAST, fasten: { setup: 2, per: 5.5, post: 4.5, min: 2, max: 4, kind: 'screw' }, task: '스크류 자동 체결 (로봇당 2~4점), 토크·각도 전수 판정' },
+  { id: 'DT_FAST', robot: { kind: 'cobot', count: 2 }, cycle: 19, T: ZONE_T.DT_FAST, fasten: { setup: 2, per: 5.5, post: 4.5, min: 2, max: 4, kind: 'screw' }, task: '협동로봇 자동 공급 스크류 드라이버: 조이며 토크·각도 판정 (로봇당 2~4점) → 비전 카메라로 나사 유무·들뜸 확인' },
   { id: 'EA_ASSY', robot: { kind: 'articulated', count: 2 }, cycle: 51, T: ZONE_T.EA_ASSY, fasten: { setup: 7, per: 5.0, post: 0, min: 2, max: 4, kind: 'press' }, task: '6축 2대: 베어링·오일씰 서보 압입 · 기어축 · 로터 삽입기 (로봇당 2~4점)' },
-  { id: 'EA_FAST', robot: { kind: 'articulated', count: 1 }, cycle: 106, T: ZONE_T.EA_FAST, fasten: { setup: 2, per: 5.5, post: 28, nut: 8, eol: true, min: 2, max: 4, kind: 'screw' }, task: '6축: 실러 도포·하우징 결합 → 볼트 2~4점 · 다축 너트러너, 토크·각도 전수 판정 → EOL 전수 시험 (누설 · 절연 저항·내전압)' },
+  { id: 'EA_FAST', robot: { kind: 'articulated', count: 1 }, cycle: 106, T: ZONE_T.EA_FAST, fasten: { setup: 2, per: 5.5, post: 22, nut: 0, eol: true, min: 2, max: 4, kind: 'screw' }, task: '6축 + 2스핀들 서보 너트러너(자동 볼트 공급): 양 끝 플랜지 볼트를 축(x) 방향으로 조이며 토크·각도 판정 → EOL 전수 시험 (누설 · 절연 저항·내전압)' },
   { id: 'PACK', robot: { kind: 'ammr', count: 2 }, cycle: 45, T: ZONE_T.PACK, packXfer: true, task: '외관·라벨 검사 → 상자 펴고 제품·뚜껑·QR 라벨 → AMR에 (e-axle은 고가반 6축)' },
 ];
 

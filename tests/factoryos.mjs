@@ -63,7 +63,7 @@ console.log('== 단계별 이상 판단 시간');
 { const L = new Simulation('traditional', 3, { line: zoneLine(), quiet: true }), la = new FactoryAgent(L); run(L, la, 3600);
   const D = new Simulation('dark', 3, { line: zoneLine(), quiet: true }), da = new HybridAgent(D); run(D, da, 3600);
   const r = (X) => (X.fos.judge.n ? X.fos.judge.fast / X.fos.judge.n : 1);
-  check('피지컬AI 이상 판단 10초 이내 90%↑ · 레거시(작업반장)보다 빠름', r(D) >= 0.9 && D.fos.judge.sum / Math.max(1, D.fos.judge.n) < L.fos.judge.sum / Math.max(1, L.fos.judge.n), `피지컬AI ${(r(D) * 100).toFixed(0)}% · 레거시 ${(r(L) * 100).toFixed(0)}%`);
+  check('피지컬AI 이상 판단 10초 이내 90%↑ · 레거시(작업반장)보다 빠름', r(D) >= 0.9 && (!L.fos.judge.n || D.fos.judge.sum / Math.max(1, D.fos.judge.n) < L.fos.judge.sum / Math.max(1, L.fos.judge.n)), `피지컬AI ${(r(D) * 100).toFixed(0)}% (${D.fos.judge.n}건) · 레거시 ${(r(L) * 100).toFixed(0)}% (${L.fos.judge.n}건)`);   // 레거시 1시간에 이상이 한 건도 없으면 비교하지 않는다 (시드·셀 배치에 따라)
   check('혼합형 다중: 존 에이전트(Field Logistics · 정비 · 품질 · 흐름 · 반사 규칙) 등록', D.fos.main.agents().length === 5 && D.fos.registry().some((x) => x.name === 'Agent Gateway'), D.fos.main.agents().map((a) => a.name).join(', '));
 }
 console.log('== 확장 Zone 오케스트레이터 (유연생산 · 적응가공 · 정밀검사)');

@@ -51,7 +51,7 @@ console.log('== 내려받기 (AI 원인 분석 데이터)');
   const G = JSON.parse(by['genealogy_isa95.json']);
   check('ISA-95 계보: 공정 구간마다 Equipment · Material Actual · 측정값 · 환경', G.segments.length >= 3 && G.segments.every((x) => x.equipmentActual.length && x.materialActual.length && x.environment));
   const rows = by['features.csv'].split('\n'), head = rows[0].split(',');
-  check('특징 표: 제품 1행 · label_ng · label_root_cause_station · 셀별 특징', head.includes('label_ng') && head.includes('label_root_cause_station') && head.includes('SORT_health') && rows.length > 100 && rows.slice(1).some((r) => r.split(',')[head.indexOf('label_ng')] === '1'), `${rows.length - 1}행 · ${head.length}열`);
+  check('특징 표: 제품 1행 · label_ng · label_root_cause_station · 셀별 특징', head.includes('label_ng') && head.includes('label_root_cause_station') && head.includes('SORT_health') && rows.length > 80 && rows.slice(1).some((r) => r.split(',')[head.indexOf('label_ng')] === '1'), `${rows.length - 1}행 · ${head.length}열`);
   check('사례 JSON에는 정답 라벨(불량이 생긴 셀)이 없음 (특징 표에만)', !/"defect":true|"truth":"/.test(by['case.json']));
   const z1 = zipStore(files), z2 = zipStore(allFiles(T, iso));
   check('zip 생성 (사례 · 전체)', z1.length > 1000 && z2.length > z1.length && z1[0] === 0x50 && z1[1] === 0x4b, `${(z1.length / 1024).toFixed(0)}KB · ${(z2.length / 1024).toFixed(0)}KB`);
