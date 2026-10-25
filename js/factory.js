@@ -3575,7 +3575,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
   //  e-axle GLT 한 층이 비면 꺼내기 전에 그 층 분리판을 거치대로 옮긴다
   animLoader(parts, st, dts) {
     const sim = this.sim, L = parts.loader, Z = parts.zoneStock, G = SRC_GEO, raw = sim.rawStock, T = sim.releaseInterval, k = Math.min(1, sim.releaseTimer / T);
-    sim.loaderGate = () => !L.r.arm.ik || !L.auto.visible || sim.mode.key === 'traditional' || !!L.atJig;   // 투입: 로봇이 자재를 지그 위에 대고 있을 때 (그 순간 손을 놓는다)
+    sim.loaderGate = () => !(L.r.arm.ik || L.r.simple) || !L.auto.visible || sim.mode.key === 'traditional' || !!L.atJig;   // 투입: 로봇이 자재를 지그 위에 대고 있을 때 (그 순간 손을 놓는다)
     const w = sim.mix ?? { doortrim: 1, eaxle: 1 }, tot = (w.doortrim || 0) + (w.eaxle || 0) || 1;
     const nDT = Math.min(2 * G.dt.C, Math.round(raw * (w.doortrim || 0) / tot)), nEA = Math.min(2 * G.ea.C, raw - nDT), n = { doortrim: nDT, eaxle: nEA };
     let next = sim.nextProduct?.() ?? 'doortrim'; if (!n[next]) next = n.doortrim ? 'doortrim' : n.eaxle ? 'eaxle' : null;

@@ -47,14 +47,17 @@ export function buildLoader(g, K, o) {
   }
   const L = { auto, car, K, railX: [x0, x1], standX, r: null, tools, stand, side: s, cur: o.tools[0].key, state: 'home', t: 0, plan: null, holding: null, held: {}, readyQ: null, homeQ: null, x: 0 };
   // 들고 있는 자재 (제품마다 · 손끝 TCP에 윗면이 오도록 뒤집어 단다 — buildSink 포장 상자와 같은 방식)
-  L.setHeld = (key, mesh, top) => { L.held[key]?.removeFromParent(); (L.heldTop ??= {})[key] = top; const r = L.r, sc = r.root.scale.x || 1, h = put(new THREE.Group(), 0, (r.arm.native ? top : -top) / sc, 0, r.tip); h.scale.setScalar(1 / sc); if (r.arm.native) h.rotation.x = Math.PI; h.add(mesh); h.visible = false; L.held[key] = h; };   // 고가반은 IRB 4600 모델을 키운 것 — 든 자재는 실물 크기로
+  L.setHeld = (key, mesh, top) => { L.held[key]?.removeFromParent(); if (key.startsWith('pad:')) top += PAD_UP; (L.heldTop ??= {})[key] = top; const r = L.r, sc = r.root.scale.x || 1, h = put(new THREE.Group(), 0, (r.arm.native ? top : -top) / sc, 0, r.tip); h.scale.setScalar(1 / sc); if (r.arm.native) h.rotation.x = Math.PI; h.add(mesh); h.visible = false; L.held[key] = h; };   // 고가반은 IRB 4600 모델을 키운 것 — 든 자재는 실물 크기로
   loaderRobot(L);
   return L;
 }
 // 로봇 (다시) 만들기 — Blender 실물 로봇 모델이 늦게 들어오면 그것으로 바꾼다 (셀 로봇 buildCrew와 같음) · 들고 있던 자재 표시는 호출 쪽이 다시 단다
+const PAD_UP = 0.04;   // 클램프·평행 그리퍼 손가락이 TCP 아래로 나온 길이 — 분리판·빈 트레이는 손가락 끝을 판 윗면에 대고 든다
 export function loaderRobot(L) {
   const { K, car } = L; if (L.r) L.r.root.removeFromParent();
-  const r = K.heavyRobot(K.MAT.orange); K.put(r.root, 0, LOADER.carY, 0, car); r.root.rotation.y = L.side > 0 ? Math.PI / 2 : -Math.PI / 2;   // 자재 쪽을 본다
+  let r = K.heavyRobot(K.MAT.orange);
+  if (!r.arm?.ik) { const a = K.makeArm(K.MAT.orange, 1.3); r = { root: a.root, tip: a.tip, arm: a, simple: 1.3 }; }   // 기본 도형 모드(Blender 실물 로봇 없음 — 웹 아티팩트 등): 간이 팔 · 해석적 역기구학 (툴은 늘 아래로)
+  K.put(r.root, 0, LOADER.carY, 0, car); r.root.rotation.y = r.simple ? 0 : L.side > 0 ? Math.PI / 2 : -Math.PI / 2;   // 자재 쪽을 본다
   const fl = r.arm.flange ?? r.tip.parent;
   for (const n of ['CustomFinger1', 'CustomFinger-1', 'CustomGripper']) { const x = fl.getObjectByName(n); if (x) x.visible = false; }
   Object.assign(L, { r, held: {}, state: 'home', plan: null, holding: null, readyQ: null, homeQ: null, q: null, cur0: null, x: 0 });
@@ -75,12 +78,14 @@ function mountTool(L, key) {
 function solve(L, cx, T, dir) {
   const { r, car } = L, P = car.parent; car.position.x = cx; car.updateWorldMatrix(true, true);
   const loc = r.root.worldToLocal(P.localToWorld(T.clone()));
+  if (r.simple) return L.K.armIK(r.simple, loc.x, loc.y, loc.z);   // 간이 팔: 툴 아래로만
   let d = true; if (dir !== true) { const a = r.root.worldToLocal(P.localToWorld(T.clone())), b = r.root.worldToLocal(P.localToWorld(T.clone().add(dir))); const v = b.sub(a).normalize(); d = { x: v.x, y: v.y, z: v.z }; }
   const q = r.arm.ik(loc.x, loc.y, loc.z, d);
   return alignX(L, q, P);
 }
 // 위치 · 툴 방향 오차 (셀 로컬): 역기구학은 위치만 맞추고 손목이 덜 풀리면 툴 방향이 기운다 — 판재를 세워 든 채면 판이 기울어 랙·받침에 닿는다
 function fitErr(L, cx, q, T, dir) {
+  if (L.r.simple) return 0;
   const { r, car } = L, P = car.parent, A = r.arm, fl = A.flange ?? r.tip.parent; car.position.x = cx; A.pose(...q); car.updateWorldMatrix(true, true);
   const tip = P.worldToLocal(r.tip.getWorldPosition(V(0, 0, 0))), ax = V(0, 1, 0).transformDirection(fl.matrixWorld), o = P.localToWorld(V(0, 0, 0)), want = (dir === true ? V(0, -1, 0) : dir.clone().negate()).normalize();
   const wantW = P.localToWorld(want.clone()).sub(o).normalize();
@@ -97,7 +102,7 @@ function solveBest(L, x, T, dir) {
   }
   return best;
 }
-function alignX(L, q, P) {   // J6로 플랜지 x축(그리퍼 긴 쪽 · 들고 있는 자재 긴 쪽)을 셀 x축에 맞춘다 — 판재·하우징은 앞뒤 대칭이라 0° · 180° 중 가까운 쪽 · 돌리고 다시 재기를 되풀이
+function alignX(L, q, P) { if (L.r.simple) return q;   // J6로 플랜지 x축(그리퍼 긴 쪽 · 들고 있는 자재 긴 쪽)을 셀 x축에 맞춘다 — 판재·하우징은 앞뒤 대칭이라 0° · 180° 중 가까운 쪽 · 돌리고 다시 재기를 되풀이
   const A = L.r.arm, fl = A.flange ?? L.r.tip.parent, out = q.slice(), wx = P.localToWorld(V(1, 0, 0)).sub(P.localToWorld(V(0, 0, 0))).normalize();
   const raw = () => {   // 툴 축을 기준으로 플랜지 x축에서 셀 x축까지의 각 (−π ~ π)
     A.pose(...out); fl.updateWorldMatrix(true, false);
@@ -129,7 +134,7 @@ function planFetch(L, key, pick, placeY) {
   const clampX = (x) => Math.max(L.railX[0], Math.min(L.railX[1], x));
   let padOn = null, padOff = null;
   if (pick.pad) {   // 층이 비면 그 층 분리판(e-axle GLT) · 빈 트레이(적응가공)를 먼저 옆 거치대·스택으로 옮긴다 — 툴 아래로, 판 가운데를 집어 수평 그대로
-    const F = pick.pad.from, D = pick.pad.to, fx = clampX(F.x), dx = clampX(D.x);
+    const F = pick.pad.from.clone().add(V(0, PAD_UP, 0)), D = pick.pad.to.clone().add(V(0, PAD_UP, 0)), fx = clampX(F.x), dx = clampX(D.x);   // 손가락 끝이 판 윗면에 닿는 높이 (TCP를 판 윗면에 두면 손가락이 판 속으로 들어간다)
     const up = Math.max(0.75, F.y + 0.75 - D.y);   // 옆 용기 위로 넘어가는 높이
     add(2.0, fx, solve(L, fx, F.clone().add(V(0, 0.4, 0)), true)); add(0.8, fx, solve(L, fx, F, true)); padOn = t; add(0.4, fx, solve(L, fx, F, true));
     add(0.8, fx, solve(L, fx, F.clone().add(V(0, 0.75, 0)), true)); add(2.0, dx, solve(L, dx, D.clone().add(V(0, up, 0)), true)); add(0.8, dx, solve(L, dx, D, true)); padOff = t;
@@ -160,7 +165,7 @@ function planFetch(L, key, pick, placeY) {
   if (via) add(1.0, pcx, solve(L, pcx, V(pick.x, Math.max(1.75, pick.y + pick.rise), s * (LOADER.railZ + 0.45)), dH));   // 들어 올린 채 랙 앞에서 물러남 — 손목은 AMR로 가며 돌려 눕힌다
   add(2.6, 0, L.readyQ);   // AMR 위 대기
   // 이어지는 자세끼리 J6(손목 마지막 축)가 반 바퀴 가까이 차이 나면 반 바퀴 돌린 같은 정렬로 — 판재·하우징은 앞뒤 대칭이라 자세마다 0° · 180°를 따로 고르면 그 사이에서 손목이 돌아 그리퍼가 세로로 선다
-  for (let i = 1; i < out.length; i++) { const q = out[i][2] = out[i][2].slice(), p5 = out[i - 1][2][5]; while (q[5] - p5 > Math.PI / 2) q[5] -= Math.PI; while (q[5] - p5 < -Math.PI / 2) q[5] += Math.PI; }
+  for (let i = 1; i < out.length && !L.r.simple; i++) { const q = out[i][2] = out[i][2].slice(), p5 = out[i - 1][2][5]; while (q[5] - p5 > Math.PI / 2) q[5] -= Math.PI; while (q[5] - p5 < -Math.PI / 2) q[5] += Math.PI; }
   L.readyQ = out[out.length - 1][2];
   return { key, keys: out, swap, gripT, end: t, padKey: pick.pad?.key, padOn, padOff };
 }
@@ -174,7 +179,7 @@ const at = (keys, t) => {
 //  반환: holding(들고 있는 제품 · 재고에서 빠진 것) — 투입 순간 손을 놓으면 null
 export function stepLoader(L, c) {
   const A = L.r.arm;
-  L.auto.visible = !c.legacy; if (c.legacy || c.frozen || !A.ik) return L.holding;   // 실물 로봇 모델(역기구학)이 아직 없으면 대기
+  L.auto.visible = !c.legacy; if (c.legacy || c.frozen || !(A.ik || L.r.simple)) return L.holding;
   if (L.state === 'home') {
     L.homeQ ??= solve(L, 0, V(0, 1.9, L.side * 0.4), true);
     if (c.next) { const p = c.pick(c.next); if (p) { L.cur0 = L.q ?? L.homeQ; L.plan = planFetch(L, c.next, p, c.placeY(c.next)); L.state = 'fetch'; L.t = 0; } }
@@ -187,7 +192,7 @@ export function stepLoader(L, c) {
     if (P.padOff != null && L.t >= P.padOff && !P.padDone) { P.padDone = true; L.padMoved = (L.padMoved ?? 0) + 1; }
     if (L.t >= P.gripT && !L.holding) L.holding = P.key;
     const [x, q] = at(P.keys, L.t); L.x = x; L.q = q;
-    if (L.t >= P.end) { L.state = 'ready'; const pq = solve(L, 0, V(0, c.placeY(P.key), 0), true); while (pq[5] - L.readyQ[5] > Math.PI / 2) pq[5] -= Math.PI; while (pq[5] - L.readyQ[5] < -Math.PI / 2) pq[5] += Math.PI; L.placeQ = pq; L.car.position.x = L.x; }   // 내려놓기도 대기 자세와 같은 쪽 정렬
+    if (L.t >= P.end) { L.state = 'ready'; const pq = solve(L, 0, V(0, c.placeY(P.key), 0), true); while (!L.r.simple && pq[5] - L.readyQ[5] > Math.PI / 2) pq[5] -= Math.PI; while (!L.r.simple && pq[5] - L.readyQ[5] < -Math.PI / 2) pq[5] += Math.PI; L.placeQ = pq; L.car.position.x = L.x; }   // 내려놓기도 대기 자세와 같은 쪽 정렬
   }
   if (L.state === 'ready' && !L.placing && c.next && L.holding && L.holding !== c.next) {   // 투입 순서가 바뀜(혼류 비율 변경 등) — 든 자재를 용기에 되돌리고 다음 제품을 꺼낸다
     L.holding = null; L.state = 'home'; L.q = L.readyQ.slice();

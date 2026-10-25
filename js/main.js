@@ -1599,7 +1599,7 @@ function frame() {
   interp.apply(interpTargets(), running && !llm.holdSim ? stepAcc / SIM_DT : 1);   // 그리는 동안만 위치·진행률을 직전 간격과 섞는다 (멈춤 중에는 현재 상태 그대로 — 멈춘 채 편집한 위치가 보이게)
   // 화면 갱신은 영역마다 따로 — 한 곳에서 예외가 나도 다른 영역은 그린다 · 같은 오류는 콘솔에 한 번만 (프레임마다 조용히 묻히지 않게)
   guard('정밀조립', () => view.update(rdt, running, speed));
-  guard('확장 Zone', () => xzones.update(rdt, running && !llm.holdSim, speed)); guard('정밀검사', () => insp.update(rdt, running && !llm.holdSim, speed));
+  guard('확장 Zone', () => xzones.update(rdt, running && !llm.holdSim, speed, running)); guard('정밀검사', () => insp.update(rdt, running && !llm.holdSim, speed));
   interp.restore();
   keyPan(rdt, shiftHeld);
   netT += rdt; if (netT > 1 && !netCard.hidden) { netT = 0; renderNetCard(); }

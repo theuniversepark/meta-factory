@@ -1271,7 +1271,7 @@ class ExtraZone {
   buildSrcStock() {
     const n = this.src; if (!n?.stockG) return;
     n.stockG.clear(); n.side = {}; n.split = {}; n.padDone = new Set(); n.padPending = null;
-    const L = n.port.loader; for (const h of Object.values(L.held)) h.removeFromParent(); if (!L.r.arm.native && blenderOn()) loaderRobot(L); L.held = {};   // 실물 로봇 모델이 늦게 들어오면 그것으로
+    const L = n.port.loader; for (const h of Object.values(L.held)) h.removeFromParent(); if ((!L.r.arm.native && blenderOn()) || (L.r.simple && blenderOn())) loaderRobot(L); L.held = {};   // 실물 로봇 모델이 늦게 들어오면 그것으로
     const rawOnly = (m) => { const S = m.userData.stage; if (S?.raw) { S.raw.visible = true; if (S.mac) S.mac.visible = false; if (S.fin) S.fin.visible = false; } return m; };
     Object.keys(this.Z.products).forEach((k) => {
       const C = n.port.conts[k];
@@ -1284,7 +1284,7 @@ class ExtraZone {
   }
   // 투입 로봇이 아직 적재 준비가 안 됨 — 화면(실물 로봇 모델 · 역기구학)이 있고 자동화·피지컬AI 단계일 때만 (헤드리스 시뮬레이션·레거시는 기다리지 않는다)
   loaderBusy() {
-    const L = this.src?.port?.loader; if (!L?.r?.arm?.ik || this.mode === 'traditional' || !L.auto.visible) return false;
+    const L = this.src?.port?.loader; if (!(L?.r?.arm?.ik || L?.r?.simple) || this.mode === 'traditional' || !L.auto.visible) return false;
     return L.state !== 'ready';
   }
   // 다음 투입 제품 (평준화 누적값을 바꾸지 않고 미리 봄) — 로봇이 그 제품 자재에서 집는다
@@ -1583,9 +1583,9 @@ class ExtraZone {
   detachItem(c) { if (c.pm) { c.g.remove(c.pm); c.pm = null; } }
 
   // ── 화면 동기화 (rdt: 실제 초, t: 화면 시간) ─────────────────
-  sync(rdt, t, dts) {
+  sync(rdt, t, dts, dta = dts) {
     this.animPack();
-    this.animSrc(dts);
+    this.animSrc(dta);   // 투입 로봇은 정밀조립Zone과 같이 에이전트 응답 대기(시뮬레이션 일시정지) 중에도 집어 오기를 이어 간다 — 적재·투입 순간은 시뮬레이션 사건을 그대로 기다린다
     if (this.board2?.g.visible) {   // 전광판 0.5초마다 · 서버 상태등 깜빡임
       this.board2.t -= rdt; if (this.board2.t <= 0) { this.board2.t = 0.5; this.drawWall(); }
       this.srvLeds.forEach((m, i) => (m.emissiveIntensity = Math.sin(t * 6 + i * 1.7) > 0.2 ? 2 : 0.4));
@@ -2231,9 +2231,9 @@ export class ExtraZones {
     this.setLabels(labelsOn);
   }
   step(dt, sim) { const K = sim.cmd, halted = !!(K?.estopAll || K?.pstopAll); this.halted = halted; sim.zonesLive = true; sim.xzones = this; for (const z of this.zones) { z.sim = sim; z.fz = sim.fleet?.[`z${z.Z.key}`]; z.step(dt, halted); } }   // 투입 자재는 정밀조립Zone 시뮬레이션의 물류존 재고에서 꺼낸다
-  update(rdt, running, speed) {
-    this.t += rdt; const dts = running ? rdt * speed : 0;
-    for (const z of this.zones) z.sync(rdt, this.t, dts);
+  update(rdt, running, speed, anim = running) {
+    this.t += rdt; const dts = running ? rdt * speed : 0, dta = anim ? rdt * speed : 0;
+    for (const z of this.zones) z.sync(rdt, this.t, dts, dta);
   }
   updateLabels() { for (const z of this.zones) z.updateLabels(this.halted); }
   setLabels(on) { this.labelsOn = on; for (const z of this.zones) z.setLabels(on); }

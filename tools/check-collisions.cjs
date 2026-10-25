@@ -56,6 +56,7 @@ while(performance.now()-T0<${secs}*1000){await new Promise(r=>setTimeout(r,40));
  if(n%15===0){regAll();const all=collect();fac=all.filter(o=>o.ow.cls==='fac');G=grid(fac);dynM=all.filter(o=>o.ow.cls!=='fac').map(o=>({m:o.m,ow:o.ow}));joints=[];for(const [o,e] of reg)if(e.cls==='robot')o.traverse(j=>{if(/^J[2-6]_Origin$|^ToolTCP$/.test(j.name))joints.push([j,e.label]);});}
  n++;const dyn=[];for(const d of dynM){d.m.updateWorldMatrix(true,false);if(!visible(d.m))continue;const B=obb(d.m);if(B)dyn.push({...d,B});}
  for(const a of dyn){if(/Caster|Wheel/i.test(a.m.name))continue;const an=nameOf(a.m);near(G,a,(b)=>{if(b.n!==n){b.m.updateWorldMatrix(true,false);b.B=obb(b.m)??b.B;b.n=n;}   // 문·헤드 등 움직이는 설비 부품: 비교할 때마다 지금 위치로 (격자는 15샘플마다)
+  if(!visible(b.m))return;   // 격자를 다시 모으는 사이(15샘플)에 숨겨진 설비 (옮겨 간 빈 트레이 등)
   if(a.ow.cls==='mover'&&b.B.max[1]<0.12)return;if(b.B.max[1]<0.1&&b.B.h[1]<0.015)return;if(!ovl(a.B,b.B))return;const p=sat(a.B,b.B);if(p<0.02||!real(a.m,b.m))return;const bn=nameOf(b.m);
   if(a.ow.cls==='robot'&&TOOL.test(an)&&WORK.test(bn))return;
   if(a.ow.cls==='belt'&&b.B.h[1]<0.08)return;
