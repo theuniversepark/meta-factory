@@ -92,6 +92,7 @@ app.whenReady().then(async () => {
       for (const h of bad.slice(0, 25)) console.log(`  ${h.max.toFixed(2)}m  ${h.k}  (${h.frames}프레임 · t ${h.t}s · ${h.a}${h.b ? ' ↔ ' + (typeof h.b === 'string' ? h.b : `${h.b.c} (${h.b.size})`) : ''} @ ${h.at})`);
     }
     fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify({ secs: SECS, pen: PEN, report, errors }, null, 2));
+    if (errors.length) { console.log(`FAIL: 페이지 오류 ${errors.length}건 — 화면 갱신이 중간에 멈추면 간섭 점검도 틀린다`); [...new Set(errors)].slice(0, 5).forEach((m) => console.log('  ' + m.slice(0, 200))); }
     const total = report.reduce((a, r) => a + r.violations, 0);
     console.log(total ? `FAIL: 간섭 ${total}건 (outputs/collisions/report.json)` : 'PASS: 세 단계 모두 간섭 없음');
     clearTimeout(timer); app.exit(total ? 1 : 0);

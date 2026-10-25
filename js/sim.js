@@ -2086,7 +2086,8 @@ export class Simulation {
         { go: pick },
         { wait: xferWait(v), face, done: () => { const n = Math.min(ZONE_SRC.load, safety ? ZONE_SRC.load : w.raw, ZONE_SRC.cap - this.zoneRaw[key] - this.zoneRawIn[key]); if (!safety) { w.raw -= n; if (n) this.fac?.consume(`${key}:raw`, n, `${code} 투입구`); } this.zoneRawIn[key] += n; v.load = { type: 'raw', n, safety }; } },
         { go: F.agvDrop },
-        { wait: 4, done: () => { const n = v.load?.n ?? 0, sf = v.load?.safety; this.zoneRaw[key] = Math.min(ZONE_SRC.cap, this.zoneRaw[key] + n); this.zoneRawIn[key] -= n; v.load = null; this.stats.zoneTrips = (this.stats.zoneTrips ?? 0) + 1; if (sf) this.orch.step(this.orch.find(`supply:${key}`), 'exec', 'act', `${v.id} 안전재고 ${n}개 ${ZONE_LABEL[key]} 투입구 도착 (재고 ${this.zoneRaw[key]}개)`); } },
+        { wait: 4, done: () => { const n = v.load?.n ?? 0, sf = v.load?.safety; this.zoneRaw[key] = Math.min(ZONE_SRC.cap, this.zoneRaw[key] + n); this.zoneRawIn[key] -= n; v.load = { type: 'empty', n: 1 }; this.stats.emptyReturns = (this.stats.emptyReturns ?? 0) + 1; this.stats.zoneTrips = (this.stats.zoneTrips ?? 0) + 1; if (sf) this.orch.step(this.orch.find(`supply:${key}`), 'exec', 'act', `${v.id} 안전재고 ${n}개 ${ZONE_LABEL[key]} 투입구 도착 (재고 ${this.zoneRaw[key]}개)`); } },
+        { go: pick }, { wait: 2, face, done: () => { v.load = null; } },   // 빈 용기(패널 랙 · 트레이 팔레트)를 확장 선반 출고 자리로 되돌림
         { go: v.home },   // 내려놓은 자리(Zone AMR 투입 경로 옆)에 서 있지 않고 충전 자리로 — 다음 운반도 바로 옆 확장 선반에서 시작한다
       ]);
     }
@@ -2188,8 +2189,11 @@ export class Simulation {
       { wait: 4, done: () => {
         const n = v.load?.n ?? PALLET_RAW;
         this.rawStock = Math.min(RAW_CAP, this.rawStock + n);
-        this.inboundRaw -= PALLET_RAW; v.load = null; this.stats.supplyTrips++;
+        this.inboundRaw -= PALLET_RAW; this.stats.supplyTrips++;
+        v.load = { type: 'empty', n: 1 }; this.stats.emptyReturns = (this.stats.emptyReturns ?? 0) + 1;   // 꽉 찬 용기를 내려놓고 빈 용기(회수 용기)를 싣는다
       } },
+      { go: at },   // 빈 용기를 자재창고 출고 자리로 되돌림 — 다음 공급도 여기서 시작
+      { wait: 2, face, done: () => { v.load = null; } },
     ]);
   }
   // 안전재고 긴급 운송 — 창고 내 별도 보관분이라 출고 중단과 무관하게 실을 수 있다

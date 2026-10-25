@@ -103,7 +103,16 @@ function planFetch(L, key, pick, placeY) {
     const ex = L.railX[1], above = solve(L, ex, V(L.standX, 1.6, s * LOADER.railZ), true), at = solve(L, ex, V(L.standX, 1.23, s * LOADER.railZ), true);
     add(2.4, ex, above); add(0.8, ex, at); swap = t; add(1.0, ex, at); add(0.8, ex, above);
   }
-  const cx = Math.max(L.railX[0], Math.min(L.railX[1], pick.x)), T = V(pick.x, pick.y, pick.z);
+  const clampX = (x) => Math.max(L.railX[0], Math.min(L.railX[1], x));
+  let padOn = null, padOff = null;
+  if (pick.pad) {   // 층이 비면 그 층 분리판(e-axle GLT) · 빈 트레이(적응가공)를 먼저 옆 거치대·스택으로 옮긴다 — 툴 아래로, 판 가운데를 집어 수평 그대로
+    const F = pick.pad.from, D = pick.pad.to, fx = clampX(F.x), dx = clampX(D.x);
+    const up = Math.max(0.75, F.y + 0.75 - D.y);   // 옆 용기 위로 넘어가는 높이
+    add(2.0, fx, solve(L, fx, F.clone().add(V(0, 0.4, 0)), true)); add(0.8, fx, solve(L, fx, F, true)); padOn = t; add(0.4, fx, solve(L, fx, F, true));
+    add(0.8, fx, solve(L, fx, F.clone().add(V(0, 0.75, 0)), true)); add(2.0, dx, solve(L, dx, D.clone().add(V(0, up, 0)), true)); add(0.8, dx, solve(L, dx, D, true)); padOff = t;
+    add(0.5, dx, solve(L, dx, D.clone().add(V(0, 0.4, 0)), true));
+  }
+  const cx = clampX(pick.x), T = V(pick.x, pick.y, pick.z);
   let pre, grip, lift, back;
   if (pick.kind === 'panel') {   // 툴 수평 (로봇 쪽에서 판재 면으로) → 흡착 → 랙 위로 뽑음 → 통로 쪽으로 물러남
     const d = V(0, 0, -s);   // 목표 → 손목 (로봇 쪽)
@@ -114,12 +123,13 @@ function planFetch(L, key, pick, placeY) {
     lift = solve(L, cx, T.clone().add(V(0, pick.rise, 0)), true); back = lift;
   }
   // 랙 앞 경유점: 툴을 아래로 둔 채 랙 앞(레일 쪽 0.45m) 높이 1.75m 위로 와서 손목을 돌린다 — 곧장 관절 보간하면 툴이 랙 받침 높이까지 처진다
-  const via = pick.kind === 'panel' ? solve(L, cx, V(pick.x, Math.max(1.75, pick.y + 0.55), s * (LOADER.railZ + 0.45)), true) : null;
+  //  경유점도 툴을 수평(판재 쪽)으로 — 손목은 AMR 위에서 높이 돌리고, 랙 앞에서는 곧게 내려가 다가간다 (랙 앞에서 손목을 돌리면 툴이 받침 높이까지 처진다)
+  const dH = V(0, 0, -s), via = pick.kind === 'panel' ? solve(L, cx, V(pick.x, Math.max(1.75, pick.y + 0.55), s * (LOADER.railZ + 0.45)), dH) : null;
   if (via) add(1.6, cx, via);
   add(via ? 1.0 : 2.2, cx, pre); add(0.8, cx, grip); const gripT = t; add(0.6, cx, grip); add(1.0, cx, lift); add(0.7, cx, back);
-  if (via) add(1.0, cx, solve(L, cx, V(pick.x, Math.max(1.75, pick.y + pick.rise), s * (LOADER.railZ + 0.45)), true));   // 들어 올린 채 손목을 돌려 눕힌다
+  if (via) add(1.0, cx, solve(L, cx, V(pick.x, Math.max(1.75, pick.y + pick.rise), s * (LOADER.railZ + 0.45)), dH));   // 들어 올린 채 랙 앞에서 물러남 — 손목은 AMR로 가며 돌려 눕힌다
   add(2.6, 0, L.readyQ);   // AMR 위 대기
-  return { key, keys: out, swap, gripT, end: t };
+  return { key, keys: out, swap, gripT, end: t, padKey: pick.pad?.key, padOn, padOff };
 }
 const at = (keys, t) => {
   let i = keys.findIndex((k) => k[0] >= t); if (i < 0) i = keys.length - 1; if (i === 0) return [keys[0][1], keys[0][2]];
@@ -140,6 +150,8 @@ export function stepLoader(L, c) {
   if (L.state === 'fetch') {
     const P = L.plan; L.t += c.dt;
     if (P.swap != null && L.t >= P.swap && L.cur !== P.key) mountTool(L, P.key);
+    L.padHeld = P.padOn != null && L.t >= P.padOn && L.t < P.padOff ? P.padKey : null;   // 옮기는 중인 분리판·빈 트레이
+    if (P.padOff != null && L.t >= P.padOff && !P.padDone) { P.padDone = true; L.padMoved = (L.padMoved ?? 0) + 1; }
     if (L.t >= P.gripT && !L.holding) L.holding = P.key;
     const [x, q] = at(P.keys, L.t); L.x = x; L.q = q;
     if (L.t >= P.end) { L.state = 'ready'; L.placeQ = solve(L, 0, V(0, c.placeY(P.key), 0), true); L.car.position.x = L.x; }
@@ -154,6 +166,17 @@ export function stepLoader(L, c) {
     L.x = 0;
   }
   L.car.position.x = L.x; A.pose(...L.q);
-  for (const [k, h] of Object.entries(L.held)) h.visible = L.holding === k;
+  for (const [k, h] of Object.entries(L.held)) h.visible = L.holding === k || (L.padHeld != null && k === L.padHeld);
   return L.holding;
+}
+
+// 용기 2자리 (쓰는 중 · 대기) — 제품마다 재고 n을 두 용기에 나눠 보인다 (용기당 C개)
+//  n > C: 대기 용기는 꽉 참(C) · 쓰는 용기는 n − C │ n ≤ C: 쓰는 용기에 n · 다른 자리는 빈 용기(회수 대기)
+//  쓰는 용기가 비는 순간(n이 C 아래로) 대기 용기가 쓰는 용기가 된다 — 자리마다 개수가 튀지 않는다 · 보충(n이 C 위로)되면 빈 자리에 꽉 찬 용기
+export function containerSplit(st, n, C) {
+  if (st.act == null) st.act = 0;
+  if (st.n != null && st.n > C && n <= C) st.act = 1 - st.act;   // 대기 용기로 넘어감
+  st.n = n;
+  const c = [0, 0]; if (n > C) { c[1 - st.act] = C; c[st.act] = n - C; } else c[st.act] = n;
+  return { act: st.act, c };
 }
