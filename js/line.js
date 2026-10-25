@@ -120,7 +120,7 @@ export const AMMR_FETCH = { turnOut: 0.06, driveOut: 0.14, pick: 0.24, turnIn: 0
 //  SORT 판독 3 + 키트 부품 4개 옮겨 담기 + 빈 트레이 회수 · DT_ASSY 변종 부품 4 + 클립 12 · DT_FAST 스크류 6점 · EA_ASSY 베어링·오일씰 서보 압입 + 기어축 + 로터 삽입기
 //  EA_FAST 실러(FIPG)·비드 검사 + 하우징 결합 + 볼트 22개 · PACK 제품마다 (e-axle은 고가반 6축이 크레이트에 넣는다)
 export const ZONE_T = {
-  SORT: [18, 25, 30], DT_ASSY: [35, 26, 37], DT_FAST: [21, 19, 26], EA_ASSY: [77, 51, 52], EA_FAST: [138, 61, 63],
+  SORT: [18, 25, 30], DT_ASSY: [35, 26, 37], DT_FAST: [21, 19, 26], EA_ASSY: [77, 51, 52], EA_FAST: [198, 106, 108],
   PACK: { doortrim: [35, 37, 50], eaxle: [70, 53, 55] },
 };
 // 단계별 사이클 배율 (sim.js MODES cycleMul) — 실제 작업 시간(ZONE_T)은 이 배율을 나눠 넣어 시뮬레이션이 곱한 뒤에 그 값이 되게 한다
@@ -134,7 +134,7 @@ const ZONE_RECIPES = [
   { id: 'DT_ASSY', robot: { kind: 'cobot', count: 4 }, cycle: 26, T: ZONE_T.DT_ASSY, fasten: { setup: 6, per: 4.5, post: 0, min: 2, max: 4, kind: 'press' }, task: '양쪽 협동로봇이 패널에 암레스트·스피커그릴·스위치 조립, 클립 압입 (로봇당 2~4점)' },
   { id: 'DT_FAST', robot: { kind: 'cobot', count: 2 }, cycle: 19, T: ZONE_T.DT_FAST, fasten: { setup: 2, per: 5.5, post: 4.5, min: 2, max: 4, kind: 'screw' }, task: '스크류 자동 체결 (로봇당 2~4점), 토크·각도 전수 판정' },
   { id: 'EA_ASSY', robot: { kind: 'articulated', count: 2 }, cycle: 51, T: ZONE_T.EA_ASSY, fasten: { setup: 7, per: 5.0, post: 0, min: 2, max: 4, kind: 'press' }, task: '6축 2대: 베어링·오일씰 서보 압입 · 기어축 · 로터 삽입기 (로봇당 2~4점)' },
-  { id: 'EA_FAST', robot: { kind: 'articulated', count: 1 }, cycle: 61, T: ZONE_T.EA_FAST, fasten: { setup: 2, per: 5.5, post: 8, min: 2, max: 4, kind: 'screw' }, task: '6축: 실러 도포·하우징 결합 → 볼트 2~4점 · 다축 너트러너, 토크·각도 전수 판정' },
+  { id: 'EA_FAST', robot: { kind: 'articulated', count: 1 }, cycle: 106, T: ZONE_T.EA_FAST, fasten: { setup: 2, per: 5.5, post: 28, nut: 8, eol: true, min: 2, max: 4, kind: 'screw' }, task: '6축: 실러 도포·하우징 결합 → 볼트 2~4점 · 다축 너트러너, 토크·각도 전수 판정 → EOL 전수 시험 (누설 · 절연 저항·내전압)' },
   { id: 'PACK', robot: { kind: 'ammr', count: 2 }, cycle: 45, T: ZONE_T.PACK, packXfer: true, task: '외관·라벨 검사 → 상자 펴고 제품·뚜껑·QR 라벨 → AMR에 (e-axle은 고가반 6축)' },
 ];
 
@@ -368,7 +368,7 @@ export function pointAt(pts, s) {
 export function buildStationDefs(line, modeKey) {
   const n = line.stations.length;
   const nodes = placeNodes(n + 2, line.layout ?? 'straight', line);
-  const defs = [{ id: 'SRC', type: 'source', ...nodes[0], name: modeKey === 'traditional' ? '자재 투입 (수작업)' : '자재 투입 (AS/RS)' }];
+  const defs = [{ id: 'SRC', type: 'source', ...nodes[0], name: modeKey === 'traditional' ? '자재 투입 (수작업)' : '자재 투입 (갠트리 로더)' }];
   line.stations.forEach((s, i) => {
     const T = STATION_TYPES[s.type];
     const manual = modeKey === 'traditional' && s.robot.count > 0;

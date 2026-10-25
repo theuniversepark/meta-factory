@@ -14,7 +14,7 @@ check('공장 → 셀 직접 명령 금지 (계층 건너뛰기) · 존 → 자�
 check('존 → 공장 결정 요청 허용 · 존 → 공장 명령 금지', allowed('zone:main', 'factory', 'decision.request') && !allowed('zone:main', 'factory', 'command'));
 console.log('== 자동화 3시간 (정밀조립)');
 const s = new Simulation('smart', 3, { line: zoneLine(), quiet: true }), ag = new FactoryAgent(s), F = s.fos;
-run(s, ag, 10800);   // 3시간 — 실제 작업 시간(1.0.45 · 약 76대/시간)으로 오더(양품 100) 1건 이상 종료
+run(s, ag, 18000);   // 5시간 — 실제 작업 시간(1.0.48 · e-axle EOL 시험 포함 · 약 65대/시간)으로 오더(양품 100) 1건 이상 종료 (첫 종료 약 4.5시간)
 { const g = F.bus.send('zone:main', 'zone:insp', 'command', { text: '시험' });
   check('가드레일이 존 → 존 명령을 막고 기록', g.status === 'blocked' && F.bus.stats.blocked >= 1, g.why);
   const C = F.orders.filter((o) => o.status === 'closed');

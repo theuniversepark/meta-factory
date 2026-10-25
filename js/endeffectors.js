@@ -64,6 +64,18 @@ export function attachVacuumGripper(arm) {
   });
 }
 
+// 롤러 헤밍 헤드: 툴 축 끝에 롤러 2개 — 아래(TCP)는 원통 롤러(프리헤밍 30° · 60° · 최종 90°를 같은 롤러로 기울기만 바꿔 누름) · 옆은 경사 롤러 · 몸체에 가압 실린더(헤밍 하중 약 1kN)
+export function attachRollerHead(arm) {
+  return mount(arm, (g) => {
+    box(0.16, 0.05, 0.16, M.arm, 0, 0.025, 0, g);
+    cyl(0.05, 0.05, 0.07, M.blue, 0, 0.085, 0, g).name = 'RollerCylinder';            // 가압 실린더 (컴플라이언스)
+    box(0.04, 0.05, 0.1, M.body, 0, 0.13, 0, g);                                       // 롤러 포크
+    const r1 = cyl(0.02, 0.02, 0.05, M.nozzle, 0, 0.13, 0, g); r1.rotation.x = Math.PI / 2; r1.name = 'HemRoller';   // 원통 롤러 (아래 끝 = TCP 0.15)
+    const r2 = cyl(0.028, 0.012, 0.03, M.nozzle, 0.07, 0.115, 0, g); r2.rotation.z = Math.PI / 2; r2.name = 'HemRollerCone';   // 경사 롤러 (모서리 프리헤밍)
+    box(0.06, 0.03, 0.04, M.body, 0.04, 0.115, 0, g);
+  });
+}
+
 // 로봇이 옮기는 작은 부품: bracket(키팅 브래킷 · 바닥면이 기준) · hinge(도어 힌지 · 판 두 장)
 const PART_M = { bracket: std(0x5d6b78, { metalness: 0.7 }), hinge: std(0x2d3238, { metalness: 0.8, roughness: 0.35 }) };
 export function makePart(kind = 'bracket') {

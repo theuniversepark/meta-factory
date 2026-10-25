@@ -111,7 +111,7 @@ const TOP = -4.6, BOT = 4.6, MID = 0, PI = Math.PI;
 // 적응가공 가공 줄: 두 줄의 가공기가 가운데에서 등을 맞댄다 — 5축 UMC-1250 두 대는 뒤 전장함(0.26m)끼리 마주 보므로 ±4.95 · 사선홀 VF-2 ↔ 선반 ST-40은 ±4.7 (±4.6이면 전장함·뒤 주물이 7~15cm 겹친다)
 const ATOP = -4.95, ABOT = 4.95, ATOP2 = -4.7, ABOT2 = 4.7;
 // 셀 실제 작업 시간 T [레거시, 자동화, 피지컬AI] (초) — 제품마다 다르면 { 제품: [...] } (정밀검사) · 레시피 기준 사이클(cycle)은 자동화 시간
-//  유연생산: 실제 차체 부품 공정 작업 요소 (스폿 약 45타점 × 2.8초 ÷ 6축 2대 · 실러 3.5m @150mm/s · 헤밍 프레스 · 비전 게이지 갭·단차 30점 …)
+//  유연생산: 실제 차체 부품 공정 작업 요소 (스폿 약 45타점 × 2.8초 ÷ 6축 2대 · 실러 3.5m @150mm/s · 롤러 헤밍 3패스 · 비전 게이지 갭·단차 30점 …)
 //  적응가공: 운영 기준 시간 (소재 식별 10 · 5축·사선홀·정밀절삭 60 · 선삭·CMM 40) — 레거시는 수동 셋업·텐딩만큼 더 · 피지컬AI는 텐딩 6축 그대로
 //  피지컬AI는 같은 산업용 로봇·전용기가 하는 공정(용접·실링·헤밍·가공)은 같고, AMMR·휴머노이드가 손으로 하는 공정은 동작이 1.3~1.6배 (VLA 인식·다시 집기)
 //  공정 설계에서 바꾼 기준 사이클(cycle)은 자동화 시간 대비 비율로 모든 단계에 같이 적용 · cycleK: 로봇 대수 효과
@@ -139,10 +139,10 @@ export const EXTRA_ZONES = [
       C02: { type: 'locate', label: '안착·보정', product: 'shared', use: '지그 안착·비전 6DoF 보정', x: -10.5, z: TOP, side: -1, cycle: 20, T: [35, 20, 22], robot: ['articulated', 1] },
       C03: { type: 'spot', label: '가접·본용접', product: 'shared', use: '스폿용접 2대 협업', x: -2, z: TOP, side: -1, cycle: 67, T: [122, 67, 67], robot: ['articulated', 2] },
       C04: { type: 'seal', label: '실링', product: 'shared', use: '실러 도포·비드 검사', x: 6.5, z: TOP, side: -1, cycle: 32, T: [56, 32, 32], robot: ['articulated', 1] },
-      C05: { type: 'hem', label: '헤밍', product: 'shared', use: '헤밍 프레스 결합', x: 15, z: TOP, side: -1, cycle: 28, T: [41, 28, 28], robot: ['articulated', 1] },
+      C05: { type: 'hem', label: '롤러 헤밍', product: 'shared', use: '결합·롤러 헤밍 3패스·유도 경화', x: 15, z: TOP, side: -1, cycle: 62, T: [95, 62, 62], robot: ['articulated', 2] },   // 핸들링 6축 + 롤러 헤밍 고가반 6축 · 반전 앤빌 테이블(후드·도어 앤빌) — 플랜지 약 4m × 3패스 @ 250mm/s + 적재·경화
       C10: { type: 'mount', label: '정밀 장착', product: 'door', use: '도어 전용 · 힌지·스트라이커 장착', x: 14, z: MID, rot: PI, side: -1, cycle: 30, T: [52, 30, 30], robot: ['articulated', 2] },
       C06: { type: 'vision', label: '치수·외관검사', product: 'shared', use: '갭·단차·외관 판정 (NG → C07)', x: 6.5, z: BOT, rot: PI, side: -1, cycle: 16, T: [52, 16, 16], robot: ['none', 0] },
-      C07: { type: 'rework', label: 'NG·재작업', product: 'ng', use: 'NG 재용접·재도포 보수 → 재검', x: -2, z: MID, rot: PI, side: -1, cycle: 40, T: [90, 40, 60], robot: ['articulated', 1, 'humanoid', 1] },
+      C07: { type: 'rework', label: 'NG 수리 부스', product: 'ng', use: '수작업 보수(휴대용 스폿·실러·그라인더) → 재검', x: -2, z: MID, rot: PI, side: -1, cycle: 75, T: [100, 75, 85], robot: ['none', 0, 'humanoid', 1], crew: 'repair' },   // 결함 자리가 매번 달라 고정 로봇 대신 수리 작업자 (AI 결함 위치 프로젝터) · 피지컬AI는 휴머노이드가 휴대용 공구로
     },
     routes: { hood: ['C01', 'C02', 'C03', 'C04', 'C05', 'C06'], door: ['C01', 'C02', 'C03', 'C04', 'C05', 'C10', 'C06'] },
     src: { x: -26.5, z: 0 }, sink: { x: 24.6, z: BOT, rot: PI },   // 구분 적재(포장)는 Zone 오른쪽 끝 — 투입(왼쪽) → 공정 → 적재(오른쪽)

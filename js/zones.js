@@ -8,7 +8,7 @@ import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { KIT } from './factory.js';
 import { blenderOn, cloneAsset, RENDER } from './blender.js';
 import { makeProductMachine } from './product-machines.js';
-import { attachSpotGun, attachSealGun, attachVacuumGripper, attachNutrunner, attachScanner, attachDeburrSpindle, attachCmmPrepTool, attachLibsProbe, holdPart, makeHose, processMarks } from './endeffectors.js';
+import { attachSpotGun, attachSealGun, attachVacuumGripper, attachRollerHead, attachNutrunner, attachScanner, attachDeburrSpindle, attachCmmPrepTool, attachLibsProbe, holdPart, makeHose, processMarks } from './endeffectors.js';
 import { pointAt, pathLength, ROBOT_KINDS, PARALLEL_GAIN } from './line.js';
 import { EXTRA_ZONES, ZONE_FAC, cellT, zoneRobotUid, zoneAmrUid, ZONE_FG_CAP, zonePack, zoneCtl, cellTendQ, TEND_END } from './zonedefs.js';
 import { BATTERY, moverRadius, moverWidth } from './sim.js';
@@ -18,7 +18,7 @@ import { matlPlan, matlPhase, MATL_PHASE_KO } from './matlcell.js';
 import { KIT_PARTS, KIT_T } from './kitcell.js';
 export { EXTRA_ZONES };
 
-const { std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, AMMR_LEAN, makeRobot, ammrContact, contactBox, surfaceY, supportBox, pointWork, alignTool, makeSparks, stepSparks, makeWorker, workerCycle, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK, makeArm, ARM_JOINTS, buildWeld, buildGate, buildVision } = KIT;
+const { std, emis, mesh, box, cyl, put, MAT, BELT_Y, AMMR, AMMR_LEAN, makeRobot, ammrContact, contactBox, surfaceY, supportBox, pointWork, alignTool, makeSparks, stepSparks, makeWorker, workerCycle, makeHumanoid, makeCarrierAMR, makeStackLight, cellBase, idPlate, armIK, makeArm, ARM_JOINTS, buildWeld, buildGate, buildVision, heavyRobot, dockStation } = KIT;
 const PI = Math.PI;
 const PC = { shared: 0x2bb3a6, hood: 0xf0a030, door: 0x9a6bff, hblock: 0xf0a030, rcover: 0x9a6bff, ng: 0xd23b3b };
 const USE_CLS = { hood: 'doortrim', hblock: 'doortrim', door: 'eaxle', rcover: 'eaxle' };   // 셀 라벨 색 (주황·보라)
@@ -163,7 +163,7 @@ function buildSpot(g) {
   if (rail) { rail.position.z = -2.25; for (const x of [-2, 2]) put(box(0.06, 1.4, 0.06, MAT.yellow), x, 0.7, -2.25, g); }
   put(box(0.45, 0.95, 0.4, MAT.dark), -1.55, 0.48, 1.95, g); put(box(0.28, 0.12, 0.28, MAT.orange), -1.55, 1.0, 1.95, g);
   put(box(0.5, 1.5, 0.4, std(0x4a5560)), 1.6, 0.75, -2.05, g); put(box(0.3, 0.2, 0.02, emis(0x3ddc84, 1)), 1.6, 1.25, -1.84, g);
-  return w;
+  return { ...w, dock: dockStation(g) };   // 스폿 가압력(약 3kN)을 AMR이 아니라 도킹 스테이션 바닥 블록이 받는다
 }
 // C04 실링: 실러 드럼·펌프 · 국소 배기 후드 · 도포 비드 입자
 function buildSeal(g) {
@@ -190,28 +190,64 @@ function buildMount(g) {
   }
   return { screen };
 }
-// C05 헤밍: 통로 건너편(+z)에 전용 헤밍 프레스 (베드·문형 기둥·크라운·램)
+// C05 롤러 헤밍 (혼류 소량 생산 방식): 통로 건너편(+z)에 반전 앤빌 테이블 — 가운데 판 위아래에 제품 전용 앤빌(후드 · 도어)을 달고, 제품이 바뀌면 x축으로 180° 뒤집어 그 제품 앤빌을 위로
+//  핸들링 6축(진공 그리퍼)이 인너를 아우터에 결합해 둔 패널을 앤빌에 올리면(진공 흡착 고정) → 롤러 헤밍 고가반 6축(앤빌 동쪽)이 플랜지를 3번 따라가며 접고(30° → 60° → 90°)
+//  → 앤빌에 묻힌 유도 코일이 헴 접착제를 가경화 → 핸들링 6축이 꺼내 AMR에 올린다
+//  반전축 높이 0.67m · 반전 반지름(도어 앤빌 반폭 0.61 · 두께) 0.65m — 바닥에 닿지 않고, 받침 기둥(x ±0.95)은 롤러 로봇 받침 밖
+export const HEM_ANVIL = { hood: { w: 1.72, d: 0.7 }, door: { w: 1.36, d: 1.2 }, axisY: 0.67, plate: { w: 1.76, d: 1.24 } };
 function buildHem(g) {
-  const pz = HEM.press.z, product = makeProductMachine('oden', g, [0, 0, pz]); if (product) return product;
-  put(box(1.9, 0.85, 0.9, MAT.dark), 0, 0.43, pz, g); put(box(1.75, 0.06, 0.8, MAT.steel), 0, 0.88, pz, g);
-  for (const x of [-1.05, 1.05]) put(box(0.22, 2.7, 0.5, MAT.accent), x, 1.35, pz, g);
-  put(box(2.35, 0.4, 0.6, MAT.accent), 0, 2.85, pz, g);
-  const ram = put(new THREE.Group(), 0, 2.2, pz, g);
-  put(box(1.55, 0.35, 0.8, MAT.steel), 0, 0, 0, ram); put(box(1.45, 0.06, 0.74, MAT.dark), 0, -0.2, 0, ram);
-  for (const x of [-1.3, 1.3]) put(box(0.06, 1.4, 0.45, MAT.yellow), x, 0.95, pz + 0.15, g);
-  return { ram };
+  const pz = HEM.press.z, H = HEM_ANVIL, top = HEM.bedY, t = (top - H.axisY - 0.12) * 2;   // 가운데 판 두께 (앤빌 0.12m 위 = 베드 높이)
+  for (const sx of [-1, 1]) { put(box(0.1, H.axisY + 0.1, 0.36, MAT.dark), sx * 0.95, (H.axisY + 0.1) / 2, pz, g); put(cyl(0.09, 0.09, 0.12, MAT.steel, 16), sx * 0.95, H.axisY, pz, g).rotation.z = PI / 2; }   // 반전축 받침 · 베어링
+  put(box(0.3, 0.45, 0.3, MAT.dark), -1.15, 0.22, pz, g); put(cyl(0.1, 0.1, 0.2, MAT.accent, 14), -1.15, H.axisY, pz, g).rotation.z = PI / 2;   // 반전 구동 모터
+  const flip = put(new THREE.Group(), 0, H.axisY, pz, g); flip.name = 'AnvilFlipTable';
+  put(box(H.plate.w, t, H.plate.d, MAT.steel), 0, 0, 0, flip);
+  const coilMat = emis(0xff7a2a, 0.05), anvils = {};
+  Object.entries({ hood: 1, door: -1 }).forEach(([k, up]) => {
+    const A = H[k], a = put(new THREE.Group(), 0, 0, 0, flip); a.name = `Anvil_${k}`; a.rotation.x = up > 0 ? 0 : PI;   // 위 면 = 후드 · 아래 면 = 도어
+    put(box(A.w, 0.12, A.d, std(0x7d8994, { metalness: 0.75, roughness: 0.3 })), 0, t / 2 + 0.06, 0, a);   // 앤빌 (패널 모양 금형 · 윗면 = 베드 높이)
+    for (const sz of [-1, 1]) put(box(A.w - 0.06, 0.012, 0.03, coilMat, false), 0, t / 2 + 0.121, sz * (A.d / 2 - 0.05), a);   // 유도 경화 코일 (플랜지 밑)
+    for (const sx of [-1, 1]) put(box(0.03, 0.012, A.d - 0.1, coilMat, false), sx * (A.w / 2 - 0.05), t / 2 + 0.121, 0, a);
+    for (const x of [-0.3, 0.3]) put(cyl(0.04, 0.04, 0.01, MAT.dark, 12), x, t / 2 + 0.125, 0, a);   // 진공 흡착 패드
+    put(box(H.plate.w, 0.05, 0.012, std(PC[k], { emissive: PC[k], emissiveIntensity: 0.4 }), false), 0, up * 0.0 + t / 2 - 0.03, -H.plate.d / 2 - 0.007, a);   // 제품 색 띠 (후드 주황 · 도어 보라)
+    anvils[k] = a;
+  });
+  // 헤밍 제어반 · 유도 경화 전원 (셀 뒤 끝 — 동쪽은 정비 자리 · 순찰 길)
+  const panel = put(box(0.6, 1.5, 0.4, std(0x4a5560)), -1.9, 0.75, 3.05, g), screen = emis(0x2c7f9e, 1.2); put(box(0.4, 0.25, 0.02, screen, false), 0, 0.35, -0.21, panel);
+  put(box(0.5, 1.0, 0.4, MAT.dark), -1.2, 0.5, 3.05, g); put(box(0.3, 0.12, 0.02, emis(0xff7a2a, 0.8), false), -1.2, 0.8, 2.84, g);
+  return { anvil: { flip, coilMat, up: 'hood', ang: 0 }, screen };
 }
-// C07 NG·재작업: 재작업 작업대 · 격리 랙(빨강) · 재검 게이지
+// C07 NG 수리 부스 (실제 차체 수리처럼 사람 손 — 결함 자리가 매번 달라 고정 로봇으로 하지 않는다): AMR이 부스 가운데 서면 작업자(피지컬AI: 휴머노이드)가 통로 북쪽(−z)에 서서
+//  천장 지브 크레인 밸런서에 매단 휴대용 스폿건 · 실러건 · 그라인더로 결함 자리를 보수 — AI 결함 위치 프로젝터가 패널 위 결함 자리를 빨갛게 비춘다
+//  부스: 뒤(−z) 용접 커튼 · 국소 배기 후드(캔틸레버 2.7m) · 공구판 · 남쪽(+z) 재검 작업대(휴대용 3D 스캐너) · 격리 랙(빨강) · 출구 쪽 라벨기는 남쪽 기둥 캔틸레버 (문형 없음)
 function buildRework(g) {
   put(box(1.4, 0.85, 0.7, MAT.dark), 0.2, 0.43, 2.0, g); put(box(1.3, 0.04, 0.6, MAT.steel), 0.2, 0.87, 2.0, g);
+  const gauge = put(new THREE.Group(), 0.45, 0.89, 2.0, g); gauge.name = 'HandScanner'; put(box(0.12, 0.06, 0.22, MAT.white), 0, 0.03, 0, gauge); put(box(0.08, 0.04, 0.03, emis(0x37e8ff, 1.2), false), 0, 0.04, -0.12, gauge);   // 재검 휴대용 3D 스캐너
   const iso = put(new THREE.Group(), -1.6, 0, 2.0, g);
   for (const [x, z] of [[-0.55, -0.35], [0.55, -0.35], [-0.55, 0.35], [0.55, 0.35]]) put(box(0.05, 1.5, 0.05, MAT.defect), x, 0.75, z, iso);
   put(box(1.15, 0.04, 0.75, MAT.defect), 0, 0.6, 0, iso); put(box(1.15, 0.04, 0.75, MAT.defect), 0, 1.2, 0, iso);
-  for (const z of [-1.5, 1.5]) put(box(0.12, 2.0, 0.12, MAT.dark), 1.25, 1.0, z, g);   // 출구 문형 프레임 — 입구 게이트와 같은 폭(2.86m)
-  put(box(0.18, 0.16, 3.1, MAT.dark), 1.25, 2.0, 0, g);
-  put(box(0.3, 0.14, 0.3, MAT.white), 1.25, 1.85, 0, g);
-  return { sparks: put(makeSparks(0xffc060, 24, 0.05), 0, 0, 0, g) };
+  // 뒤(−z) 용접 커튼 (반투명 주황) · 공구판 (그라인더 · 실러건 · 예비 팁)
+  const curtain = new THREE.MeshStandardMaterial({ color: 0xff8a2a, transparent: true, opacity: 0.35, roughness: 0.6, side: THREE.DoubleSide, depthWrite: false });
+  for (const x of [-2.1, 2.1]) put(box(0.05, 2.0, 0.05, MAT.dark), x, 1.0, -2.2, g);
+  put(box(4.2, 0.05, 0.05, MAT.dark), 0, 2.0, -2.2, g); put(new THREE.Mesh(new THREE.PlaneGeometry(4.1, 1.8), curtain), 0, 1.05, -2.2, g);
+  const tb = put(new THREE.Group(), 1.3, 0, -2.12, g); tb.name = 'ToolBoard';
+  put(box(0.9, 0.7, 0.03, std(0x4a5560)), 0, 1.25, 0, tb); put(box(0.3, 0.08, 0.08, MAT.orange), -0.2, 1.35, 0.06, tb); put(box(0.08, 0.2, 0.06, MAT.dark), 0.15, 1.3, 0.06, tb); put(box(0.06, 0.18, 0.06, MAT.yellow), 0.32, 1.2, 0.06, tb);
+  // 국소 배기 후드: 뒤쪽 기둥 2개에서 통로 위로 내민 캔틸레버 (아랫면 2.65m — 작업자 머리 · AMR 위 패널 위)
+  for (const x of [-1.2, 1.2]) put(box(0.1, 2.9, 0.1, MAT.steel), x, 1.45, -1.95, g);
+  put(box(2.6, 0.25, 1.5, std(0x8a949e, { metalness: 0.5 })), 0, 2.78, -1.3, g); put(box(0.35, 0.6, 0.35, std(0x8a949e, { metalness: 0.5 })), 0, 3.2, -1.7, g);
+  // 지브 크레인 · 밸런서 · 휴대용 스폿건 (작업자 오른쪽 위)
+  put(box(0.12, 2.6, 0.12, MAT.yellow), -1.9, 1.3, -1.6, g); const boom = put(box(1.6, 0.1, 0.1, MAT.yellow), -1.15, 2.55, -1.6, g); boom.name = 'JibBoom';
+  put(cyl(0.006, 0.006, 0.9, MAT.dark, 6), -0.6, 2.05, -1.6, g); put(box(0.12, 0.12, 0.12, MAT.dark), -0.6, 1.58, -1.6, g);   // 밸런서 와이어 · 본체
+  const gun = put(new THREE.Group(), -0.6, 1.35, -1.6, g); gun.name = 'HandSpotGun'; put(box(0.1, 0.22, 0.1, MAT.body ?? MAT.dark), 0, 0, 0, gun); put(box(0.05, 0.05, 0.22, MAT.steel), 0, -0.1, 0.12, gun);
+  // AI 결함 위치 프로젝터 (배기 후드 아래 · 결함 자리를 비춘다)
+  const projMat = new THREE.MeshBasicMaterial({ color: 0xff3030, transparent: true, opacity: 0.0, blending: THREE.AdditiveBlending, depthWrite: false });
+  put(box(0.18, 0.12, 0.18, MAT.dark), 0, 2.6, -0.9, g); const beam = put(new THREE.Mesh(new THREE.ConeGeometry(0.1, 1.66, 16, 1, true), projMat), 0, 1.9, -0.45, g); beam.rotation.x = -0.573; beam.name = 'DefectProjector';   // 빛줄기: 프로젝터(z −0.9 · 2.6m) → 패널 윗면 가운데 줄(z 0 · 1.2m)
+  // 출구 라벨기 캔틸레버 (남쪽 기둥 · 문형 없음) — 라벨기·판독기는 팔 아래 (재검 합격 시 QR 라벨)
+  put(box(0.12, 2.0, 0.12, MAT.dark), 1.25, 1.0, 1.55, g); put(box(0.12, 0.12, 2.4, MAT.dark), 1.25, 2.0, 0.4, g);
+  return { sparks: put(makeSparks(0xffc060, 24, 0.05), 0, 0, 0, g), proj: { beam, mat: projMat } };
 }
+// 헤밍 셀 진행률 → 핸들링 6축 동작 진행률: 사이클 앞 HEM.win[0]에 패널을 앤빌로(동작 0 ~ 0.49), 롤러 헤밍 동안 대기(0.545), 뒤 1 − HEM.win[1]에 꺼내 AMR로(0.6 ~ 1)
+const hemHandQ = (p) => { const [a, b] = HEM.win; return p < a ? (p / a) * 0.49 : p > b ? 0.6 + ((p - b) / (1 - b)) * 0.4 : 0.545; };
+const sm01 = (x) => { const k = Math.min(1, Math.max(0, x)); return k * k * (3 - 2 * k); };
 // 휴머노이드는 셀 바닥(0.06m)에 서서 AMR 통로 경계선(±0.78m) 바로 바깥 — 두 손이 AMR 위 대상물(폭 ±0.29m · 윗면 1.11m) 가장자리와 윗면에 닿는 거리
 const HUM_SLOT_Z = 0.88;
 // 확장 Zone 6축·협동로봇 접촉 작업 구간(셀 진행률)과 방식 — 헤밍 램(0.45~0.85) · CMM 탐침(0.3~0.6) · 과 겹치지 않게
@@ -230,7 +266,7 @@ const PICK_AT = { kit: (r) => ({ x: r.slot.x, y: KITC.conv.y + 0.08, z: KITC.sz 
 // 받침대가 없으면 J1 하우징이 프레스 베이스(높이 0.65m · 앞면 z 1.1) 위를 돌며 부딪히고, 더 앞(z > 0.82)이면 받침대·J1 하우징이 베이스·기둥에 닿는다
 // x는 패널 끝(±0.8m) 바깥 — 패널 길이 안쪽에 서면 프레스에 넣을 때 패널 안쪽 가장자리가 로봇 어깨·위팔 위에 걸린다
 // 프레스 램은 넣고 뺄 때 0.5m 더 열리고(손목·아래팔이 다이 밑으로 들어감), 헤밍 때 다이 아래면이 패널 윗면까지 내려온다
-export const HEM = { robot: { x: -1.25, z: 0.9, y: 0.5 }, press: { x: 0, z: 2.3 }, bedY: 0.77, open: 0.7, dieY: 1.1, edge: 0.15, gx: 0.2, lift: 0.1, mouth: 0.75, rest: { dx: 0.4, y: 1.55, dz: 0.07 } };   // mouth: 프레스 중심 → 기둥 앞면 (ODEN 기둥 깊이 1.5m의 절반)
+export const HEM = { robot: { x: -1.25, z: 0.9, y: 0.5 }, press: { x: 0, z: 2.3 }, roller: { x: 1.65, z: 2.15, y: 0.5 }, win: [0.22, 0.8], bedY: 0.85, open: 0.7, dieY: 1.1, edge: 0.15, gx: 0.2, lift: 0.1, mouth: 0.75, rest: { dx: 0.05, y: 1.75, dz: -0.2 } };   // mouth: 프레스 중심 → 기둥 앞면 (ODEN 기둥 깊이 1.5m의 절반)
 // 머신텐딩 동작 경유점 (로봇 루트 로컬: +z = 기계 쪽, 높이는 루트 기준) — 문 밖 대기 · 문 앞 · 테이블/척 · AMR 위 · AMR 지그
 // 대기(home)는 팔을 접어 TCP를 몸 앞 0.15m에 둔다 — 머시닝센터 문이 로봇 중심에서 0.53m 앞이라, 0.45m 앞에 두면 닫힌 문(가공 중)에 팔·그리퍼가 들어간다
 const TEND_PTS = (() => {
@@ -677,7 +713,7 @@ const BUILD = { kit: buildKit, locate: buildLocate, spot: buildSpot, seal: build
   mill5: buildMill5, turn: buildTurn, deburr: buildDeburr, matid: buildMatId,
   cmm: (g) => { const P = buildCMM(g); return { ...P, markMat: addLaser(P.car) }; } };   // CMM 합격 즉시 DataMatrix 레이저 각인
 
-// 투입 스테이션(AS/RS 출고 포트) · 구분 적재장 — 두 Zone 공통 간이 형상
+// 투입 스테이션(갠트리 로더) · 구분 적재장 — 두 Zone 공통 간이 형상
 // 자재 투입존 (정밀조립Zone 투입 스테이션과 같은 구성): 혼류 제품별로 양쪽에 따로 보관 (첫 제품 +z · 둘째 제품 −z) — 판넬(후드·도어)은 빗살 거치대에 세워 2열 × 10장,
 // 주조·단조 소재(유압블록·리어커버)는 팔레트에 4 × 3 × 2단 · 가운데는 AMR 지그 투입 위치 · 직교 3축 갠트리가 다음 투입 제품 쪽에서 집어 지그에 내려놓는다
 const SRC_SIDE = 20;   // 제품별 보관 칸 (sim.js ZONE_SRC.cap = 양쪽 합)
@@ -695,6 +731,7 @@ function buildPort(g, Z, kind) {
     put(box(0.4, 0.3, 0.4, MAT.orange), 0, -0.05, 0, car); put(box(0.18, 0.7, 0.18, MAT.dark), 0, 0.3, 0, car);
     const lift = put(new THREE.Group(), 0, 0, 0, car);
     put(box(0.08, 2.7, 0.08, MAT.steel), 0, -0.25, 0, lift); put(box(0.5, 0.08, 0.4, MAT.dark), 0, -1.6, 0, lift);
+    if (Z.products.hood || Z.products.door) for (const z of [-0.06, 0.06]) { put(box(0.42, 0.16, 0.025, MAT.steel), 0, -1.72, z, lift); for (const x of [-0.15, 0.15]) put(cyl(0.03, 0.03, 0.012, MAT.dark, 10), x, -1.74, z * 0.7, lift).rotation.x = PI / 2; }   // 패널 에지 클램프 그리퍼 (진공 패드 내장 — 빗살 거치대에 세운 패널 윗변을 양쪽에서 문다)
     // 제품별 보관 구역 바닥색 · 거치대 · 바닥 이름 (혼류 구분)
     Object.keys(Z.products).forEach((k, i) => {
       const z = i ? -2.15 : 2.15, panel = k === 'hood' || k === 'door';
@@ -827,7 +864,7 @@ class ExtraZone {
       const g = put(new THREE.Group(), n.def.x, 0, n.def.z, this.G); g.rotation.y = n.def.rot ?? 0; n.port = buildPort(g, Z, kind);
       if (kind === 'src') { n.stockG = put(new THREE.Group(), 0, 0, 0, g); n.heldG = put(new THREE.Group(), 0, 0, 0, n.port.lift); }
       const el = document.createElement('div'); el.className = 'st-label xz';
-      el.innerHTML = `<div class="nm"><span>${kind === 'src' ? '자재 투입 (AS/RS)' : Z.pack ? '포장·구분 적재 (제품별)' : '양품 구분 적재'}</span><i class="uid">${Z.uidp}-${kind === 'src' ? 'AS' : 'PL'}-01</i></div><div class="row"><span class="chip s-IDLE"></span></div>`;
+      el.innerHTML = `<div class="nm"><span>${kind === 'src' ? '자재 투입 (갠트리 로더)' : Z.pack ? '포장·구분 적재 (제품별)' : '양품 구분 적재'}</span><i class="uid">${Z.uidp}-${kind === 'src' ? 'AS' : 'PL'}-01</i></div><div class="row"><span class="chip s-IDLE"></span></div>`;
       const label = new CSS2DObject(el); label.position.set(0, 4.0, 0); g.add(label);
       Object.assign(n, { g, el, label, chip: el.querySelector('.chip') });
     }
@@ -864,12 +901,25 @@ class ExtraZone {
       const pad = put(new THREE.Mesh(new THREE.PlaneGeometry(2.9, 1.7), new THREE.MeshStandardMaterial({ color: col, transparent: true, opacity: 0.35, depthWrite: false })), x, 0.02, z, g); pad.rotation.x = -PI / 2;
       put(box(2.6, 0.12, 1.4, MAT.pallet), x, 0.12, z, g);
       const mat = std(q.product === 'hood' || q.product === 'hblock' ? 0xc9a36a : 0xb59adf, { roughness: 0.8 });
-      const stack = [];
-      for (let i = 0; i < ZONE_FG_CAP; i++) { const lx = i % 4, lz = Math.floor(i / 4) % 2, ly = Math.floor(i / 8); const b = put(box(0.6, 0.45, 0.6, mat), x - 0.96 + lx * 0.64, 0.41 + ly * 0.47, z - 0.32 + lz * 0.64, g); b.visible = false; stack.push(b); }
-      const lab = put(textPlane([`${Z.products[q.product].label} 팔레트`], 2.4, 0.4, 'rgba(255,255,255,0.9)'), x, 0.03, z + q.sd * 1.05, g);
+      const stack = [], panel = q.product === 'hood' || q.product === 'door';
+      let rack = null;
+      if (panel) {
+        // 외판(후드·도어)은 긁히지 않게 세워서 수직 슬롯 랙에 — 팔레트 위 랙(슬롯 24칸 · 간격 5cm · 패널 긴 쪽 = x) · 먼 쪽(북)부터 로봇 쪽으로 채운다 · 지게차가 랙째 출하
+        const [L, H] = PRODUCT_DIM[q.product], pmat = std(PC[q.product], { metalness: 0.45, roughness: 0.4 }), z0 = z + q.sd * 0.6, dz = -q.sd * 0.05, RH = H + 0.25;
+        // 랙 기둥: 먼 쪽(북) 두 개는 패널 높이까지 + 위 가로대 · 로봇 쪽은 낮게(0.45m — 팔레타이징 로봇 팔꿈치가 위로 지나간다, 로봇 쪽은 넣고 빼는 열린 면)
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) { const far = sz === q.sd, h = far ? RH : 0.45; put(box(0.06, h, 0.06, MAT.yellow ?? MAT.accent), x + sx * (L / 2 + 0.14), 0.18 + h / 2, z + sz * 0.66, g); }
+        put(box(L + 0.34, 0.06, 0.06, MAT.yellow ?? MAT.accent), x, 0.18 + RH, z + q.sd * 0.66, g);
+        for (const sx of [-1, 1]) put(box(0.08, 0.04, 1.3, MAT.dark), x + sx * (L / 2 + 0.04), 0.2, z, g);   // 바닥 슬롯 레일
+        const tine = new THREE.InstancedMesh(new THREE.BoxGeometry(0.03, 0.22, 0.008), MAT.dark, 50); let n = 0;
+        for (let i = 0; i <= ZONE_FG_CAP; i++) for (const sx of [-1, 1]) tine.setMatrixAt(n++, new THREE.Matrix4().makeTranslation(x + sx * (L / 2 + 0.04), 0.33, z0 + (i - 0.5) * dz));   // 슬롯 빗살 (패널 양 끝)
+        tine.count = n; g.add(tine);
+        for (let i = 0; i < ZONE_FG_CAP; i++) { const b = put(box(L, H, 0.012, pmat), x, 0.22 + H / 2, z0 + i * dz, g); b.visible = false; stack.push(b); }
+        rack = { L, H, mat: pmat };
+      } else for (let i = 0; i < ZONE_FG_CAP; i++) { const lx = i % 4, lz = Math.floor(i / 4) % 2, ly = Math.floor(i / 8); const b = put(box(0.6, 0.45, 0.6, mat), x - 0.96 + lx * 0.64, 0.41 + ly * 0.47, z - 0.32 + lz * 0.64, g); b.visible = false; stack.push(b); }
+      const lab = put(textPlane([`${Z.products[q.product].label} ${panel ? '슬롯 랙' : '팔레트'}`], 2.4, 0.4, 'rgba(255,255,255,0.9)'), x, 0.03, z + q.sd * 1.05, g);
       put(cyl(0.55, 0.6, 0.06, std(col, { roughness: 0.5 })), q.arm.x, 0.03, q.arm.z, g);   // 로봇 받침 (제품 색)
       const idx = Object.keys(this.pack).length;
-      this.pack[q.product] = { ...q, armPos: q.arm, arm: null, stack, mat, col, uid: `${Z.uidp}-RB-PL-${idx + 1}`, idx, lab };
+      this.pack[q.product] = { ...q, armPos: q.arm, arm: null, stack, mat, col, rack, uid: `${Z.uidp}-RB-PL-${idx + 1}`, idx, lab };
     }
     this.packArmsG = put(new THREE.Group(), 0, 0, 0, g);
   }
@@ -880,9 +930,10 @@ class ExtraZone {
     for (const P of Object.values(this.pack)) {
       const arm = makeArm(std(P.col, { roughness: 0.45, metalness: 0.3 }), 1.2, 'articulated'); put(arm.root, P.armPos.x, 0.06, P.armPos.z, this.packArmsG);
       arm.root.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-      const held = put(box(0.6, 0.45, 0.6, P.mat), 0, (arm.native ? 1 : -1) * 0.25, 0, arm.tip); held.visible = false;
+      const held = P.rack ? put(box(P.rack.L, 0.012, P.rack.H, P.rack.mat), 0, 0, 0, this.packG) : put(box(0.6, 0.45, 0.6, P.mat), 0, (arm.native ? 1 : -1) * 0.25, 0, arm.tip); held.visible = false;   // 패널: 손끝 아래 (animPack이 눕힘 → 세움)
       arm.root.traverse((o) => { o.userData.stationId = `${this.Z.uidp}_PACK`; o.userData.robotIdx = P.idx; });
       const sp = idPlate(P.uid); sp.position.set(0, 3.0, 0); arm.root.add(sp);
+      if (P.held && P.held !== held) P.held.removeFromParent();
       Object.assign(P, { arm, held, sp, robot: null });
     }
   }
@@ -898,11 +949,15 @@ class ExtraZone {
       const home = rel(A.x, 1.9, A.z - P.sd * 0.6);
       let q = home;
       if (job && job.product === p && !legacy) {
-        const u = Math.min(1, job.u), sk = this.Z.sink, idx = Math.min(ZONE_FG_CAP - 1, n), b = P.stack[idx].position, top = BELT_Y + 0.45;
-        const keys = [[0, home], [0.22, rel(sk.x, top + 0.6, sk.z)], [0.32, rel(sk.x, top, sk.z)], [0.42, rel(sk.x, top + 0.6, sk.z)], [0.7, rel(b.x, b.y + 0.95, b.z)], [0.8, rel(b.x, b.y + 0.25, b.z)], [0.9, rel(b.x, b.y + 0.95, b.z)], [1, home]];
+        const u = Math.min(1, job.u), sk = this.Z.sink, idx = Math.min(ZONE_FG_CAP - 1, n), b = P.stack[idx].position, R = P.rack, top = BELT_Y + 0.45, up = R ? R.H / 2 + 0.01 : 0.25, app = R ? R.H / 2 + 0.55 : 0.95;   // 패널: 슬롯 위에서 세운 채 내려 끼운다
+        const keys = [[0, home], [0.22, rel(sk.x, top + 0.6, sk.z)], [0.32, rel(sk.x, top, sk.z)], [0.42, rel(sk.x, top + 0.6, sk.z)], [0.7, rel(b.x, b.y + app, b.z)], [0.8, rel(b.x, b.y + up, b.z)], [0.9, rel(b.x, b.y + app, b.z)], [1, home]];
         const i = keys.findIndex((kf) => kf[0] >= u), [t0, p0] = keys[Math.max(0, i - 1)], [t1, p1] = keys[i];
         q = lerpA(p0, p1, ease(t1 > t0 ? (u - t0) / (t1 - t0) : 1));
         P.held.visible = u >= 0.32 && u < 0.8;
+        if (R && P.held.visible) {   // 진공 그리퍼로 눕혀 집은 패널을 옮기는 동안(0.42 ~ 0.66) 세운다 — 손끝 바로 아래 · 긴 쪽 = x
+          P.arm.pose(...q); const k = ease(Math.min(1, Math.max(0, (u - 0.42) / 0.24))), tp = this.packG.worldToLocal(P.arm.tip.getWorldPosition(new THREE.Vector3()));
+          P.held.position.set(tp.x, tp.y - 0.006 - k * (R.H / 2), tp.z); P.held.rotation.set(k * PI / 2, 0, 0);
+        }
         if (job.c.pm) job.c.pm.visible = u < 0.32;
       } else P.held.visible = false;
       P.arm.pose(...q);
@@ -1075,21 +1130,25 @@ class ExtraZone {
         c.rb.textContent = `👷 작업자×${n}`;
         continue;
       }
+      if ((!count || kind === 'none') && c.def.crew === 'repair') {   // C07 수리 부스: 통로 북쪽(−z)에 수리 작업자 1명 — AMR 위 패널 쪽을 보고 결함 자리로 옆걸음 (animCell)
+        const w = makeWorker(); put(w, 0, 0, -1.05, c.workersG); w.userData.repair = true; c.rb.textContent = '👷 수리 작업자 · AI 결함 위치'; continue;
+      }
       if (!count || kind === 'none') { c.rb.textContent = c.def.type === 'vision' ? '📷 비전·치수 게이지' : ''; continue; }
       const tend = c.def.type === 'mill5' || c.def.type === 'turn' || c.def.type === 'deburr';   // 머신텐딩 (디버링셀: 사선홀 머시닝센터)
       // CMM · 소재 식별셀: 남쪽 도킹 정면(x 0) 1대 — 북쪽은 이송 6축 · 측정실·리워크 머시닝센터 / 스캔 부스·격리 랙
       const slots = tend ? [[TEND.robot.x, TEND.robot.z, PI]] : c.def.type === 'cmm' || c.def.type === 'matid' ? [[0, 1.75, PI]] : c.def.type === 'kit' ? [[KITC.stops[0], KITC.sz * 1.75, 0], [KITC.stops[1], KITC.sz * 1.75, 0]] : [[-0.75, -1.75, 0], [-0.75, 1.75, PI], [0.95, -1.75, 0], [0.95, 1.75, PI]];
-      if (c.def.type === 'hem') slots[0] = [HEM.robot.x, HEM.robot.z, 0];
-      if (c.def.type === 'hem') put(box(0.45, HEM.robot.y - 0.06, 0.45, MAT.dark), HEM.robot.x, (HEM.robot.y + 0.06) / 2, HEM.robot.z, c.robotsG);   // 헤밍 로봇 받침대   // 헤밍: 프레스 앞(통로 쪽) 비스듬히 — AMR 위 패널과 프레스 베드 양쪽에 닿는 자리 (프레스 기둥 사이 앞쪽으로 팔이 들어간다)
+      if (c.def.type === 'hem') { slots[0] = [HEM.robot.x, HEM.robot.z, 0]; slots[1] = [HEM.roller.x, HEM.roller.z, PI]; }   // 둘째 대: 롤러 헤밍 고가반 6축 (앤빌 동쪽)
+      if (c.def.type === 'hem') { put(box(0.45, HEM.robot.y - 0.06, 0.45, MAT.dark), HEM.robot.x, (HEM.robot.y + 0.06) / 2, HEM.robot.z, c.robotsG); put(box(0.75, HEM.roller.y - 0.06, 0.75, MAT.dark), HEM.roller.x, (HEM.roller.y + 0.06) / 2, HEM.roller.z, c.robotsG); }   // 롤러 로봇 받침대 (0.5m — 위팔이 앤빌 위 패널 모서리 위로 지나가게)   // 헤밍 로봇 받침대   // 헤밍: 프레스 앞(통로 쪽) 비스듬히 — AMR 위 패널과 프레스 베드 양쪽에 닿는 자리 (프레스 기둥 사이 앞쪽으로 팔이 들어간다)
       for (let i = 0; i < count; i++) {
-        const r = makeRobot(kind, MAT.orange);
+        const roller = c.def.type === 'hem' && i === 1, r = roller ? heavyRobot(MAT.orange) : makeRobot(kind, MAT.orange);   // 롤러 헤밍 하중(약 1kN)·도달 거리 — 고가반 6축
         const [x, z, yaw] = slots[i];
         // 접촉 작업 셀의 협동로봇(UR20 도달 1.75m)은 셀 중심에서 1.25m — 툴을 세워 대상물 윗면에 손끝이 닿도록
-        put(r.root, x, c.def.type === 'hem' ? HEM.robot.y : kind === 'ammr' || kind === 'humanoid' ? 0.06 : kind === 'cobot' ? .5 : 0.15, kind === 'ammr' ? Math.sign(z) * AMMR.slotZ : kind === 'humanoid' ? Math.sign(z) * HUM_SLOT_Z : kind === 'cobot' && CELL_WORK[c.def.type] ? Math.sign(z) * 1.25 : z, c.robotsG); r.root.rotation.y = yaw;
+        put(r.root, x, roller ? HEM.roller.y : c.def.type === 'hem' ? HEM.robot.y : kind === 'ammr' || kind === 'humanoid' ? 0.06 : kind === 'cobot' ? .5 : 0.15, kind === 'ammr' ? Math.sign(z) * AMMR.slotZ : kind === 'humanoid' ? Math.sign(z) * HUM_SLOT_Z : kind === 'cobot' && CELL_WORK[c.def.type] ? Math.sign(z) * 1.25 : z, c.robotsG); r.root.rotation.y = yaw;
         if (kind === 'ammr') r.slot = { x, z: Math.sign(z) * AMMR.slotZ };   // 접촉 작업 기본 자리 (ammrContact)
         if (r.arm?.native && !legacy) {   // 유연생산 공정 툴: 스폿용접 C건 · 실러 디스펜싱 건(+디스펜서까지 호스) · 패널 진공 그리퍼
           if (c.def.type === 'spot') { r.tool = attachSpotGun(r.arm); r.pwHomeAt = { x: x + 0.35, y: 1.35, z: Math.sign(z) * 0.85 }; }   // 대기: 자기 쪽 통로 경계 위 — 마주 보는 로봇과 용접 건이 셀 가운데 위에서 만나지 않고, 더 뒤로 접으면 위팔이 뒤쪽 펜스 난간(1.4m)에 닿는다
           else if (c.def.type === 'seal') { const s = attachSealGun(r.arm); if (s) { r.tool = s.tool; r.hoseFit = s.fitting; r.hose = makeHose(r.root); } }   // 호스는 로봇에 딸린 것 (로봇 로컬로 그린다)
+          else if (roller) { r.tool = attachRollerHead(r.arm); r.roller = true; }
           else if (c.def.type === 'hem') r.tool = attachVacuumGripper(r.arm);
           else if (c.def.type === 'rework') { const s2 = attachSealGun(r.arm); if (s2) { r.tool = s2.tool; r.hoseFit = s2.fitting; r.hose = makeHose(r.root); } }   // NG 보수: 보수 토치·실러 노즐 (결함 자리에 대고 재용접 · 재도포 · 재헤밍)
           else if (c.def.type === 'kit') { r.held = holdPart(r.tip, 'bracket'); r.tool = r.held; }   // 키팅: 기본 그리퍼로 브래킷을 하나씩
@@ -1544,7 +1603,7 @@ class ExtraZone {
     if (c.halt || c.fault || this.halted) return;   // 정지·고장: 팔·패널 모두 그 자리
     const A = r.arm, P = r.root.parent, V = (x, y, z) => new THREE.Vector3(x, y, z), pm = car?.pm;
     const ik = (v) => { const l = r.root.worldToLocal(P.localToWorld(v.clone())); return A.ik(l.x, l.y, l.z, true); };
-    // 대기: 로봇 앞 프레스 쪽(+x)으로 팔을 세워 접는다 — 로봇 바로 뒤(+z)가 왼쪽 프레스 기둥이라, 뒤(−x)로 접으면 오갈 때마다 팔이 그 기둥을 쓸고 지나간다 · AMR 통로(z < 0.78) 밖
+    // 대기: 받침 위로 팔을 세워 접는다 (통로 쪽으로 조금 — AMR·패널 위 1.75m) · 롤러 헤밍 동안 앤빌 위 패널에서 떨어져 있다
     r.hemRest ??= ik(V(HEM.robot.x + HEM.rest.dx, HEM.rest.y, HEM.robot.z + HEM.rest.dz));
     const restore = () => { const h = r.hemPm; if (h?.userData.home) { h.position.copy(h.userData.home.p); h.quaternion.copy(h.userData.home.q); } r.hemPm = null; };
     if (!pm || c.state !== 'BUSY' || !c.item) { restore(); r.hemKey = null; r.hemCur = r.hemCur ? r.hemCur.map((v, k) => v + (r.hemRest[k] - v) * 0.15) : r.hemRest.slice(); A.pose(...r.hemCur); return; }
@@ -1864,26 +1923,48 @@ class ExtraZone {
     A.pose(...q); r.rwCur = q.slice();
     r.reworkOn = on; r.reworkSpark = on && d.kind === 'spot';
   }
-  // 헤밍 프레스: 넣고 뺄 때 램을 0.5m 더 열고, 패널이 베드에 있을 때(0.48 ~ 0.62) 다이 아래면이 패널 윗면까지 내려와 누른 뒤 올라간다
-  hemPress(c, busy, p, dts) {
-    const M = c.parts.machine, ram = M.nodes.Ram; if (!ram) return;
-    M.update({ busy: false, progress: p, rdt: dts, dts, open: true });
-    const sm = (a, b, x) => { const k = Math.min(1, Math.max(0, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
-    const open = busy ? sm(0.17, 0.24, p) * (1 - sm(0.44, 0.48, p)) + sm(0.62, 0.66, p) * (1 - sm(0.82, 0.88, p)) : 0;
-    const press = busy ? Math.min(1, Math.max(0, Math.sin(((p - 0.48) / 0.14) * PI) * 1.4)) * (p > 0.48 && p < 0.62 ? 1 : 0) : 0;
-    const depth = Math.max(0, HEM.dieY - (c.hemTopY ?? HEM.bedY + 0.16) - 0.003);
-    ram.position.y = M.rest.Ram.y + HEM.open * open - depth * press;
-    // 램을 쉬는 자리보다 더 올려 열 때(모델은 아래로만 움직이게 되어 있다): 피스톤 로드는 슬라이드와 같이 움직이고, 실린더 몸통은 슬라이드 윗면에 닿는 만큼만 크라운 안으로 올린다
-    // — 그대로 두면 열린 슬라이드가 실린더 몸통을 뚫고 로드가 슬라이드 밑으로 빠져나와 프레스 안에 매달린다
-    if (!M.hemDrive) {
-      const bb = (o) => { o.geometry.computeBoundingBox(); return o.geometry.boundingBox; }, slide = ram.getObjectByName('Slide');
-      const parts = ['RamRod', 'RamRod_old', 'HydraulicCylinder', 'HydraulicCylinder_old'].map((n) => M.root.getObjectByName(n)).filter((o) => o?.isMesh);
-      const top = slide ? M.rest.Ram.y + slide.position.y + bb(slide).max.y : M.rest.Ram.y;
-      M.hemDrive = parts.map((o) => ({ o, y: o.position.y, gap: /Cylinder/.test(o.name) ? o.position.y + bb(o).min.y - top : null }));
+  // 롤러 헤밍 로봇 (고가반 6축 · 롤러 헤드): 핸들링 6축이 패널을 앤빌에 내려놓고 물러난 동안(HEM.win) — 패널 둘레 플랜지(가장자리 2.5cm 안)를 3번 돌며 접는다
+  //  1패스 프리헤밍 30° (플랜지 윗면 1.4cm 위) → 2패스 60° (0.7cm) → 3패스 최종 90° (판 윗면) · 패스 사이에 시작점 위로 들었다 다시 내려간다 · 끝나면 위로 빠져 대기 자세
+  rollerWork(c, r, car, p) {
+    if (c.halt || c.fault || this.halted) return;
+    const A = r.arm, P = r.root.parent, V = (x, y, z) => new THREE.Vector3(x, y, z), pm = car?.pm, L = (a, b, k) => a.map((v, j) => v + (b[j] - v) * k), sm = (a, b, x) => { const k = Math.min(1, Math.max(0, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
+    const ik = (x, y, z) => { const l = r.root.worldToLocal(P.localToWorld(V(x, y, z))); return A.ik(l.x, l.y, l.z, true); };
+    r.rlHome ??= ik(HEM.roller.x - 0.2, 1.75, HEM.roller.z + 0.25);   // 대기: 받침 위로 팔을 세워 접는다 (앤빌·핸들링 로봇 쪽으로 뻗지 않게)
+    const [w0, w1] = HEM.win, u = (p - w0) / (w1 - w0), go = (q) => { r.rlCur = r.rlCur ? L(r.rlCur, q, 0.15) : q.slice(); A.pose(...r.rlCur); };
+    if (c.state !== 'BUSY' || !c.item || !pm || u <= 0 || u >= 1) { r.rollOn = false; r.rlPass = 0; go(r.rlHome); return; }
+    if (r.rlKey !== c.item.id) {
+      const b = contactBox(pm, P); if (!b) return;
+      const e = 0.025, [x0, , z0] = b.min, [x1, y1, z1] = b.max, ring = [], step = 0.08;
+      const corner = [[x0 + e, z0 + e], [x1 - e, z0 + e], [x1 - e, z1 - e], [x0 + e, z1 - e], [x0 + e, z0 + e]];   // 동쪽 아래(로봇 가까운 쪽)부터 한 바퀴
+      const start = corner.findIndex(([x, z]) => x > (x0 + x1) / 2 && z < (z0 + z1) / 2), C = [...corner.slice(start, 4), ...corner.slice(0, start), corner[start]];
+      for (let k = 1; k < C.length; k++) { const [ax, az] = C[k - 1], [bx, bz] = C[k], n = Math.max(1, Math.round(Math.hypot(bx - ax, bz - az) / step)); for (let j = 0; j < n; j++) ring.push([ax + ((bx - ax) * j) / n, az + ((bz - az) * j) / n]); }
+      ring.push(C[C.length - 1]);
+      const yAt = (x, z) => surfaceY(pm, P, null, x, z, y1);
+      r.rlPlan = { passes: [0.014, 0.007, 0].map((o) => ring.map(([x, z]) => ik(x, yAt(x, z) + o, z))), above: ik(ring[0][0], y1 + 0.25, ring[0][1]) };
+      r.rlKey = c.item.id;
     }
-    const dy = ram.position.y - M.rest.Ram.y;
-    for (const d of M.hemDrive) d.o.position.y = d.y + (d.gap == null ? dy : Math.max(0, dy - d.gap));
-    c.parts.screen?.emissive?.setHex(press > 0.05 ? 0xf5b82e : 0x2c7f9e);
+    const R = r.rlPlan, S = [0.06, 0.34, 0.62, 0.9];   // 패스마다 u 구간 (내려감 8% · 굴림 82% · 들어 올림 10%)
+    let q = R.above, on = false, pass = 0;
+    if (u < S[0]) q = L(r.rlHome, R.above, sm(0, S[0], u));
+    else if (u >= S[3]) q = L(R.above, r.rlHome, sm(S[3], 1, u));
+    else {
+      const k = S.findIndex((s0, i) => i < 3 && u >= s0 && u < S[i + 1]), v = (u - S[k]) / (S[k + 1] - S[k]), pts = R.passes[k];
+      if (v < 0.08) q = L(R.above, pts[0], sm(0, 0.08, v));
+      else if (v < 0.9) { const w = ((v - 0.08) / 0.82) * (pts.length - 1), j = Math.min(pts.length - 2, Math.floor(w)); q = L(pts[j], pts[j + 1], w - j); on = true; pass = k + 1; }
+      else q = L(pts[pts.length - 1], R.above, sm(0.9, 1, v));
+    }
+    A.pose(...q); r.rlCur = q.slice(); r.rollOn = on; r.rlPass = pass;
+  }
+  // 반전 앤빌 테이블: 다음 패널 제품의 앤빌이 위가 되도록 사이클 시작(패널을 앤빌로 옮기기 전 · 진행 0 ~ 0.08)에 180° 뒤집는다 · 헤밍이 끝나면 유도 코일이 경화(밝아짐)
+  anvilAnim(c, busy, p, rdt) {
+    const A = c.parts.anvil, want = c.item?.product === 'door' ? PI : 0;
+    if (busy && p < 0.09) A.ang += Math.sign(want - A.ang) * Math.min(Math.abs(want - A.ang), (PI / (0.08 * c.cur || 4)) * (rdt || 0));
+    else if (!busy && !c.item) { /* 대기: 그대로 */ }
+    else A.ang = want;
+    A.flip.rotation.x = A.ang;
+    const [w0, w1] = HEM.win, cure = busy ? sm01((p - (w0 + (w1 - w0) * 0.9)) / 0.04) * (1 - sm01((p - w1 - 0.02) / 0.02)) : 0, rl = c.robots.find((r) => r.roller);
+    A.coilMat.emissiveIntensity = 0.05 + cure * 3;
+    c.parts.screen?.emissive?.setHex(rl?.rollOn ? 0xf5b82e : cure > 0.1 ? 0xff7a2a : 0x2c7f9e);
   }
   animCell(c, t, rdt, dts) {
     const P = c.parts, busy = c.state === 'BUSY' && !c.halt && !c.fault, p = c.progress, st = c.halt ? 'ESTOP' : c.fault ?? c.state;
@@ -1901,7 +1982,8 @@ class ExtraZone {
       if (r.xfer) { r.anim(busy, t + r.phase, p); return; }
       if (r.scanBot) { this.scanBotPose(c, r, busy, p); return; }
       if (r.kitPicker) { this.kitPickerPose(c, r, busy, p, t); return; }
-      if (c.def.type === 'hem' && r.tool && P.machine) { this.hemWork(c, r, wcar, p); return; }   // 헤밍: AMR 위 패널을 프레스에 넣고 헤밍 뒤 빼서 AMR에 다시 올림
+      if (r.roller) { this.rollerWork(c, r, wcar, p); return; }   // 롤러 헤밍: 앤빌 위 패널 플랜지를 3번 따라가며 접는다
+      if (c.def.type === 'hem' && r.tool && P.anvil) { this.hemWork(c, r, wcar, hemHandQ(p)); return; }   // 헤밍: AMR 위 패널을 앤빌에 올리고 헤밍 뒤 꺼내 AMR에 다시 올림
       if (c.def.type === 'locate' && r.arm?.native && !r.body) { r.slot ??= { x: r.root.position.x, z: r.root.position.z }; this.locateWork(c, r, wcar, p); return; }   // 안착·보정: 비전 측정 → 패널을 잡아 살짝 들어 기준핀 자리로 옮겨 내려놓음
       if (c.def.type === 'rework' && r.arm?.native && !r.body && wcar && c.item?.ngDefect) { this.reworkWork(c, r, wcar, p, rdt); return; }   // C07: C06이 찾은 결함 자리를 보수
       if (W && r.arm?.native && !r.machineTargets && !r.body) {
@@ -1937,6 +2019,13 @@ class ExtraZone {
     });
     // 디버링셀 이송 6축: AMR 지그 → 그리퍼 → 부스 → 세척기 → AMR 지그 / 머신텐딩: AMR 지그 → 그리퍼 → 기계 → 그리퍼 → AMR 지그 (지그·클램프는 AMR에 남는다)
     c.workersG.children.forEach((w, i) => workerCycle(w, busy, p, 3, (w.userData.baseYaw ??= w.rotation.y), { binSide: i ? -1 : 1 }));   // 레거시 작업자: 부품함 ↔ 대상물 수작업 사이클
+    if (P.proj) {   // C07 수리 부스: AI 프로젝터가 결함 자리를 비추고, 수리 작업자는 그 앞으로 옆걸음해 보수 (스폿 결함은 휴대용 스폿건 불꽃)
+      const d = c.item?.ngDefect, rc = busy && d ? this.carriers.find((k) => k.at === c.id && k.state === 'work' && k.pm) : null, bx = rc ? contactBox(rc.pm, c.robotsG) : null;
+      const on = bx ? sm(0.05, 0.12, p) * (1 - sm(0.83, 0.9, p)) : 0, dx = bx ? bx.min[0] + (bx.max[0] - bx.min[0]) * d.u : 0;
+      for (const w of c.workersG.children) if (w.userData.repair) { w.userData.x0 ??= w.position.x; w.position.x = w.userData.x0 + (Math.max(-0.9, Math.min(0.9, dx)) - w.userData.x0) * on; }
+      P.proj.beam.position.x = dx; P.proj.mat.opacity = bx && !d.fixed ? 0.3 * on : 0;
+      P.repairAt = bx && on > 0.9 && d.kind === 'spot' && c.workersG.children.some((w) => w.userData.repair) && Math.sin(t * 5) > 0 ? { x: dx, y: bx.max[1] + 0.02, z: 0 } : null;
+    }
     const xr = P.washer || P.room || P.scanBooth ? c.robots.find((x) => x.xfer) : null, away = xr ? this.chainPart(c, P, xr) : false;
     if ((c.def.type === 'mill5' || c.def.type === 'turn' || c.def.type === 'deburr') && P.machine) this.tendPart(c, P, { hide: away });
     else if (xr) this.tendPart(c, P, { r: null, hide: away });   // CMM · 소재 식별셀: 소재가 측정실·머시닝센터 / 스캔 부스·교체 작업대·그리퍼에 있는 동안 AMR에는 지그만
@@ -1951,7 +2040,7 @@ class ExtraZone {
       drawGate(P.gateSign, P.gateTitle, text, it ? hex(it.rework && ty === 'cmm' ? 0xf5b82e : PC[it.product]) : '#e6edf3');
     }
     if (P.markMat) P.markMat.emissiveIntensity = c.markT != null && this.time - c.markT < 1.2 ? 6 : 0.35;   // 시리얼 마킹·판독 순간
-    if (ty === 'hem' && P.machine && c.robots.some((r) => r.tool)) { if (!c.halt && !this.halted) this.hemPress(c, busy && !c.fault, p, dts); return; }
+    if (ty === 'hem' && P.anvil) { if (!c.halt && !this.halted) this.anvilAnim(c, busy && !c.fault, p, dts); return; }
     // 디버링셀은 앞부분(TEND_END)만 머시닝센터 가공 — 진행률을 나눠 주고, 틸팅 크래들은 가공 중에만 기울인다 · 그 뒤 부스·세척기 (animXfer)
     const tq = cellTendQ(ty, p), tb = busy && (ty !== 'deburr' || p < TEND_END);
     if (P.machine) {
@@ -1963,12 +2052,12 @@ class ExtraZone {
     switch (ty) {
       case 'kit': if (P.kit) this.kitAnim(c, P.kit, busy, p, t); break;
       case 'locate': P.scan.visible = busy && p > 0.05 && p < 0.45; if (P.scan.visible) P.scan.position.x = Math.sin(p * PI * 6) * 0.7; break;   // 비전 측정 → 로봇 보정 (locateWork)
-      case 'spot': stepSparks(P.sparks, legacy && busy && Math.sin(t * 6) > -0.3, { x: -0.3, y: BELT_Y + 0.45, z: 0 }, rdt, 2.2, -7); for (const r of c.robots) { if (r.sparks) stepSparks(r.sparks, !!r.weldOn && busy, r.sparkAt, rdt, 1.5, -9); if (r.flash && !busy) r.flash.visible = false; } break;   // 수작업(레거시)만 셀 가운데 — 로봇은 툴 끝 (toolMarks)
+      case 'spot': if (P.dock) P.dock.set(P.dock.k + ((busy && p > 0.03 && p < 0.97 ? 1 : 0) - P.dock.k) * Math.min(1, rdt * 4));
+        stepSparks(P.sparks, legacy && busy && Math.sin(t * 6) > -0.3, { x: -0.3, y: BELT_Y + 0.45, z: 0 }, rdt, 2.2, -7); for (const r of c.robots) { if (r.sparks) stepSparks(r.sparks, !!r.weldOn && busy, r.sparkAt, rdt, 1.5, -9); if (r.flash && !busy) r.flash.visible = false; } break;   // 수작업(레거시)만 셀 가운데 — 로봇은 툴 끝 (toolMarks)
       case 'seal': P.lamp.emissiveIntensity = busy ? 1.4 : 0.5; for (const r of c.robots) if (r.hose) this.sealHose(c, r); break;
-      case 'hem': { const k = busy && p > 0.45 && p < 0.85 ? Math.sin(((p - 0.45) / 0.4) * PI) : 0; P.ram.position.y = 2.2 - k * 1.05; break; }
       case 'mount': P.screen.emissive.setHex(busy && Math.sin(t * 10) > 0 ? 0xf5b82e : 0x3ddc84); break;
       case 'vision': { const sc = busy && !legacy; P.scan.visible = sc; if (sc) P.scan.position.x = Math.sin(p * PI * 2) * 0.6; P.ringMat.emissiveIntensity = sc && p > 0.45 && p < 0.55 ? 8 : 0.4; break; }
-      case 'rework': { const r0 = c.robots.find((o) => o.reworkOn); const tp = r0 ? P.sparks.parent.worldToLocal(r0.tip.getWorldPosition(new THREE.Vector3())) : null; stepSparks(P.sparks, !!tp && r0.reworkSpark, tp ?? { x: 0, y: 0, z: 0 }, rdt, 1.2, -6); break; }   // 보수 용접 불꽃은 토치 끝에서
+      case 'rework': { const r0 = c.robots.find((o) => o.reworkOn); const tp = r0 ? P.sparks.parent.worldToLocal(r0.tip.getWorldPosition(new THREE.Vector3())) : P.repairAt; stepSparks(P.sparks, !!tp && (r0 ? r0.reworkSpark : true), tp ?? { x: 0, y: 0, z: 0 }, rdt, 1.2, -6); break; }   // 보수 용접 불꽃은 토치 끝에서
       case 'mill5': case 'turn': case 'deburr': {   // 간이 머시닝센터 (모델이 없을 때) — 디버링셀은 tq · tb (앞부분만 가공)
         const open = !it || tq < 0.15 || tq > 0.85 || c.robots.some((r) => r.tendInside && !r.xfer) ? 1 : 0;
         c.doorK = (c.doorK ?? 0) + (open - (c.doorK ?? 0)) * Math.min(1, dts * 4); P.door.position.x = c.doorK * 1.25;

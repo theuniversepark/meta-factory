@@ -28,7 +28,7 @@ app.whenReady().then(async()=>{try{
   await js(`document.querySelector('[data-mode=${mode}]').click()`);await wait(1000);
   const state=await js(`(()=>{const t=window.__twin;const machines=[...t.view.stationViews.map(s=>s.parts.machine),...t.xzones.zones.flatMap(z=>z.order.map(c=>c.parts.machine))].filter(Boolean);const tech=t.hub.assets.filter(a=>a.tech.ReferenceModel&&/Haas|AIDA|SCHMIDT|AP&T/.test(a.tech.ReferenceManufacturer));return{mode:t.sim.mode.key,machines:machines.map(m=>({key:m.key,model:m.spec.model,fits:m.envelopeFits,tiltEnabled:m.tiltEnabled})),aasModels:tech.map(a=>a.tech.ReferenceModel)};})()`);installed.push(state);console.log('installed',JSON.stringify(state));
   if(state.machines.some(m=>m.fits===false))throw Error('Current product does not fit base working envelope');
-  if(!state.machines.some(m=>m.key==='umc1250')||!state.machines.some(m=>m.key==='st40')||!state.machines.some(m=>m.key==='oden'))throw Error('Zone machines not replaced');
+  if(!state.machines.some(m=>m.key==='umc1250')||!state.machines.some(m=>m.key==='st40'))throw Error('Zone machines not replaced');
   if(mode!=='traditional'&&!state.aasModels.some(m=>m==='UMC-1250'))throw Error('Machine AAS spec missing');
  }
  await wait(1000);fs.writeFileSync(path.join(out,'factory.png'),(await w.webContents.capturePage()).toPNG());

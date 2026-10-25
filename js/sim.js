@@ -708,7 +708,7 @@ export class Simulation {
   // 설비·로봇 고유 ID — 현황판·라벨·텔레메트리·데이터 연동에 같은 ID를 쓴다 (사람은 제외)
   assignIds() {
     const two = (n) => String(n).padStart(2, '0');
-    this.stations[0].uid = 'AS-01';                                     // 자재 투입 AS/RS
+    this.stations[0].uid = 'AS-01';                                     // 자재 투입 갠트리 로더
     this.stations[this.stations.length - 1].uid = 'PL-01';              // 완제품·구분 적재장
     this.processing.forEach((st, k) => {
       st.uid = `CL-${two(k + 1)}`;
@@ -1764,7 +1764,9 @@ export class Simulation {
     const main = !st.zone, special = main && this.zone && (st.id === 'SORT' || st.id === 'PACK');   // 부품분류(키팅 구역)·검사·포장(포장대)은 셀 앞이 설비 — 두 자리만
     // 적응가공 ①소재 식별 · ⑥CMM: 북쪽에 스캔 부스·측정실·엣지 서버·격리 통이 붙어 가장자리를 따라 걷지 못한다 — 한자리에서 세 항목을 차례로
     if (st.zone === 'adapt' && (st.cellId === 'MATL' || st.cellId === 'CMM')) return ['로봇 관절·감속기 열화상', '제어반·모터 진동 · 전류', '배관·케이블 · 소음(누설)'].map((item) => ({ ...P0, item, secs: 5 }));
-    if (S && !st.techOnSite && !st.request && Math.hypot(S.x - P0.x, S.z - P0.z) > 0.8) out.push({ ...S, aisle: P0.aisle, item: '제어반·모터 진동 · 전류', secs: 5 });
+    // 안전 펜스 셀(e-axle 조립·체결): 정비 자리 앞은 인터록 미닫이문 — 사족보행은 0.35m 더 바깥에서 본다
+    const fenced = main && this.zone && (st.id === 'EA_ASSY' || st.id === 'EA_FAST'), S1 = fenced && S ? localLoc(st.def, 0.9, SVC_Z + 0.35, st.name) : S;
+    if (S && !st.techOnSite && !st.request && Math.hypot(S.x - P0.x, S.z - P0.z) > 0.8) out.push({ ...S1, aisle: P0.aisle, item: '제어반·모터 진동 · 전류', secs: 5 });
     if (S && !special && !st.def?.wash && !(st.svcWash)) {   // 반대편: 정비 자리에서 점검 자리 반대쪽으로 같은 거리 (세척기 셀은 세척기 캐빈 쪽이라 뺀다)
       const dx = S.x - P0.x, dz = S.z - P0.z, L = Math.hypot(dx, dz);
       if (L > 0.8) { const k = Math.min(2.0, L) / L; out.push({ x: S.x + dx * k, z: S.z + dz * k, aisle: P0.aisle, name: P0.name, item: '배관·케이블 · 소음(누설)', secs: 5 }); }
@@ -2179,7 +2181,7 @@ export class Simulation {
       { go: at },
       { until: () => this.time >= this.supplyDisruptedUntil, task: '출고 대기 (공급 차질)', face },
       { until: () => this.whRaw > 0, task: '창고 재고 대기 (입고 트럭 대기)', face },
-      { wait: xferWait(v), face, done: () => { const n = Math.min(PALLET_RAW, this.whRaw); this.whRaw -= n; v.load = { type: 'raw', n }; this.fac?.consume('raw', n, '투입구 (AS/RS)'); } },
+      { wait: xferWait(v), face, done: () => { const n = Math.min(PALLET_RAW, this.whRaw); this.whRaw -= n; v.load = { type: 'raw', n }; this.fac?.consume('raw', n, '투입구 (갠트리 로더)'); } },
       { go: this.loc.SRC },
       { wait: 4, done: () => {
         const n = v.load?.n ?? PALLET_RAW;
