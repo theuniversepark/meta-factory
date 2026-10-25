@@ -1390,8 +1390,8 @@ function buildAssembly(g, st, sim) {
 
 // 부품분류셀: 비전 카메라 브리지 + 부품 공급 트레이 + 분류 빈
 function buildSort(g, st, sim) {
-  // 분류 게이트를 셀 입구(x −1.75)에 두고, 분류 로봇은 그 뒤에서 게이트 결정대로 작업한다
-  const gate = buildGate(g, -1.75, 0x33ff99);
+  // 분류 게이트를 셀 입구(x −1.75)에 두고, 분류 로봇은 그 뒤에서 게이트 결정대로 작업한다 · 경광등은 북서 모서리 (북쪽 게이트 기둥 z −1.5 바깥 · 레거시 작업자 자리 밖)
+  const gate = { ...buildGate(g, -1.75, 0x33ff99), light: { x: -2.3, z: -2.1 } };
   if (sim?.zone) {
     // 제품 라인 표시판: 도어트림 쪽(+z) · e-axle 쪽(−z) 셀 출구 — 키트는 셀 양옆 서열 키팅 구역(buildSps)에서 담아 AMR 키트 포켓에 싣는다
     [['doortrim', 1.15], ['eaxle', -1.15]].forEach(([k, z]) => {
@@ -1410,9 +1410,11 @@ function buildSort(g, st, sim) {
 }
 
 // 분류·포장 게이트: 문형 프레임 + 비전 카메라·스캔 링·스캔 막 + 결정 표시판 (셀 입구에 두고 들어오는 대상물을 판별)
-function buildGate(g, x, scanColor) {
-  for (const z of [-1.0, 1.0]) put(box(0.14, 2.3, 0.14, MAT.dark), x, 1.3, z, g);
-  put(box(0.22, 0.2, 2.2, MAT.dark), x, 2.45, 0, g);
+// 기둥 z (북 · 남): 기본 ±1.5 — 기둥 사이 2.86m (AMR 폭 0.99m가 비스듬히 들어와도 걸리지 않게) · 셀마다 옆 설비에 맞춰 좁힌다
+export const GATE_Z = [-1.5, 1.5];
+function buildGate(g, x, scanColor, zs = GATE_Z) {
+  for (const z of zs) put(box(0.14, 2.3, 0.14, MAT.dark), x, 1.3, z, g);
+  put(box(0.22, 0.2, zs[1] - zs[0] + 0.2, MAT.dark), x, 2.45, (zs[0] + zs[1]) / 2, g);
   put(box(0.3, 0.26, 0.36, MAT.white), x, 2.2, 0, g);
   const ringMat = emis(0xffffff, 0.4);
   const ring = put(mesh(new THREE.TorusGeometry(0.3, 0.035, 8, 28), ringMat, false), x, 1.9, 0, g);
@@ -1695,7 +1697,8 @@ function buildPack(g, st, sim) {
   if (sim?.zone) {
     // 공동 포장셀: 입구에 포장 게이트(제품 판별 → 트레이 박스/폴딩 크레이트), 셀 양옆 밖에 포장대(도어트림 +z · e-axle −z) — 그 제품 쪽 로봇이 포장 (js/pack.js)
     // 포장대마다: 접힌 상자 매거진(서쪽) · 라벨 프린터(셀 쪽 가장자리) · 뚜껑 (자동화 = 셀 안 모서리 선반 · 피지컬AI = 포장대 동쪽 랙) · 출구 쪽 문형에는 QR 판독 카메라
-    const gate = buildGate(g, -1.75, 0x58c4ff), G = PACK_GEO, T = G.table, dark = sim.mode?.key === 'dark', LY = G.lay[dark ? 'ammr' : 'arm'], pack = {};
+    // 게이트 기둥 ±1.4 — ±1.5면 AMMR이 매거진(x −1.3 · z ±1.95)으로 옆걸음할 때 기둥과 4cm
+    const gate = buildGate(g, -1.75, 0x58c4ff, [-1.4, 1.4]), G = PACK_GEO, T = G.table, dark = sim.mode?.key === 'dark', LY = G.lay[dark ? 'ammr' : 'arm'], pack = {};
     for (const [k, s] of [['doortrim', 1], ['eaxle', -1]]) {
       const B = PACK_BOX[k], mat = k === 'doortrim' ? MAT.carton : MAT.crate;
       const tb = put(new THREE.Group(), T.x, 0, s * T.z, g); tb.name = 'PackTable';
@@ -3788,7 +3791,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
     if (r.pkKey !== key) {
       const magY = 0.12 + S.nFold * (B.fold + 0.004), lidY = S.lidY + S.nLid * (B.lid + 0.003), L = S.lidAt, via = (y) => ik(G.arm.x + 0.35, y, s * 1.05), M = LY.mag, PR = LY.printer;
       r.pkQ = {
-        box: { a: ik(M.x, magY + 0.28, s * M.z), g: ik(M.x, magY + 0.01, s * M.z), b: ik(T.x, T.y + B.fold + 0.28, s * T.z), d: ik(T.x, T.y + B.fold + 0.01, s * T.z) },
+        box: { a: ik(M.x, magY + 0.28, s * M.z), g: ik(M.x, magY + 0.01, s * M.z), v: ik((M.x + T.x) / 2, T.y + 0.45, s * (M.z + T.z) / 2), b: ik(T.x, T.y + B.fold + 0.28, s * T.z), d: ik(T.x, T.y + B.fold + 0.01, s * T.z) },
         prod: { a: ik(gx, BELT_Y + pTop + 0.25, gz), g: ik(gx, BELT_Y + pTop + 0.01, gz), v: via(BELT_Y + pTop + 0.45), b: ik(T.x + gx, T.y + 0.02 + pTop + 0.25, s * T.z + gz), d: ik(T.x + gx, T.y + 0.02 + pTop + 0.01, s * T.z + gz) },
         lid: { a: ik(L.x, lidY + 0.25, s * L.z), g: ik(L.x, lidY + 0.01, s * L.z), v: ik(T.x + 0.45, T.y + top + 0.5, s * T.z), b: ik(T.x, T.y + top + 0.25, s * T.z), d: ik(T.x, T.y + top + 0.01, s * T.z) },
         label: { a: ik(PR.x, 1.2, s * PR.z - s * 0.03), g: ik(PR.x, 0.995, s * PR.z - s * 0.03), b: ik(T.x + B.w * 0.2, T.y + top + 0.2, s * T.z), d: ik(T.x + B.w * 0.2, T.y + top + 0.012, s * T.z) },

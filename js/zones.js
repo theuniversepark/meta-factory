@@ -35,7 +35,7 @@ function cellPath(Z, aId, bId, a, b) {
   if (Math.abs(a.z - b.z) < 0.01) return [{ x: a.x, z: a.z }, { x: b.x, z: b.z }];
   // 투입구(SRC)에서는 갠트리 기둥(±1.95)을 다 지난 뒤 꺾는다 — 2.3m에서 꺾으면 AMR·도어 패널이 기둥에 닿는다
   const merge = Math.abs(b.z) < 0.01, ez = merge ? Math.sign(a.z - b.z) * 0.75 : b.z, ex = b.x - 2, x0 = a.x + (aId === 'SRC' ? 3.0 : 2.3);
-  // 가운데 줄 셀로 합류: 합류 차로(±0.75)에서 게이트(셀 x −1.75, 기둥 z ±1.0) 1.75m 앞에서 셀 중심선에 올라탄 뒤 곧게 들어간다 — 차로에서 비스듬히 들어가면 AMR이 게이트 기둥에 걸린다
+  // 가운데 줄 셀로 합류: 합류 차로(±0.75)에서 게이트(셀 x −1.75, 기둥 z ±1.5 · 북서에 실이 붙은 셀은 북쪽 −1.1) 1.75m 앞에서 셀 중심선에 올라탄 뒤 곧게 들어간다 — 차로에서 비스듬히 들어가면 AMR이 게이트 기둥에 걸린다
   if (merge) return [{ x: a.x, z: a.z }, { x: x0, z: a.z }, { x: Math.max(x0, ex - 3), z: ez }, { x: b.x - 3.5, z: 0 }, { x: b.x, z: b.z }];
   return [{ x: a.x, z: a.z }, { x: x0, z: a.z }, { x: Math.max(x0, ex - 3), z: ez }, { x: ex, z: ez }, { x: b.x, z: b.z }];
 }
@@ -64,7 +64,9 @@ function dashLine(g, pts, mat) {
 }
 
 // ── 설비 모델 (유연생산Zone: flexible-manufacturing · 적응가공Zone: adaptive-machining과 같은 형상) ─────────────────
-function gateOf(g, x, color) { const G = buildGate(g, x, color); return G; }
+// 북서에 실(스캔 부스 · 항온 측정실, 남쪽 벽 z −1.2)이 붙은 셀: 게이트 북쪽 기둥은 −1.1까지만 (남쪽은 기본 +1.5)
+const GATE_BOX = [-1.1, 1.5];
+function gateOf(g, x, color, zs) { const G = buildGate(g, x, color, zs); return G; }
 function drawGate(gs, title, text, col) {
   const key = `${title}|${text}|${col}`; if (gs.id === key) return; gs.id = key;
   const c = gs.cv.getContext('2d'), F = '"Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
@@ -205,8 +207,8 @@ function buildRework(g) {
   const iso = put(new THREE.Group(), -1.6, 0, 2.0, g);
   for (const [x, z] of [[-0.55, -0.35], [0.55, -0.35], [-0.55, 0.35], [0.55, 0.35]]) put(box(0.05, 1.5, 0.05, MAT.defect), x, 0.75, z, iso);
   put(box(1.15, 0.04, 0.75, MAT.defect), 0, 0.6, 0, iso); put(box(1.15, 0.04, 0.75, MAT.defect), 0, 1.2, 0, iso);
-  for (const z of [-1.0, 1.0]) put(box(0.12, 2.0, 0.12, MAT.dark), 1.25, 1.0, z, g);
-  put(box(0.18, 0.16, 2.1, MAT.dark), 1.25, 2.0, 0, g);
+  for (const z of [-1.5, 1.5]) put(box(0.12, 2.0, 0.12, MAT.dark), 1.25, 1.0, z, g);   // 출구 문형 프레임 — 입구 게이트와 같은 폭(2.86m)
+  put(box(0.18, 0.16, 3.1, MAT.dark), 1.25, 2.0, 0, g);
   put(box(0.3, 0.14, 0.3, MAT.white), 1.25, 1.85, 0, g);
   return { sparks: put(makeSparks(0xffc060, 24, 0.05), 0, 0, 0, g) };
 }
@@ -487,14 +489,14 @@ export const MATC = {
 };
 const MATL_MAT = { wall: std(0x39414b, { metalness: 0.3, roughness: 0.6 }), frame: std(0x8a96a3, { metalness: 0.6, roughness: 0.35 }), rack: std(0x2f6f8f, { metalness: 0.4, roughness: 0.45 }), red: std(0xd23b3b, { roughness: 0.6 }) };
 function buildMatId(g) {
-  const gate = gateOf(g, -1.75, 0x37e8ff);
+  const gate = gateOf(g, -1.75, 0x37e8ff, GATE_BOX);
   // 주조 각인 판독 카메라 2대 (게이트 윗보 · 링 조명) · 팔레트 RFID 안테나 (게이트 기둥 안쪽)
   for (const z of [-0.85, 0.85]) {
     const sc = put(new THREE.Group(), -1.75, 2.1, z, g); sc.rotation.x = z > 0 ? -0.6 : 0.6; sc.name = 'DpmReader';
     put(box(0.2, 0.14, 0.18, MAT.dark), 0, 0, 0, sc);
     put(new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.01, 6, 16), emis(0x37e8ff, 2)), 0, -0.08, z > 0 ? -0.04 : 0.04, sc).rotation.x = PI / 2;
   }
-  for (const z of [-0.88, 0.88]) put(box(0.04, 0.4, 0.3, std(0xe9ecef, { roughness: 0.5 })), -1.75, 1.0, z, g).name = 'RfidAntenna';
+  for (const z of GATE_BOX) put(box(0.04, 0.4, 0.3, std(0xe9ecef, { roughness: 0.5 })), -1.75, 1.0, z - Math.sign(z) * 0.23, g).name = 'RfidAntenna';
   // 3D 스캔 부스: 차광 벽 · 지붕 틀 · 롤업 셔터 (동쪽)
   const B = MATC.booth, F = MATC.fix, W = put(new THREE.Group(), B.x, 0, B.z, g); W.name = 'ScanBooth';
   const dz = F.z - B.z, cab = cabin(W, B, MATC.door, 1, dz, { body: MATL_MAT.frame, wall: MATL_MAT.wall, frame: MATL_MAT.frame, roof: false, drumIn: true });   // 드럼은 부스 안 — 원소재(유압블록)를 든 채 접을 때 문 위를 지난다
@@ -537,7 +539,7 @@ function buildMatId(g) {
 }
 // 초정밀 측정·리워크셀 (셀 로컬) — 디버링셀 이송 6축 자리를 남북으로 뒤집은 꼴: 이송 6축은 AMR 정북 1.5m · 0.4m 받침대 위에서 AMR(남쪽)을 보고 선다
 //  북서 항온 측정실 (x −3.95 ~ −1.5, z −3.6 ~ −1.2): 유리벽 · 동쪽 면 롤업 셔터 · 화강암 정반 위 브리지형 CMM(브리지 x · 캐리지 z · 램 y) · 고정 지그(문 면 0.3m 안)
-//    게이트 기둥(x −1.75, z −1.0)과 0.13m · 서쪽 바깥 정밀 공조기 · 북동 모서리 밖 CMM 제어반 — 측정·각인 때만 브리지가 지그 위로, 그 밖은 서쪽 끝(park)
+//    게이트 기둥(x −1.75, z −1.1)과 0.03m · 서쪽 바깥 정밀 공조기 · 북동 모서리 밖 CMM 제어반 — 측정·각인 때만 브리지가 지그 위로, 그 밖은 서쪽 끝(park)
 //  북동 리워크 머시닝센터 (x 1.5 ~ 3.7, z −3.2 ~ −1.2): 서쪽 면 자동 셔터 · 바이스(고정구) · 주축 머리 · 동쪽 칩 컨베이어 — AMR 나가는 길(z 0)에서 1.2m
 export const CMMC = {
   robot: { x: 0, z: -1.5, y: 0.4 },
@@ -562,7 +564,7 @@ function cabin(W, C, D, face, dz, m) {
 }
 const CMM_MAT = { frame: std(0x8a96a3, { metalness: 0.6, roughness: 0.35 }), granite: std(0x3b3f45, { roughness: 0.35, metalness: 0.1 }), bridge: std(0xe4e8ec, { roughness: 0.35, metalness: 0.2 }), vmc: std(0xd9dde2, { roughness: 0.4, metalness: 0.3 }), vmcTrim: std(0x2f6f8f, { metalness: 0.4, roughness: 0.45 }) };
 function buildCMM(g) {
-  const gate = gateOf(g, -1.75, 0x58c4ff), R = CMMC.room, F = CMMC.fix;
+  const gate = gateOf(g, -1.75, 0x58c4ff, GATE_BOX), R = CMMC.room, F = CMMC.fix;
   // 항온 측정실: 유리벽(알루미늄 기둥) · 동쪽 롤업 셔터 · 지붕은 틀만 (위에서 안이 보이게) · 실내 조명 · 공조 덕트
   const W = put(new THREE.Group(), R.x, 0, R.z, g); W.name = 'MetrologyRoom';
   const dz = F.z - R.z, cab = cabin(W, R, CMMC.door, 1, dz, { body: CMM_MAT.frame, wall: MAT.glass, wallName: 'RoomGlass', frame: CMM_MAT.frame, roof: false });
@@ -807,7 +809,7 @@ class ExtraZone {
       const equipmentRoot = put(new THREE.Group(), 0, 0, 0, g);
       const parts = BUILD[c.type](equipmentRoot, c);
       if (Z.key === 'adapt' && CM_TYPES.has(c.type)) addCMSensors(equipmentRoot, c, parts);   // 가공기 상태 감시 장비 (js/machmon.js)
-      const box2 = c.type === 'cmm' || c.type === 'matid', light = put(makeStackLight(), box2 ? -2.3 : -1.9, 0.15, box2 ? 1.3 : -1.6, g);   // CMM 측정실 · 소재 식별셀 스캔 부스가 북서를 차지 — 셀 경광등은 남서 (게이트 기둥 밖)
+      const box2 = c.type === 'cmm' || c.type === 'matid', kit = c.type === 'kit', light = put(makeStackLight(), box2 ? -2.3 : kit ? -2.05 : -1.9, 0.15, box2 ? 1.3 : kit ? -1.95 : -1.6, g);   // CMM 측정실 · 소재 식별셀 스캔 부스가 북서를 차지 — 셀 경광등은 남서 (게이트 기둥 밖) · C01은 게이트 기둥(±1.5) 바깥 모서리
       // IoT 노드 (정밀조립Zone 셀과 같은 자리·모양 — factory.js setup): 셀 데이터를 Zone 데이터 서버로 올린다
       const sensorMat = emis(0x37e8ff, 2.5), ringM = new THREE.MeshBasicMaterial({ color: 0x37e8ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false });
       const iot = put(new THREE.Group(), 1.7, 3.2, -1.4, g), sensor = put(mesh(new THREE.SphereGeometry(0.12, 12, 10), sensorMat, false), 0, 0, 0, iot);
