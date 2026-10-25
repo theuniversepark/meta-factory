@@ -48,7 +48,7 @@ const near=(G,a,f)=>{const seen=new Set();for(let x=Math.floor(a.B.min[0]);x<=Ma
 const ovl=(A,B)=>A.min[0]<B.max[0]&&A.max[0]>B.min[0]&&A.min[1]<B.max[1]&&A.max[1]>B.min[1]&&A.min[2]<B.max[2]&&A.max[2]>B.min[2];
 const TOOL=/ToolFlange|ToolTCP|J6_Origin|J5_Origin|WristCamera|Gripper|Finger|tool_left|tool_right|EE_|[LR]_J[67]/;   // RB-Y1 양팔 그리퍼 포함   // 손목·툴 — 집는 대상과의 접촉은 작업 접촉
 const WORK=/Workpiece|Jig|Pin_|Eaxle|Hblock|Rcover|Hood|Door_|Machined|P_[A-Z]|Bin|Fixture|Chuck|Platter|TSlot/;   // 집는 대상·지그·부품
-const hits=new Map(),add=(key,info,pen)=>{const h=hits.get(key);if(!h)hits.set(key,{...info,max:pen,n:1});else{h.n++;if(pen>h.max)Object.assign(h,info,{max:pen});}};
+const hits=new Map(),add=(key,info,pen)=>{info={...info,t:+(window.__twin.sim?.time??0).toFixed(1)};const h=hits.get(key);if(!h)hits.set(key,{...info,max:pen,n:1});else{h.n++;if(pen>h.max)Object.assign(h,info,{max:pen});}};
 const P3=(c)=>[+c.x.toFixed(2),+c.y.toFixed(2),+c.z.toFixed(2)];
 let n=0,fac=[],G=null,dynM=[],joints=[];const T0=performance.now();document.querySelector('[data-speed="3"]')?.click();
 while(performance.now()-T0<${secs}*1000){await new Promise(r=>setTimeout(r,40));
@@ -82,13 +82,13 @@ app.whenReady().then(async () => {
     for (let k = 0; k < 90; k++) { if (await js('!!window.__twin?.RENDER.loaded')) break; await wait(500); }
     if (!await js('!!window.__twin?.RENDER.loaded')) throw Error('Blender assets not loaded');
     const report = [];
-    for (const mode of ['traditional', 'smart', 'dark']) {
+    for (const mode of (process.env.COLLIDE_MODES || 'traditional,smart,dark').split(',')) {   // COLLIDE_MODES=smart,dark — 일부 단계만
       await js(`document.querySelector('[data-mode=${mode}]').click()`); await wait(1500);
       if (process.env.COLLIDE_PRE) { await js(fs.readFileSync(path.resolve(process.env.COLLIDE_PRE), 'utf8')); await wait(500); }   // 점검 전 설정 (예: Zone 셀 레시피 적용) — 페이지에서 실행할 JS 파일
       const r = await js(AUDIT(SECS)); const bad = r.res.filter((h) => h.max >= PEN);
       report.push({ ...r, violations: bad.length });
       console.log(`== ${mode} (${r.samples} 샘플)  간섭 ${bad.length}건${bad.length ? '' : ' — 없음'}`);
-      for (const h of bad.slice(0, 25)) console.log(`  ${h.max.toFixed(2)}m  ${h.k}  (${h.frames}프레임 · ${h.a}${h.b ? ' ↔ ' + (typeof h.b === 'string' ? h.b : `${h.b.c} (${h.b.size})`) : ''} @ ${h.at})`);
+      for (const h of bad.slice(0, 25)) console.log(`  ${h.max.toFixed(2)}m  ${h.k}  (${h.frames}프레임 · t ${h.t}s · ${h.a}${h.b ? ' ↔ ' + (typeof h.b === 'string' ? h.b : `${h.b.c} (${h.b.size})`) : ''} @ ${h.at})`);
     }
     fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify({ secs: SECS, pen: PEN, report, errors }, null, 2));
     const total = report.reduce((a, r) => a + r.violations, 0);

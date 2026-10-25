@@ -22,6 +22,7 @@ console.log('== 시리얼 서비스 이벤트 → EPCIS 2.0 (자동화 · 정밀
 const s = new Simulation('smart', 4, { line: zoneLine(), quiet: true }), ag = new FactoryAgent(s), H = s.serials;
 H.feedOn = true;
 run(s, ag, 5400);
+for (let k = 0; k < 180 && !(H.fg.doortrim ?? []).some((u) => !u.hold); k++) run(s, ag, 10);   // 샘플로 꺼낼 도어트림 완제품이 적재장에 있을 때 (방금 출하로 비었으면 잠깐 더)
 { const F = s.fos, req = { id: 'QS-E1', zone: 'main', product: 'doortrim', t0: s.time }; F.sampleRequest(req); F.sampleResult({ ...req }, 'ng'); run(s, ag, 1800); }
 const raw = H.drain(), evs = raw.map((e) => epcisEvent(H, e, iso)).filter(Boolean), doc = epcisDocument(evs, iso(s.time));
 const by = (b) => evs.filter((e) => e.bizStep === b);

@@ -130,6 +130,59 @@ const OI_PTS = (() => {
   return { home: [0.55, 1.45, 0], over: [0.9, 1.5, 0], amr: [-r.x, top, -r.z], table: [OINS.table.x - r.x, 0.9 + 0.26 + 0.06 - Y0, OINS.table.z - r.z] };
 })();
 const OI_SEQ = [[0, 'home'], [0.03, 'over'], [0.05, 'amr'], [0.07, 'over'], [0.1, 'table'], [0.13, 'home'], [0.86, 'home'], [0.89, 'table'], [0.92, 'over'], [0.95, 'amr'], [0.98, 'over'], [1, 'home']];
+// 비전 · 3D 스캔 · 초음파 · ATOS 로봇: AMR 위 시료(c.occ.pm — 몸통 0.40 × 0.20 × 0.36m)를 실제로 훑는다 — 측정 구간(진행 0.12 ~ 0.88)만
+//  views  (비전 카메라 6뷰 · ATOS 블루라이트 8뷰): 로봇 쪽 반구에서 시료 가운데를 겨누는 자리(거리 0.45 · 0.6m)로 옮겨 가(구간 30%) 멈춰 찍는다
+//  raster (3D 스캐너): 윗면 0.32m 위를 진행 방향(x)으로 오가며 5줄 · ut (초음파 프로브): 윗면 로봇 쪽 가장자리·가운데 용접선 3줄에 프로브를 대고 따라간다
+// 자세는 시료마다(AMR이 서는 자리가 조금씩 다르다) 그 자리에서 팔 IK로 푼다 · 측정 밖에서는 기본 자세
+const INSP_WIN = [0.12, 0.88];
+// 3D 스캔·초음파 셀: 스캐너가 먼저 형상을 훑고(앞 절반) 물러난 뒤 초음파 프로브가 용접선을 탐상(뒤 절반) — 두 로봇이 같은 윗면 위에서 동시에 움직이지 않게
+const INSP_SUB = { views: INSP_WIN, raster: [0.12, 0.5], ut: [0.5, 0.88] };
+function inspPose(r, c, busy, p, mode, home) {
+  const A = r.arm, amr = c.occ, pm = amr?.pm;
+  const W = INSP_SUB[mode], on = busy && pm && p >= W[0] && p < W[1];
+  const sm = (k) => { k = Math.min(1, Math.max(0, k)); return k * k * (3 - 2 * k); }, lerp = (a, b, k) => a.map((v, j) => v + (b[j] - v) * k);
+  if (!on) { r.ipCur = r.ipCur ? lerp(r.ipCur, home, 0.12) : home.slice(); A.pose(...r.ipCur); r.tool?.userData?.scanOn?.(false); return; }
+  const key = `${c.item?.id}:${mode}`;
+  if (r.ipKey !== key) {
+    pm.updateWorldMatrix(true, true); r.root.updateWorldMatrix(true, true);
+    const body = pm.userData.body, bb = new THREE.Box3().setFromObject(body), C = bb.getCenter(new THREE.Vector3()), H = bb.getSize(new THREE.Vector3()).multiplyScalar(0.5);
+    const base = r.root.getWorldPosition(new THREE.Vector3()), sz = Math.sign(base.z - C.z) || 1;   // 로봇이 선 쪽 (시료에서 본 월드 z 부호)
+    const L = (v) => r.root.worldToLocal(v.clone()), ik = (pt, dir) => { const a = L(pt), d = L(pt.clone().add(dir)).sub(a); return A.ik(a.x, a.y, a.z, d); };
+    let pts;
+    if (mode === 'views') {   // 로봇 쪽 반구 — 방위 −60° ~ +60°(로봇 쪽 정면 기준) · 높이각 35° / 65° 번갈아
+      const n = c.def.type === 'atos' ? 8 : 6, R = c.def.type === 'atos' ? 0.6 : 0.45;
+      pts = Array.from({ length: n }, (_, k) => {
+        const ph = (-60 + (120 * k) / (n - 1)) * (Math.PI / 180), th = (k % 2 ? 65 : 35) * (Math.PI / 180);
+        const d = new THREE.Vector3(Math.cos(th) * Math.sin(ph), Math.sin(th), sz * Math.cos(th) * Math.cos(ph));
+        return ik(C.clone().addScaledVector(d, R), d);
+      });
+    } else if (mode === 'raster') {   // 윗면 0.32m 위 · 5줄 (로봇 쪽부터) · 줄마다 x 왼쪽 → 오른쪽 / 오른쪽 → 왼쪽
+      const y = C.y + H.y + 0.32, up = new THREE.Vector3(0, 1, 0);
+      pts = [];
+      for (let k = 0; k < 5; k++) { const z = C.z + sz * H.z * (1 - (2 * k) / 4) * 0.9, xs = k % 2 ? [H.x, -H.x] : [-H.x, H.x]; for (const xx of xs) pts.push(ik(new THREE.Vector3(C.x + xx * 0.9, y, z), up)); }
+    } else {   // 초음파: 윗면에 대고(손끝 1cm 누름) 3줄을 x로 — 줄 사이는 0.08m 들어 옮김
+      const y = C.y + H.y + 0.005, up = new THREE.Vector3(0, 1, 0);
+      pts = [];
+      for (const fz of [0.85, 0.45, 0]) { const z = C.z + sz * H.z * fz; pts.push(ik(new THREE.Vector3(C.x - H.x * 0.9, y + 0.08, z), up), ik(new THREE.Vector3(C.x - H.x * 0.9, y, z), up), ik(new THREE.Vector3(C.x + H.x * 0.9, y, z), up), ik(new THREE.Vector3(C.x + H.x * 0.9, y + 0.08, z), up)); }
+    }
+    r.ipPts = pts; r.ipKey = key;
+  }
+  const P = r.ipPts, u = (p - W[0]) / (W[1] - W[0]);
+  let q, measuring = false;
+  if (mode === 'views') {
+    const n = P.length, j = Math.min(n - 1, Math.floor(u * n)), f = u * n - j, from = j ? P[j - 1] : home;
+    q = f < 0.3 ? lerp(from, P[j], sm(f / 0.3)) : P[j]; measuring = f >= 0.35 && f < 0.95;
+    if (j === n - 1 && f > 0.85) q = lerp(P[j], home, sm((f - 0.85) / 0.15));
+  } else {   // 경유점을 차례로 (첫 점까지 10% · 마지막에서 돌아오기 10%)
+    const n = P.length;
+    if (u < 0.1) q = lerp(home, P[0], sm(u / 0.1));
+    else if (u > 0.9) q = lerp(P[n - 1], home, sm((u - 0.9) / 0.1));
+    else { const w = ((u - 0.1) / 0.8) * (n - 1), j = Math.min(n - 2, Math.floor(w)); q = lerp(P[j], P[j + 1], sm(w - j)); measuring = mode === 'raster' || j % 4 === 1; }
+  }
+  r.ipCur = q.slice(); A.pose(...q);
+  r.tool?.userData?.scanOn?.(measuring);
+  if (r.ipLens) r.ipLens.emissiveIntensity = measuring ? 5 : 1.2;
+}
 function oiPose(r, p) {
   const J = (r.oiJ ??= Object.fromEntries(Object.entries(OI_PTS).map(([k, [x, y, z]]) => [k, r.arm.native ? r.arm.ik(x, y, z) : armIK(r.scale ?? 1, x, y, z)])));
   let i = 0; while (i < OI_SEQ.length - 2 && p >= OI_SEQ[i + 1][0]) i++;
@@ -295,10 +348,11 @@ export class InspZone {
         put(r.root, x, 0.15, z, c.robotsG); r.root.rotation.y = yaw; r.phase = i * 1.7;
         if (c.def.type === 'scan' || c.def.type === 'atos' || c.def.type === 'vision') {   // 끝단 센서: 3D 스캐너(청색) · UT 프로브 · 비전 카메라
           const head = put(box(0.22, 0.12, 0.16, c.def.type === 'atos' || (c.def.type === 'scan' && i === 0) ? std(0x2b6cb0) : MAT.dark), 0, 0.06, 0, r.tip);
-          put(cyl(0.035, 0.035, 0.03, emis(c.def.type === 'atos' ? 0x5aa0ff : 0x37e8ff, 2), 10), 0, 0.075, 0, head);
+          const lens = emis(c.def.type === 'atos' ? 0x5aa0ff : 0x37e8ff, 2); put(cyl(0.035, 0.035, 0.03, lens, 10), 0, 0.075, 0, head); r.ipLens = lens;   // 측정하는 동안 밝아짐 (inspPose)
         }
         r.wristCam = !!r.wristCameraAnchor || modeKey === 'dark';   // 피지컬AI: 손목 카메라 (로봇 비전 관제 디스플레이 영상)
         if (c.def.type === 'oins') r.anim = (busy, t, p) => { if (busy) oiPose(r, p); else if (c.state !== 'BUSY') oiPose(r, 0); };
+        else if (r.arm?.native && ['vision', 'scan', 'atos'].includes(c.def.type)) { const mode = c.def.type === 'scan' ? (i === 0 ? 'raster' : 'ut') : 'views', home = r.arm.home.slice(); r.anim = (busy, t, p) => inspPose(r, c, busy, p, mode, home); }   // 시료를 실제로 훑는다 (inspPose)
         const uid = `${INSP.uidp}-RB-${c.id}-${i + 1}`, sp = idPlate(uid); sp.position.set(0, 2.35, 0); r.root.add(sp); sp.visible = this.labelsOn; c.plates.push(sp);
         r.root.traverse((o) => { o.userData.stationId = this.sid(c); o.userData.robotIdx = i; });   // 클릭 → 셀 로봇 텔레메트리 (factory.js pick → ExtraZones.cellRobot)
         c.robots.push(r); c.robotUids.push(uid);
@@ -535,6 +589,7 @@ export class InspZone {
     const st = this.halted ? 'ESTOP' : c.fault ?? (c.state === 'DONE' ? 'BUSY' : c.state);
     c.light.userData.set(st, t);
     for (const r of c.robots) r.anim(busy, t + r.phase, p);
+    c.workersG.children.forEach((w) => KIT.workerCycle(w, busy, p, 3, (w.userData.baseYaw ??= w.rotation.y)));   // 레거시 검사원: 시료를 집어 보고 게이지를 대는 수작업 사이클
     switch (c.def.type) {
       case 'dock': P.reader.emissiveIntensity = busy ? 2 + Math.sin(t * 12) : 0.6; P.screen.emissive.setHex(busy ? 0x58c4ff : 0x3ddc84); break;
       case 'vision': P.light.emissiveIntensity = busy ? 2.4 : 0.5; P.screen.emissive.setHex(busy ? 0x58c4ff : 0x3ddc84); break;
