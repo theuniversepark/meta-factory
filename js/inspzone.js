@@ -114,7 +114,9 @@ function buildScanCell(g) {
   return { blue, screen };
 }
 // 안에 넣어 재는 셀 (O-INSPECT 정반 · 청정도 추출 캐비닛 · CT 턴테이블): 로봇이 AMR 지그의 시료를 집어 넣고, 끝나면 다시 AMR로
-const CAB = { oins: { robot: { x: -1.45, z: -0.95 }, table: { x: 0, z: -1.75, y: 0.9 } }, clean: { robot: { x: -1.45, z: -0.95 }, table: { x: 0, z: -1.8, y: 0.95 } }, ct: { robot: { x: -1.45, z: -0.95 }, table: { x: 0, z: -1.85, y: 0.92 } } };
+// 청정도 · CT: 로봇을 받침대(0.45m) 위 AMR 통로와 장비 사이 가운데(z −1.15)에 — 뒤로 돌아 AMR 시료를 집고 앞쪽 장비에 넣는 머신 텐딩 배치
+//  (예전 자리 x −1.45 · z −0.95는 AMR이 셀 서쪽에서 들어오는 길 옆 바닥이라 AMR·장비 옆벽·CT 문과 겹쳤다) · 장비는 그만큼 뒤로 (청정도 추출대 z −2.1 · CT 턴테이블 z −2.45)
+const CAB = { oins: { robot: { x: -1.45, z: -0.95 }, table: { x: 0, z: -1.75, y: 0.9 } }, clean: { robot: { x: 0, z: -1.15, y: 0.45 }, table: { x: 0, z: -2.1, y: 0.95 } }, ct: { robot: { x: 0, z: -1.15, y: 0.45 }, table: { x: 0, z: -2.45, y: 0.92 } } };   // CT 문(앞면 z −1.58)이 로봇 받침(−1.45)과 띄워짐
 const OINS = { col: -2.7 };
 // O-INSPECT: 화강암 정반 + 뒤쪽 기둥 · 앞으로 뻗은 암 · 측정 헤드(카메라·접촉 프로브)
 function buildOins(g) {
@@ -171,8 +173,8 @@ function buildClean(g) {
   const spray = emis(0x9fd8ff, 0.3); const nozzle = put(box(0.1, 0.25, 0.1, MAT.dark), T.x, T.y + 1.05, T.z, g); put(cyl(0.18, 0.02, 0.5, spray, 12, true), 0, -0.38, 0, nozzle);
   const scope = put(new THREE.Group(), 1.75, 0, -1.4, g); put(box(0.6, 0.85, 0.6, MAT.steel), 0, 0.425, 0, scope); put(box(0.12, 0.5, 0.12, MAT.white), 0, 1.1, -0.15, scope); put(cyl(0.05, 0.05, 0.25, MAT.dark, 10), 0, 1.0, 0.0, scope);
   const screen = emis(0x58c4ff, 1.2); put(box(0.4, 0.28, 0.02, screen, false), 0, 1.45, 0.25, scope);
-  for (const [x, z] of [[-2.1, -2.2], [2.2, -2.2]]) put(box(0.04, 2.4, 0.04, MAT.steel), x, 1.2, z, g);
-  put(box(4.3, 0.04, 0.04, MAT.steel), 0.05, 2.4, -2.2, g); put(box(4.3, 2.0, 0.02, std(0xdff6ff, { transparent: true, opacity: 0.18 }), false), 0.05, 1.4, -2.22, g);
+  for (const [x, z] of [[-2.1, -2.9], [2.2, -2.9]]) put(box(0.04, 2.4, 0.04, MAT.steel), x, 1.2, z, g);   // 청정 부스 뒤 커튼 (추출 캐비닛 뒤)
+  put(box(4.3, 0.04, 0.04, MAT.steel), 0.05, 2.4, -2.9, g); put(box(4.3, 2.0, 0.02, std(0xdff6ff, { transparent: true, opacity: 0.18 }), false), 0.05, 1.4, -2.92, g);
   return { spray, screen };
 }
 // 산업용 CT (225kV): 납 차폐 캐비닛 · 미닫이 문 · 턴테이블 · X선 경고등 — 문이 열려 있을 때만 로봇이 넣고 꺼낸다
@@ -419,7 +421,8 @@ export class InspZone {
       const slots = CAB[ty] ? [[CAB[ty].robot.x, CAB[ty].robot.z, 0]] : ty === 'dock' || ty === 'judge' ? [[xferOf(ty).robot.x, xferOf(ty).robot.z, xferOf(ty).robot.yaw ?? 0]] : [[-0.95, -1.75, 0], [-0.25, 1.75, PI]];
       for (let i = 0; i < n; i++) {
         const r = c.def.heavy ? KIT.heavyRobot(MAT.orange) : makeRobot(ty === 'clean' ? 'cobot' : 'articulated', MAT.orange), [x, z, yaw] = slots[i];
-        put(r.root, x, 0.15, z, c.robotsG); r.root.rotation.y = yaw; r.phase = i * 1.7;
+        const cob = ty === 'clean', ped = CAB[ty]?.robot.y; if (ped && !cob) put(box(0.6, ped - 0.02, 0.6, MAT.dark), x, (ped - 0.02) / 2, z, c.robotsG);   // 6축 받침대 (협동로봇은 모델에 받침대가 붙어 있다 — 0.5m 위에 루트)
+        put(r.root, x, cob && ped ? 0.5 : ped ?? 0.15, z, c.robotsG); r.root.rotation.y = yaw; r.phase = i * 1.7;
         if (ty === 'scan' || ty === 'atos' || ty === 'vision') {   // 끝단 센서: 3D 스캐너(청색) · PAUT 프로브 · 비전 카메라
           const head = put(box(0.22, 0.12, 0.16, ty === 'atos' || (ty === 'scan' && i === 0) ? std(0x2b6cb0) : MAT.dark), 0, 0.06, 0, r.tip);
           const lens = emis(ty === 'atos' ? 0x5aa0ff : 0x37e8ff, 2); put(cyl(0.035, 0.035, 0.03, lens, 10), 0, 0.075, 0, head); r.ipLens = lens;   // 측정하는 동안 밝아짐 (inspPose)

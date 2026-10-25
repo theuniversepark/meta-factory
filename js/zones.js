@@ -1314,8 +1314,11 @@ class ExtraZone {
       return o;
     };
     const moved0 = L.padMoved ?? 0;
-    const held = stepLoader(L, { next, pick, placeY: (p) => BELT_Y + 0.05 + (n.side[p]?.panel ? 0.16 : n.side[p]?.h ?? 0.2), placeK: k == null ? (L.state === 'ready' && L.placeT ? 1 : null) : Math.min(1, k / 0.9), dt: dts, frozen: this.halted || this.ctl?.stop, legacy: this.mode === 'traditional' });
-    L.placeT = k != null;
+    // 적재(load)가 시작되면 지그 위로 내려가 든 채 기다리다, 적재가 끝나 대상물이 AMR에 올라가는 순간 손을 놓는다
+    if (c && !L.placing) L.loadOcc = c;
+    const released = !!L.loadOcc && L.loadOcc.state !== 'load';
+    const held = stepLoader(L, { next, pick, placeY: (p) => BELT_Y + 0.05 + (n.side[p]?.panel ? 0.16 : n.side[p]?.h ?? 0.2), place: !!c, released, dt: dts, frozen: this.halted || this.ctl?.stop, legacy: this.mode === 'traditional' });
+    if (!L.placing) L.loadOcc = null;
     if ((L.padMoved ?? 0) > moved0 && n.padPending) { n.padDone.add(n.padPending); n.padPending = null; }
     for (const p of keys) {
       const D = n.side[p], S = containerSplit(n.split[p], cnt[p] - (held === p ? 1 : 0), D.C[0].C);

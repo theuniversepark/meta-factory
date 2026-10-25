@@ -170,8 +170,8 @@ const at = (keys, t) => {
   return [x0 + (x1 - x0) * e, a.map((v, j) => v + (b[j] - v) * e)];
 };
 
-// 매 프레임: c = { next(다음 투입 제품 · 재고 없으면 null), pick(next), placeY, placeK(내려놓기 진행 0~1 · null이면 아직), dt(시뮬레이션 초), frozen, legacy }
-//  반환: holding(들고 있는 제품 · 재고에서 빠진 것) — 내려놓기가 끝나면(placeK 0.55) null
+// 매 프레임: c = { next(다음 투입 제품 · 재고 없으면 null), pick(next), placeY, place(내려놓기 시작 — AMR이 서고 투입 차례), released(투입·적재가 실제로 일어남), dt(시뮬레이션 초), frozen, legacy }
+//  반환: holding(들고 있는 제품 · 재고에서 빠진 것) — 투입 순간 손을 놓으면 null
 export function stepLoader(L, c) {
   const A = L.r.arm;
   L.auto.visible = !c.legacy; if (c.legacy || c.frozen || !A.ik) return L.holding;   // 실물 로봇 모델(역기구학)이 아직 없으면 대기
@@ -189,15 +189,22 @@ export function stepLoader(L, c) {
     const [x, q] = at(P.keys, L.t); L.x = x; L.q = q;
     if (L.t >= P.end) { L.state = 'ready'; const pq = solve(L, 0, V(0, c.placeY(P.key), 0), true); while (pq[5] - L.readyQ[5] > Math.PI / 2) pq[5] -= Math.PI; while (pq[5] - L.readyQ[5] < -Math.PI / 2) pq[5] += Math.PI; L.placeQ = pq; L.car.position.x = L.x; }   // 내려놓기도 대기 자세와 같은 쪽 정렬
   }
-  if (L.state === 'ready' && c.next && L.holding && L.holding !== c.next && c.placeK == null) {   // 투입 순서가 바뀜(혼류 비율 변경 등) — 든 자재를 용기에 되돌리고 다음 제품을 꺼낸다
+  if (L.state === 'ready' && !L.placing && c.next && L.holding && L.holding !== c.next) {   // 투입 순서가 바뀜(혼류 비율 변경 등) — 든 자재를 용기에 되돌리고 다음 제품을 꺼낸다
     L.holding = null; L.state = 'home'; L.q = L.readyQ.slice();
   }
   if (L.state === 'ready') {
-    const k = c.placeK;
-    if (k != null) {   // 내려놓기: 대기 → 지그 위 (0 ~ 0.4) → 놓음 (0.5) → 위로 (0.55 ~ 0.85)
-      L.q = k < 0.4 ? L.readyQ.map((v, j) => v + (L.placeQ[j] - v) * ease(k / 0.4)) : k < 0.55 ? L.placeQ.slice() : L.placeQ.map((v, j) => v + (L.readyQ[j] - v) * ease((k - 0.55) / 0.3));
-      if (k >= 0.5) L.holding = null;
-      if (k >= 0.85) { L.state = 'home'; L.q = L.readyQ.slice(); }
+    // 내려놓기: AMR이 서고 투입 차례(c.place)가 오면 지그 위로 내려가(1초) 든 채 기다린다(L.atJig) → 투입·적재가 실제로 일어나는 순간(c.released) 손을 놓고 → 위로 물러나(0.8초) 다음 자재로
+    //  손을 놓는 순간 대상물이 AMR에 나타나므로 사이에 사라지는 틈이 없다 (로봇이 먼저 놓고 떠나면 투입 전까지 비고, 다음 자재를 또 집어 왔다)
+    if (!L.placing && c.place) { L.placing = true; L.pt = 0; L.rt = null; L.atJig = false; }
+    if (L.placing) {
+      if (L.rt == null) {
+        L.pt = Math.min(1, L.pt + c.dt / 1.0); L.atJig = L.pt >= 1;
+        L.q = L.readyQ.map((v, j) => v + (L.placeQ[j] - v) * ease(L.pt));
+        if (L.atJig && c.released) { L.holding = null; L.rt = 0; }
+      } else {
+        L.rt += c.dt / 0.8; L.q = L.placeQ.map((v, j) => v + (L.readyQ[j] - v) * ease(L.rt));
+        if (L.rt >= 1) { L.placing = false; L.atJig = false; L.state = 'home'; L.q = L.readyQ.slice(); }
+      }
     } else L.q = L.readyQ.slice();
     L.x = 0;
   }

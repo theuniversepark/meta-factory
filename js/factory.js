@@ -3575,12 +3575,12 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
   //  e-axle GLT 한 층이 비면 꺼내기 전에 그 층 분리판을 거치대로 옮긴다
   animLoader(parts, st, dts) {
     const sim = this.sim, L = parts.loader, Z = parts.zoneStock, G = SRC_GEO, raw = sim.rawStock, T = sim.releaseInterval, k = Math.min(1, sim.releaseTimer / T);
-    sim.loaderGate = () => !L.r.arm.ik || !L.auto.visible || sim.mode.key === 'traditional' || (L.state === 'ready' && L.placeT >= 0.5);   // 투입: 로봇이 지그에 내려놓은 뒤
+    sim.loaderGate = () => !L.r.arm.ik || !L.auto.visible || sim.mode.key === 'traditional' || !!L.atJig;   // 투입: 로봇이 자재를 지그 위에 대고 있을 때 (그 순간 손을 놓는다)
     const w = sim.mix ?? { doortrim: 1, eaxle: 1 }, tot = (w.doortrim || 0) + (w.eaxle || 0) || 1;
     const nDT = Math.min(2 * G.dt.C, Math.round(raw * (w.doortrim || 0) / tot)), nEA = Math.min(2 * G.ea.C, raw - nDT), n = { doortrim: nDT, eaxle: nEA };
     let next = sim.nextProduct?.() ?? 'doortrim'; if (!n[next]) next = n.doortrim ? 'doortrim' : n.eaxle ? 'eaxle' : null;
     const ready = !sim.useAMR || sim.carriers.some((c) => c.state === 'atSrc'), frozen = st.state === 'HOLD' || st.state === 'ESTOP' || st.state === 'PSTOP';
-    if (L.state !== 'ready') L.placeT = 0; else if (L.placeT > 0 || (ready && (k > 0.85 || sim.releaseTimer >= T - 1e-6))) L.placeT += dts / 2.6;   // 내려놓기 2.6초
+    const rel = sim.stats.released; if (!L.placing) L.relBase = rel;   // 내려가기 시작한 뒤 투입이 일어나면 손을 놓는다
     // 들고 있는 것을 뺀 재고를 두 용기에 나눔
     const hold0 = L.holding, sp = {}; for (const p of ['doortrim', 'eaxle']) { const C = G[p === 'eaxle' ? 'ea' : 'dt'].C; sp[p] = containerSplit(Z.split[p], n[p] - (hold0 === p ? 1 : 0), C); }
     const padKey = (j, c) => `${j}:${c}`, per = G.ea.per;
@@ -3595,7 +3595,7 @@ const VZ = (bk(-9) + fr(9)) / 2, VL = fr(9) - bk(-9) + 2.6;
       return o;
     };
     const moved0 = L.padMoved ?? 0;
-    const held = stepLoader(L, { next, pick, placeY: (p) => BELT_Y + 0.03 + (p === 'eaxle' ? G.ea.h + 0.06 : Z.th), placeK: L.placeT > 0 ? Math.min(1, L.placeT) : null, dt: dts, frozen, legacy: sim.mode.key === 'traditional' });
+    const held = stepLoader(L, { next, pick, placeY: (p) => BELT_Y + 0.03 + (p === 'eaxle' ? G.ea.h + 0.06 : Z.th), place: ready && (k > 0.92 || sim.releaseTimer >= T - 1e-6), released: rel > (L.relBase ?? rel), dt: dts, frozen, legacy: sim.mode.key === 'traditional' });
     if ((L.padMoved ?? 0) > moved0 && Z.padPending) { Z.padDone.add(Z.padPending); Z.padPending = null; }
     // 용기마다 보이는 개수 · 분리판 (보충된 용기의 분리판 기록은 지움 — 빈 GLT와 함께 회수됨)
     const showDT = containerSplit(Z.split.doortrim, nDT - (held === 'doortrim' ? 1 : 0), G.dt.C), showEA = containerSplit(Z.split.eaxle, nEA - (held === 'eaxle' ? 1 : 0), G.ea.C);
