@@ -114,7 +114,7 @@ export const AMMR_FETCH = { turnOut: 0.06, driveOut: 0.14, pick: 0.24, turnIn: 0
 // fasten: 체결·압입 셀 — AMR이 들어오면 로봇마다 2~4점을 체결(압입)한다. 사이클 = 준비(부품 집기·정렬) + 로봇 중 가장 많은 점 수 × 점당 시간 + 후공정(전수 토크 판정)
 // 점당 시간 = 부품 선반 왕복·집기(부품은 한 번에 1개) + 체결: 스크류·볼트 5.5초(왕복 2.5 + 착좌·런다운·토크 확인 3.0) · 클립 압입 4.5초 · 베어링·로터 압입 5.0초 — 로봇들은 각자 자기 점을 동시에 체결한다
 const ZONE_RECIPES = [
-  { id: 'SORT', robot: { kind: 'ammr', count: 2 }, cycle: 7, task: 'AMMR 양팔로 옆 부품 선반에서 부품을 가져와 판별·분류·키팅' },
+  { id: 'SORT', robot: { kind: 'ammr', count: 2 }, cycle: 7, kitXfer: true, task: '게이트 판별 → 그 제품 쪽 로봇이 키트 컨베이어에서 키트를 꺼내 AMR 키트 포켓에 부품 4개를 옮겨 담음' },
   { id: 'DT_ASSY', robot: { kind: 'cobot', count: 4 }, cycle: 19.5, fasten: { setup: 6, per: 4.5, post: 0, min: 2, max: 4, kind: 'press' }, task: '양쪽 협동로봇이 패널에 암레스트·스피커그릴·스위치 조립, 클립 압입 (로봇당 2~4점)' },
   { id: 'DT_FAST', robot: { kind: 'cobot', count: 2 }, cycle: 23, fasten: { setup: 2, per: 5.5, post: 4.5, min: 2, max: 4, kind: 'screw' }, task: '스크류 자동 체결 (로봇당 2~4점), 토크·각도 전수 판정' },
   { id: 'EA_ASSY', robot: { kind: 'cobot', count: 4 }, cycle: 22, fasten: { setup: 7, per: 5.0, post: 0, min: 2, max: 4, kind: 'press' }, task: '양쪽 협동로봇이 베어링 압입·로터·감속기어 삽입, 하우징 결합 (로봇당 2~4점)' },
@@ -164,7 +164,10 @@ const taskForMode = (s, modeKey) => (ROBOT_KINDS[s.robot?.kind]?.darkOnly && !am
 // 대상물이 나가고 다음 AMR이 들어온다 (복귀 시간이 없으면 팔이 아직 점 위에 있을 때 다음 AMR이 진입해 팔과 부딪힌다) · sim.js 사이클과 factory.js 동작이 같은 값을 쓴다
 export const FASTEN_RETRACT = 2.5;
 export const fastenT = (F, pts) => F.setup + Math.max(...pts) * F.per + Math.max(F.post, FASTEN_RETRACT);
+// 부품분류셀 키트 옮겨 싣기 명목 사이클 (초): 제품 쪽 로봇 1대가 키트를 가져와 부품 4개를 하나씩 키트 포켓에 넣는다 — 로봇이 여러 대여도 한 대상물은 그 제품 쪽 한 대가 하므로 대수로 줄지 않는다 (js/sps.js SORT_AMMR · SORT_ARM)
+export const SORT_CYCLE = 12;
 export function effCycle(s, modeKey = 'smart') {
+  if (s.kitXfer) { const kind = robotForMode(s.robot, modeKey)?.kind ?? 'none'; return SORT_CYCLE * (modeKey === 'traditional' || kind === 'none' ? 1 : ROBOT_KINDS[kind].factor); }
   if (s.fasten) return fastenT(s.fasten, [(s.fasten.min + s.fasten.max) / 2]);   // 체결 셀: 로봇마다 자기 점을 동시에 — 평균 점 수 기준 (실제 사이클은 대상물마다 sim.js fastenCycle)
   const n = Math.max(1, s.robot?.count ?? 0);
   const kind = robotForMode(s.robot, modeKey)?.kind ?? 'none';
@@ -227,6 +230,7 @@ export function normalizeLine(raw) {
       if (s.id === 'PACK' && s.task === 'AMMR 양팔로 옆 선반에서 포장재를 가져와 제품별 포장·라벨') s.task = ZONE_RECIPES.find((r) => r.id === 'PACK').task;
       const F = ZONE_RECIPES.find((r) => r.id === s.id)?.fasten;   // 체결·압입 점(2~4점) 설정은 셀에 고정 — 저장된 라인·편집 초안에 없어도 되살린다 (빠지면 점마다 선반 왕복 체결이 꺼진다)
       if (F) s.fasten = { ...F };
+      if (s.id === 'SORT') { s.kitXfer = true; if (/부품 선반에서 부품을 가져와 판별·분류·키팅/.test(s.task)) s.task = ZONE_RECIPES.find((r) => r.id === 'SORT').task; }   // 서열 키팅 옮겨 싣기 (저장된 예전 레시피에도)
     }
   } else if (!LAYOUTS[layout]) { warnings.push(`알 수 없는 레이아웃 "${raw?.layout}" → 일자형`); out.layout = 'straight'; }
   return { line: out, errors, warnings };

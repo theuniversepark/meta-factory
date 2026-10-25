@@ -2,8 +2,8 @@
 // 부품분류셀 연결(선반 대신 키트 컨베이어 · 정비 자리 · 부품 선반 재고 대상 아님), 피지컬AI ①~⑥이 단계별로 다르게 기록되는지와 셀 대기 시간, 센서값 · 데이터(MQTT 토픽)를 확인한다
 // (트레이·피킹 로봇·키트 포켓 동작과 간섭은 tools/check-collisions.cjs). 실행: npm test
 import { Simulation } from '../js/sim.js';
-import { zoneLine, AMMR } from '../js/line.js';
-import { SPS_SPEC, SPS_SENSORS, SPS_TOPIC, SPS_KITS, SPS_RACKS, SPS_GEO, SPS_SIDE, SPS_LINE, SPS_T, SPS_LOAD } from '../js/sps.js';
+import { zoneLine, AMMR, effCycle, SORT_CYCLE } from '../js/line.js';
+import { SPS_SPEC, SPS_SENSORS, SPS_TOPIC, SPS_KITS, SPS_RACKS, SPS_GEO, SPS_SIDE, SPS_LINE, SPS_T, kitSlot, SORT_AMMR, SORT_ARM, sortPlaced, sortGrabbed } from '../js/sps.js';
 let pass = 0, fail = 0;
 const check = (name, ok, info = '') => { ok ? pass++ : fail++; console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${info ? '  — ' + info : ''}`); };
 const sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
@@ -12,17 +12,27 @@ console.log('== 구성 · 배치');
 check('키트: 도어트림·e-axle 각 4개(조립셀 로봇 4대 순서) · 흐름 랙 3대 · e-axle 베어링·오일씰은 로트 추적', Object.values(SPS_KITS).every((k) => k.length === 4 && k.every((q) => q[2] >= 0 && q[2] < 3)) && Object.values(SPS_RACKS).every((r) => r.length === 3) && SPS_KITS.eaxle.filter((q) => q[5]).map((q) => q[0]).join() === '베어링,오일씰' && !SPS_KITS.doortrim.some((q) => q[5]));
 check('키팅 구역 쪽: 도어트림 +z · e-axle −z (게이트 결정의 주 작업 로봇 쪽) · 라인사이드 칸반 셀 4곳', SPS_SIDE.doortrim === 1 && SPS_SIDE.eaxle === -1 && Object.keys(SPS_LINE).join() === 'DT_ASSY,DT_FAST,EA_ASSY,EA_FAST');
 const G = SPS_GEO, B = G.booth;
-check('배치: 키트 컨베이어는 셀(±2.3) 밖 · 동쪽 끝이 분기 차로 시작(x 2.3) 안쪽 · 버퍼 4칸 + 담기 자리 겹치지 않음 · 서쪽 정비 자리(x −3.0)와 떨어짐',
-  G.conv.z - G.conv.w / 2 > 2.3 && G.conv.x1 < 2.3 && G.buf.every((x, i) => i === 0 || x - G.buf[i - 1] >= 0.48) && G.build - 0.23 > G.buf.at(-1) + 0.23 && G.conv.x0 > -3.0 + 0.6 && B.x0 > -3.0 + 0.1);
+check('배치: 키트 컨베이어는 셀(±2.3) 밖 · 동쪽 끝이 분기 차로(컨베이어 높이 z에서 x 4.2~)와 떨어짐 · 버퍼 4칸 + 담기 자리 겹치지 않음 · 꺼내는 자리 = AMR 가운데(x 0) · 서쪽 정비 자리(x −3.0)와 떨어짐',
+  G.conv.z - G.conv.w / 2 > 2.3 && G.conv.x1 < 2.3 + (G.conv.z - G.conv.w / 2) * (2.9 / 4.6) - 0.5 && G.buf.every((x, i) => i === 0 || x - G.buf[i - 1] >= 0.48) && G.build - 0.23 > G.buf.at(-1) + 0.23 && G.buf[0] === 0 && G.chute.x0 > -3.0 + 0.6 && B.x0 > -3.0 + 0.1);
+check('닿는 거리: 부품분류셀 협동로봇(x 0 · z 1.6)이 컨베이어 맨 앞 트레이와 키트 포켓 먼 칸에 모두 닿음 (UR20 1.75m) · 키트 포켓 칸은 제품 쪽 절반에',
+  Math.hypot(0.165, G.conv.z - G.armZ) < 1.6 && Object.keys(SPS_KITS).every((p) => [0, 1, 2, 3].every((j) => { const k = kitSlot(p, j); return Math.hypot(k[0], k[2] - SPS_SIDE[p] * G.armZ) < 1.72 && Math.sign(k[2]) === SPS_SIDE[p]; })));
 check('배치: 피킹 길은 컨베이어와 흐름 랙 사이 · 클린 부스는 컨베이어를 덮지 않음(셀 쪽 트임) · 흐름 랙을 덮음', G.lane > G.conv.z + G.conv.w / 2 && G.lane < G.rackZ - G.rackD / 2 && B.z0 > G.conv.z + G.conv.w / 2 && B.z1 > G.rackZ + G.rackD / 2 && B.x0 < Math.min(...G.racks) - G.rackW / 2 && B.x1 > Math.max(...G.racks) + G.rackW / 2);
-check('진행 구간: 피킹(부품 4개 · 0.2씩) → 검증 · AMR에 싣는 순간 = AMMR 왕복 놓기', SPS_T.pick === 0.8 && SPS_T.verify === 1 && SPS_LOAD === 0.5);
+check('진행 구간: 키팅 피킹(부품 4개 · 0.2씩) → 검증 · 부품분류셀 옮겨 싣기는 부품 4개를 하나씩 (집은 수 ≥ 넣은 수 · 끝에 4개)',
+  SPS_T.pick === 0.8 && SPS_T.verify === 1 && [true, false].every((am) => [0.3, 0.5, 0.6, 0.7, 0.8, 0.9].every((p) => sortGrabbed(am, p) >= sortPlaced(am, p)) && sortPlaced(am, 0.99) === 4 && sortPlaced(am, am ? 0.45 : 0.04) === 0)
+  && SORT_AMMR.pick[1] < SORT_AMMR.parts[0][0] && SORT_ARM.parts[1] <= SORT_ARM.ret[0]);
+check('부품분류셀 사이클: 제품 쪽 로봇 1대가 하므로 대수로 줄지 않음 (피지컬AI AMMR · 자동화 협동로봇 · 레거시)', (() => { const l = zoneLine(), sr = l.stations[0]; const two = effCycle(sr, 'dark'), four = effCycle({ ...sr, robot: { ...sr.robot, count: 4 } }, 'dark'); return sr.kitXfer && two === four && Math.abs(two - SORT_CYCLE * 0.9) < 1e-9 && effCycle(sr, 'smart') === SORT_CYCLE * 1.25; })());
 
 console.log('== 부품분류셀 연결');
 const sims = Object.fromEntries(['dark', 'smart', 'traditional'].map((m) => [m, new Simulation(m, 17, { line: zoneLine(), quiet: true })]));
 const sortOf = (s) => s.processing.find((x) => x.id === 'SORT');
 const D = sortOf(sims.dark);
 check('피지컬AI 부품분류셀: 부품 선반 재고·보충 대상 아님(서열 버퍼에서 꺼냄) · 다른 셀은 선반 재고 그대로', D.parts == null && sims.dark.processing.filter((x) => x.id !== 'SORT').every((x) => x.parts === sims.dark.mode.partsCap));
-check('AMMR 왕복: 자기 쪽 키트 컨베이어(z ±3.3) 앞(z ±2.5)까지 · 선반 메시 없음 표시(sps)', D.ammrRacks?.length === 2 && D.ammrRacks.every((p) => p.sps && Math.abs(p.rack.z) === G.conv.z && Math.abs(p.pick.z) === G.pickZ && Math.abs(p.slot.z) === AMMR.slotZ && Math.sign(p.pick.z) === p.side));
+check('AMMR: 대기 자리는 AMR 가운데 맞은편(x 0) · 자기 쪽 키트 컨베이어 앞까지 · 선반 메시 없음 표시(sps)', D.ammrRacks?.length === 2 && D.ammrRacks.every((p) => p.sps && p.slot.x === 0 && Math.abs(p.rack.z) === G.conv.z && Math.abs(p.pick.z) === G.pickZ && Math.abs(p.slot.z) === AMMR.slotZ && Math.sign(p.pick.z) === p.side));
+{ // 제품 쪽 AMMR만 움직임: 도어트림이 들어오면 +z 로봇, e-axle이면 −z 로봇 (다른 로봇은 대기 자리)
+  const s2 = new Simulation('dark', 5, { line: zoneLine(), quiet: true }), S2 = sortOf(s2), seen = { doortrim: new Set(), eaxle: new Set() };
+  for (let t = 0; t < 1500 && (!seen.doortrim.size || !seen.eaxle.size || t < 600); t += 0.1) { s2.step(0.1); if (S2.item?.product && S2.state === 'BUSY') for (const u of S2.ammr) if (u.phase !== 'work' || u.pos > 0) seen[S2.item.product].add(u.side); }
+  check('제품별 분담: 도어트림은 +z AMMR만 · e-axle은 −z AMMR만 키트를 가지러 나감 (다른 쪽은 대기)', [...seen.doortrim].join() === '1' && [...seen.eaxle].join() === '-1', `도어트림 ${[...seen.doortrim]} · e-axle ${[...seen.eaxle]}`);
+}
 check('정비 자리 · 순찰 자리: 셀 서쪽(키팅 구역을 지나지 않음)', D.svc && D.svc.x < D.x - 2.5 && sims.dark.patrolSpot(D).x < D.x - 2.5);
 
 console.log('== 피지컬AI · 자동화 · 레거시 (대상물 3000개 · 9초마다 투입 · 도어트림/e-axle 번갈아)');

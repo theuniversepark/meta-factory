@@ -111,7 +111,7 @@ console.log('== 확장 Zone (유연생산 QR · 적응가공 DataMatrix) — 화
 
 console.log('== 내려받기 (EPCIS 2.0 · CSV)');
 { const doc = serialEpcis(H, iso), ev = doc.epcisBody.eventList, csv = serialsCSV(H).split('\n');
-  check('EPCIS: 시리얼 발행(commissioning) · 포장 묶음(AggregationEvent SSCC) · 출하(shipping) · 보류 · 폐기(decommissioning)', ['commissioning', 'packing', 'shipping', 'holding', 'decommissioning'].every((b) => ev.some((e) => e.bizStep?.endsWith(b))) && ev.some((e) => e.type === 'AggregationEvent' && /^urn:epc:id:sscc:8800000\.\d{10}$/.test(e.parentID)), `${ev.length}건`);
+  check('EPCIS: 시리얼 발행(commissioning) · 포장 묶음(AggregationEvent SSCC) · 출하(shipping) · 보류 · 폐기(decommissioning)', ['commissioning', 'packing', 'shipping', 'holding', ...(H.units.some((u) => u.disp?.d === 'scrap') ? ['decommissioning'] : [])].every((b) => ev.some((e) => e.bizStep?.endsWith(b))) && ev.some((e) => e.type === 'AggregationEvent' && /^urn:epc:id:sscc:8800000\.\d{10}$/.test(e.parentID)), `${ev.length}건`);
   check('serials.csv: WIP ID · 시리얼 · GTIN · 마킹 · SSCC · 처분 열', csv[0].startsWith('wip_id,serial,zone,product,gtin') && csv.length > 300);
   const A = allFiles(T, iso).map((f) => f.path);
   check('불량 분석 전체 묶음에 serial_events.jsonld · serials.csv 포함', A.includes('serial_events.jsonld') && A.includes('serials.csv'));

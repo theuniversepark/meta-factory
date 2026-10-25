@@ -53,17 +53,40 @@ export const SPS_SENSORS = [
 // 키트 1개 담기 진행 구간 (0~1): 부품 4개 피킹 (0 ~ 0.8, 부품마다 0.2) · 검증 (0.8 ~ 1)
 export const SPS_T = { pick: 0.8, verify: 1 };
 export const SPS_PHASE_KO = { pick: '흐름 랙에서 피킹', verify: '검증 (영상 · 무게)', full: '서열 버퍼 가득 — 대기', stockout: '흐름 랙 결품 — 보충 대기', idle: '대기' };
-// 키팅 구역 배치 (부품분류셀 로컬 m — x: 흐름 방향, z: 쪽 부호 × 값) · 셀(±2.3) 밖 셀 앞뒤 · 동쪽 분기 차로(x 2.3~ 대각)와 서쪽 정비 자리(x −3.0)를 비킨다
-//  · 키트 컨베이어 z 3.3: 동쪽 끝 담기·검증 자리(x 1.4) → 서쪽으로 서열 버퍼 4칸(x 0.75 · 0.25 · −0.25 · −0.75 = 꺼내는 자리 — 지금 셀이 꺼내 가는 키트 + 버퍼 3개)
-//  · 피킹 길 z 4.2 (레일 · AMMR · 작업자) · 흐름 랙 z 5.4 (셀 쪽 z 4.95에서 꺼내고 바깥 z 5.85에서 보충)
-//  · e-axle 쪽: 컨베이어 서쪽 끝 개봉대(x −1.65) · 클린 부스(피킹 길·흐름 랙을 덮고 컨베이어 쪽은 트였다)
+// 키팅 구역 배치 (부품분류셀 로컬 m — x: 흐름 방향, z: 쪽 부호 × 값) · 셀(±2.3) 밖 셀 앞뒤 · 동쪽 분기 차로(z ±3 높이에서 x 4.2~)와 서쪽 정비 자리(x −3.0)를 비킨다
+//  · 키트 컨베이어 z 3.05: 동쪽 끝 담기·검증 자리(x 2.0) → 서쪽으로 서열 버퍼 4칸(x 1.5 · 1.0 · 0.5 · 0 = 꺼내는 자리 — 부품분류셀 로봇이 AMR 가운데 맞은편에 서므로 그 앞)
+//    꺼내는 자리 서쪽 끝에 빈 트레이 회수 슈트(x −0.7) → 컨베이어 아래 회수 레인(y 0.4)으로 담기 자리까지 돌아감
+//  · 피킹 길 z 4.1 (레일 · AMMR · 작업자 — 랙 끝 칸까지 x −2.15 ~ 2.05) · 흐름 랙 z 5.4 (셀 쪽 z 4.95에서 꺼내고 바깥 z 5.85에서 보충)
+//  · e-axle 쪽: 개봉대(x −1.65 · 컨베이어 줄) · 클린 부스(피킹 길·흐름 랙을 덮고 컨베이어 쪽은 트였다)
 export const SPS_GEO = {
-  conv: { z: 3.3, x0: -1.15, x1: 1.95, y: 0.86, w: 0.5 }, buf: [-0.75, -0.25, 0.25, 0.75], build: 1.4, pickZ: 2.5,
-  lane: 4.2, laneX: [-1.75, 1.75], racks: [-1.75, -0.2, 1.3], rackZ: 5.4, rackW: 1.3, rackD: 0.9, depack: -1.65,
-  booth: { x0: -2.85, x1: 2.4, z0: 3.62, z1: 6.15, h: 2.55 },   // 동쪽 끝은 e-axle 피킹 로봇이 셋째 랙 끝 칸(x 1.7)에 팔을 뻗어도 모서리 기둥에 닿지 않게
+  conv: { z: 3.05, x0: -0.4, x1: 2.35, y: 0.86, w: 0.5 }, buf: [0, 0.5, 1.0, 1.5], build: 2.0, pickZ: 2.4,
+  chute: { x: -0.62, y: 0.66, x0: -0.95, x1: -0.35, top: 0.8 }, ret: { y: 0.4 },   // 회수 슈트(서쪽이 높고 동쪽으로 내려가 컨베이어 아래 회수 레인으로) · 빈 트레이를 놓는 자리
+  armZ: 1.6,   // 부품분류셀 협동로봇·6축 자리 (셀 중심에서) — 컨베이어 맨 앞 트레이(1.45m)와 키트 포켓 먼 칸(1.69m)에 모두 닿는다 (UR20 리치 1.75m)
+  lane: 4.1, laneX: [-2.15, 2.05], racks: [-1.75, -0.2, 1.3], rackZ: 5.4, rackW: 1.3, rackD: 0.9, depack: -1.65,
+  booth: { x0: -2.85, x1: 2.6, z0: 3.62, z1: 6.15, h: 2.55 },   // 동쪽 끝은 피킹 로봇이 담기 자리(x 2.0)·셋째 랙 끝 칸(x 1.7)에 팔을 뻗어도 모서리 기둥에 닿지 않게
 };
-// 부품분류셀 진행률: 버퍼에서 키트를 꺼내 AMR 키트 포켓에 싣는 순간 (line.js AMMR_FETCH.place와 같은 값)
-export const SPS_LOAD = 0.5;
+// AMR 키트 포켓 칸 (대상물 그룹 좌표 · 칸 바닥): 지그 상판 뒤끝(x −0.67) · 앞끝(x 0.62) 트레이 — 제품마다 자기 쪽 절반(도어트림 +z · e-axle −z)에 칸 4개
+// 부품분류셀의 그 제품 쪽 로봇이 자기 앞쪽 절반에 부품 j(SPS_KITS 순서)를 칸 j에 넣고, 조립셀 로봇은 자기 자리 쪽 칸에서 집는다
+export const kitSlot = (product, j) => [j < 2 ? -0.67 : 0.62, 0.02, (SPS_SIDE[product] ?? 1) * (j % 2 ? 0.3 : 0.1)];
+// 부품분류셀 키트 옮겨 싣기 진행 구간 — 그 제품 쪽 로봇 1대가 한다 (line.js SORT_CYCLE · 화면 factory.js sortAMMR · sortArm)
+//  · AMMR(피지컬AI): 셀 쪽 → 컨베이어 쪽으로 돎 → 컨베이어 앞으로 → (지난번 빈 트레이를 회수 슈트에) → 맨 앞 키트 트레이를 두 손으로 집음 → 셀 쪽으로 돎 → AMR 앞으로 다가섬
+//    → 뒤 포켓 쪽으로 옆걸음 → 한 손으로 트레이를 들고 다른 손으로 부품 2개를 하나씩 집어 뒤 포켓 칸에 → 앞 포켓 쪽으로 옆걸음(트레이를 두 손으로) → 부품 2개를 앞 포켓 칸에 → 대기 자리로 (빈 트레이는 든 채)
+//  · 협동로봇·6축(자동화): 컨베이어 맨 앞 트레이의 부품 4개를 하나씩 집어 키트 포켓 칸에 넣음 → 빈 트레이를 회수 슈트에
+export const SORT_AMMR = {
+  turnOut: [0.05, 0.1], driveOut: [0.1, 0.17], drop: [0.17, 0.25], pick: [0.25, 0.36], turnIn: [0.36, 0.4], driveIn: [0.4, 0.48],
+  shiftR: [0.48, 0.52], parts: [[0.52, 0.61], [0.61, 0.7], [0.75, 0.84], [0.84, 0.93]], shiftF: [0.7, 0.75], place: [0.48, 0.93], back: [0.93, 1],
+};
+export const SORT_ARM = { parts: [0.05, 0.85], ret: [0.85, 0.96] };
+// 부품마다 구간 안에서 집는 순간 · 놓는 순간 (구간 비율)
+export const SORT_GRAB = { ammr: 0.42, arm: 0.36 }, SORT_DROP = { ammr: 0.86, arm: 0.8 };
+const partWins = (ammr) => (ammr ? SORT_AMMR.parts : [0, 1, 2, 3].map((k) => { const [a, b] = SORT_ARM.parts, w = (b - a) / 4; return [a + w * k, a + w * (k + 1)]; }));
+const countAt = (ammr, p, at) => partWins(ammr).filter(([a, b]) => p >= a + (b - a) * at).length;
+// 지금까지 키트 포켓에 넣은 부품 수 · 트레이에서 집어 간 부품 수
+export const sortPlaced = (ammr, p) => countAt(ammr, p, SORT_DROP[ammr ? 'ammr' : 'arm']);
+export const sortGrabbed = (ammr, p) => countAt(ammr, p, SORT_GRAB[ammr ? 'ammr' : 'arm']);
+export const sortPartWin = (ammr, k) => partWins(ammr)[k];
+// AMMR이 맨 앞 트레이를 집어 드는 순간 · 협동로봇이 빈 트레이를 슈트에 놓는 순간
+export const SORT_TAKE = { ammr: SORT_AMMR.pick[0] + (SORT_AMMR.pick[1] - SORT_AMMR.pick[0]) * 0.45, arm: SORT_ARM.ret[0] + (SORT_ARM.ret[1] - SORT_ARM.ret[0]) * 0.8 };
 
 export class SpsMonitor {
   constructor(sim) {

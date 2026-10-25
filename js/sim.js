@@ -18,7 +18,7 @@ import { WasherMonitor } from './washer.js';
 import { CmmCellMonitor } from './cmmcell.js';
 import { MatlCellMonitor } from './matlcell.js';
 import { KitMonitor } from './kitcell.js';
-import { SpsMonitor, SPS_GEO } from './sps.js';
+import { SpsMonitor, SPS_GEO, SORT_AMMR } from './sps.js';
 import { ZoneKpi } from './zonekpi.js';
 import { CapaManager } from './capa.js';
 import { FactoryOS } from './factoryos.js';
@@ -777,7 +777,8 @@ export class Simulation {
     // 부품분류셀: 선반 대신 셀 양옆 키팅 구역의 키트 컨베이어(서열 버퍼) — 로봇은 자기 쪽 컨베이어 앞까지 나가 키트를 꺼낸다 (js/sps.js SPS_GEO)
     if (zone && st.id === 'SORT') {
       const G = SPS_GEO;
-      st.ammrRacks = st.ammr.map((u, i) => { const [sx, side] = slots[i] ?? slots[0]; return { mode: 'z', sps: true, rack: { x: sx, z: side * G.conv.z }, pick: { x: sx, z: side * G.pickZ }, side, slot: { x: sx, z: side * AMMR.slotZ } }; });
+      // 대기 자리는 AMR 가운데 맞은편(x 0) — 키트 포켓 앞뒤 칸에 양팔이 고르게 닿고, 컨베이어 맨 앞 칸(x 0)으로 곧장 나간다 (3·4번째 로봇은 원래 자리)
+      st.ammrRacks = st.ammr.map((u, i) => { const [sx0, side] = slots[i] ?? slots[0], sx = i < 2 ? 0 : sx0; return { mode: 'z', sps: true, rack: { x: sx, z: side * G.conv.z }, pick: { x: sx, z: side * G.pickZ }, side, slot: { x: sx, z: side * AMMR.slotZ } }; });
       for (const [i, u] of st.ammr.entries()) { const p = st.ammrRacks[i]; u.rack = p; u.travel = Math.abs(p.pick.z - p.slot.z); }
       return;
     }
@@ -1301,7 +1302,7 @@ export class Simulation {
     st.gate = {
       id: it.id, product: it.product, t: this.time, lead,
       text: sort ? `${P} → ${P} 라인 · ${P} 키트` : `${P} → ${tray ? '트레이' : '크레이트'} 포장`,
-      role: sort ? { lead: `${P} 부품 키팅`, support: '작업물 고정 · ID 태그' } : { lead: `${P} ${tray ? '트레이' : '크레이트'} 포장`, support: '작업물 고정 · 라벨' },
+      role: sort ? { lead: `${P} 키트 4개를 AMR 키트 포켓에 옮겨 담기`, support: `대기 — 다른 제품 담당 (${P}는 맡지 않음)` } : { lead: `${P} ${tray ? '트레이' : '크레이트'} 포장`, support: '작업물 고정 · 라벨' },
     };
     st.gateCount ??= {}; st.gateCount[it.product] = (st.gateCount[it.product] ?? 0) + 1;
     // 결정 기록 (FACOS 셀·게이트 화면): 최근 40건 + 로봇별 주 작업 횟수
@@ -1338,6 +1339,7 @@ export class Simulation {
     }
   }
   updateAMMR(st) {
+    if (this.zone && st.id === 'SORT' && this.sps?.on) return this.updateSortAMMR(st);
     const work = st.item && !st.item.scrap && !st.done && ['BUSY', 'DOWN', 'MAINT', 'ESTOP', 'PSTOP', 'CHECK', 'CSTOP'].includes(st.state);
     for (const u of st.ammr) {
       if (!work || !this.isLead(st, u.i)) { if (!st.item || st.done || work) { u.phase = 'work'; u.pos = 0; u.turn = 0; u.carry = false; } continue; }   // 보조 역할은 자리에서 작업물 고정
@@ -1349,6 +1351,24 @@ export class Simulation {
       else if (q < AMMR_FETCH.turnIn) { u.phase = 'turnIn'; u.turn = 1 - seg(AMMR_FETCH.pick, AMMR_FETCH.turnIn); u.pos = 1; u.carry = true; }
       else if (q < AMMR_FETCH.driveIn) { u.phase = 'driveIn'; u.turn = 0; u.pos = 1 - seg(AMMR_FETCH.turnIn, AMMR_FETCH.driveIn); u.carry = true; }
       else { u.phase = 'work'; u.turn = 0; u.pos = 0; u.carry = q < AMMR_FETCH.place; }
+      if (u.phase === 'pick' && u.lastItem !== st.item.id) { u.lastItem = st.item.id; u.trips++; }
+    }
+  }
+
+  // 부품분류셀 AMMR: 그 제품 쪽 로봇만 키트를 가져와 옮겨 싣는다 (js/sps.js SORT_AMMR — 화면 factory.js sortAMMR과 같은 구간) · 다른 로봇은 대기 자리에서 쉼
+  updateSortAMMR(st) {
+    const work = st.item && !st.item.scrap && !st.done && ['BUSY', 'DOWN', 'MAINT', 'ESTOP', 'PSTOP', 'CHECK', 'CSTOP'].includes(st.state), A = SORT_AMMR, p = st.progress ?? 0;
+    const k = (w) => Math.min(1, Math.max(0, (p - w[0]) / (w[1] - w[0])));
+    for (const u of st.ammr) {
+      if (!work || !this.isLead(st, u.i) || u.i !== this.isLeadFirst(st)) { if (!st.item || st.done || work) { u.phase = 'work'; u.pos = 0; u.turn = 0; u.carry = false; } continue; }
+      if (p < A.turnOut[0]) { u.phase = 'work'; u.turn = 0; u.pos = 0; }
+      else if (p < A.turnOut[1]) { u.phase = 'turnOut'; u.turn = k(A.turnOut); u.pos = 0; }
+      else if (p < A.driveOut[1]) { u.phase = 'driveOut'; u.turn = 1; u.pos = k(A.driveOut); }
+      else if (p < A.pick[1]) { u.phase = 'pick'; u.turn = 1; u.pos = 1; }
+      else if (p < A.turnIn[1]) { u.phase = 'turnIn'; u.turn = 1 - k(A.turnIn); u.pos = 1; }
+      else if (p < A.driveIn[1]) { u.phase = 'driveIn'; u.turn = 0; u.pos = 1 - k(A.driveIn); }
+      else { u.phase = 'work'; u.turn = 0; u.pos = 0; }
+      u.carry = p >= A.pick[0] + (A.pick[1] - A.pick[0]) * 0.4 && p < A.place[1];
       if (u.phase === 'pick' && u.lastItem !== st.item.id) { u.lastItem = st.item.id; u.trips++; }
     }
   }
