@@ -116,7 +116,7 @@ function buildScanCell(g) {
 // 안에 넣어 재는 셀 (O-INSPECT 정반 · 청정도 추출 캐비닛 · CT 턴테이블): 로봇이 AMR 지그의 시료를 집어 넣고, 끝나면 다시 AMR로
 // 청정도 · CT: 로봇을 받침대(0.45m) 위 AMR 통로와 장비 사이 가운데(z −1.15)에 — 뒤로 돌아 AMR 시료를 집고 앞쪽 장비에 넣는 머신 텐딩 배치
 //  (예전 자리 x −1.45 · z −0.95는 AMR이 셀 서쪽에서 들어오는 길 옆 바닥이라 AMR·장비 옆벽·CT 문과 겹쳤다) · 장비는 그만큼 뒤로 (청정도 추출대 z −2.1 · CT 턴테이블 z −2.45)
-const CAB = { oins: { robot: { x: -1.45, z: -0.95 }, table: { x: 0, z: -1.75, y: 0.9 } }, clean: { robot: { x: 0, z: -1.15, y: 0.45 }, table: { x: 0, z: -2.1, y: 0.95 } }, ct: { robot: { x: 0, z: -1.15, y: 0.45 }, table: { x: 0, z: -2.45, y: 0.92 } } };   // CT 문(앞면 z −1.58)이 로봇 받침(−1.45)과 띄워짐
+const CAB = { oins: { robot: { x: -1.45, z: -0.95 }, table: { x: 0, z: -1.75, y: 0.9 } }, clean: { robot: { x: 0, z: -1.15, y: 0.45 }, table: { x: 0, z: -2.1, y: 0.95 } }, ct: { robot: { x: 0, z: -1.15, y: 0.45 }, table: { x: 0, z: -2.15, y: 0.92 } } };   // CT 턴테이블은 차폐 본체 앞 시료실 가운데 (본체 안에 묻히지 않게)   // CT 문(앞면 z −1.58)이 로봇 받침(−1.45)과 띄워짐
 const OINS = { col: -2.7 };
 // O-INSPECT: 화강암 정반 + 뒤쪽 기둥 · 앞으로 뻗은 암 · 측정 헤드(카메라·접촉 프로브)
 function buildOins(g) {
@@ -170,21 +170,21 @@ function buildClean(g) {
   put(box(1.5, T.y - 0.05, 1.2, MAT.steel), T.x, (T.y - 0.05) / 2, T.z - 0.1, g);
   for (const sx of [-1, 1]) put(box(0.05, 1.3, 1.2, MAT.glass, false), T.x + sx * 0.75, T.y + 0.6, T.z - 0.1, g);
   put(box(1.5, 0.05, 1.2, MAT.steel), T.x, T.y + 1.25, T.z - 0.1, g);
-  const spray = emis(0x9fd8ff, 0.3); const nozzle = put(box(0.1, 0.25, 0.1, MAT.dark), T.x, T.y + 1.05, T.z, g); put(cyl(0.18, 0.02, 0.5, spray, 12, true), 0, -0.38, 0, nozzle);
+  const spray = emis(0x9fd8ff, 0.3); const nozzle = put(box(0.1, 0.25, 0.1, MAT.dark), T.x, T.y + 1.05, T.z, g), jet = put(cyl(0.18, 0.02, 0.5, spray, 12, true), 0, -0.38, 0, nozzle); jet.visible = false;   // 분사 원뿔은 세정하는 동안만 (로봇이 물러난 뒤)
   const scope = put(new THREE.Group(), 1.75, 0, -1.4, g); put(box(0.6, 0.85, 0.6, MAT.steel), 0, 0.425, 0, scope); put(box(0.12, 0.5, 0.12, MAT.white), 0, 1.1, -0.15, scope); put(cyl(0.05, 0.05, 0.25, MAT.dark, 10), 0, 1.0, 0.0, scope);
   const screen = emis(0x58c4ff, 1.2); put(box(0.4, 0.28, 0.02, screen, false), 0, 1.45, 0.25, scope);
   for (const [x, z] of [[-2.1, -2.9], [2.2, -2.9]]) put(box(0.04, 2.4, 0.04, MAT.steel), x, 1.2, z, g);   // 청정 부스 뒤 커튼 (추출 캐비닛 뒤)
   put(box(4.3, 0.04, 0.04, MAT.steel), 0.05, 2.4, -2.9, g); put(box(4.3, 2.0, 0.02, std(0xdff6ff, { transparent: true, opacity: 0.18 }), false), 0.05, 1.4, -2.92, g);
-  return { spray, screen };
+  return { spray, jet, screen };
 }
 // 산업용 CT (225kV): 납 차폐 캐비닛 · 미닫이 문 · 턴테이블 · X선 경고등 — 문이 열려 있을 때만 로봇이 넣고 꺼낸다
 function buildCt(g) {
-  const T = CAB.ct.table, cab = put(new THREE.Group(), T.x, 0, T.z - 0.15, g);
-  put(box(1.9, 2.1, 1.3, std(0xcfd6dc, { roughness: 0.5, metalness: 0.3 })), 0, 1.05, -0.35, cab);   // 차폐 본체 (뒤쪽 · 선원·검출기)
+  const T = CAB.ct.table, cab = put(new THREE.Group(), T.x, 0, T.z - 0.45, g);
+  put(box(1.9, 2.1, 1.3, std(0xcfd6dc, { roughness: 0.5, metalness: 0.3 })), 0, 1.05, -0.65, cab);   // 앞면(z 0)부터 문(1.02)까지가 시료실   // 차폐 본체 (뒤쪽 · 선원·검출기)
   for (const sx of [-1, 1]) put(box(0.08, 2.1, 0.9, std(0xcfd6dc)), sx * 0.91, 1.05, 0.55, cab);
   put(box(1.9, 0.12, 0.9, std(0xcfd6dc)), 0, 2.04, 0.55, cab);
   const door = put(box(0.95, 1.6, 0.06, std(0xaab4bf, { metalness: 0.4 })), 0, 1.0, 1.02, cab);
-  const turn = put(new THREE.Group(), 0, T.y - 0.04, 0.15, cab); put(cyl(0.32, 0.32, 0.06, MAT.dark, 24), 0, 0, 0, turn); put(box(0.4, 0.82, 0.4, MAT.dark), 0, -0.45, 0, turn);
+  const turn = put(new THREE.Group(), 0, T.y - 0.04, 0.45, cab); put(cyl(0.32, 0.32, 0.06, MAT.dark, 24), 0, 0, 0, turn); put(box(0.4, 0.82, 0.4, MAT.dark), 0, -0.45, 0, turn);
   const xray = emis(0xff4d4d, 0.3); put(cyl(0.07, 0.07, 0.12, xray, 12), 0.75, 2.2, 0.9, cab);
   const sign = put(textPlane(['⚠ X선 촬영 중'], 1.0, 0.25, 'rgba(255,90,90,0.95)'), 0, 1.95, 1.06, cab); sign.rotation.x = 0;
   const screen = emis(0x58c4ff, 1.2), ctl = put(box(0.5, 0.9, 0.35, MAT.dark), 1.85, 0.45, -1.5, g); put(box(0.36, 0.25, 0.02, screen, false), 0, 0.25, 0.18, ctl);
@@ -257,13 +257,21 @@ function moveQ(J, f) {
   return { q: lerpQ(J[a], J[b], smq((f - f0) / Math.max(1e-6, f1 - f0))), held: f >= 0.3 && f < 0.8 };
 }
 // 넣어 재는 셀 (O-INSPECT · 청정도 · CT): AMR → 안쪽 자리 (0.05 ~ 0.1) · 측정 · 안쪽 → AMR (0.89 ~ 0.95)
-const CAB_SEQ = [[0, 'home'], [0.025, 'aU'], [0.05, 'a'], [0.075, 'aU'], [0.1, 'b'], [0.13, 'home'], [0.86, 'home'], [0.89, 'b'], [0.92, 'aU'], [0.95, 'a'], [0.975, 'aU'], [1, 'home']];
+const CAB_SEQ = [[0, 'home'], [0.025, 'aU'], [0.05, 'a'], [0.075, 'aU'], [0.088, 'bU'], [0.1, 'b'], [0.115, 'bU'], [0.13, 'home'], [0.86, 'home'], [0.875, 'bU'], [0.89, 'b'], [0.905, 'bU'], [0.925, 'aU'], [0.95, 'a'], [0.975, 'aU'], [1, 'home']];   // 안쪽 자리는 위(bU)에서 수직으로 넣고 뺀다
 function cabPose(r, p) {
   const J = r.cabJ; if (!J) return;
   let i = 0; while (i < CAB_SEQ.length - 2 && p >= CAB_SEQ[i + 1][0]) i++;
   const [p0, a] = CAB_SEQ[i], [p1, b] = CAB_SEQ[i + 1];
   r.arm.pose(...lerpQ(J[a], J[b], smq((p - p0) / Math.max(1e-6, p1 - p0))));
 }
+// 넣어 재는 셀 로봇 기본 자세 — 모델 기본 자세는 손목이 AMR 쪽으로 늘어져 들어오는 시료에 닿으므로 장비 쪽으로 접어 둔다
+function cabHome(r, cell) {
+  if (cell.def.type !== 'clean' && cell.def.type !== 'ct') return r.arm.home?.slice();   // CT 6축 기본 자세도 손목이 시료실 옆벽에 걸린다
+  const T = CAB[cell.def.type].table; cell.g.updateWorldMatrix(true, true);
+  const o = r.root.getWorldPosition(new THREE.Vector3()), tb = cell.g.localToWorld(new THREE.Vector3(T.x, T.y, T.z));
+  return ikW(r, o.clone().add(tb.sub(o).setY(0).setLength(cell.def.type === 'ct' ? 0.22 : 0.35)).setY(o.y + (cell.def.type === 'ct' ? 1.0 : 0.75)));   // CT는 닫힌 문(받침 앞 0.43m)에 닿지 않게 더 붙인다
+}
+const CAB_GRIP = 0.06;   // TCP ↔ 시료 윗면: 그리퍼 판(TCP 아래 0.055m)이 윗면에 닿는 높이
 const cabWhere = (p) => (p < 0.05 || p >= 0.95 ? 'amr' : p < 0.1 || p >= 0.89 ? 'hand' : 'in');
 export class InspZone {
   constructor(scene) {
@@ -430,6 +438,7 @@ export class InspZone {
           const head = put(box(0.14, 0.1, 0.14, std(0xd8a032)), 0, 0.05, 0, r.tip); const lens = emis(0x3ddc84, 1.2); put(cyl(0.025, 0.025, 0.06, lens, 10), 0, 0.08, 0, head); r.ipLens = lens;
         } else put(box(0.3, 0.05, 0.22, MAT.dark), 0, 0.03, 0, r.tip);   // 진공·기계식 그리퍼
         r.wristCam = !!r.wristCameraAnchor || modeKey === 'dark';   // 피지컬AI: 손목 카메라 (로봇 비전 관제 디스플레이 영상)
+        if (CAB[ty]) { const h0 = cabHome(r, c); if (h0) { r.cabJ = { home: h0 }; r.arm.pose(...h0); } }
         if (CAB[ty]) r.anim = (busy) => { if (busy) cabPose(r, c.progress); else if (c.state !== 'BUSY' && r.cabJ) r.arm.pose(...r.cabJ.home); };
         else if (ty === 'dock' || ty === 'judge') { const home = r.arm.home?.slice(); r.anim = (busy) => this.xferPose(c, r, busy, home); }
         else if (r.arm?.native) { const mode = ty === 'scan' ? (i === 0 ? 'raster' : 'ut') : ty === 'func' ? 'touch' : 'views', home = r.arm.home.slice(); r.anim = (busy, t, p) => inspPose(r, c, busy, p, mode, home); }   // 시료를 실제로 훑는다 (inspPose)
@@ -706,7 +715,8 @@ export class InspZone {
     const T = CAB[cell.def.type], m = a.pm; if (!T || !m) return;
     const base = new THREE.Vector3(a.x, BELT_Y, a.z), h = m.userData.h, tb = cell.g.localToWorld(new THREE.Vector3(T.table.x, T.table.y, T.table.z));
     cell.cab = { a: base, b: tb, h };
-    for (const r of cell.robots) { r.root.updateWorldMatrix(true, true); const g = (v, dy) => ikW(r, v.clone().setY(v.y + h + 0.01 + dy)); r.cabJ = { aU: g(base, 0.35), a: g(base, 0), b: g(tb, 0) }; r.cabJ.home = r.arm.home?.slice() ?? r.cabJ.aU; }
+    for (const r of cell.robots) { r.root.updateWorldMatrix(true, true); const g = (v, dy) => ikW(r, v.clone().setY(v.y + h + CAB_GRIP + dy)); r.cabJ = { aU: g(base, 0.35), a: g(base, 0), bU: g(tb, 0.22), b: g(tb, 0) };
+      r.cabJ.home = cabHome(r, cell) ?? r.cabJ.aU; }
   }
   push(it, res) { this.recent.unshift({ id: it.id, zone: it.zone, product: it.product, res, t: this.time }); this.recent.length = Math.min(this.recent.length, 6); }
   attach(c) { const m = makeSample(c.item.product); setPacked(m, true); m.position.set(0, BELT_Y, 0); m.rotation.y = PI / 2; c.g.add(m); c.pm = m; }   // 제품 긴 쪽을 AMR 긴 쪽(진행 방향)으로 — 후드(1.6m)가 옆으로 삐져나와 셀 로봇에 닿지 않게   // 정밀조립 시료는 포장 상자째 · 유연생산·적응가공은 지그째
@@ -744,7 +754,7 @@ export class InspZone {
     if (CAB[c.def.type] && c.cab && c.occ?.pm && c.state !== 'IDLE') {   // 넣어 재는 셀: 시료가 AMR → 손 → 안쪽 자리 → 손 → AMR (CT는 턴테이블과 함께 돈다)
       const U = c.occ.pm.userData, w = c.state === 'DONE' ? 'amr' : cabWhere(p), r = c.robots[0];
       if (w === 'amr' || !r) { U.prod.position.set(0, 0, 0); U.prod.rotation.y = 0; }
-      else if (w === 'hand') { r.root.updateWorldMatrix(true, true); const v = r.tip.getWorldPosition(new THREE.Vector3()); v.y -= c.cab.h + 0.01; setW(U.prod, v); U.prod.rotation.y = 0; }
+      else if (w === 'hand') { r.root.updateWorldMatrix(true, true); const v = r.tip.getWorldPosition(new THREE.Vector3()); v.y -= c.cab.h + CAB_GRIP; setW(U.prod, v); U.prod.rotation.y = 0; }
       else { setW(U.prod, c.cab.b); if (c.def.type === 'ct') U.prod.rotation.y = P.turn.rotation.y; }
     }
     c.workersG.children.forEach((w) => KIT.workerCycle(w, busy, p, 3, (w.userData.baseYaw ??= w.rotation.y)));   // 레거시 검사원: 시료를 집어 보고 게이지를 대는 수작업 사이클
@@ -761,7 +771,7 @@ export class InspZone {
         break;
       }
       case 'func': { const on = busy && p > 0.12 && p < 0.88; P.screen.emissive.setHex(on ? 0x58c4ff : 0x3ddc84); P.gauge.emissiveIntensity = on ? 1.5 + Math.sin(t * 5) : 0.6; P.warn.emissiveIntensity = on && c.item?.product === 'eaxle' && Math.sin(t * 6) > 0 ? 2.5 : 0.3; break; }   // 누설 압력 · 절연 시험 중 경고
-      case 'clean': { const on = busy && cabWhere(p) === 'in' && p > 0.15 && p < 0.6; P.spray.emissiveIntensity = on ? 1.5 + Math.sin(t * 20) : 0.2; P.screen.emissive.setHex(busy && p >= 0.6 ? 0x58c4ff : 0x3ddc84); break; }   // 압력 세정 추출 → 여과·입자 분석
+      case 'clean': { const on = busy && cabWhere(p) === 'in' && p > 0.15 && p < 0.6; if (P.jet) P.jet.visible = on; P.spray.emissiveIntensity = on ? 1.5 + Math.sin(t * 20) : 0.2; P.screen.emissive.setHex(busy && p >= 0.6 ? 0x58c4ff : 0x3ddc84); break; }   // 압력 세정 추출 → 여과·입자 분석
       case 'ct': {
         const scan = busy && p > 0.16 && p < 0.84, open = !busy || p < 0.13 || p > 0.86;
         P.door.position.x += ((open ? 0.95 : 0) - P.door.position.x) * Math.min(1, rdt * 3);   // 넣고 꺼낼 때만 문이 열린다
