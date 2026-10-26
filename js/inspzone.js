@@ -116,7 +116,7 @@ function buildScanCell(g) {
 // 안에 넣어 재는 셀 (O-INSPECT 정반 · 청정도 추출 캐비닛 · CT 턴테이블): 로봇이 AMR 지그의 시료를 집어 넣고, 끝나면 다시 AMR로
 // 청정도 · CT: 로봇을 받침대(0.45m) 위 AMR 통로와 장비 사이 가운데(z −1.15)에 — 뒤로 돌아 AMR 시료를 집고 앞쪽 장비에 넣는 머신 텐딩 배치
 //  (예전 자리 x −1.45 · z −0.95는 AMR이 셀 서쪽에서 들어오는 길 옆 바닥이라 AMR·장비 옆벽·CT 문과 겹쳤다) · 장비는 그만큼 뒤로 (청정도 추출대 z −2.1 · CT 턴테이블 z −2.45)
-const CAB = { oins: { robot: { x: -1.45, z: -0.95 }, table: { x: 0, z: -1.75, y: 0.9 } }, clean: { robot: { x: 0, z: -1.15, y: 0.45 }, table: { x: 0, z: -2.1, y: 0.95 } }, ct: { robot: { x: 0, z: -1.15, y: 0.45 }, table: { x: 0, z: -2.15, y: 0.92 } } };   // CT 턴테이블은 차폐 본체 앞 시료실 가운데 (본체 안에 묻히지 않게)   // CT 문(앞면 z −1.58)이 로봇 받침(−1.45)과 띄워짐
+const CAB = { oins: { robot: { x: -1.45, z: -0.95 }, table: { x: 0, z: -1.75, y: 0.9 } }, clean: { robot: { x: 0, z: -1.15, y: 0.45 }, table: { x: 0, z: -2.1, y: 0.95 } }, ct: { robot: { x: 0, z: -1.15, y: 0.2 }, table: { x: 0, z: -2.35, y: 0.92 } } };   // CT 턴테이블은 차폐 본체 앞 시료실 가운데 · 받침대를 낮춰(0.2m) 넣을 때 위팔이 시료실 지붕 앞 모서리에 걸리지 않게 · 문을 받침대에서 0.68m 띄움   // CT 문(앞면 z −1.58)이 로봇 받침(−1.45)과 띄워짐
 const OINS = { col: -2.7 };
 // O-INSPECT: 화강암 정반 + 뒤쪽 기둥 · 앞으로 뻗은 암 · 측정 헤드(카메라·접촉 프로브)
 function buildOins(g) {
@@ -179,12 +179,14 @@ function buildClean(g) {
 }
 // 산업용 CT (225kV): 납 차폐 캐비닛 · 미닫이 문 · 턴테이블 · X선 경고등 — 문이 열려 있을 때만 로봇이 넣고 꺼낸다
 function buildCt(g) {
-  const T = CAB.ct.table, cab = put(new THREE.Group(), T.x, 0, T.z - 0.45, g);
-  put(box(1.9, 2.1, 1.3, std(0xcfd6dc, { roughness: 0.5, metalness: 0.3 })), 0, 1.05, -0.65, cab);   // 앞면(z 0)부터 문(1.02)까지가 시료실   // 차폐 본체 (뒤쪽 · 선원·검출기)
-  for (const sx of [-1, 1]) put(box(0.08, 2.1, 0.9, std(0xcfd6dc)), sx * 0.91, 1.05, 0.55, cab);
-  put(box(1.9, 0.12, 0.9, std(0xcfd6dc)), 0, 2.04, 0.55, cab);
-  const door = put(box(0.95, 1.6, 0.06, std(0xaab4bf, { metalness: 0.4 })), 0, 1.0, 1.02, cab);
-  const turn = put(new THREE.Group(), 0, T.y - 0.04, 0.45, cab); put(cyl(0.32, 0.32, 0.06, MAT.dark, 24), 0, 0, 0, turn); put(box(0.4, 0.82, 0.4, MAT.dark), 0, -0.45, 0, turn);
+  const T = CAB.ct.table, cab = put(new THREE.Group(), T.x, 0, T.z - 0.5, g);
+  // 시료실 안쪽 폭 2.14m — 지그째 든 시료(1.1 × 0.8m)를 꺼내 AMR 쪽으로 돌 때 옆 칸막이에 닿지 않는 폭 · 문은 양쪽으로 열리는 두 짝
+  put(box(2.3, 2.1, 1.3, std(0xcfd6dc, { roughness: 0.5, metalness: 0.3 })), 0, 1.05, -0.65, cab);   // 앞면(z 0)부터 문(1.02)까지가 시료실   // 차폐 본체 (뒤쪽 · 선원·검출기)
+  for (const sx of [-1, 1]) put(box(0.08, 2.1, 0.9, std(0xcfd6dc)), sx * 1.11, 1.05, 0.55, cab);
+  put(box(2.3, 0.12, 0.9, std(0xcfd6dc)), 0, 2.04, 0.55, cab);
+  const door = put(new THREE.Group(), 0, 1.0, 1.02, cab), dm = std(0xaab4bf, { metalness: 0.4 });
+  door.userData.leaves = [-1, 1].map((sx) => { const m = put(box(1.07, 1.6, 0.06, dm), sx * 0.535, 0, 0, door); m.userData.sx = sx; return m; }); door.userData.k = 1;
+  const turn = put(new THREE.Group(), 0, T.y - 0.04, 0.5, cab);   // 시료가 돌아도(대각 0.9m) 본체 앞면·문과 띄움 put(cyl(0.32, 0.32, 0.06, MAT.dark, 24), 0, 0, 0, turn); put(box(0.4, 0.82, 0.4, MAT.dark), 0, -0.45, 0, turn);
   const xray = emis(0xff4d4d, 0.3); put(cyl(0.07, 0.07, 0.12, xray, 12), 0.75, 2.2, 0.9, cab);
   const sign = put(textPlane(['⚠ X선 촬영 중'], 1.0, 0.25, 'rgba(255,90,90,0.95)'), 0, 1.95, 1.06, cab); sign.rotation.x = 0;
   const screen = emis(0x58c4ff, 1.2), ctl = put(box(0.5, 0.9, 0.35, MAT.dark), 1.85, 0.45, -1.5, g); put(box(0.36, 0.25, 0.02, screen, false), 0, 0.25, 0.18, ctl);
@@ -269,7 +271,7 @@ function cabHome(r, cell) {
   if (cell.def.type !== 'clean' && cell.def.type !== 'ct') return r.arm.home?.slice();   // CT 6축 기본 자세도 손목이 시료실 옆벽에 걸린다
   const T = CAB[cell.def.type].table; cell.g.updateWorldMatrix(true, true);
   const o = r.root.getWorldPosition(new THREE.Vector3()), tb = cell.g.localToWorld(new THREE.Vector3(T.x, T.y, T.z));
-  return ikW(r, o.clone().add(tb.sub(o).setY(0).setLength(cell.def.type === 'ct' ? 0.22 : 0.35)).setY(o.y + (cell.def.type === 'ct' ? 1.0 : 0.75)));   // CT는 닫힌 문(받침 앞 0.43m)에 닿지 않게 더 붙인다
+  return ikW(r, o.clone().add(tb.sub(o).setY(0).setLength(cell.def.type === 'ct' ? 0.3 : 0.35)).setY(o.y + (cell.def.type === 'ct' ? 1.0 : 0.75)));   // CT는 닫힌 문(받침 앞 0.68m)에 닿지 않게 더 붙인다
 }
 const CAB_GRIP = 0.06;   // TCP ↔ 시료 윗면: 그리퍼 판(TCP 아래 0.055m)이 윗면에 닿는 높이
 const cabWhere = (p) => (p < 0.05 || p >= 0.95 ? 'amr' : p < 0.1 || p >= 0.89 ? 'hand' : 'in');
@@ -774,7 +776,7 @@ export class InspZone {
       case 'clean': { const on = busy && cabWhere(p) === 'in' && p > 0.15 && p < 0.6; if (P.jet) P.jet.visible = on; P.spray.emissiveIntensity = on ? 1.5 + Math.sin(t * 20) : 0.2; P.screen.emissive.setHex(busy && p >= 0.6 ? 0x58c4ff : 0x3ddc84); break; }   // 압력 세정 추출 → 여과·입자 분석
       case 'ct': {
         const scan = busy && p > 0.16 && p < 0.84, open = !busy || p < 0.13 || p > 0.86;
-        P.door.position.x += ((open ? 0.95 : 0) - P.door.position.x) * Math.min(1, rdt * 3);   // 넣고 꺼낼 때만 문이 열린다
+        const D = P.door.userData; D.k += ((open ? 1 : 0) - D.k) * Math.min(1, rdt * 3); for (const m of D.leaves) m.position.x = m.userData.sx * (0.535 + D.k * 1.07);   // 넣고 꺼낼 때만 문이 양쪽으로 열린다
         if (scan) P.turn.rotation.y += dts * 0.4; P.xray.emissiveIntensity = scan ? 3 : 0.3; P.screen.emissive.setHex(scan ? 0x58c4ff : 0x3ddc84);
         break;
       }
