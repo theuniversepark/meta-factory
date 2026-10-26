@@ -284,7 +284,9 @@ const TEND_SEQ = [
   [0.00, 'tuckB'], [0.015, 'over'], [0.03, 'amr'], [0.045, 'over'], [0.055, 'tuckB'], [0.065, 'tuck'], [0.08, 'home'], [0.095, 'entry'], [0.11, 'table'], [0.125, 'entry'], [0.14, 'home'],
   [0.89, 'home'], [0.905, 'entry'], [0.92, 'table'], [0.935, 'entry'], [0.945, 'home'], [0.955, 'tuck'], [0.965, 'tuckB'], [0.975, 'over'], [0.985, 'amr'], [0.993, 'over'], [1.0, 'tuckB'],
 ];
-const TEND_TUCK = [0, -0.1, -1.5, 0, -0.75, 0];   // IRB 4600 세운 자세 (관절값)
+// IRB 4600 접은 자세 (관절값): 위팔을 뒤로 조금 눕히고 아래팔을 앞으로 내려 툴을 아래로 — 관절·손끝이 로봇 축 0.5m 안(손끝 앞 0.27m · 루트 위 1.66m)
+// 예전 세운 자세(J2 −0.1 · J3 −1.5)는 손끝이 루트 위 2.55m까지 올라가 든 소재가 머시닝센터 문 위 헤더(2.66m)·세척기 위 배관을 스쳤다
+const TEND_TUCK = [0, -0.7, 0, 0, 2.1, 0];
 const tendJoints = (s) => Object.fromEntries(Object.entries(TEND_PTS).map(([k, [x, y, z]]) => [k, armIK(s, x, y, z)]));
 // 관절 공간 보간 (J1은 기계 쪽 0 ↔ AMR 쪽 π를 늘 같은 쪽으로 돌아 간다)
 // 문 인터록: 문이 95% 넘게 열리기 전에는 기계 안 경유점(entry·table)으로 가지 않고 대기(home)에서 기다리며, 팔이 안에 있는 동안(r.tendInside)은 문을 닫지 않는다 (animCell)
@@ -1212,6 +1214,7 @@ class ExtraZone {
           // 선반: 척에 세운 원판(반지름 0.215m)의 윗가장자리를 위에서 잡는다 — 원판 중심 높이를 잡으면 그리퍼·손목이 원판을 뚫는다
           if (c.def.type === 'turn') target[1] += 0.21; else target[2] -= 0.12;
           r.machineTargets = { ...TEND_PTS, table: target, entry: [target[0], target[1] + .12, Math.max(.5, target[2] - .48)] };
+          r.swing = 0.15;   // 접은 자세에서 든 소재를 비켜 드는 거리 — 0.32m면 선회할 때 소재 끝(손끝 앞 0.27m + 0.32m + 반 길이 0.33m)이 머시닝센터 앞 측판에, 0.1m면 아래팔(J4)에 닿았다
         }
         if (tend && r.arm) r.anim = (busy, t, p) => { const M = c.parts.machine, dk = Math.min(M?.doorK ?? c.doorK ?? 1, M?.headHome ?? 1); if (busy) tendPose(r, cellTendQ(c.def.type, p), dk); else if (c.state !== 'BUSY') tendPose(r, 0, dk); };   // 디버링셀은 앞부분(TEND_END)에 머신텐딩   // 문이 열리고 스핀들 헤드가 맨 위(원점)로 올라간 뒤에 들어간다
         const sp = idPlate(c.robotUids[i]); sp.position.set(0, kind === 'ammr' ? 2.55 : 2.35, 0); r.root.add(sp); sp.visible = this.labelsOn ?? true; c.plates.push(sp);   // 로봇 위 ID 명판 (정밀조립 셀 로봇과 같은 모양 · 라벨 버튼으로 켜고 끔)
