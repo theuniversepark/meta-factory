@@ -9,6 +9,7 @@ import { KIT } from './factory.js';
 import { buildLoader, stepLoader, loaderRobot, visibleTop, containerSplit } from './loader.js';
 import { blenderOn, cloneAsset, RENDER } from './blender.js';
 import { makeProductMachine } from './product-machines.js';
+import { aimWristCam } from './payload-robots.js';
 import { attachSpotGun, attachSealGun, attachVacuumGripper, attachRollerHead, attachNutrunner, attachScanner, attachDeburrSpindle, attachCmmPrepTool, attachLibsProbe, holdPart, makeHose, processMarks } from './endeffectors.js';
 import { pointAt, pathLength, ROBOT_KINDS, PARALLEL_GAIN } from './line.js';
 import { EXTRA_ZONES, ZONE_FAC, cellT, zoneRobotUid, zoneAmrUid, ZONE_FG_CAP, zonePack, zoneCtl, cellTendQ, TEND_END } from './zonedefs.js';
@@ -694,6 +695,12 @@ const CM_TYPES = new Set(['mill5', 'turn', 'deburr']);
 // 시리얼 마킹 장비 (js/serial.js) — 마킹 순간 표시등(markMat)이 밝아진다
 //  label: 라벨 프린터·부착기(탬프 패드) + 2D 코드 판독기 — 문형 빔(셀 로컬 x · y)에 매단다 / laser: CMM 브리지 캐리지 옆 레이저 각인 헤드 + 판독기
 const MARK_MAT = () => emis(0x37e8ff, 0.35);
+// 손목 카메라 (모델에 카메라가 없는 6축·협동로봇): 플랜지 옆에 달고 그리퍼 접근 축 앞을 보게 맞춘다 (payload-robots aimWristCam)
+function wristCamBox(r) {
+  const a = put(new THREE.Object3D(), 0, 0.02, 0.07, r.tip.parent);
+  put(box(0.07, 0.05, 0.06, MAT.dark), 0, 0, -0.01, a); put(cyl(0.018, 0.018, 0.02, emis(0x37e8ff, 1.5), 10), 0, 0, 0.03, a).rotation.x = Math.PI / 2;
+  r.wristCameraAnchor = aimWristCam(a, r.tip); r.wristCam = true;
+}
 function addLabeler(parent, x, y, zPrint, zRead) {
   const markMat = MARK_MAT();
   const pr = put(new THREE.Group(), x, y, zPrint, parent); pr.name = 'LabelPrintApply';
@@ -1193,10 +1200,7 @@ class ExtraZone {
           else if (c.def.type === 'mount') { attachNutrunner(r.arm); r.held = holdPart(r.tip, 'hinge'); r.tool = r.held; }   // 정밀 장착: 그리퍼 + 너트러너 — 힌지를 놓고 그 자리에서 체결
         }
         // 피지컬AI: 6축·협동로봇 손목 카메라 (정밀조립 VLA 셀 로봇과 같은 자리·모양 — factory.js placeRobots) · AMMR·휴머노이드는 모델에 카메라 4대(r.cams)
-        if (dark && !r.wristCameraAnchor && (kind === 'articulated' || kind === 'cobot')) {
-          const cam = put(box(0.07, 0.05, 0.06, MAT.dark), 0.07, 0.02, 0, r.tip.parent);
-          put(cyl(0.018, 0.018, 0.02, emis(0x37e8ff, 1.5), 10), 0, 0.035, 0, cam); r.wristCam = true;
-        }
+        if (dark && !r.wristCameraAnchor && (kind === 'articulated' || kind === 'cobot')) wristCamBox(r);
         r.root.traverse((o) => { o.userData.stationId = this.sid(c); o.userData.robotIdx = i; });   // 클릭 → 셀 로봇 텔레메트리 (factory.js pick · DataHub 자산 id와 같은 셀 키)
         r.phase = i * 1.3; c.robots.push(r); c.robotUids.push(zoneRobotUid(this.Z, c.id, i));   // 셀 로봇 고유 ID (zonedefs.js)
         // 머신텐딩: 문이 열렸을 때만 AMR 지그 ↔ 테이블(척)로 넣고 빼며, 가공 중(문 닫힘)에는 문 밖에서 기다린다 — 정지·고장 중에는 그 자세 그대로
@@ -1235,7 +1239,7 @@ class ExtraZone {
         r.gripOff = G; r.swing = 0.12; r.xfer = true; r.kind ??= c.def.aux[0];
         r.anim = c.parts.washer ? (busy, t, p) => { if (busy) xferPose(r, washQ(p)); else if (c.state !== 'BUSY') xferPose(r, 0); }
           : (busy, t, p) => { const S = (c.parts.room ? cmmPlan : matlPlan)(c.item).seq; if (busy) xferPose(r, p, S); else if (c.state !== 'BUSY') xferPose(r, 0, S); };
-        if (dark && !r.wristCameraAnchor && r.tip) { const cam = put(box(0.07, 0.05, 0.06, MAT.dark), 0.07, 0.02, 0, r.tip.parent); put(cyl(0.018, 0.018, 0.02, emis(0x37e8ff, 1.5), 10), 0, 0.035, 0, cam); r.wristCam = true; }
+        if (dark && !r.wristCameraAnchor && r.tip) wristCamBox(r);
         r.root.traverse((o) => { o.userData.stationId = this.sid(c); o.userData.robotIdx = i; });
         r.phase = i * 1.3; c.robots.push(r); c.robotUids.push(zoneRobotUid(this.Z, c.id, i));
         const sp = idPlate(c.robotUids[i]); sp.position.set(0, 2.35, 0); r.root.add(sp); sp.visible = this.labelsOn ?? true; c.plates.push(sp);

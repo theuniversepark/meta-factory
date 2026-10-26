@@ -59,12 +59,27 @@ export function nativeChain(root, names, tip) {
   return chain;
 }
 
+// 손목 카메라를 그리퍼 접근 축에 맞춘다 (실제 VLA 손목 카메라처럼): 렌즈(+z)는 손끝(TCP) 앞 ahead 지점을 보고, 화면 위(+y)는 접근 축에서 카메라 쪽
+// → 그리퍼 손가락이 화면 아래, 집는 물체가 화면 가운데. 접근 축 = 툴 몸체(TCP 부모) → TCP. 앵커 아래 카메라 몸체·렌즈도 함께 돈다
+export function aimWristCam(anchor, tcp, ahead = 0.1) {
+  const V = THREE.Vector3, P = anchor.parent; tcp.updateWorldMatrix(true, false); anchor.updateWorldMatrix(true, false);
+  const t = tcp.getWorldPosition(new V()), c = anchor.getWorldPosition(new V());
+  let b = tcp.parent, ax = new V(); while (b && ax.subVectors(t, b.getWorldPosition(new V())).length() < 0.01) b = b.parent;
+  ax.normalize(); const up = c.clone().sub(t); up.addScaledVector(ax, -up.dot(ax));
+  const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(t.addScaledVector(ax, ahead), c, up));
+  anchor.quaternion.copy(P.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(q));
+  anchor.userData.wristTcp = tcp; return anchor;
+}
+
 export function makePayloadArm(kind) {
   const spec = ROBOT_SPECS[kind], A = cloneAsset(spec.asset), root = new THREE.Group(); root.add(A.root);
   const arm = nativeChain(root, [1, 2, 3, 4, 5, 6].map((i) => `J${i}`), A.find('ToolTCP'));
   Object.assign(arm, { spec, kind, payload: spec.payload, wristCam: true, wristCameraAnchor: A.find('WristCamera'), turret: arm.pivots[0], shoulder: arm.pivots[1], elbow: arm.pivots[2], wrist: arm.pivots[3], flange: A.find('ToolFlange'), cameraAnchor: A.find('WristCamera'), blender: true });
   arm.home = kind === 'cobot' ? [0, -1.1, 1.8, -2.25, -Math.PI / 2, 0] : [0, .35, -.55, 0, .8, 0];
-  arm.pose(...arm.home); return arm;
+  arm.pose(...arm.home);
+  // 손목 카메라는 손가락이 벌어지는 방향(x)과 직각(z)에 — 가까운 손가락이 렌즈를 가리지 않고 두 손가락 사이로 대상물이 보인다
+  if (arm.cameraAnchor) { const c = arm.cameraAnchor.position; c.set(-c.z, c.y, c.x); aimWristCam(arm.cameraAnchor, arm.tip); }
+  return arm;
 }
 
 export function makePayloadDual(camModule) {
@@ -74,7 +89,7 @@ export function makePayloadDual(camModule) {
   const arms = ['L','R'].map(side=>nativeChain(root,Array.from({length:7},(_,i)=>`${side}_J${i+1}`),A.find(`${side}_ToolTCP`)));
   arms.forEach((a,i)=>{ const nativePose=a.pose, sd=i?-1:1; a.nativePose=nativePose;
     a.pose=(yaw=0,shoulder=.3,elbow=1,wrist=.5,roll=0,twist=0)=>nativePose(-shoulder,sd*.35,yaw*.4,-elbow,roll,wrist,twist); a.pose(); a.home=a.joints(); });   // IK 시작 자세 = 기본 자세 (팔꿈치가 자연스러운 쪽으로 풀린다)
-  const cams={head:camModule(head,0,0,.04,.55,-Math.PI/2,.04,false),handL:camModule(arms[0].tip,.045,-.02,0,0,0,.028),handR:camModule(arms[1].tip,.045,-.02,0,0,0,.028),back:camModule(torso,-.04,.07,-.15,.1,Math.PI/2,.04)};
+  const cams={head:camModule(head,0,0,.04,.55,-Math.PI/2,.04,false),handL:aimWristCam(camModule(arms[0].tip,0,.1,.07,0,0,.028),arms[0].tip),handR:aimWristCam(camModule(arms[1].tip,0,.1,.07,0,0,.028),arms[1].tip),back:camModule(torso,-.04,.07,-.15,.1,Math.PI/2,.04)};
   const bin=new THREE.Mesh(new THREE.BoxGeometry(.36,.18,.26),new THREE.MeshStandardMaterial({color:0x2f6fd6,roughness:.6}));bin.visible=false;bin.position.set(0,.44,-.2);root.add(bin);
   const extra=nativeChain(root,['right_wheel','left_wheel','head_0','head_1'],head);
   const jointDefs=[...body.jointDefs.map((j,i)=>({...j,name:`몸통 J${i+1}`})),...arms.flatMap((a,i)=>a.jointDefs.map(j=>({...j,name:`${i?'오른팔':'왼팔'} ${j.name}`}))),...extra.jointDefs.map((j,i)=>({...j,name:['오른바퀴','왼바퀴','머리 팬','머리 틸트'][i]}))];

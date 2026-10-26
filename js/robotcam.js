@@ -13,6 +13,22 @@ const FONT = '"Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif
 const CLS_COLOR = { 설비: '#37a0ff', 협동로봇: '#2bd4c6', AMR: '#3ddc84', AGV: '#3ddc84', 휴머노이드: '#b89bff', 사족보행: '#f5d36b', 사람: '#ff5a5a', 누유: '#ff7a3d', 이물질: '#f5b82e', 연기: '#ff5a5a' };
 const hash = (s) => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0) / 4294967295; };
 
+// 손목 카메라 시점: 카메라 몸체(앵커 +z = 렌즈)를 그대로 — aimWristCam으로 그리퍼 접근 축 앞을 보게 맞춰 둠. 광각(손가락과 대상물이 함께) · 가까운 그리퍼가 잘리지 않게 near 2cm
+const WRIST_FOV = 78, FLIP = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+function wristPose(a) {
+  a.updateWorldMatrix(true, false);
+  const quat = a.getWorldQuaternion(new THREE.Quaternion()), dir = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
+  return { pos: a.getWorldPosition(new THREE.Vector3()).addScaledVector(dir, 0.03), dir, ahead: 0.3, quat: quat.multiply(FLIP), fov: WRIST_FOV, near: 0.02 };
+}
+// 그리퍼 접근 축: TCP 부모(툴 몸체) → TCP (aimWristCam과 같은 기준)
+function gripOf(r, tcp) {
+  return () => {
+    const t = tcp.getWorldPosition(new THREE.Vector3()), ax = new THREE.Vector3();
+    for (let b = tcp.parent; b && ax.subVectors(t, b.getWorldPosition(new THREE.Vector3())).length() < 0.01; b = b.parent);
+    return { tcp: t, ax: ax.normalize(), root: r.root ?? r.arm?.root };
+  };
+}
+
 export class RobotCamWall {
   // D: 화면 자리·크기 (기본 = 정밀조립 왼쪽 벽) · rot: 화면이 보는 방향 (y축 회전)
   constructor(scene, renderer, D = DISPLAY, rot = Math.PI / 2) {
@@ -181,9 +197,8 @@ export class RobotCamWall {
     if (ref.type === 'cell') {
       const cr = view?.cellRobot(ref.stationId, ref.idx), r = cr?.robot, st = cr?.st;   // 정밀조립 셀 · 확장 Zone 셀
       if (!r) return null;
-      if (r.wristCameraAnchor) return { label: r.kind === 'articulated' ? 'ABB 손목 카메라' : 'UR20 손목 카메라', pose: () => { const a = r.wristCameraAnchor; a.updateWorldMatrix(true, false); const dir = new THREE.Vector3(0, 0, 1).transformDirection(a.matrixWorld); return { pos: a.getWorldPosition(new THREE.Vector3()).addScaledVector(dir, .055), dir, ahead: 1.5 }; } };
-      if (r.vla || r.wristCam) { const up = new THREE.Vector3(); return { label: r.vla ? '손목 카메라 · VLA' : '손목 카메라', pose: () => { const p = r.tip.getWorldPosition(new THREE.Vector3()); up.set(0, 1, 0).transformDirection(r.tip.parent.matrixWorld); return { pos: p.addScaledVector(up, -0.06), dir: up.clone(), ahead: 1.2 }; } }; }
-      if ((r.kind === 'ammr' || r.kind === 'humanoid') && r.cams) return this.anchorCam(r.cams, ref.cam, r.kind === 'ammr' ? 'AMMR' : '휴머노이드');
+      if (r.wristCameraAnchor) return { label: r.kind === 'articulated' ? 'ABB 손목 카메라' : 'UR20 손목 카메라', pose: () => wristPose(r.wristCameraAnchor), grip: gripOf(r, r.tip) };
+      if ((r.kind === 'ammr' || r.kind === 'humanoid') && r.cams) return this.anchorCam(r.cams, ref.cam, r.kind === 'ammr' ? 'AMMR' : '휴머노이드', r);
       return { label: '셀 상부 카메라', pose: () => { const p = r.root.getWorldPosition(new THREE.Vector3()); const c = new THREE.Vector3(st.x, 1.2, st.z); return { pos: p.add(new THREE.Vector3(0, 2.6, 0)), dir: c.sub(p).normalize(), ahead: 3 }; } };
     }
     const m = [...sim.movers, ...(sim.drones ?? [])].find((x) => x.id === ref.id);
@@ -226,8 +241,9 @@ export class RobotCamWall {
     return out;
   }
   // 카메라 앵커(+z = 보는 방향) → 시점. cam: head · handL · handR · back (없으면 머리)
-  anchorCam(cams, cam, who) {
+  anchorCam(cams, cam, who, r) {
     const key = cams[cam] ? cam : 'head', a = cams[key], label = ROBOT_CAMS.find(([k]) => k === key)[1];
+    if (a.userData.wristTcp) return { label, cam: key, who, pose: () => wristPose(a), grip: r && gripOf(r, a.userData.wristTcp) };   // AMMR 양손: 그리퍼 접근 축에 맞춘 손목 카메라
     const ahead = key === 'head' ? 3 : key === 'back' ? 4 : 1.2;
     return { label, cam: key, who, pose: () => { a.updateWorldMatrix(true, false); const pos = a.getWorldPosition(new THREE.Vector3()); const dir = new THREE.Vector3(0, 0, 1).transformDirection(a.matrixWorld); return { pos: pos.addScaledVector(dir, 0.03), dir, ahead }; } };
   }
@@ -273,6 +289,7 @@ export class RobotCamWall {
     const cx = w / 2, cy = h / 2 + 12;
     g.beginPath(); g.moveTo(cx - 14, cy); g.lineTo(cx - 5, cy); g.moveTo(cx + 5, cy); g.lineTo(cx + 14, cy); g.moveTo(cx, cy - 14); g.lineTo(cx, cy - 5); g.moveTo(cx, cy + 5); g.lineTo(cx, cy + 14); g.stroke();
     for (const [x0, y0, dx, dy] of [[8, 32, 1, 1], [w - 8, 32, -1, 1], [8, h - 8, 1, -1], [w - 8, h - 8, -1, -1]]) { g.beginPath(); g.moveTo(x0, y0 + dy * 16); g.lineTo(x0, y0); g.lineTo(x0 + dx * 16, y0); g.stroke(); }
+    this.drawGrip(g, this.panelCam, f, 0, 0, w, h);
     return f.label;
   }
 
@@ -306,10 +323,74 @@ export class RobotCamWall {
   }
 
   setCam(cam, f) {
-    const { pos, dir, ahead } = f.pose();
+    const { pos, dir, ahead, quat, fov = 70, near = cam.userData.near0 ??= cam.near } = f.pose();
     cam.position.copy(pos);
-    cam.lookAt(pos.x + dir.x * ahead, pos.y + dir.y * ahead, pos.z + dir.z * ahead);
+    if (quat) cam.quaternion.copy(quat);   // 손목 카메라: 렌즈 방향·화면 위쪽까지 카메라 몸체 그대로 (그리퍼가 화면 아래)
+    else cam.lookAt(pos.x + dir.x * ahead, pos.y + dir.y * ahead, pos.z + dir.z * ahead);
+    cam.fov = fov; cam.near = near;
     cam.updateMatrixWorld(); cam.updateProjectionMatrix();
+  }
+
+  // 손목 카메라 작업 표시: 그리퍼 접근 축(손끝 → 앞) · 접근 축 앞 작업 대상물 상자와 거리 — VLA가 무엇을 보고 손을 어디로 움직이는지
+  drawGrip(g, cam, f, x0, y0, w, h) {
+    const G = f.grip?.(); if (!G) return;
+    const scr = (v) => { const q = v.clone().project(cam); return q.z > 1 || q.z < -1 ? null : [x0 + (q.x + 1) / 2 * w, y0 + (1 - q.y) / 2 * h]; };
+    const t = scr(G.tcp), e = scr(G.tcp.clone().addScaledVector(G.ax, 0.3));
+    g.save(); g.font = `700 11px ${FONT}`; g.textBaseline = 'middle';
+    if (t && e) {
+      g.strokeStyle = 'rgba(61,220,132,0.9)'; g.lineWidth = 2; g.setLineDash([6, 4]);
+      g.beginPath(); g.moveTo(...t); g.lineTo(...e); g.stroke(); g.setLineDash([]);
+      const a = Math.atan2(e[1] - t[1], e[0] - t[0]);
+      g.fillStyle = '#3ddc84'; g.beginPath(); g.moveTo(...e); g.lineTo(e[0] - 9 * Math.cos(a - 0.4), e[1] - 9 * Math.sin(a - 0.4)); g.lineTo(e[0] - 9 * Math.cos(a + 0.4), e[1] - 9 * Math.sin(a + 0.4)); g.fill();
+      g.beginPath(); g.arc(...t, 4, 0, Math.PI * 2); g.stroke();
+      g.fillText('그리퍼', t[0] + 7, Math.min(y0 + h - 8, t[1] + 9));
+    }
+    const hit = this.gripTarget(G, cam);
+    if (hit) {
+      const b = hit.box, v = new THREE.Vector3(); let X0 = Infinity, Y0 = Infinity, X1 = -Infinity, Y1 = -Infinity, n = 0;
+      for (const sx of [0, 1]) for (const sy of [0, 1]) for (const sz of [0, 1]) {
+        const p = scr(v.set(sx ? b.max.x : b.min.x, sy ? b.max.y : b.min.y, sz ? b.max.z : b.min.z)); if (!p) continue;
+        n++; X0 = Math.min(X0, p[0]); X1 = Math.max(X1, p[0]); Y0 = Math.min(Y0, p[1]); Y1 = Math.max(Y1, p[1]);
+      }
+      const near = hit.d < 0.03, col = near ? '#3ddc84' : '#f5b82e', txt = near ? '대상물 · 접촉' : `대상물 · ${Math.round(hit.d * 100)}cm`;
+      if (n >= 4) {
+        X0 = Math.max(x0 + 2, X0); Y0 = Math.max(y0 + 26, Y0); X1 = Math.min(x0 + w - 2, X1); Y1 = Math.min(y0 + h - 2, Y1);
+        if (X1 - X0 > 8 && Y1 - Y0 > 8) {
+          const k = Math.min(14, (X1 - X0) / 3, (Y1 - Y0) / 3); g.strokeStyle = col; g.lineWidth = 2; g.beginPath();
+          for (const [cx, cy, dx, dy] of [[X0, Y0, 1, 1], [X1, Y0, -1, 1], [X0, Y1, 1, -1], [X1, Y1, -1, -1]]) { g.moveTo(cx, cy + dy * k); g.lineTo(cx, cy); g.lineTo(cx + dx * k, cy); }
+          g.stroke();
+          const tw = g.measureText(txt).width + 8, ly = Y0 > y0 + 44 ? Y0 - 9 : Y1 + 9;
+          g.fillStyle = 'rgba(5,8,12,0.7)'; g.fillRect(X0, ly - 8, tw, 16); g.fillStyle = col; g.fillText(txt, X0 + 4, ly);
+        }
+      }
+      const hp = scr(hit.p); if (hp) { g.strokeStyle = col; g.lineWidth = 1.5; g.beginPath(); g.arc(...hp, 5, 0, Math.PI * 2); g.moveTo(hp[0] - 9, hp[1]); g.lineTo(hp[0] + 9, hp[1]); g.moveTo(hp[0], hp[1] - 9); g.lineTo(hp[0], hp[1] + 9); g.stroke(); }
+    }
+    g.restore();
+  }
+  // 로봇 주변 3m 안 메시 (2초마다 갱신) — 공장 전체 레이 검사는 한 번에 약 4ms라 관제 화면 8칸을 그리면 끊겼다
+  nearMeshes(G) {
+    const C = this.gripNear ??= new Map(), now = performance.now() / 1000; let e = C.get(G.root);
+    if (!e || now - e.t > 2) {
+      const base = G.root.getWorldPosition(new THREE.Vector3()), sp = new THREE.Sphere(), list = [];
+      this.scene.traverseVisible((o) => {
+        if (!o.isMesh || o.isSprite) return;
+        if (o.isInstancedMesh) { o.boundingSphere ?? o.computeBoundingSphere(); sp.copy(o.boundingSphere); } else { o.geometry.boundingSphere ?? o.geometry.computeBoundingSphere(); sp.copy(o.geometry.boundingSphere); }
+        sp.applyMatrix4(o.matrixWorld); if (sp.center.distanceTo(base) - sp.radius < 3) list.push(o);
+      });
+      C.set(G.root, e = { t: now, list });
+    }
+    return e.list;
+  }
+  // 그리퍼 접근 축 앞 0.6m 안에서 처음 닿는 물체 (로봇 자신·화면 연출 제외) → { 닿은 점 · 거리 · 물체 상자 }
+  gripTarget(G, cam) {
+    const R = this.gripRay ??= new THREE.Raycaster(); R.set(G.tcp, G.ax); R.near = 0; R.far = 0.6; R.camera = cam;   // 스프라이트(이름표)도 레이 검사에 카메라가 필요
+    const vis = (o) => { for (let p = o; p; p = p.parent) if (!p.visible || p === G.root || p.userData.camWall) return false; return true; };
+    const hit = R.intersectObjects(this.nearMeshes(G), false).find((h) => vis(h.object)); if (!hit) return null;
+    // 대상물: 닿은 메시에서 위로 올라가며 1.2m보다 작은 가장 큰 묶음 (부품·제품 단위)
+    const bb = new THREE.Box3(); let o = hit.object, box = bb.setFromObject(o).clone();
+    for (let k = 0; k < 4 && o.parent && o.parent !== this.scene; k++) { bb.setFromObject(o.parent); if (bb.getSize(new THREE.Vector3()).length() > 1.2) break; o = o.parent; box = bb.clone(); }
+    if (box.getSize(new THREE.Vector3()).length() > 1.2) box = new THREE.Box3().setFromCenterAndSize(hit.point, new THREE.Vector3(0.12, 0.12, 0.12));
+    return { p: hit.point, d: hit.distance, box };
   }
 
   update(rdt) {
@@ -451,6 +532,7 @@ export class RobotCamWall {
         const tag = f.pin ? '📌 해결 시까지 유지' : this.rot?.n ? `🔄 ${Math.max(0, Math.ceil(5 - (this.t - this.rot.t)))}s · 순환 ${this.rot.n}대` : '';
         if (tag) { g.fillStyle = f.pin ? '#ffb35a' : '#7ff3ff'; g.font = `11px ${FONT}`; g.fillText(tag, x0 + TW - g.measureText(tag).width - 8, fy + 14); }
       }
+      if (f.ref?.type === 'cell') this.drawGrip(g, cam, { grip: this.cameraFor(f.ref)?.grip }, x0, y0, TW, TH);   // 손목 카메라: 그리퍼 접근 축 · 작업 대상물
       // 이 로봇과 관련된 알람 배너
       const mine = alarms.filter((a) => (a.m && a.m === f.mover) || (a.at && (a.at === f.station || (f.mover?.lineInfo?.station === a.at.id))) || (a.ev && (a.ev.detectedBy === f.robot || a.ev.responder === f.mover?.id)));
       mine.slice(0, 2).forEach((a, k) => {

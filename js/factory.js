@@ -11,7 +11,7 @@ import { bk, fr, BUILDING, TECH_ROOM, TECH_ROOMS, ZONE_FAC, EXTRA_ZONES, LEFT_WA
 import { STAGES, INCIDENT_TYPES, prioOf } from './orchestrator.js';
 import { NR } from './net5g.js';
 import { blenderOn, cloneAsset, RENDER } from './blender.js';
-import { makePayloadArm, makePayloadDual } from './payload-robots.js';
+import { makePayloadArm, makePayloadDual, aimWristCam } from './payload-robots.js';
 import { ROBOT_SPECS } from './robot-specs.js';
 import { makeProductMachine } from './product-machines.js';
 import { ZONE_SRC, ZONE_SINK } from './line.js';
@@ -36,7 +36,7 @@ const put = (o, x, y, z, parent) => { o.position.set(x, y, z); parent?.add(o); r
 export const ROBOT_CAMS = [['head', '머리 스테레오 카메라'], ['handL', '왼손 카메라'], ['handR', '오른손 카메라'], ['back', '등 카메라']];
 const CAM_BODY = new THREE.MeshStandardMaterial({ color: 0x1b1f25, roughness: 0.4, metalness: 0.55 });
 const CAM_LENS = new THREE.MeshStandardMaterial({ color: 0x0a0d10, emissive: 0x37e8ff, emissiveIntensity: 1.8, roughness: 0.2 });
-function camModule(parent, x, y, z, pitch = 0, yaw = 0, size = 0.05, housing = true) {
+export function camModule(parent, x, y, z, pitch = 0, yaw = 0, size = 0.05, housing = true) {
   const a = put(new THREE.Object3D(), x, y, z, parent); a.rotation.set(pitch, yaw, 0, 'YXZ');
   if (housing) {
     put(box(size, size * 0.72, size * 0.8, CAM_BODY, false), 0, 0, -size * 0.25, a);
@@ -1037,8 +1037,8 @@ function makeRobot(kind, color, opts = {}) {
       const pedestal = put(new THREE.Mesh(new THREE.BoxGeometry(.5,.5,.5), new THREE.MeshStandardMaterial({color:0x687581,metalness:.55,roughness:.45})),0,-.25,0,arm.root);
       pedestal.name='CobotPedestal'; pedestal.castShadow=true; pedestal.receiveShadow=true; pedestal.userData.dimensionsMeters=[.5,.5,.5];
     }
-    // Industry camera follows the physical housing's optical axis.
-    const wristCameraAnchor = arm.cameraAnchor ?? camModule(arm.tip, .08, -.04, 0, -Math.PI / 2, 0, .035);
+    // 손목 카메라: 플랜지 옆(손가락이 벌어지는 x와 직각 z · TCP 뒤 12cm)에서 그리퍼 접근 축 앞 10cm를 본다 — Blender 모델 카메라도 같은 기준으로 맞춤 (payload-robots aimWristCam)
+    const wristCameraAnchor = arm.cameraAnchor ?? aimWristCam(camModule(arm.tip.parent, 0, .03, .095, 0, 0, .035), arm.tip);
     const speed = cobot ? 1.4 : 2.2;
     return {
       root: arm.root, kind, spec, tip: arm.tip, jointDefs: arm.jointDefs ?? ARM_JOINTS, joints: arm.joints, payload: spec.payload, arm, scale: cobot ? 1.75 / 2.3 : 2.05 / 2.3, wristCam: true, wristCameraAnchor,
@@ -1084,7 +1084,7 @@ function makeRobot(kind, color, opts = {}) {
     });
     const sideNames = ['왼팔', '오른팔'];
     // 카메라 4대: 머리 스테레오(작업대를 내려다봄) · 양손 손목(그리퍼 방향) · 등(몸통 뒤 — 선반·통로 쪽)
-    const cams = { head: camModule(head, 0, 0.01, 0.11, 0.6, 0, 0.05, false), handL: camModule(arms[0].tip, 0.045, -0.02, 0, -Math.PI / 2, 0, 0.035), handR: camModule(arms[1].tip, 0.045, -0.02, 0, -Math.PI / 2, 0, 0.035), back: camModule(lift, 0, 0.8, -0.16, 0.25, Math.PI, 0.05) };
+    const cams = { head: camModule(head, 0, 0.01, 0.11, 0.6, 0, 0.05, false), handL: aimWristCam(camModule(arms[0].tip.parent, 0, 0.02, 0.06, 0, 0, 0.035), arms[0].tip), handR: aimWristCam(camModule(arms[1].tip.parent, 0, 0.02, 0.06, 0, 0, 0.035), arms[1].tip), back: camModule(lift, 0, 0.8, -0.16, 0.25, Math.PI, 0.05) };
     return {
       root, kind, tip: arms[0].tip, tip2: arms[1].tip, head, bin, payload: 10, dual: true, arms, lift, cams,
       jointDefs: [{ name: '몸통 승강', unit: 'mm', min: 0, max: 0.12 },
