@@ -2,6 +2,7 @@
 // 한 분할 화면(칸 256×144)으로 렌더해 WebM 영상으로 계속 녹화하고 5분 구간 파일로 로컬(서버 data/robotcam/)에 저장한다.
 // 구간마다 칸 색인(JSON: 로봇 · 카메라 · AAS 자산 · 칸 좌표)을 같이 남기고, AAS 파일을 만들 때 그 로봇이 찍힌 영상 파일 링크를 넣는다(aas.js videoSubmodel).
 import * as THREE from 'three';
+import { renderAux } from './viewcull.js';
 import { recSupported, pickMime, saveBlob, convertSegs } from './cctvrec.js';
 // 카메라별 MP4 파일 이름 (server/video-convert.mjs camFile과 같은 규칙)
 export const camFile = (t) => `${String(t.robot ?? t.id ?? 'cam').replace(/[^A-Za-z0-9_-]/g, '_')}_${String(t.camera ?? 'view').replace(/[^A-Za-z0-9_-]/g, '_')}.mp4`;
@@ -89,7 +90,7 @@ export class RobotVideoRecorder {
       this.cw.setCam(this.cams[i], f);
       const H = this.rows * RREC.th, [x, y] = this.rect(i);
       this.rt.viewport.set(x, H - (y - RREC.head) - RREC.th, RREC.tw, RREC.th); this.rt.scissor.copy(this.rt.viewport); this.rt.scissorTest = true;
-      r.setRenderTarget(this.rt); r.render(this.cw.scene, this.cams[i]);
+      r.setRenderTarget(this.rt); renderAux(r, this.cw.scene, this.cams[i], RREC.th);
     }
     r.setRenderTarget(prev); r.shadowMap.autoUpdate = auto; hide.forEach((o, i) => (o.visible = vis[i]));
     // 녹화 주기는 실제 경과 시간으로 (프레임 시간 rdt는 0.1초로 잘려 들어와, 화면이 느리면 2장/초보다 훨씬 덜 찍혔다)

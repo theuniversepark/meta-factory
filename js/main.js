@@ -45,6 +45,7 @@ import { OrchView } from './orchview.js';
 import { EpcisStore, epcisEvent, epcisDocument } from './epcis.js';
 import { FLEET_RANGE, FLEET_NAMES, SHARED_SPACE_LIMIT, fleetAdvice, predictFleet, predictFleetCounts, ZONE_FLEETS, isAmrFleet } from './fleet.js';
 import { SEC_LAYERS, SEC_KPI, SEC_THREATS, SEC_LANES, SEC_STAGES, SEC_ACTORS } from './security.js';
+import { PerfMeter } from './perf.js';
 import { DEFAULT_LINE, normalizeLine, cloneLine, zoneLine, isZone, ZONE_CELLS, ZONE_PRODUCTS, ZONE_MIXES, ZONE_NAME } from './line.js';
 
 // ── 렌더러 ─────────────────────────────
@@ -60,6 +61,7 @@ const makeRenderer = () => {
   return r;
 };
 let renderer = makeRenderer();
+const perf = new PerfMeter(() => renderer);   // 구간별 성능 표시 — P 키 (js/perf.js)
 host.prepend(renderer.domElement);
 
 const labelRenderer = new CSS2DRenderer();
@@ -1472,7 +1474,8 @@ for (const side of ['left', 'right']) {
 const panKeys = new Set();
 addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.('input, textarea, select, [contenteditable]')) return;
-  if (e.key === '[') setSide('left', !document.body.classList.contains('hide-left'));
+  if (e.key === 'p' || e.key === 'P') perf.toggle();   // 구간별 성능 표시 (js/perf.js)
+  else if (e.key === '[') setSide('left', !document.body.classList.contains('hide-left'));
   else if (e.key === ']') setSide('right', !document.body.classList.contains('hide-right'));
   else if (e.key.startsWith('Arrow')) { panKeys.add(e.key); e.preventDefault(); }
 });
@@ -1582,7 +1585,8 @@ function frame() {
   const rdt = Math.min(clock.getDelta(), 0.1);
   // 시뮬레이션은 0.1초 고정 간격으로만 진행한다 (헤드리스 테스트·디지털트윈과 같은 간격) — 프레임 시간으로 나눠 진행하면 화면 주사율에 따라 결과가 달라졌다
   // 남은 시간은 다음 프레임으로 넘기고, 그 사이 프레임은 화면 보간(js/stepinterp.js)으로 부드럽게 그린다
-  if (running && !llm.holdSim) {
+  perf.begin();
+  if (running && !llm.holdSim) perf.run('sim', () => {
     stepAcc += rdt * speed;
     const n = Math.floor(stepAcc / SIM_DT + 1e-9);
     for (let i = 0; i < n; i++) {
@@ -1591,28 +1595,32 @@ function frame() {
     }
     stepAcc = Math.max(0, stepAcc - n * SIM_DT);
     llm.update();
-  }
+  });
   hub.tick(rdt);
   bzT += rdt; if (bzT > 1.5) { bzT = 0; blenderize(scene); trimShadows(scene); }   // Blender 옵션: 운영 중에 새로 생긴 모델(대상물·트럭 등)도 바꿔 끼운다
   pcapVideoTick(rdt);
   facPushTick(rdt);
+  perf.run('anim', () => {
   interp.apply(interpTargets(), running && !llm.holdSim ? stepAcc / SIM_DT : 1);   // 그리는 동안만 위치·진행률을 직전 간격과 섞는다 (멈춤 중에는 현재 상태 그대로 — 멈춘 채 편집한 위치가 보이게)
   // 화면 갱신은 영역마다 따로 — 한 곳에서 예외가 나도 다른 영역은 그린다 · 같은 오류는 콘솔에 한 번만 (프레임마다 조용히 묻히지 않게)
   guard('정밀조립', () => view.update(rdt, running, speed));
   guard('확장 Zone', () => xzones.update(rdt, running && !llm.holdSim, speed, running)); guard('정밀검사', () => insp.update(rdt, running && !llm.holdSim, speed));
   interp.restore();
+  });
   keyPan(rdt, shiftHeld);
   netT += rdt; if (netT > 1 && !netCard.hidden) { netT = 0; renderNetCard(); }
   gnbT += rdt; if (gnbT > 1 && gnbSel) { gnbT = 0; renderGnb(); }
   controls.update();
   uiTimer += rdt; screenTimer += rdt;
+  perf.run('ui', () => {
   if (uiTimer > 0.25) { uiTimer = 0; ui.update(); view.updateLabels(); xzones.updateLabels(); insp.updateLabels(); updateZoneCard(); updateXzCard(); orchView.tick(); gateView.tick(); updateAlarmButtons(); updateCmdUI(); clockEl.title = `기준 시계 (UTC) ${hub.iso()} · 모든 데이터·메시지가 이 시각을 씁니다`; }
   robotTimer += rdt;
   if (view.telemetry && robotTimer > 0.12) { robotTimer = 0; ui.renderRobot(view.telemetry.snapshot(), hub.robotCounts(view.telemetry)); }
   pcapBoxT += rdt; if (pcapBoxT > 0.5 && ui.robotMode && !document.getElementById('detail').classList.contains('hidden') && !document.getElementById('pcapBox')?.contains(document.activeElement)) { pcapBoxT = 0; renderPcapBox(); }
+  });
   // 피지컬AI: 로봇 정보 창에 그 로봇 카메라의 실시간 영상 (약 10fps)
   camTimer += rdt;
-  if (view.telemetry && ui.robotMode && camTimer > 0.1) {
+  if (view.telemetry && ui.robotMode && camTimer > 0.1) perf.run('rbcam', () => {
     camTimer = 0;
     const box = document.getElementById('rbCamBox'), cv = document.getElementById('rbCam');
     // 휴머노이드·AMMR: 카메라 4대(머리 · 왼손 · 오른손 · 등) 중 고른 시점
@@ -1623,31 +1631,33 @@ function frame() {
     if (tabs) { const h = camList.length ? camList.map(([k, l]) => `<button type="button" data-rbcam="${k}" class="${rbCam.sel === k ? 'on' : ''}">${l.replace(' 카메라', '').replace('스테레오', '')}</button>`).join('') : ''; if (tabs.dataset.h !== h) { tabs.innerHTML = h; tabs.dataset.h = h; } tabs.hidden = !camList.length; }
     const shown = modeKey === 'dark' && box && cv && camWall.renderRobotView(camList.length ? { ...ref0, cam: rbCam.sel } : ref0, cv, (() => { const t = Math.floor(sim.time) + 8 * 3600; return [t / 3600 % 24, t / 60 % 60, t % 60].map((v) => String(Math.floor(v)).padStart(2, '0')).join(':'); })());
     if (box) box.hidden = !shown;
-  }
+  });
+  perf.run('ui', () => {
   if (view.telemetry && ui.robotMode) placeRobotPanel();
   if (screenTimer > 0.6 && modeKey !== 'traditional') { screenTimer = 0; view.drawScreen(sim.kpi(), agent.lastThought, { hub: hub.stats(), msgs: hub.msgs, bytes: hub.bytes }); }
-  epRec.update();
-  vlaTimer += rdt; if (vlaTimer > 0.5) { vlaTimer = 0; renderVla(); renderAios(); renderImpact(); renderTrace(); zdTimer += 0.5; if (zdTimer >= 2) { zdTimer = 0; renderZoneDash(); } aiosUpload(); renderFacos(); renderFacosView(); renderSensors(); sensorFlush(); updateSensor3d(); }
-  cctvT += rdt; if (cctvSel && cctvT > 0.12) { cctvT = 0; renderCctvPanel(); }
+  });
+  perf.run('ep', () => epRec.update());
+  vlaTimer += rdt; if (vlaTimer > 0.5) perf.run('dash', () => { vlaTimer = 0; renderVla(); renderAios(); renderImpact(); renderTrace(); zdTimer += 0.5; if (zdTimer >= 2) { zdTimer = 0; renderZoneDash(); } aiosUpload(); renderFacos(); renderFacosView(); renderSensors(); sensorFlush(); updateSensor3d(); });
+  cctvT += rdt; if (cctvSel && cctvT > 0.12) { cctvT = 0; perf.run('cctvp', renderCctvPanel); }
   if (!glLost) {
     try {
       // 보조 화면(전광판·녹화)은 공장 전체를 여러 번 다시 그린다 — 객체 위치(행렬)는 이번 프레임에 한 번만 계산하고 그 값을 함께 쓴다
       // (그릴 때마다 3만 개 객체의 위치를 처음부터 다시 계산하던 것을 없앰. 메인 화면은 아래 composer.render에서 평소대로 다시 계산)
-      scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;
+      perf.run('matrix', () => scene.updateMatrixWorld()); scene.matrixWorldAutoUpdate = false;
       camera.updateMatrixWorld(); wallFrustum.setFromProjectionMatrix(wallVP.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
       for (const w of [camWall, ...zoneWalls]) w.seen = !!w.screen && wallFrustum.intersectsObject(w.screen);   // 시야 밖 전광판은 덜 자주 그림 (robotcam.js)
       try {
-        camWall.update(rdt); for (const w of zoneWalls) w.update(rdt);
-        cctvView.update(rdt); for (const b of cctvBoards) b.update(rdt);
-        cctvRec.update(rdt);
-        robotRec.update(rdt);
+        perf.run('walls', () => { camWall.update(rdt); for (const w of zoneWalls) w.update(rdt); });
+        perf.run('cctv', () => { cctvView.update(rdt); for (const b of cctvBoards) b.update(rdt); });
+        perf.run('rec', () => { cctvRec.update(rdt); robotRec.update(rdt); });
       } finally { scene.matrixWorldAutoUpdate = true; }
       // 안개는 카메라 거리를 따라 민다 — 줌 아웃해도 공장이 배경색(어두운 색)으로 바래지 않고 밝기를 유지한다 (가까이서는 기존 70~160m 그대로)
       if (scene.fog) { const d = camera.position.distanceTo(controls.target); scene.fog.near = Math.max(70, d + 40); scene.fog.far = Math.max(160, d + 160); }
-      composer.render();
+      perf.run('main', () => composer.render());
     } catch (e) { if (!frame.errAt || performance.now() - frame.errAt > 5000) { frame.errAt = performance.now(); console.error('[피지컬AI 실증 메타팩토리] 렌더 오류', e); } }
   }
-  labelRenderer.render(scene, camera);
+  perf.run('labels', () => labelRenderer.render(scene, camera));
+  perf.end();
 }
 
 // Blender 모델을 먼저 불러온 뒤 공장을 한 번만 그린다 (불러오지 못하면 기본 도형 모델로 계속)
@@ -2348,4 +2358,4 @@ fcBody.addEventListener('click', (e) => {
   const sf = e.target.closest('[data-sec-flow]'); if (sf) { secFlowSel = +sf.dataset.secFlow; renderFacosView(true); }
 });
 
-window.__twin = { epcisSt, epcisLocal, epcisQuery, insp, cctvBoards, zoneWalls, xzones, flyTo, primKey, setRender, RENDER, openGnb: (id) => openGnb(id), cctvRec, robotRec, cctvView, epRec, get sim() { return sim; }, get agent() { return agent; }, view, ui, hub, camWall, orchView, persp, ctlP, llm };
+window.__twin = { perf, epcisSt, epcisLocal, epcisQuery, insp, cctvBoards, zoneWalls, xzones, flyTo, primKey, setRender, RENDER, openGnb: (id) => openGnb(id), cctvRec, robotRec, cctvView, epRec, get sim() { return sim; }, get agent() { return agent; }, view, ui, hub, camWall, orchView, persp, ctlP, llm };

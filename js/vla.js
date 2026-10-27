@@ -28,6 +28,10 @@ const MOBILE_MAX_S = 180, MOBILE_FRAME_S = 2;   // 이동 휴머노이드 에피
 // 영상(MP4) 방식 (서버 ffmpeg가 있을 때 — 맥 앱): 카메라 프레임을 스텝마다 캡처해 에피소드가 끝나면 카메라별 H.264 MP4로 묶는다
 // 셀 로봇 5fps(스텝마다) · 이동 휴머노이드 2.5fps(2스텝마다, 에피소드가 길어서). 스텝은 {영상 경로, 타임스탬프}로 영상 프레임을 가리킨다 (LeRobot 형식)
 export const VIDEO_FPS = { cell: EP_HZ, mobile: EP_HZ / 2 };
+// 카메라 캡처는 한 장이 공장 전체를 한 번 그리는 일(약 8ms, tools/perf-sample.cjs) — 한 프레임에 CAP_PER_FRAME장까지
+// 스텝의 카메라 묶음(휴머노이드·AMMR 4대)은 기록하는 그 자리에서 한꺼번에 찍는다: 다음 프레임으로 미루면 장면이 이미 움직여 영상이 관절 기록과 어긋나고,
+// 일부 카메라만 빠지는 일도 생긴다. 이번 프레임 한도를 넘는 스텝은 통째로 프레임 없이 기록한다 (관절·동작 기록은 그대로)
+const CAP_PER_FRAME = 4;
 const two = (n, w = 6) => String(n).padStart(w, '0');
 
 // VLA 6축 로봇의 작업 단계 (factory.animVLA 키프레임과 같은 구간)
@@ -47,7 +51,7 @@ export class EpisodeRecorder {
   constructor(view, camWall, hub) { this.view = view; this.camWall = camWall; this.hub = hub; this.server = false; this.video = false; this.onEpisode = null; }   // video: 서버 ffmpeg로 MP4 (main.js가 /api/status로 켬)
   attach(sim) {
     this.sim = sim; this.on = sim.mode.key === 'dark';
-    this.byRobot = new Map(); this.rec = new Map(); this.seq = 0; this.total = 0; this.uploaded = 0; this.bytes = 0; this.captureQ = [];
+    this.byRobot = new Map(); this.rec = new Map(); this.seq = 0; this.total = 0; this.uploaded = 0; this.bytes = 0; this.req = []; this.ending = [];
     this.runId = this.hub?.runId ?? `run-${Date.now()}`;
   }
   // 기록 대상: VLA 6축 로봇 · AMMR · 셀 휴머노이드 (셀 로봇 ID가 있는 것) + 이동 휴머노이드(정비·물류 — 작업 하나 = 에피소드 하나)
@@ -70,21 +74,33 @@ export class EpisodeRecorder {
     return [Math.round((u.waist?.rotation.y ?? 0) * 1e4) / 1e4, Math.round((u.head?.rotation.y ?? 0) * 1e4) / 1e4, a(u.armL), a(u.elbowL), a(u.armR), a(u.elbowR), a(u.legL), a(u.kneeL), a(u.legR), a(u.kneeR),
       Math.round(m.x * 1000), Math.round(m.z * 1000), Math.round(Math.atan2(Math.sin(m.heading), Math.cos(m.heading)) * 1e4) / 1e4];
   }
-  // 카메라 프레임 요청: 카메라가 여럿이면(휴머노이드·AMMR) 네 시점을 같은 시각으로 함께
-  queueFrames(rec, step, ref, cams) {
+  // 카메라 프레임 요청: 카메라가 여럿이면(휴머노이드·AMMR) 네 시점을 같은 시각으로 함께 — 이번 프레임 끝(shoot)에 한꺼번에 찍는다
+  queueFrames(rec, step, ref, cams, onShot) {
     if (cams) rec.multiCam = true;
-    if (this.captureQ.length > (this.video ? 160 : 48)) { this.skipped = (this.skipped ?? 0) + 1; return; }   // 빠른 배속 등으로 캡처가 밀리면 이번 프레임은 건너뛴다 (없는 영상 파일을 가리키지 않게)
-    const n = two(rec.nFrame = (rec.nFrame ?? -1) + 1, 3);
-    if (!cams) { const fname = `frame_${n}.jpg`; step.frame = fname; this.captureQ.push({ rec, fname, ref, t: step.t }); return; }
-    step.frames = {};
-    for (const cam of EP_CAMS) { const fname = `${cam}/frame_${n}.jpg`; step.frames[cam] = fname; this.captureQ.push({ rec, fname, cam, ref: { ...ref, cam }, t: step.t }); }
-    step.frame = step.frames.head;
+    this.req.push({ rec, step, ref, cams, onShot });
+  }
+  // 이번 프레임 요청을 찍는다: 가장 오래 못 찍은 에피소드부터 CAP_PER_FRAME장까지 (동시에 기록 중인 로봇끼리 고르게) · 넘는 요청은 그 스텝 프레임 없음
+  // 요청과 같은 프레임 안이라 장면은 스텝을 기록한 그때 그대로
+  shoot(t) {
+    let shots = 0;
+    for (const q of this.req.sort((a, b) => (a.rec.lastShot ?? -Infinity) - (b.rec.lastShot ?? -Infinity))) {
+      const { rec, step, ref, cams } = q, need = cams ? cams.length : 1;
+      if (shots + need > CAP_PER_FRAME) { this.skipped = (this.skipped ?? 0) + 1; continue; }   // 프레임 없음 (없는 영상 파일을 가리키지 않게)
+      shots += need; rec.lastShot = t;
+      const n = two(rec.nFrame = (rec.nFrame ?? -1) + 1, 3);
+      const shot = (fname, cam, r) => rec.frames.push({ file: fname, cam, t: step.t, data: this.camWall.captureFrame(r, 160, 120) });
+      if (!cams) { const fname = `frame_${n}.jpg`; step.frame = fname; shot(fname, null, ref); }
+      else { step.frames = {}; for (const cam of cams) { const fname = `${cam}/frame_${n}.jpg`; step.frames[cam] = fname; shot(fname, cam, { ...ref, cam }); } step.frame = step.frames.head; }
+      q.onShot?.();
+    }
+    this.req.length = 0;
   }
   list(uid) { return this.byRobot.get(uid) ?? []; }
 
   update() {
     if (!this.on || !this.sim) return;
     const sim = this.sim, t = sim.time;
+    this.req = []; this.ending = [];   // 이번 프레임 카메라 요청 · 끝난 에피소드 (찍은 뒤에 마감 — 마지막 스텝 프레임까지 담기게)
     for (const R of this.robots()) {
       if (R.mobile) { this.updateMobile(R, t); continue; }
       const { uid, r, i, st } = R;
@@ -113,18 +129,15 @@ export class EpisodeRecorder {
         const grip = r.vla ? (r.vla.held.visible ? 1 : 0) : st.ammr?.[i]?.carry ? 1 : 0;
         const step = { i: rec.steps.length, t: Math.round((t - rec.t0) * 1000) / 1000, ts: this.hub.iso(t), state: q, tcp_mm: tcp, gripper: grip, phase, frame: null };
         if (this.video || phase !== rec.lastPhase || rec.steps.length - (rec.lastFrameStep ?? -99) >= EP_HZ) {   // 영상: 스텝마다 · 사진: 단계가 바뀌거나 1초마다
-          rec.lastPhase = phase; rec.lastFrameStep = rec.steps.length;
-          this.queueFrames(rec, step, { type: 'cell', stationId: st.id, idx: i }, r.cams ? EP_CAMS : null);
+          const k = rec.steps.length;
+          this.queueFrames(rec, step, { type: 'cell', stationId: st.id, idx: i }, r.cams ? EP_CAMS : null, () => { rec.lastPhase = phase; rec.lastFrameStep = k; });   // 못 찍었으면 다음 스텝에 다시
         }
         rec.steps.push(step);
       }
-      if (ended || broken) this.finish(rec, broken ? `중단: ${st.state}` : null);
+      if (ended || broken) this.ending.push([rec, broken ? `중단: ${st.state}` : null]);
     }
-    // 카메라 캡처는 한 프레임에 4장까지 (화면 끊김 방지 — 휴머노이드·AMMR 네 시점이 한 프레임에)
-    for (let k = 0; k < (this.video ? 8 : 4) && this.captureQ.length; k++) {
-      const c = this.captureQ.shift(), pr = this.camWall.captureFrame(c.ref, 160, 120);
-      c.rec.frames.push({ file: c.fname, cam: c.cam ?? null, t: c.t, data: pr });
-    }
+    this.shoot(t);
+    for (const [rec, why] of this.ending) this.finish(rec, why);
   }
   // 이동 휴머노이드: 작업(정비·청소·소화 대기·부품 보충) 하나를 에피소드 하나로 — 이동(navigate)·작업(manipulate) 단계, 카메라 4대
   updateMobile(R, t) {
@@ -148,10 +161,10 @@ export class EpisodeRecorder {
       const phase = m.moving ? 'navigate' : 'manipulate';
       const step = { i: rec.steps.length, t: Math.round((t - rec.t0) * 1000) / 1000, ts: this.hub.iso(t), state: this.mobileState(R),
         tcp_mm: [Math.round((dx * sn + dz * c) * 1000), Math.round(-(dx * c - dz * sn) * 1000), Math.round(w.y * 1000)], gripper: m.tool || m.carry ? 1 : 0, phase, frame: null };
-      if (this.video ? rec.steps.length % 2 === 0 : (phase !== rec.lastPhase || t - rec.lastFrameT >= MOBILE_FRAME_S)) { rec.lastPhase = phase; rec.lastFrameT = t; this.queueFrames(rec, step, { type: 'mover', id: m.id }, EP_CAMS); }
+      if (this.video ? rec.steps.length % 2 === 0 : (phase !== rec.lastPhase || t - rec.lastFrameT >= MOBILE_FRAME_S)) this.queueFrames(rec, step, { type: 'mover', id: m.id }, EP_CAMS, () => { rec.lastPhase = phase; rec.lastFrameT = t; });
       rec.steps.push(step);
     }
-    if (ended || over) this.finish(rec, over ? '시간 제한 (3분)' : null);
+    if (ended || over) this.ending.push([rec, over ? '시간 제한 (3분)' : null]);
   }
 
   // 카메라 프레임 → 카메라별 MP4 (서버 ffmpeg): 프레임마다 다음 프레임까지 머무는 시간을 넘겨 실제 시각 간격을 지킨다

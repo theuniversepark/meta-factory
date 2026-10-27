@@ -3,6 +3,7 @@
 // 오버레이: 카메라로 투영한 객체 인식 박스·신뢰도, 추론 지연, 작업 상태, 현장 이벤트·알람 배너와 하단 알람 띠.
 import { bk, inExtraZone, LEFT_WALL, ZONE_FAC, EXTRA_ZONES, zoneRect, inInsp } from './zonedefs.js';
 import * as THREE from 'three';
+import { renderAux } from './viewcull.js';
 import { FIELD_EVENTS, ST_LABEL, moverRadius } from './sim.js';
 import { makeAlarmFx, blinkAlarmFx, ALARM_COLOR, ROBOT_CAMS } from './factory.js';
 
@@ -271,7 +272,7 @@ export class RobotCamWall {
     const beams = (this.view.droneViews ?? []).map((dv) => { const b = dv.g.userData.beam, v = b.visible; b.visible = false; return [b, v]; });
     const auto = r.shadowMap.autoUpdate; r.shadowMap.autoUpdate = false;
     const prev = r.getRenderTarget();
-    r.setRenderTarget(this.panelRT); r.clear(); r.render(this.scene, this.panelCam);
+    r.setRenderTarget(this.panelRT); r.clear(); renderAux(r, this.scene, this.panelCam, h);
     r.readRenderTargetPixels(this.panelRT, 0, 0, w, h, this.panelBuf);
     r.setRenderTarget(prev); r.shadowMap.autoUpdate = auto;
     this.group.visible = vis[0]; if (this.view.selRing) this.view.selRing.visible = vis[1];
@@ -308,7 +309,7 @@ export class RobotCamWall {
     this.group.visible = false; if (this.view.selRing) this.view.selRing.visible = false;
     const auto = r.shadowMap.autoUpdate; r.shadowMap.autoUpdate = false;
     const prev = r.getRenderTarget();
-    r.setRenderTarget(this.capRT); r.clear(); r.render(this.scene, this.capCam);
+    r.setRenderTarget(this.capRT); r.clear(); renderAux(r, this.scene, this.capCam, h);
     // 비동기 읽기: 지금 그린 내용을 GPU 쪽 버퍼로 복사만 걸어 두고(다음 렌더와 섞이지 않음) 끝나면 받는다 — 동기 읽기는 GPU 작업이 다 끝날 때까지 화면을 멈췄다
     const buf = new Uint8Array(w * h * 4), read = r.readRenderTargetPixelsAsync(this.capRT, 0, 0, w, h, buf);
     r.setRenderTarget(prev); r.shadowMap.autoUpdate = auto;
@@ -416,7 +417,7 @@ export class RobotCamWall {
       const beams = (this.view.droneViews ?? []).map((dv) => { const b = dv.g.userData.beam, v = b.visible; b.visible = false; return [b, v]; });
       const auto = r.shadowMap.autoUpdate; r.shadowMap.autoUpdate = false;
       const prev = r.getRenderTarget();
-      r.setRenderTarget(this.rt); r.render(this.scene, cam); r.setRenderTarget(prev);
+      r.setRenderTarget(this.rt); renderAux(r, this.scene, cam, this.rt.viewport.w); r.setRenderTarget(prev);
       r.shadowMap.autoUpdate = auto;
       this.group.visible = vis[0]; if (this.view.selRing) this.view.selRing.visible = vis[1];
       for (const [b, v] of beams) b.visible = v;

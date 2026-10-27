@@ -7,6 +7,7 @@ import { SHIP } from './shipping.js';
 import { INBOUND } from './receiving.js';
 import { bk, fr, LEFT_WALL, ZONE_FAC, ZONE_LABEL, TECH_ROOMS, INSP_FAC, camArea, inInsp, techLocal, zoneDef, zoneRect } from './zonedefs.js';
 import * as THREE from 'three';
+import { renderAux } from './viewcull.js';
 import { moverRadius } from './sim.js';
 import { AI_MODELS, EVENT_MODEL, blocked } from './cctv.js';
 
@@ -181,7 +182,7 @@ export class CCTVView {
     // 그림자 맵은 렌더러마다 한 번은 그려야 한다 (안 그린 맵을 샘플링하면 GL 형식 불일치 오류)
     const auto = r.shadowMap.autoUpdate; r.shadowMap.autoUpdate = this.shadowR === r ? false : auto; this.shadowR = r; const prev = r.getRenderTarget();
     if (viewport) { target.viewport.copy(viewport); target.scissor.copy(viewport); target.scissorTest = true; }
-    r.setRenderTarget(target); if (!viewport) r.clear(); r.render(this.scene, cam); r.setRenderTarget(prev);
+    r.setRenderTarget(target); if (!viewport) r.clear(); renderAux(r, this.scene, cam, viewport ? viewport.w : target.height); r.setRenderTarget(prev);
     r.shadowMap.autoUpdate = auto; hide.forEach((o, i) => (o.visible = vis[i]));
   }
   renderTile(k) {

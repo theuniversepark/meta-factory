@@ -1,6 +1,6 @@
 {
   "name": "meta-factory",
-  "version": "1.0.58",
+  "version": "1.0.59",
   "description": "제조공정·스마트팩토리·다크팩토리 3D 시뮬레이션 에이전트",
   "main": "electron/main.mjs",
   "scripts": {
@@ -22,6 +22,7 @@
     "test:spot": "node tests/blender.mjs && electron tools/check-spot.cjs",
     "check:collisions": "electron tools/check-collisions.cjs",
     "check:sweeps": "electron tools/check-sweeps.cjs",
+    "perf": "electron tools/perf-sample.cjs",
     "guide:pdf": "node tools/guide-pdf.cjs",
     "rca-server": "node server/rca-server.mjs",
     "sensor-server": "node server/sensor-server.mjs"
