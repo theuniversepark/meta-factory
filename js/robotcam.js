@@ -272,7 +272,7 @@ export class RobotCamWall {
     const beams = (this.view.droneViews ?? []).map((dv) => { const b = dv.g.userData.beam, v = b.visible; b.visible = false; return [b, v]; });
     const auto = r.shadowMap.autoUpdate; r.shadowMap.autoUpdate = false;
     const prev = r.getRenderTarget();
-    r.setRenderTarget(this.panelRT); r.clear(); renderAux(r, this.scene, this.panelCam, h);
+    r.setRenderTarget(this.panelRT); r.clear(); renderAux(r, this.scene, this.panelCam, h, { groups: true });   // 화면 표시 전용 — 그룹째 숨기기
     r.readRenderTargetPixels(this.panelRT, 0, 0, w, h, this.panelBuf);
     r.setRenderTarget(prev); r.shadowMap.autoUpdate = auto;
     this.group.visible = vis[0]; if (this.view.selRing) this.view.selRing.visible = vis[1];
@@ -417,7 +417,7 @@ export class RobotCamWall {
       const beams = (this.view.droneViews ?? []).map((dv) => { const b = dv.g.userData.beam, v = b.visible; b.visible = false; return [b, v]; });
       const auto = r.shadowMap.autoUpdate; r.shadowMap.autoUpdate = false;
       const prev = r.getRenderTarget();
-      r.setRenderTarget(this.rt); renderAux(r, this.scene, cam, this.rt.viewport.w); r.setRenderTarget(prev);
+      r.setRenderTarget(this.rt); renderAux(r, this.scene, cam, this.rt.viewport.w, { groups: true });   // 화면 표시 전용 — 그룹째 숨기기 r.setRenderTarget(prev);
       r.shadowMap.autoUpdate = auto;
       this.group.visible = vis[0]; if (this.view.selRing) this.view.selRing.visible = vis[1];
       for (const [b, v] of beams) b.visible = v;

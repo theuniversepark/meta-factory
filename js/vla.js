@@ -83,7 +83,10 @@ export class EpisodeRecorder {
   // 요청과 같은 프레임 안이라 장면은 스텝을 기록한 그때 그대로
   shoot(t) {
     let shots = 0;
-    for (const q of this.req.sort((a, b) => (a.rec.lastShot ?? -Infinity) - (b.rec.lastShot ?? -Infinity))) {
+    // 이어서 찍는 캡처 사이에는 아무것도 움직이지 않으므로 객체 위치(행렬)는 한 번만 계산해 함께 쓴다 (캡처마다 3만 객체를 다시 계산하던 것 · 결과 같음)
+    const scene = this.view?.scene, auto = scene?.matrixWorldAutoUpdate;
+    if (scene && this.req.length) { scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false; }
+    try { for (const q of this.req.sort((a, b) => (a.rec.lastShot ?? -Infinity) - (b.rec.lastShot ?? -Infinity))) {
       const { rec, step, ref, cams } = q, need = cams ? cams.length : 1;
       if (shots + need > CAP_PER_FRAME) { this.skipped = (this.skipped ?? 0) + 1; continue; }   // 프레임 없음 (없는 영상 파일을 가리키지 않게)
       shots += need; rec.lastShot = t;
@@ -92,7 +95,7 @@ export class EpisodeRecorder {
       if (!cams) { const fname = `frame_${n}.jpg`; step.frame = fname; shot(fname, null, ref); }
       else { step.frames = {}; for (const cam of cams) { const fname = `${cam}/frame_${n}.jpg`; step.frames[cam] = fname; shot(fname, cam, { ...ref, cam }); } step.frame = step.frames.head; }
       q.onShot?.();
-    }
+    } } finally { if (scene) scene.matrixWorldAutoUpdate = auto; }
     this.req.length = 0;
   }
   list(uid) { return this.byRobot.get(uid) ?? []; }

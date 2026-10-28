@@ -46,6 +46,7 @@ import { EpcisStore, epcisEvent, epcisDocument } from './epcis.js';
 import { FLEET_RANGE, FLEET_NAMES, SHARED_SPACE_LIMIT, fleetAdvice, predictFleet, predictFleetCounts, ZONE_FLEETS, isAmrFleet } from './fleet.js';
 import { SEC_LAYERS, SEC_KPI, SEC_THREATS, SEC_LANES, SEC_STAGES, SEC_ACTORS } from './security.js';
 import { PerfMeter } from './perf.js';
+import { withCull } from './viewcull.js';
 import { DEFAULT_LINE, normalizeLine, cloneLine, zoneLine, isZone, ZONE_CELLS, ZONE_PRODUCTS, ZONE_MIXES, ZONE_NAME } from './line.js';
 
 // ── 렌더러 ─────────────────────────────
@@ -62,6 +63,7 @@ const makeRenderer = () => {
 };
 let renderer = makeRenderer();
 const perf = new PerfMeter(() => renderer);   // 구간별 성능 표시 — P 키 (js/perf.js)
+const mainCull = { on: true };   // 메인 화면 작은 물체 빼기 (끄면 비교 확인용 · window.__twin.mainCull)
 host.prepend(renderer.domElement);
 
 const labelRenderer = new CSS2DRenderer();
@@ -1653,7 +1655,8 @@ function frame() {
       } finally { scene.matrixWorldAutoUpdate = true; }
       // 안개는 카메라 거리를 따라 민다 — 줌 아웃해도 공장이 배경색(어두운 색)으로 바래지 않고 밝기를 유지한다 (가까이서는 기존 70~160m 그대로)
       if (scene.fog) { const d = camera.position.distanceTo(controls.target); scene.fog.near = Math.max(70, d + 40); scene.fog.far = Math.max(160, d + 160); }
-      perf.run('main', () => composer.render());
+      // 메인 화면도 화면에 1픽셀(기기 픽셀)보다 작게 찍힐 작은 물체는 빼고 그린다 (멀리서 볼 때 나사·케이블·라벨판) — 그룹째 숨기기는 쓰지 않음 (시야 밖 설비의 그림자가 시야 안에 드리움)
+      perf.run('main', () => (mainCull.on ? withCull(scene, camera, innerHeight * renderer.getPixelRatio(), undefined, () => composer.render()) : composer.render()));
     } catch (e) { if (!frame.errAt || performance.now() - frame.errAt > 5000) { frame.errAt = performance.now(); console.error('[피지컬AI 실증 메타팩토리] 렌더 오류', e); } }
   }
   perf.run('labels', () => labelRenderer.render(scene, camera));
@@ -2358,4 +2361,4 @@ fcBody.addEventListener('click', (e) => {
   const sf = e.target.closest('[data-sec-flow]'); if (sf) { secFlowSel = +sf.dataset.secFlow; renderFacosView(true); }
 });
 
-window.__twin = { perf, epcisSt, epcisLocal, epcisQuery, insp, cctvBoards, zoneWalls, xzones, flyTo, primKey, setRender, RENDER, openGnb: (id) => openGnb(id), cctvRec, robotRec, cctvView, epRec, get sim() { return sim; }, get agent() { return agent; }, view, ui, hub, camWall, orchView, persp, ctlP, llm };
+window.__twin = { perf, mainCull, epcisSt, epcisLocal, epcisQuery, insp, cctvBoards, zoneWalls, xzones, flyTo, primKey, setRender, RENDER, openGnb: (id) => openGnb(id), cctvRec, robotRec, cctvView, epRec, get sim() { return sim; }, get agent() { return agent; }, view, ui, hub, camWall, orchView, persp, ctlP, llm };

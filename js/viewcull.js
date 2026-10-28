@@ -2,38 +2,79 @@
 // 보조 화면은 해상도가 낮고(160×120 ~ 타일 수백 픽셀) 공장 전체를 다시 그리므로, 멀리 있는 나사·케이블·라벨판 같은 작은 메시가 그리기 호출 대부분을 차지했다
 // (tools/perf-sample.cjs 측정: 보조 화면 합계가 메인 화면보다 draw가 많음). 1픽셀 미만은 저해상도 렌더 타깃(MSAA 없음)에서 거의 보이지 않으므로 화면 차이는 없다
 // 메인 화면은 그대로 (이 함수를 쓰지 않음)
+// groups: 화면 표시 전용 렌더(로봇 비전 전광판·로봇 정보 창)만 — 카메라 시야 밖이거나 1픽셀보다 작은 설비 그룹을 통째로 숨긴다.
+//   렌더 한 번의 비용 대부분이 3만여 객체를 훑으며 시야를 검사하는 데 들어가서(아무것도 안 보이는 카메라도 약 10ms), 그룹째 빼면 훑을 객체가 준다.
+//   그룹은 시야 밖일 때만 숨긴다 (안의 메시도 모두 시야 밖이라 그림이 같음 · 작게 찍히는 큰 설비는 1픽셀이라도 남게 그대로)
+//   그룹 범위는 REFRESH_MS마다 다시 재므로 그 사이 안에서 움직이는 부분(로봇 팔·문)은 GROUP_PAD만큼 넉넉히 잡는다 — 데이터가 되는 렌더(녹화·에피소드)에는 쓰지 않는다
+import * as THREE from 'three';
+
 const MIN_PX = 1;          // 이보다 작게 찍히면 뺀다 (화면 픽셀)
 const SMALL_R = 0.6;       // 이보다 큰 물체(월드 반지름 m)는 후보에서 뺀다 — 보조 카메라 먼 쪽 끝(60~90m)에서도 1픽셀 넘게 찍힘
 const REFRESH_MS = 2000;   // 후보 목록을 다시 만드는 간격 (운영 중 새로 생긴 대상물·트럭·Blender 교체 모델)
+const GROUP_MIN = 20;      // 그룹째 숨기는 대상: 메시가 이만큼 넘는 그룹
+const GROUP_PAD = 3;       // 그룹 범위 여유 (m) — 다시 재기 전까지 안에서 움직이는 팔·문, 서 있다 출발한 차량(2초 · 1.5m/s)
 
-const cache = new WeakMap();   // 장면마다 후보 목록
+const cache = new WeakMap();   // 장면마다 후보 목록 · 그룹 나무
 function candidates(scene) {
   const now = performance.now(), hit = cache.get(scene);
-  if (hit && now - hit.t < REFRESH_MS) return hit.list;
-  const list = [];
-  scene.traverse((o) => {
-    if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || o.children.length || !o.geometry) return;   // 자식이 있는 메시는 숨기면 자식까지 사라지므로 뺀다
-    const g = o.geometry; if (!g.boundingSphere) g.computeBoundingSphere();
-    const s = g.boundingSphere; if (!s || !Number.isFinite(s.radius)) return;
-    const e = o.matrixWorld.elements, k = Math.max(Math.hypot(e[0], e[1], e[2]), Math.hypot(e[4], e[5], e[6]), Math.hypot(e[8], e[9], e[10]));
-    const r = s.radius * k; if (r < SMALL_R) list.push({ o, r, c: s.center });
-  });
-  cache.set(scene, { t: now, list });
-  return list;
+  if (hit && now - hit.t < REFRESH_MS) return hit;
+  const list = [], prev = hit?.boxes ?? new WeakMap(), boxes = new WeakMap(), sph = new THREE.Sphere();
+  // 아래에서 위로: 그룹마다 자손 물체를 감싸는 상자 · 메시 수 · 숨기면 안 되는 것(빛 · 화면 크기 고정 스프라이트 · 시야 검사를 끈 물체) 포함 여부
+  const walk = (o) => {
+    const box = new THREE.Box3(); let n = 0, bad = !!(o.isLight || o.isSprite || o.isSkinnedMesh || ((o.isMesh || o.isLine || o.isPoints) && o.frustumCulled === false));
+    const kids = [], start = list.length;
+    if (o.geometry && (o.isMesh || o.isLine || o.isPoints)) {
+      const g = o.geometry; if (!g.boundingSphere) g.computeBoundingSphere();
+      const s = o.isInstancedMesh ? (o.boundingSphere ?? (o.computeBoundingSphere(), o.boundingSphere)) : g.boundingSphere;
+      if (s && Number.isFinite(s.radius)) {
+        sph.copy(s).applyMatrix4(o.matrixWorld); box.expandByPoint(sph.center.clone().addScalar(sph.radius)).expandByPoint(sph.center.clone().addScalar(-sph.radius));
+        n++;
+        if (o.isMesh && !o.isInstancedMesh && !o.isSkinnedMesh && !o.children.length && sph.radius < SMALL_R) list.push({ o, r: sph.radius, c: s.center });   // 자식이 있는 메시는 숨기면 자식까지 사라지므로 뺀다
+      }
+    }
+    for (const c of o.children) { const k = walk(c); if (k.n) box.union(k.box); n += k.n; bad ||= k.bad; if (k.node) kids.push(k.node); else kids.push(...k.kids); }
+    let node = null;
+    if (!o.isScene && !o.isMesh && n >= GROUP_MIN && !bad && !box.isEmpty()) {
+      const p = prev.get(o), moved = !p || p.min.distanceTo(box.min) > 0.05 || p.max.distanceTo(box.max) > 0.05;   // 지난번과 범위가 달라졌으면 움직이는 그룹 — 숨기지 않고 안쪽 그룹만 본다
+      boxes.set(o, box.clone());
+      node = { o, s: box.getBoundingSphere(new THREE.Sphere()), moved, at: o.matrixWorld.elements.slice(12, 15), kids, start, end: list.length };   // [start, end): 이 그룹 안의 작은 메시 후보 (숨기면 건너뜀)
+      node.s.radius += GROUP_PAD;
+    }
+    return { box, n, bad, node, kids };
+  };
+  const root = walk(scene);
+  const hitNew = { t: now, list, nodes: root.node ? [root.node] : root.kids, boxes };
+  cache.set(scene, hitNew);
+  return hitNew;
 }
 
-const hidden = [];
-// cam: 그릴 카메라 · pxH: 이 렌더가 차지하는 세로 픽셀 (전광판 칸이면 칸 높이)
-export function renderAux(r, scene, cam, pxH) {
+const hidden = [], skip = [], frustum = new THREE.Frustum(), vp = new THREE.Matrix4();
+// cam: 그릴 카메라 · pxH: 이 렌더가 차지하는 세로 픽셀 (전광판 칸이면 칸 높이) · groups: 그룹째 숨기기 (화면 표시 전용 렌더만)
+export function renderAux(r, scene, cam, pxH, opt) { withCull(scene, cam, pxH, opt, () => r.render(scene, cam)); }
+// 메인 화면(후처리 포함)처럼 렌더를 직접 부르는 곳: 작은 물체를 뺀 채 draw()를 실행하고 되돌린다
+export function withCull(scene, cam, pxH, { groups = false } = {}, draw) {
   cam.updateMatrixWorld();
   const ce = cam.matrixWorld.elements, cx = ce[12], cy = ce[13], cz = ce[14];
-  const kk = pxH / (2 * Math.tan((cam.fov ?? 60) * Math.PI / 360) * MIN_PX), list = candidates(scene);
-  for (let i = 0; i < list.length; i++) {
+  const kk = pxH / (2 * Math.tan((cam.fov ?? 60) * Math.PI / 360) * MIN_PX), C = candidates(scene), list = C.list;
+  if (groups) {
+    frustum.setFromProjectionMatrix(vp.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
+    const visit = (nd) => {
+      const o = nd.o; if (!o.visible) return;
+      const e = o.matrixWorld.elements, a = nd.at, still = Math.abs(e[12] - a[0]) + Math.abs(e[13] - a[1]) + Math.abs(e[14] - a[2]) < GROUP_PAD / 2;   // 그룹 자체가 크게 옮겨졌으면(차량) 잰 범위가 안 맞음
+      if (!nd.moved && still) {
+        if (!frustum.intersectsSphere(nd.s)) { o.visible = false; hidden.push(o); if (nd.end > nd.start) skip.push(nd.start, nd.end); return; }
+      }
+      for (const k of nd.kids) visit(k);
+    };
+    for (const nd of C.nodes) visit(nd);
+  }
+  for (let i = 0, j = 0; i < list.length; i++) {
+    if (j < skip.length && i === skip[j]) { i = skip[j + 1] - 1; j += 2; continue; }   // 숨긴 그룹 안 — 훑지 않음 (그룹 순서대로 쌓여 있음)
     const { o, r: rad, c } = list[i]; if (!o.visible) continue;
     const e = o.matrixWorld.elements;
     const x = e[0] * c.x + e[4] * c.y + e[8] * c.z + e[12] - cx, y = e[1] * c.x + e[5] * c.y + e[9] * c.z + e[13] - cy, z = e[2] * c.x + e[6] * c.y + e[10] * c.z + e[14] - cz;
     const lim = rad * kk;
     if (x * x + y * y + z * z > lim * lim) { o.visible = false; hidden.push(o); }
   }
-  try { r.render(scene, cam); } finally { for (const o of hidden) o.visible = true; hidden.length = 0; }
+  try { draw(); } finally { for (let i = hidden.length - 1; i >= 0; i--) hidden[i].visible = true; hidden.length = 0; skip.length = 0; }
 }
