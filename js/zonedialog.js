@@ -65,21 +65,30 @@ function findMix(text, ctx) {
   return null;
 }
 
+// 같은 뜻 표현 묶음 (정밀조립 js/dialog.js와 같은 낱말 · tests/zonedialog.mjs)
+const FEED = /투입|자재|재료|소재|원자재|공급/, FEED_HOLDW = /정지|중단|멈|보류|막|쉬|홀드|그만|스톱/, FEED_GOW = /재개|다시|시작|풀/;
+const MAINTW = /예방\s*정비|정비|점검|손\s*(좀\s*)?(봐|보)|고장|고쳐|수리|장비\s*(확인|봐)|(기계|장비|설비).*(이상|문제|소리)/;
+const pctOf = (text) => {
+  const m = text.match(/(\d{2,3})\s*(%|퍼센트|프로|퍼)/) ?? (/속도|빠르게|느리게|천천히|올려|내려|낮춰|높여/.test(text) ? text.match(/(\d{2,3})\s*(?:으로|로)/) : null);
+  return m ? +m[1] : /반쯤|절반\s*속도|반\s*속도/.test(text) ? 50 : null;
+};
+
 // 문장 하나 → 조치
 function parseClause(text, ctx) {
   const cell = findCell(text, ctx), out = [];
   const add = (a) => out.push({ zone: ctx.key, ...a, cell: a.cell === undefined ? cell?.id ?? null : a.cell });
-  const pct = text.match(/(\d{2,3})\s*(%|퍼센트|프로)/);
-  if (/상태|어때|어떻|현황|알려|보고|몇\s*개|얼마|확인해|UPH|생산량/i.test(text) && !/정지|멈|정비|속도|투입|재개|비율/.test(text)) { add({ type: 'zstatus' }); return out; }
+  const pv = pctOf(text);
+  if (/상태|어때|어떻|현황|알려|보고|몇\s*개|얼마|확인해|UPH|생산량|괜찮|돌아가/i.test(text) && !/정지|멈|정비|속도|투입|재개|비율|장비|손\s*봐|고장|고쳐|수리/.test(text)) { add({ type: 'zstatus' }); return out; }
   const mix = (/비율|혼류|생산|만\s|전용|:|대\s*\d/.test(text) || /만$/.test(text)) && findMix(text, ctx);
   if (mix) { add({ type: 'zmix', mix, cell: null }); return out; }
-  if (/투입|자재\s*넣/.test(text) && /정지|중단|멈|보류|막/.test(text)) { add({ type: 'zfeed', on: true, cell: null }); return out; }
-  if (/투입|자재\s*넣/.test(text) && /재개|다시|시작|풀/.test(text)) { add({ type: 'zfeed', on: false, cell: null }); return out; }
-  if (pct || /속도|빠르게|느리게|천천히/.test(text)) {
-    const v = pct ? +pct[1] : /빠르게|올려|높여/.test(text) ? 110 : /느리게|천천히|내려|낮춰/.test(text) ? 75 : /원래|정상|표준/.test(text) ? 100 : null;
+  const feed = /투입/.test(text) || (FEED.test(text) && !cell);   // "공급·키팅 셀 정지"처럼 셀 이름에 든 '공급'은 투입 지시가 아님
+  if (feed && FEED_HOLDW.test(text)) { add({ type: 'zfeed', on: true, cell: null }); return out; }
+  if (feed && FEED_GOW.test(text)) { add({ type: 'zfeed', on: false, cell: null }); return out; }
+  if (pv != null || /속도|빠르게|느리게|천천히|살살/.test(text)) {
+    const v = pv ?? (/빠르게|올려|높여/.test(text) ? 110 : /느리게|천천히|살살|내려|낮춰/.test(text) ? 75 : /원래|정상|표준/.test(text) ? 100 : null);
     if (v != null) { add({ type: 'zspeed', pct: v }); return out; }
   }
-  if (/예방\s*정비|정비|점검/.test(text)) { add({ type: 'zmaint' }); return out; }
+  if (MAINTW.test(text)) { add({ type: 'zmaint' }); return out; }
   if (/재개|다시\s*(가동|돌|시작)|계속\s*(가동|돌)|가동시켜|해제|풀어/.test(text)) { add({ type: 'zrun', stop: false }); return out; }
   if (/비상\s*정지|긴급\s*정지|사이클\s*정지|일시\s*정지|멈춰|정지|세워|중지/.test(text)) { add({ type: 'zrun', stop: true, urgent: /비상|긴급/.test(text) }); return out; }
   return out;

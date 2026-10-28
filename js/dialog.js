@@ -7,14 +7,28 @@ import { ZONE_MIXES } from './line.js';
 
 // 정밀조립Zone 셀 별칭 (다른 라인은 설비 이름으로 찾는다)
 const CELL_ALIASES = [
-  [/부품\s*분류|분류\s*셀|소팅/, 'SORT'],
+  [/부품\s*분류|분류\s*셀|소팅|부품\s*나누|분류하는|맨\s*(앞|처음)/, 'SORT'],
   [/도어\s*트림\s*(조립)/, 'DT_ASSY'],
   [/도어\s*트림\s*(체결|스크류|나사)/, 'DT_FAST'],
-  [/(e-?\s*axle|이\s*액슬|이\s*엑슬)\s*(조립)/i, 'EA_ASSY'],
-  [/(e-?\s*axle|이\s*액슬|이\s*엑슬)\s*(체결)/i, 'EA_FAST'],
+  [/(e-?\s*axle|이?\s*액슬|이\s*엑슬)\s*(조립)/i, 'EA_ASSY'],
+  [/(e-?\s*axle|이?\s*액슬|이\s*엑슬)\s*(체결)/i, 'EA_FAST'],
   [/포장/, 'PACK'],
 ];
 const ALL_RE = /전체|모든|모두|공장|라인\s*전|zone|존\s*전체|전\s*셀/i;
+// 같은 뜻 표현 묶음 (Claude 없이도 흔한 바꿔 말하기를 받는다 · tests/dialog.mjs)
+const DT = /도어\s*트림/, EA = /e-?\s*axle|이?\s*액슬|이\s*엑슬/i;
+const MORE = /더|많이|늘|높|위주|중심|비중/, LESS = /절반|줄|적게|덜|낮/;
+const URGENT = /비상|급히|급하게|위험|당장|긴급/, STOPW = /멈|정지|세워|스톱|중지/;
+const FEED = /투입|자재|재료|소재|원자재|공급/, FEED_HOLDW = /정지|중단|멈|보류|막|쉬|홀드|그만|스톱/, FEED_GOW = /재개|다시|시작|풀/;
+const MAINTW = /예방\s*정비|정비|점검|손\s*(좀\s*)?(봐|보)|고장|고쳐|수리|장비\s*(확인|봐)|(기계|장비|설비).*(이상|문제|소리)/;
+const RECALW = /재보정|보정|캘리브|다시\s*(맞춰|잡아)|정밀도|영점/;
+const NORMALW = /원래\s*대로|보통으로|표준으로|사이클\s*원래|무리하지|혹사/;
+// 숫자: % · 퍼센트 · 프로 · 퍼, 또는 속도 문맥의 "N으로" · 반쯤 → 50
+function pctOf(text) {
+  const m = text.match(/(\d{2,3})\s*(%|퍼센트|프로|퍼)/) ?? (/속도|빠르게|느리게|천천히|올려|내려|낮춰|높여/.test(text) ? text.match(/(\d{2,3})\s*(?:으로|로)/) : null);
+  if (m) return +m[1];
+  return /반쯤|절반\s*속도|반\s*속도/.test(text) ? 50 : null;
+}
 const norm = (s) => s.replace(/\s+/g, '').toLowerCase();
 
 export const DIALOG_EXAMPLES = ['포장셀 속도 75%', '도어트림 2:1로 생산', 'e-axle 조립셀 예방정비', '투입 정지', '전체 보호정지', '부품분류셀 상태 어때?'];
@@ -32,10 +46,10 @@ function findTarget(text, sim) {
 function parseClause(text, sim) {
   const target = findTarget(text, sim), out = [];
   const cmd = (code, def = 'all', arg = null) => out.push({ type: 'command', code, target: target ?? def, arg });
-  const pct = text.match(/(\d{2,3})\s*(%|퍼센트|프로)/);
+  const pv = pctOf(text);
   // 혼류 비율 (제품 이름이 들어간 비율·전용 생산)
   const ratio = text.match(/(\d)\s*(?::|대|to)\s*(\d)/i);
-  if (sim.zone && (ratio && /비율|혼류|도어\s*트림|e-?\s*axle|이\s*액슬|생산/i.test(text))) {
+  if (sim.zone && (ratio && /비율|혼류|도어\s*트림|e-?\s*axle|액슬|생산/i.test(text))) {
     let [a, b] = [+ratio[1], +ratio[2]];
     if (/(e-?\s*axle|이\s*액슬).*(도어\s*트림)/i.test(text) && !/(도어\s*트림).*(e-?\s*axle|이\s*액슬)/i.test(text)) [a, b] = [b, a];   // "e-axle 2 : 도어트림 1"
     const key = a === b ? '1:1' : a > b ? '2:1' : '1:2';
@@ -45,31 +59,35 @@ function parseClause(text, sim) {
   if (sim.zone && /(도어\s*트림)\s*(만|전용)/.test(text)) { out.push({ type: 'mix', mix: 'dt' }); return out; }
   if (sim.zone && /(e-?\s*axle|이\s*액슬)\s*(만|전용)/i.test(text)) { out.push({ type: 'mix', mix: 'ea' }); return out; }
   if (sim.zone && /(반반|균등|같은\s*비율|1\s*대\s*1)/.test(text)) { out.push({ type: 'mix', mix: '1:1' }); return out; }
-  if (sim.zone && /(도어\s*트림).*(더|많이|늘)/.test(text)) { out.push({ type: 'mix', mix: '2:1' }); return out; }
-  if (sim.zone && /(e-?\s*axle|이\s*액슬).*(더|많이|늘)/i.test(text)) { out.push({ type: 'mix', mix: '1:2' }); return out; }
+  // 한 제품을 늘리거나(위주 · 비중 높여) 다른 제품을 줄이면(절반 · 덜) 그쪽 2 : 1
+  const mixOk = sim.zone && !(target && target !== 'all') && !/속도|정지/.test(text) && !MAINTW.test(text) && !RECALW.test(text);   // 셀 지시 · 정비 · 속도 문장의 "더"는 혼류가 아님
+  const dtM = DT.test(text) && MORE.test(text) && !LESS.test(text), eaM = EA.test(text) && MORE.test(text) && !LESS.test(text);
+  if (mixOk && ((dtM && !EA.test(text)) || (EA.test(text) && LESS.test(text) && !DT.test(text)))) { out.push({ type: 'mix', mix: '2:1' }); return out; }
+  if (mixOk && ((eaM && !DT.test(text)) || (DT.test(text) && LESS.test(text) && !EA.test(text)))) { out.push({ type: 'mix', mix: '1:2' }); return out; }
   // 상태 질의
-  if (/상태|어때|어떻|현황|알려|보고|몇\s*개|얼마|확인해/.test(text) && !/정지|멈|정비|보정|속도|투입|대피/.test(text)) { out.push({ type: 'status', target: target ?? 'all' }); return out; }
+  if (/상태|어때|어떻|현황|알려|보고|몇\s*개|얼마|확인해|괜찮|돌아가/.test(text) && !/정지|멈|정비|보정|속도|투입|대피|장비|손\s*봐|고장|고쳐|수리/.test(text)) { out.push({ type: 'status', target: target ?? 'all' }); return out; }
   // 긴급·제어 명령 (먼저 해제·리셋류를 본다)
   if (/비상\s*정지\s*(해제|풀)|리셋|재가동/.test(text)) cmd('RESET');
-  else if (/비상\s*정지|e-?\s*stop|긴급\s*정지|당장\s*멈/i.test(text)) cmd('ESTOP');
+  else if (/비상\s*정지|e-?\s*stop|긴급\s*정지|당장\s*멈/i.test(text) || (URGENT.test(text) && STOPW.test(text) && !/재고|조달|발주/.test(text))) cmd('ESTOP');
   else if (/보호\s*정지\s*(해제|풀)/.test(text)) cmd('RESUME');
   else if (/보호\s*정지/.test(text)) cmd('SAFE_STOP');
   else if (/대피\s*(해제|풀|끝|종료)/.test(text)) out.push({ type: 'command', code: 'EVAC_END', target: 'all' });
-  else if (/대피/.test(text)) out.push({ type: 'command', code: 'EVACUATE', target: 'all' });
+  else if (/대피|다\s*나가|모두\s*나가|피신/.test(text)) out.push({ type: 'command', code: 'EVACUATE', target: 'all' });
   else if (/감속\s*(해제|풀)|정상\s*속도|원래\s*속도/.test(text)) cmd('SAFE_SPEED_OFF');
-  else if (/투입\s*간격/.test(text) && /(\d+(?:\.\d+)?)\s*초/.test(text)) out.push({ type: 'interval', seconds: +text.match(/(\d+(?:\.\d+)?)\s*초/)[1] });
-  else if (/투입|자재\s*넣/.test(text) && /정지|중단|멈|보류|막/.test(text)) out.push({ type: 'command', code: 'FEED_HOLD', target: 'all' });
-  else if (/투입|자재\s*넣/.test(text) && /재개|다시|시작|풀/.test(text)) out.push({ type: 'command', code: 'FEED_RESUME', target: 'all' });
-  else if (pct || /속도|빠르게|느리게|천천히/.test(text)) {
-    if (/안전\s*(감속|속도)|협동\s*속도/.test(text) && !pct) cmd('SAFE_SPEED');
+  else if (/(투입|넣는|들어가는)\s*(간격|주기|텀)/.test(text) && /(\d+(?:\.\d+)?)\s*초/.test(text)) out.push({ type: 'interval', seconds: +text.match(/(\d+(?:\.\d+)?)\s*초/)[1] });
+  else if (/긴급\s*조달|대체\s*발주|안전\s*재고|비상\s*재고|재고\s*풀|공급\s*(문제|차질).*(해결|빨리|급히)/.test(text)) out.push({ type: 'expedite' });
+  else if (FEED.test(text) && FEED_HOLDW.test(text) && !/간격|주기/.test(text)) out.push({ type: 'command', code: 'FEED_HOLD', target: 'all' });
+  else if (FEED.test(text) && FEED_GOW.test(text) && !/간격|주기/.test(text)) out.push({ type: 'command', code: 'FEED_RESUME', target: 'all' });
+  else if (target && target !== 'all' && NORMALW.test(text) && !/빠르게|느리게|천천히/.test(text)) cmd('SPEED', 'all', 100);   // 셀 사이클을 표준(속도 100%)으로
+  else if (pv != null || /속도|빠르게|느리게|천천히|살살/.test(text)) {
+    if (/안전\s*(감속|속도)|협동\s*속도/.test(text) && pv == null) cmd('SAFE_SPEED');
     else {
-      const v = pct ? Math.max(30, Math.min(120, +pct[1])) : /빠르게|올려|높여/.test(text) ? 110 : /느리게|천천히|내려|낮춰/.test(text) ? 75 : null;
+      const v = pv != null ? Math.max(30, Math.min(120, pv)) : /빠르게|올려|높여/.test(text) ? 110 : /느리게|천천히|살살|내려|낮춰/.test(text) ? 75 : null;
       if (v != null) cmd('SPEED', 'all', v);
     }
   } else if (/감속/.test(text)) cmd('SAFE_SPEED');
-  else if (/긴급\s*조달|대체\s*발주|안전\s*재고/.test(text)) out.push({ type: 'expedite' });
-  else if (/재보정|보정|캘리브/.test(text)) out.push({ type: 'command', code: 'RECALIB', target: target ?? null });
-  else if (/예방\s*정비|정비|점검/.test(text)) out.push({ type: 'command', code: 'MAINT', target: target ?? null });
+  else if (RECALW.test(text)) out.push({ type: 'command', code: 'RECALIB', target: target ?? null });
+  else if (MAINTW.test(text)) out.push({ type: 'command', code: 'MAINT', target: target ?? null });
   else if (/사이클\s*정지|일시\s*정지|멈춰|정지시켜|세워|정지/.test(text)) cmd('CYCLE_STOP');
   else if (/재개|다시\s*(가동|돌|시작)|계속\s*(가동|돌)|가동시켜/.test(text)) cmd('RESUME');
   return out;
@@ -77,11 +95,18 @@ function parseClause(text, sim) {
 
 // 지시 전체 → 문장별 조치 (해석하지 못한 문장은 따로 돌려준다)
 export function parseInstruction(text, sim) {
-  const clauses = text.split(/\s*(?:,|\.(?=\s|$)|;|\n|그리고|그 ?다음(?:에)?|이후에?|및)\s*/).map((s) => s.trim()).filter(Boolean);
-  const actions = [], unknown = [];
-  for (const c of clauses) { const a = parseClause(c, sim); if (a.length) actions.push(...a.map((x) => ({ ...x, clause: c }))); else unknown.push(c); }
+  const clauses = splitClauses(text), actions = [], unknown = [], seen = new Set();
+  for (let i = 0; i < clauses.length; i++) {
+    let c = clauses[i], a = parseClause(c, sim);
+    // "투입 간격 너무 짧아, 15초로" — 수치만 있는 다음 문장을 앞 문장에 붙여 다시 본다
+    if (!a.length && QTY.test(clauses[i + 1] ?? '')) { const j = `${c} ${clauses[i + 1]}`, b = parseClause(j, sim); if (b.length) { c = j; a = b; i++; } }
+    if (!a.length) { unknown.push(c); continue; }
+    for (const x of a) { const k = JSON.stringify([x.type, x.code, x.target, x.arg, x.mix, x.seconds]); if (!seen.has(k)) { seen.add(k); actions.push({ ...x, clause: c }); } }   // 같은 조치를 두 번 말하면 한 번만 ("공급 문제 해결해, 비상 재고 풀어")
+  }
   return { actions, unknown };
 }
+const QTY = /^\d+(?:\.\d+)?\s*(초|%|퍼센트|프로|퍼)?\s*(으로|로)?\s*(해|해줘|바꿔|맞춰)?$/;
+export const splitClauses = (text) => text.split(/\s*(?:,|\.(?=\s|$)|;|\n|그리고|그 ?다음(?:에)?|이후에?|및)\s*/).map((s) => s.trim()).filter(Boolean);
 
 // 조치 실행 — 결과 한 줄씩 돌려준다 (실행 못 하면 이유)
 export function applyAction(a, sim, { by = '운영자 대화 지시', onMix, agent } = {}) {

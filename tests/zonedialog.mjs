@@ -41,5 +41,17 @@ console.log('== Agent 도구(zone_command) 검증');
 const snap = { zones: { flex: { name: '유연생산Zone', cells: Object.keys(EXTRA_ZONES[0].cells).map((id) => ({ id })), mixes: { '2:1': '2 : 1' } }, insp: { name: '정밀검사Zone', cells: [{ id: 'ATOS' }], mixes: null } } };
 const v = (input) => validate('zone_command', { cell: '', arg: '', reason: 'x', ...input }, snap, new Set());
 check('정상 조치 통과 · 셀 속도 · 없는 셀 · 정밀검사 투입 · 정비 셀 누락은 거부', v({ zone: 'flex', action: 'MAINT', cell: 'C04' }) === null && v({ zone: 'flex', action: 'SPEED', cell: 'C03', arg: '90' }) && v({ zone: 'flex', action: 'STOP', cell: 'X9' }) && v({ zone: 'insp', action: 'FEED_HOLD' }) && v({ zone: 'flex', action: 'MAINT' }));
+console.log('== 바꿔 말하기 (동의어 묶음 · Claude 없이)');
+const P = (zk, text, want) => { const ctx = zoneCtx(sim, zk), { actions, unknown } = parseZoneInstruction(text, ctx); check(`[${zk}] ${text}`, actions.length === 1 && !unknown.length && Object.entries(want).every(([k, v]) => actions[0][k] === v), JSON.stringify(actions.map(({ clause, ...x }) => x)) + (unknown.length ? ` 모름: ${unknown}` : '')); };
+P('flex', '헤밍하는 쪽 장비 손봐줘', { type: 'zmaint', cell: 'C05' });
+P('flex', '실링하는 셀 점검', { type: 'zmaint', cell: 'C04' });
+P('adapt', '선삭 셀 장비 확인해줘', { type: 'zmaint', cell: 'RC_TURN' });
+P('insp', 'CT 셀 점검 부탁해', { type: 'zmaint', cell: 'CT' });
+P('adapt', '가공 쪽 전체 좀 느리게 60으로', { type: 'zspeed', pct: 60, cell: null });
+P('insp', '정밀검사 전체 속도 80으로', { type: 'zspeed', pct: 80, cell: null });
+P('flex', '유연생산 쪽 소재 투입 멈춰', { type: 'zfeed', on: true });
+P('flex', '재료 그만 넣어', { type: 'zfeed', on: true });
+P('flex', '공급·키팅 셀 정지', { type: 'zrun', stop: true, cell: 'C01' });   // 셀 이름의 '공급'은 투입 지시가 아님
+P('adapt', '적응가공 요즘 괜찮아?', { type: 'zstatus' });
 console.log(`\n결과: ${pass} PASS / ${fail} FAIL`);
 process.exitCode = fail ? 1 : 0;
