@@ -1690,6 +1690,7 @@ function toriPanel(p) {
   else if (p.kind === 'fac') { facTab = p.tab ?? 'po'; document.getElementById('btnFac').click(); }
   else if (p.kind === 'robot') { if (modeKey === 'dark' && [...sim.movers, ...(sim.drones ?? [])].some((m) => m.id === p.id)) { view.selectRobot({ type: 'mover', id: p.id }); ui.showRobot(); robotTimer = 1; camTimer = 1; } }   // 로봇 정보 창 (그 로봇 카메라 영상 · AI 검출)
   else if (p.kind === 'orchInc') { const inc = sim.orch.incidents.find((i) => i.key === p.key); orchView.show(); orchView.tab = 'flow'; if (inc) orchView.sel = inc.id; orchView.render(true); }   // 그 인시던트 흐름도
+  else if (p.kind === 'facos') { if (modeKey === 'dark') openFacosView(p.view); }   // FACOS 상세 창 (셀 게이트 · 현장 감지 · 보안)
   else if (p.kind === 'zd') { zdState.tab = p.tab ?? 'live'; openZoneDash(p.zone ?? 'main'); }
   else if (p.kind === 'trace') {
     traceState.tab = p.tab ?? 'trace'; traceState.q = '';
@@ -1710,6 +1711,7 @@ function toriClosePanels() {
   document.body.classList.remove('tori-tour'); orchView.hide(); zdModal.classList.add('hidden');
   if (ui.robotMode) { view.selectRobot(null); ui.hideDetail(); }
   facModal.classList.add('hidden'); clearInterval(facTimer); traceModal.classList.add('hidden');
+  fcModal.classList.add('hidden'); fcView = null;
 }
 // 토리 인시던트 예시: 흐름도를 바로 열지 않고 현장 이벤트만 만든다 (⚠ 버튼은 흐름도를 함께 연다) · 배속 · 이동체 위치
 function toriEvent() {

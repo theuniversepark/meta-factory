@@ -17,6 +17,7 @@ const store = { get: (k) => { try { return localStorage.getItem(k); } catch { re
 
 // 흐름 막대: 제품 ID 추적 7단계 (아래 작은 글씨 = 그 단계에서 붙는 ID)
 const CHAIN = [['오더', ''], ['자재', '원자재 로트'], ['투입', '생산 ID'], ['공정', '셀별 이력'], ['판정', '제품 ID'], ['출하', '팔레트 SSCC'], ['이후', '조회 · 리콜']];
+const FCHAIN = [['공장', 'FacOS'], ['게이트', 'A2A'], ['Zone', '오케스트레이터'], ['셀', 'OCS'], ['엣지', '스킬'], ['기록', 'FAC']];   // FacOS 계층
 const QCHAIN = [['예방', '건강·보정'], ['전수', '토크·각도'], ['샘플', '정밀검사'], ['대응', '봉쇄·경보'], ['원인', 'AI 분석'], ['개선', '8D·정책'], ['감시', '관리도']];   // 품질 관리 7단계
 function chainSvg(at, C = CHAIN) {
   const W = 336, H = 70, n = C.length, gap = W / n;
@@ -28,6 +29,10 @@ function chainSvg(at, C = CHAIN) {
 }
 // 실제 제품 예시 (시뮬레이션의 시리얼 서비스 · 제품 추적에서 읽음)
 const prodKo = (p) => PRODUCTS[p]?.label ?? p;
+// FacOS 주제: 공장 오케스트레이터 상태 (js/factoryos.js)
+const fos = (T) => T.h.sim?.()?.fos ?? null;
+const fosOrder = (F) => { const o = F?.orders.find((x) => x.status === 'open' && x.evidenced !== true) ?? F?.orders[0]; return o ? { o, good: F.main.reconcile(o.id)?.good ?? 0 } : null; };
+const DEC_KO = { policy: '정책 승인', 'due-risk': '납기 위험', timeout: '응답 시간 초과', 'first-article': '초품 불합격', 'tool-stock': '공구 재고', 'machine-pm': '주축 예지정비', 'insp-priority': '정밀검사 우선순위' };
 // 인시던트 예시: 그 인시던트 흐름도의 단계 · 시각 · 출동 로봇 도착
 const RADIUS = { leak: 1.3, debris: 1.0, intrusion: 2.2, smoke: 1.8 };
 const inc = (T, kind) => T.ev?.inc?.steps?.find((x) => x.kind === kind);
@@ -69,7 +74,49 @@ const TOPICS = {
     { say: '오른쪽 패널은 공장 운영 AI예요. 고장 · 공급 차질 · 현장 이벤트를 관찰 → 판단 → 실행한 기록이 남아요. 아래 입력창에 "포장셀 속도 80%"처럼 지시할 수도 있어요.', hl: ['#agentPanel'] },
     { say: '위쪽 버튼에서는 로봇 데이터로 VLA 학습, 운영 AI 학습, KPI 영향 분석, 품질 추적, Zone 대시보드를 볼 수 있어요.', hl: ['#btnVla', '#btnAios', '#btnImpact', '#btnTrace', '#btnZoneDash'] },
     { say: '아래 버튼으로 설비 고장이나 현장 이벤트를 일부러 일으켜 보세요. 에이전트가 어떻게 대응하는지 볼 수 있어요. CCTV · 5G · 센서 배치도 여기서 봐요.', hl: ['#btnFault', '#btnEvent', '#btnCctv'] },
-    { say: '설비를 누르면 상세 정보가, 🏷 라벨 버튼을 누르면 이름표가 보여요. 저를 누르면 인시던트 해결 예시, 제품 ID 추적, 품질 관리, 데이터 폐루프와 플라이휠, 매뉴얼 · 앱 내려받기도 안내해 드려요!', view: 'all', hl: ['#btnLabels'], end: true },
+    { say: '설비를 누르면 상세 정보가, 🏷 라벨 버튼을 누르면 이름표가 보여요. 저를 누르면 FacOS 공장 운영 SW, 인시던트 해결 예시, 제품 ID 추적, 품질 관리, 데이터 폐루프와 플라이휠, 매뉴얼 · 앱 내려받기도 안내해 드려요!', view: 'all', hl: ['#btnLabels'], end: true },
+  ] },
+  // FacOS — 공장 운영 SW: 계층(공장 → 게이트 → Zone → 셀 → 엣지 → 기록) · 오더 · 결정 요청 · A2A 가드레일 · 상위망 단절 · 셀 게이트 · 현장 감지 · 보안 · FAC
+  //   가드레일 시험 · 상위망 단절 시험은 토리가 직접 실행 (운영에 영향 없음 · 단절은 다음 단계 · 주제를 벗어나면 복구)
+  facos: { name: 'FacOS — 공장 운영 SW', steps: [
+    { mode: 'dark', view: 'all', hl: ['#facos'], fchain: -1,
+      voice: 'FacOS는 이 공장의 운영 소프트웨어예요. 원칙은 세 가지예요. 명령은 위에서 아래로, 상태는 아래에서 위로, 같은 계층끼리는 핸드셰이크와 알림만 주고받아요. 결정이 필요한 일은 공장으로 올려요.',
+      say: 'FacOS(Factory OS)는 이 공장의 운영 SW예요. 원칙 세 가지 — 명령은 위 → 아래, 상태는 아래 → 위, 같은 계층끼리는 핸드셰이크 · 알림만. 결정이 필요한 일은 공장으로 올려요. 화면 위 FACOS 줄이 지금 상태예요.' },
+    { panel: { kind: 'orch', tab: 'fos' }, hl: ['#btnOrch'], fchain: 2,
+      voice: '계층을 볼게요. 맨 위 공장 오케스트레이터가 오더와 우선순위, Zone 간 자원을 정하고, Zone마다 오케스트레이터가 셀을 맡아요. 셀 OCS는 상태 기계로 명령을 검증하고, 맨 아래 엣지 스킬이 실제 동작을 해요.',
+      say: '계층 — 공장 오케스트레이터(오더 · 납기 · 우선순위 · Zone 간 자원) → Agent Gateway(A2A 가드레일) → Zone 오케스트레이터 4개(정밀조립 = Manufacturing Agent · 정밀검사 · 유연생산 · 적응가공) → 셀 OCS(IDLE · READY · RUN · DONE · HOLD · RECOVER · SAFE-STOP 상태 기계) → 엣지 스킬(VLA 피킹 · 압입 · 체결 판정 · 인터록). 에이전트는 제안하고, 오케스트레이터가 검증해 확정해요.' },
+    { hl: ['#btnOrch'], fchain: 0, live: true,
+      voice: '오더는 공장이 Zone에 내려보내고, Zone이 투입 순서로 수락해요. 양품 목표를 채우면 Zone이 수량 정산 증빙을 올리고, 정산 오차가 0일 때만 공장이 오더를 닫아요.',
+      say: (T) => { const r = fosOrder(fos(T)); return `오더 — 공장이 Zone에 배정 → Zone이 수락(투입 순서) → 양품 목표를 채우면 Zone이 종료 증빙 → 공장이 확인해 종료.${r ? ` 지금 ${r.o.id}: 양품 ${r.good}/${r.o.target} · 납기 ${clock(r.o.due)}.` : ''} 투입 = 공정 + 합격대기 + HOLD + 인계 + 폐기, 이 수량 정산 오차가 0일 때만 닫혀요.`; } },
+    { hl: ['#btnOrch'], fchain: 0, live: true,
+      voice: 'Zone이 스스로 못 정하는 일은 결정 요청으로 공장에 올라와요. 납기 위험이면 납기를 늘리고, 정비 인력이 모자라면 다른 Zone에서 빌려 오고, 정책 반영은 사람이 결정해요. 결정에는 대상과 권한자, 계획 버전, 제약, 재개 조건이 꼭 붙어요.',
+      say: (T) => { const d = fos(T)?.decisions?.[0]; return `결정 요청 — Zone이 못 정하는 일은 공장으로: 납기 위험(납기 연장) · Zone 간 정비 지원(빌려주고 1건 뒤 복귀) · 정밀검사 우선순위 · 정책 승인(사람이 결정). 결정에는 대상 · 권한자 · 계획 버전 · 제약 · 재개 조건이 꼭 붙어요.${d ? ` 최근 결정: ${clock(d.t)} ${DEC_KO[d.kind] ?? d.kind} → ${d.verdict} (${d.version}).` : ' 아직 결정 요청은 없어요.'}`; } },
+    { act: (T) => { const F = fos(T); if (F && T.guard === undefined) T.guard = F.bus.send('zone:main', 'zone:insp', 'command', { body: { code: 'SPEED', arg: 0.5 }, text: '시험(토리): 정밀조립이 정밀검사 셀에 속도 명령' }); },
+      panel: { kind: 'orch', tab: 'a2a' }, hl: ['#btnOrch'], fchain: 1,
+      voice: '이번에는 가드레일을 시험해 볼게요. 정밀조립 Zone이 옆 정밀검사 Zone에 속도 명령을 보내 봤어요. 같은 계층끼리는 명령할 수 없어서 게이트웨이가 막았어요. 모든 메시지는 번호를 달고 기록돼요.',
+      say: (T) => T.guard ? `가드레일 시험 — 제가 정밀조립 Zone에서 정밀검사 Zone으로 속도 명령을 보내 봤어요. 결과: ${T.guard.status === 'blocked' ? `차단 (${T.guard.why})` : T.guard.status}, ${T.guard.msgId}. 존 간 메시지 탭에 빨간 줄로 남았어요. 모든 메시지는 번호 · 보낸 곳 · 받는 곳 · 계획 버전과 함께 기록돼요.` : '지금은 FacOS가 없어요 (피지컬AI 단계에서).' },
+    { act: (T) => { const F = fos(T); if (F && T.netOff === undefined) { T.netOff = F.online; if (F.online) F.setOnline(false); T.netT0 = performance.now(); F.bus.send('zone:main', 'factory', 'status', { text: '정밀조립 상태 보고 (상위망 단절 중 · 토리 시험)' }); } }, hl: ['#btnOrch'], fchain: 1, live: true,
+      ready: (T) => !fos(T) || fos(T).kpi().queued > 0 || performance.now() - (T.netT0 ?? 0) > 15000,
+      voice: '이번엔 공장과 Zone 사이 상위망을 끊어 볼게요. 망이 끊겨도 Zone은 승인된 범위 안에서 계속 일하고, 공장으로 갈 메시지는 Outbox에 쌓아 둬요.',
+      say: (T) => { const F = fos(T); return F ? `상위망 단절 시험 — 공장 ↔ Zone 망을 끊었어요. Zone은 승인된 범위 안에서 계속 일하고, 공장으로 갈 메시지는 Edge Outbox에 쌓여요: 지금 ${F.kpi().queued}건.` : ''; } },
+    { act: (T) => { const F = fos(T); if (F && T.netOff) { T.flushed = F.setOnline(true); T.netOff = false; } }, hl: ['#btnOrch'], fchain: 1,
+      voice: '망을 복구했어요. 쌓여 있던 메시지가 순서대로 공장에 전달됐어요. 접수 확인만으로 재개하지 않고, 공장이 실제로 처리한 뒤에 다음으로 넘어가요.',
+      say: (T) => `복구 — 망을 다시 연결하자 Outbox에 쌓인 ${T.flushed ?? 0}건이 순서대로 공장에 전달됐어요. 접수 확인(ACK)만으로 재개하지 않고, 공장이 실제로 처리한 결과로 넘어가요. 이 시험 기록도 존 간 메시지 탭에 남아요.` },
+    { panel: { kind: 'facos', view: 'cell' }, cam: { view: 'precision' }, hl: ['#facos'], fchain: 3, live: true,
+      voice: '셀 게이트예요. 정비, 보정, 현장 명령은 셀 OCS가 지금 상태와 인터록을 보고 승인하거나 거부하고, 그 사유를 남겨요. 마지막 권한은 안전 PLC에 있어요.',
+      say: (T) => { const K = fos(T)?.kpi(); return `셀 게이트 — 정비 · 보정 · 현장 명령은 셀 OCS가 상태와 인터록을 보고 승인 · 거부하고 사유를 남겨요${K ? ` (지금까지 승인 ${K.ocsOk} · 거부 ${K.ocsRej})` : ''}. 셀이 스스로 복구는 1회까지, 안 되면 Zone으로 올려요. 최종 권한은 안전 PLC예요. 창에는 셀별 진행 결과와 분류 · 포장 게이트 판별이 보여요.`; } },
+    { panel: { kind: 'facos', view: 'sense' }, hl: ['#facos'], fchain: 4,
+      voice: '현장 감지예요. 로봇 카메라와 CCTV 영상을 엣지에서 AI가 추론해 누유, 이물질, 연기, 무단 진입을 찾고, 오케스트레이터에 보고해요. 처리가 끝난 기록도 여기 남아요.',
+      say: '현장 감지 — 로봇 카메라 · CCTV 영상을 엣지에서 AI가 추론해 누유 · 이물질 · 연기 · 무단 진입을 찾아 오케스트레이터에 보고해요. 안전(P1) · 보안 · 출하품 영향은 모든 계층에 바로 알려요. 인시던트 해결 예시에서 이 흐름을 끝까지 볼 수 있어요.' },
+    { when: (T) => !!T.h.sim?.()?.sec?.on, panel: { kind: 'facos', view: 'sec' }, hl: ['#facos'], fchain: 1,
+      voice: '보안 계층이에요. 로봇과 에이전트마다 디지털 신원을 두고, 명령에는 서명과 권한 증명을 붙여 검증해요. 위조되거나 권한 밖의 명령은 차단해요.',
+      say: '보안 — 로봇 · 에이전트마다 분산 신원(DID)을 두고, 명령에는 서명과 권한 증명(VC) · 일회용 인증(OTAC)을 붙여 검증해요. 위조되거나 권한 밖의 명령은 차단하고 보안 인시던트(P2)로 올려요.' },
+    { panel: { kind: 'fac', tab: 'po' }, hl: ['#btnFac'], fchain: 5,
+      voice: '마지막은 FAC 업무 기록이에요. FacOS가 한 발주, 입고, 재고 이동, 정비요청, 오더 배정과 종료가 전표로 남아요. 앱에서는 ERPNext와도 연동돼요.',
+      say: 'FAC 업무 기록 — FacOS가 한 일이 전표로 남아요: 구매오더(P0000n) · 입고(WH/IN) · 내부 이동 · 출고(WH/OUT, 10분마다 한 전표로 묶음) · 정비요청(MR/) · 오더 배정 · 종료. 앱에서는 ERPNext와도 연동돼요.' },
+    { panel: { kind: 'orch', tab: 'fos' }, hl: ['#btnOrch', '#facos'], fchain: -1, live: true, end: true, next: 'incident',
+      voice: '정리하면, FacOS는 오더부터 결정, 명령 검증, 기록까지 공장의 운영 규칙을 지키게 해요. 이제 인시던트 해결 예시에서 FacOS가 실제로 움직이는 모습을 볼까요?',
+      say: (T) => { const K = fos(T)?.kpi(); return `정리 — FacOS는 오더 → 결정 → 명령 검증 → 기록까지 운영 규칙을 지키게 해요.${K ? ` 지금 지표: 이상 판단 10초 이내 ${K.judgeRate == null ? '-' : `${Math.round(K.judgeRate * 100)}%`} · 수량 정산 오차 ${K.recon?.err ?? '-'} · 명령 검증 승인 ${K.ocsOk} / 거부 ${K.ocsRej} · A2A 메시지 ${K.msgs}건(차단 ${K.blocked}).` : ''} 다음 — 인시던트 해결 예시에서 FacOS가 실제로 움직이는 모습을 봐요!`; } },
   ] },
   // 인시던트 해결 예시 (3막): ① 현장 — 이벤트를 조용히 만들고 그 자리로 확대, 감지한 로봇의 카메라 영상 → ② 오케스트레이터 — 그 인시던트 흐름도로
   //   보고 · 판단 · 명령 · 배정 → ③ 해결된 현장 — 출동 로봇을 따라가며 처리 · 정상화 · 기록. 진행하는 동안 시뮬레이션 1배속 (끝나면 원래 배속)
@@ -288,12 +335,12 @@ export class Tori {
     this.unhold(); this.restoreSpeed(); clearInterval(this.liveT); clearInterval(this.followT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.step = -1; this.open = true; this.el.classList.remove('mini');
     this.nEl.textContent = ''; this.figEl.innerHTML = '';
     this.say(MENU_SAY);
-    this.btnEl.innerHTML = ['tour', 'incident', 'trace', 'quality', 'data', 'docs'].map((k) => [k, TOPICS[k]]).map(([k, T]) => `<button type="button" data-t="topic" data-k="${k}">${T.name}</button>`).join('');
+    this.btnEl.innerHTML = ['tour', 'facos', 'incident', 'trace', 'quality', 'data', 'docs'].map((k) => [k, TOPICS[k]]).map(([k, T]) => `<button type="button" data-t="topic" data-k="${k}">${T.name}</button>`).join('');
     this.btnEl.classList.add('menu');
   }
-  play(topic) { this.unhold(); this.restoreSpeed(); this.topic = topic; this.list = null; this.ev = undefined; this.qInj = undefined; this.go(0); }
+  play(topic) { this.unhold(); this.restoreSpeed(); this.topic = topic; this.list = null; this.ev = undefined; this.qInj = undefined; this.guard = undefined; this.netOff = undefined; this.flushed = undefined; this.go(0); }
   unhold() { clearInterval(this.holdT); if (this.held) { this.held = false; this.h.pause?.(false); } }
-  restoreSpeed() { if (this.spd0 != null) this.h.speed?.(this.spd0); this.spd0 = undefined; }   // 인시던트 예시가 1배속으로 늦춘 것을 되돌림   // 시나리오(현장 이벤트 · 공정 편차)는 한 번 재생에 한 번만
+  restoreSpeed() { if (this.spd0 != null) this.h.speed?.(this.spd0); this.spd0 = undefined; if (this.netOff) { fos(this)?.setOnline(true); this.netOff = false; } }   // 인시던트 예시 배속 · FacOS 상위망 단절 시험 되돌림   // 인시던트 예시가 1배속으로 늦춘 것을 되돌림   // 시나리오(현장 이벤트 · 공정 편차)는 한 번 재생에 한 번만
 
   go(i) {
     const S = this.steps();
@@ -302,7 +349,7 @@ export class Tori {
     this.clearHl(); clearInterval(this.liveT); clearInterval(this.followT); this.unhold();
     const s = S[i], back = i < this.step; this.step = i; this.open = true; this.el.classList.remove('mini'); this.btnEl.classList.remove('menu');
     if (s.act && !back) s.act(this);   // 이전으로 돌아올 때는 다시 실행하지 않음 (이벤트를 또 만들지 않게)
-    if (s.mode && this.h.mode?.() !== s.mode) this.h.setMode?.(s.mode);
+    if (s.mode && this.h.mode?.() !== s.mode) { this.h.setMode?.(s.mode); this.list = null; }   // 단계를 바꾸면 그 단계에 맞는 안내만 다시 고른다 (예: 보안 계층은 피지컬AI에서만)
     if (s.view) this.h.flyTo?.(s.view);
     if (s.cam) { const c = typeof s.cam === 'function' ? s.cam(this) : s.cam; if (c) this.h.camTo?.(c); }   // 그 현장으로 이동 · 확대
     if (s.hold) { const f = () => { if (!this.held && s.hold(this)) { this.held = true; this.h.pause?.(true); } }; f(); this.holdT = setInterval(f, 300); }   // 명령이 내려지면 설명하는 동안 현장을 멈춤
@@ -317,7 +364,7 @@ export class Tori {
     }
     for (const q of s.hl ?? []) document.querySelector(q)?.classList.add('tori-hl');
     this.nEl.textContent = `${TOPICS[this.topic].name}${i ? ` · ${i} / ${S.length - 1}` : ''}`;
-    this.figEl.innerHTML = s.ring ? ringSvg(s.ring, s.at) : s.chain != null ? chainSvg(s.chain) : s.qchain != null ? chainSvg(s.qchain, QCHAIN) : '';
+    this.figEl.innerHTML = s.ring ? ringSvg(s.ring, s.at) : s.chain != null ? chainSvg(s.chain) : s.qchain != null ? chainSvg(s.qchain, QCHAIN) : s.fchain != null ? chainSvg(s.fchain, FCHAIN) : '';
     const last = s.end || i === S.length - 1, nextLabel = s.start ? '둘러보기 시작 ▶' : last && s.next ? `${TOPICS[s.next].name} ▶` : last ? '마치기' : '다음 ▶';
     this.btnEl.innerHTML = `${i ? '<button type="button" data-t="prev">◀ 이전</button>' : ''}${i === 0 && this.topic === 'tour' ? '<button type="button" data-t="skip">다음에</button>' : ''}<button type="button" data-t="menu">주제</button><button type="button" data-t="next" class="primary">${nextLabel}</button>`;
     const text = () => (typeof s.say === 'function' ? s.say(this) : s.say);
