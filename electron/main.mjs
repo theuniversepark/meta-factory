@@ -133,6 +133,7 @@ async function createWindow() {
     webPreferences: {
       preload: path.join(HERE, 'preload.cjs'),
       contextIsolation: true, nodeIntegration: false, sandbox: true,
+      autoplayPolicy: 'no-user-gesture-required',   // 안내 아바타(토리)가 첫 인사부터 음성으로 말하게 (js/tori.js)
     },
   });
   win.once('ready-to-show', () => win.show());

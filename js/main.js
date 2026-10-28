@@ -46,6 +46,7 @@ import { EpcisStore, epcisEvent, epcisDocument } from './epcis.js';
 import { FLEET_RANGE, FLEET_NAMES, SHARED_SPACE_LIMIT, fleetAdvice, predictFleet, predictFleetCounts, ZONE_FLEETS, isAmrFleet } from './fleet.js';
 import { SEC_LAYERS, SEC_KPI, SEC_THREATS, SEC_LANES, SEC_STAGES, SEC_ACTORS } from './security.js';
 import { PerfMeter } from './perf.js';
+import { Tori } from './tori.js';
 import { withCull } from './viewcull.js';
 import { DEFAULT_LINE, normalizeLine, cloneLine, zoneLine, isZone, ZONE_CELLS, ZONE_PRODUCTS, ZONE_MIXES, ZONE_NAME } from './line.js';
 
@@ -199,7 +200,7 @@ llm.zoneView = () => (zonePick.view === 'precision' ? 'main' : zonePick.view);
 llm.onZoneMix = (key, mix) => { zonePick.mix[key] = mix; saveZonePick(); renderZoneCard(); };
 let sim, agent, agentArch = 'single';   // 에이전트 구조: single · hybrid (혼합형 다중 에이전트)
 const archPref = {};   // 단계별 운영자 선택 (없으면 MODES[단계].agentArch — 피지컬AI 기본 혼합형)
-let modeKey = 'smart', speed = 3, running = true, labelsOn = true;
+let modeKey = 'smart', speed = 3, running = true, labelsOn = false;   // 라벨은 꺼진 채 시작 (첫 화면을 깔끔하게 · 하단 「🏷 라벨」로 켬)
 const SEED = 20261001;
 const fleetCfg = { amr: { scale: 1, paused: false, count: null }, agv: { scale: 1, paused: false, count: null }, zflex: { scale: 1, paused: false, count: null }, zadapt: { scale: 1, paused: false, count: null } };   // count: 운행 대수 (null = 설치 대수 전부)   // AMR·AGV 관제 설정 (단계·라인을 바꿔도 유지)
 
@@ -1668,6 +1669,10 @@ let blenderErr = null;
 await loadBlenderAssets().catch((e) => { blenderErr = e.message; });
 document.body.dataset.render = RENDER.loaded ? 'blender' : '3d';
 start('smart');
+const tori = new Tori({ flyTo, setMode: (k) => document.querySelector(`#modeSeg button[data-mode="${k}"]`)?.click(), mode: () => modeKey,
+  injectEvent: () => { const n = sim.fieldSeq ?? 0; document.getElementById('btnEvent').click(); return (sim.fieldSeq ?? 0) > n ? sim.fieldEvents.at(-1) : null; },   // ⚠ 현장 이벤트 버튼과 같은 동작 · 새로 생긴 이벤트
+  look: (x, z) => { persp.position.set(x + 3, 24, z + 22); ctlP.target.set(x, 0, z); ctlP.update(); } });   // 안내 로봇 (js/tori.js) — 처음 접속이면 인사
+tori.greetIfFirst();
 if (blenderErr) sim.log('warn', 'Blender 모델을 불러오지 못함', { obs: blenderErr, act: '기본 도형 모델로 계속' });
 frame();
 
@@ -2361,4 +2366,4 @@ fcBody.addEventListener('click', (e) => {
   const sf = e.target.closest('[data-sec-flow]'); if (sf) { secFlowSel = +sf.dataset.secFlow; renderFacosView(true); }
 });
 
-window.__twin = { perf, mainCull, epcisSt, epcisLocal, epcisQuery, insp, cctvBoards, zoneWalls, xzones, flyTo, primKey, setRender, RENDER, openGnb: (id) => openGnb(id), cctvRec, robotRec, cctvView, epRec, get sim() { return sim; }, get agent() { return agent; }, view, ui, hub, camWall, orchView, persp, ctlP, llm };
+window.__twin = { perf, mainCull, tori, epcisSt, epcisLocal, epcisQuery, insp, cctvBoards, zoneWalls, xzones, flyTo, primKey, setRender, RENDER, openGnb: (id) => openGnb(id), cctvRec, robotRec, cctvView, epRec, get sim() { return sim; }, get agent() { return agent; }, view, ui, hub, camWall, orchView, persp, ctlP, llm };

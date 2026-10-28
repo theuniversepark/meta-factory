@@ -1222,3 +1222,40 @@ details.zone-agent:not([open]) { padding-bottom: 7px; } details.zone-agent:not([
 #perfHud td, #perfHud th { padding: 0 8px 0 0; text-align: right; font-weight: 400; color: var(--muted, #8b949e); }
 #perfHud td:first-child, #perfHud th:first-child { text-align: left; color: var(--ink); }
 #perfHud i { display: inline-block; height: 8px; background: #58a6ff; vertical-align: middle; }
+/* 토리(Tori) 안내 로봇 — 오른쪽 패널 바로 왼쪽 아래 (js/tori.js) */
+.tori { position: fixed; right: calc(var(--rx) + 4px); bottom: 64px; z-index: 12; display: flex; align-items: flex-end; gap: 6px; pointer-events: none; }
+.tori-cv { width: 150px; height: 150px; cursor: pointer; pointer-events: auto; filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.35)); transition: width 0.25s, height 0.25s; }
+.tori.mini .tori-cv { width: 92px; height: 92px; }
+.tori.mini .tori-bubble { display: none; }
+.tori-bubble { pointer-events: auto; width: min(360px, calc(100vw - var(--lx) - var(--rx) - 140px)); margin-bottom: 18px; padding: 10px 12px; border-radius: 14px 14px 4px 14px; background: var(--panel); border: 1px solid rgba(55, 160, 255, 0.45); backdrop-filter: blur(10px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
+.tori-h { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.tori-h b { color: #9fd0ff; }
+.tori-n, .tori-gpu { font-size: 11px; color: var(--muted); }
+.tori-gpu { margin-left: auto; padding: 0 5px; border: 1px solid var(--line); border-radius: 6px; }
+.tori-h button { border: 0; background: none; color: var(--ink2); padding: 2px 4px; border-radius: 6px; cursor: pointer; }
+.tori-h button:hover { background: rgba(255, 255, 255, 0.08); }
+.tori-h button[data-t="voice"]:not(.on) { opacity: 0.45; }
+.tori-say { margin: 8px 0 10px; font-size: 13.5px; line-height: 1.6; color: var(--ink); }
+.tori-btns { display: flex; gap: 6px; justify-content: flex-end; }
+.tori-btns button { border: 1px solid var(--line); background: rgba(255, 255, 255, 0.05); padding: 5px 10px; border-radius: 8px; font-size: 12.5px; cursor: pointer; color: var(--ink); }
+.tori-btns button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tori-btns button[hidden] { display: none; }
+.tori-hl { outline: 2px solid #37a0ff !important; outline-offset: 2px; animation: tori-pulse 1.2s ease-in-out infinite; }
+@keyframes tori-pulse { 50% { box-shadow: 0 0 0 6px rgba(55, 160, 255, 0.25); } }
+@media (prefers-reduced-motion: reduce) { .tori-hl { animation: none; } .tori-cv { transition: none; } }
+.tori-btns.menu { flex-direction: column; align-items: stretch; }
+.tori-btns.menu button { text-align: left; padding: 7px 10px; }
+.tori-btns.menu button:hover { border-color: var(--accent); }
+.tori-fig:empty { display: none; }
+.tori-ring { display: block; width: 100%; height: auto; margin-top: 6px; }
+.tori-ring .tr-a { fill: none; stroke: rgba(169, 180, 192, 0.35); stroke-width: 1.6; }
+.tori-ring .tr-a.on { stroke: #37a0ff; stroke-width: 2.2; }
+.tori-ring .tr-h { fill: rgba(169, 180, 192, 0.5); }
+.tori-ring .tr-h.on { fill: #37a0ff; }
+.tori-ring .tr-n rect { fill: #18202b; stroke: rgba(255, 255, 255, 0.14); }
+.tori-ring .tr-n text { fill: var(--muted); font-size: 11.5px; }
+.tori-ring .tr-n.on rect { fill: #17304a; stroke: rgba(55, 160, 255, 0.6); }
+.tori-ring .tr-n.on text { fill: var(--ink); }
+.tori-ring .tr-n.cur rect { fill: #37a0ff; stroke: #37a0ff; }
+.tori-ring .tr-n.cur text { fill: #fff; font-weight: 700; }
+.tori-ring .tr-c { fill: #9fd0ff; font-size: 12px; font-weight: 700; }
