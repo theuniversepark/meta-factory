@@ -30,6 +30,24 @@ function pctOf(text) {
   return /반쯤|절반\s*속도|반\s*속도/.test(text) ? 50 : null;
 }
 const norm = (s) => s.replace(/\s+/g, '').toLowerCase();
+// 실행 전에 걸러낼 문장 — 하지 말라는 지시 · 묻는 말 · 대상 셀이 불분명한 지시는 명령으로 바꾸지 않는다
+// 부정 · 금지: 문장 끝이 「…지 마 / 말아 / 하면 안 돼 / 금지」 (중간의 「…지 말고 보통으로」는 다른 지시를 하라는 뜻이라 제외)
+const NEG_END = /(지\s*(마|마요|마세요|마라|말아|말아요|말아줘|말아\s*주세요|말\s*것)|면\s*안\s*(돼|되|됩니다)\w*|금지|하지\s*않도록|못\s*하게\s*해\w*)\s*[.!?~]*$/;
+// 묻는 말: 상태 · 현황을 묻고, 끝이 제어 동사(해 · 시켜 · 걸어 · 풀어 …)로 끝나지 않는다 (「알려줘 · 보여줘 · 확인해줘」는 묻는 말)
+const ASK = /상태|어때|어떻|현황|몇\s*개|얼마|괜찮|돌아가|인가요|인지|있어\s*\?|있나|했어\s*\?|됐어\s*\?|\?\s*$/;
+const DO_END = /(정지|멈춰|세워|정비|점검|보정|수리|고쳐|대피|투입|재개|해제|리셋|가동|낮춰|높여|올려|내려|바꿔|맞춰|풀어|걸어|시켜|해)\s*(줘|요|라|주세요|줄래|봐)?\s*[.!]*$/;
+const SHOW_END = /(알려|보여|확인해|말해|봐)\s*(줘|요|주세요|줄래)?\s*[.!?]*$/;
+const isAsk = (text) => ASK.test(text) && (SHOW_END.test(text) || /\?\s*$/.test(text) || !DO_END.test(text));
+// 셀을 가리킨 말이 있는데 이름을 정확히 찾지 못하면 후보를 돌려준다 (「조립셀」 → 도어트림 · e-axle 조립셀, 「DT_ASY 셀」 → 없음)
+function unclearCell(text, sim) {
+  const id = text.match(/\b[A-Za-z]{2,}_[A-Za-z0-9_]+\b/);
+  const word = text.match(/([가-힣A-Za-z0-9_-]+?)\s*셀/);
+  if (!id && !word) return null;
+  const key = norm((id?.[0] ?? word[1]).replace(/[·\s]/g, ''));
+  const cells = sim.processing.filter((st) => !st.standby);
+  const cand = cells.filter((st) => norm(st.name).includes(key) || norm(st.id).includes(key) || norm(st.id).replace(/_/g, '').includes(key.replace(/_/g, '')));
+  return { word: id?.[0] ?? `${word[1]}셀`, cand };
+}
 
 export const DIALOG_EXAMPLES = ['포장셀 속도 75%', '도어트림 2:1로 생산', 'e-axle 조립셀 예방정비', '투입 정지', '전체 보호정지', '부품분류셀 상태 어때?'];
 
@@ -43,8 +61,9 @@ function findTarget(text, sim) {
 }
 
 // 문장 하나 → 조치 목록
-function parseClause(text, sim) {
+function parseClause(text, sim, depth = 0) {
   const target = findTarget(text, sim), out = [];
+  if (NEG_END.test(text)) return [{ type: 'unclear', reason: '하지 말라는 지시 — 명령을 보내지 않고 지금 상태를 그대로 둡니다', alt: '바꾸려면 원하는 동작을 말해 주세요 · 지금 상태는 "…상태 알려줘"로 확인' }];
   const cmd = (code, def = 'all', arg = null) => out.push({ type: 'command', code, target: target ?? def, arg });
   const pv = pctOf(text);
   // 혼류 비율 (제품 이름이 들어간 비율·전용 생산)
@@ -64,8 +83,14 @@ function parseClause(text, sim) {
   const dtM = DT.test(text) && MORE.test(text) && !LESS.test(text), eaM = EA.test(text) && MORE.test(text) && !LESS.test(text);
   if (mixOk && ((dtM && !EA.test(text)) || (EA.test(text) && LESS.test(text) && !DT.test(text)))) { out.push({ type: 'mix', mix: '2:1' }); return out; }
   if (mixOk && ((eaM && !DT.test(text)) || (DT.test(text) && LESS.test(text) && !EA.test(text)))) { out.push({ type: 'mix', mix: '1:2' }); return out; }
-  // 상태 질의
-  if (/상태|어때|어떻|현황|알려|보고|몇\s*개|얼마|확인해|괜찮|돌아가/.test(text) && !/정지|멈|정비|보정|속도|투입|대피|장비|손\s*봐|고장|고쳐|수리/.test(text)) { out.push({ type: 'status', target: target ?? 'all' }); return out; }
+  // 셀을 가리켰는데 정확히 못 찾으면 전체로 넓히지 않고 되묻는다
+  if (!target) {
+    const u = unclearCell(text, sim);
+    if (u && u.cand.length === 1 && !depth) return parseClause(text.replace(u.word, u.cand[0].name), sim, 1);   // 후보가 하나면 그 셀
+    if (u) return [{ type: 'unclear', reason: u.cand.length ? `「${u.word}」이(가) 여러 셀에 해당 — ${u.cand.map((c) => c.name).join(' · ')}` : `「${u.word}」에 해당하는 셀이 없음`, alt: `셀 이름을 정확히 (예: "${(u.cand[0] ?? sim.processing[0]).name} …") 또는 "전체 …"` }];
+  }
+  // 상태 질의 — 묻는 말이면 정지 · 정비 같은 낱말이 있어도 조회만 한다 (「비상정지 상태 알려줘」 · 「포장셀 정비 상태 어때?」)
+  if (isAsk(text)) { out.push({ type: 'status', target: target ?? 'all' }); return out; }
   // 긴급·제어 명령 (먼저 해제·리셋류를 본다)
   if (/비상\s*정지\s*(해제|풀)|리셋|재가동/.test(text)) cmd('RESET');
   else if (/비상\s*정지|e-?\s*stop|긴급\s*정지|당장\s*멈/i.test(text) || (URGENT.test(text) && STOPW.test(text) && !/재고|조달|발주/.test(text))) cmd('ESTOP');
@@ -145,10 +170,10 @@ export function statusText(sim, target) {
   const STL = { BUSY: '가동', STARVED: '자재대기', BLOCKED: '배출대기', DOWN: '고장', MAINT: '정비중', ESTOP: '비상정지', PSTOP: '보호정지', CSTOP: '사이클정지', CHECK: '자가진단', NOPARTS: '부품결품', REFILL: '부품보충중', IDLE: '대기' };
   if (target && target !== 'all') {
     const st = sim.processing.find((x) => x.id === target), a = sim.assess(st);
-    const k = st.cmd, lim = [k?.safe && '감속 25%', k && k.override !== 1 && `속도 ${Math.round(k.override * 100)}%`, k?.hold === 'cycle' && '사이클 정지'].filter(Boolean);
+    const k = st.cmd, lim = [st.request && `${st.request.kind === 'repair' ? '수리' : st.request.kind === 'pm' ? '예방정비' : '정비'} 요청 중`, k?.safe && '감속 25%', k && k.override !== 1 && `속도 ${Math.round(k.override * 100)}%`, k?.hold === 'cycle' && '사이클 정지'].filter(Boolean);
     return `${st.name}: ${STL[st.state] ?? st.state} · 건강도 ${st.health.toFixed(0)}% · 10분 고장확률 ${(a.risk10 * 100).toFixed(1)}% · Cpk ${a.cpk.toFixed(2)} · 처리 ${st.c.processed}개${lim.length ? ` · ${lim.join(' · ')}` : ''}`;
   }
   const k = sim.kpi(), down = sim.processing.filter((s) => s.state === 'DOWN').map((s) => s.name);
-  const open = sim.orch.openCount();
-  return `라인: 시간당 ${Math.round(k.uphRecent)}개 · OEE ${(k.OEE * 100).toFixed(1)}% · 재공 ${k.wip}개 · 양품 ${k.good}개${sim.zone ? ` (도어트림 ${sim.stats.goodBy.doortrim ?? 0} · e-axle ${sim.stats.goodBy.eaxle ?? 0})` : ''}${down.length ? ` · 고장 ${down.join(', ')}` : ''}${open ? ` · 진행 중 인시던트 ${open}건` : ''}${sim.zone ? ` · 혼류 ${ZONE_MIXES[sim.line.mix]?.label ?? '1 : 1'}` : ''}`;
+  const open = sim.orch.openCount(), C = sim.cmd, cmds = [C?.estopAll && '비상정지 발령 중', C?.pstopAll && '보호정지 중', C?.feedHold && '투입 보류', C?.evac && '대피 중'].filter(Boolean);
+  return `라인: 시간당 ${Math.round(k.uphRecent)}개 · OEE ${(k.OEE * 100).toFixed(1)}% · 재공 ${k.wip}개 · 양품 ${k.good}개${sim.zone ? ` (도어트림 ${sim.stats.goodBy.doortrim ?? 0} · e-axle ${sim.stats.goodBy.eaxle ?? 0})` : ''}${down.length ? ` · 고장 ${down.join(', ')}` : ''}${open ? ` · 진행 중 인시던트 ${open}건` : ''} · ${cmds.length ? cmds.join(' · ') : '비상정지 · 보호정지 없음'}${sim.zone ? ` · 혼류 ${ZONE_MIXES[sim.line.mix]?.label ?? '1 : 1'}` : ''}`;
 }

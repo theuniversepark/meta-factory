@@ -45,7 +45,7 @@ export class LLMController {
     this.enabled = false;
     this.pauseWhileThinking = true;
     this.inFlight = false;
-    this.queue = null;            // { reasons:Set, urgent, operatorMessage }
+    this.queue = [];              // 차례로 보낼 요청 [{ reasons:Set, urgent, operatorMessage, rec }] — 지시마다 따로 (응답을 그 지시에 연결)
     this.calls = 0; this.costUSD = 0; this.tokensIn = 0; this.tokensOut = 0;
     this.status = '';
     this.onChange = null;
@@ -127,7 +127,7 @@ export class LLMController {
 
   attach(sim, agent) {
     this.sim = sim; this.agent = agent;
-    this.history = []; this.queue = null;
+    this.history = []; this.queue = []; this.pendingDialog = null;
     this.gen = (this.gen ?? 0) + 1;     // 모드 전환 시 이전 응답 무시
     this.setEnabled(this.enabled && sim.mode.agentActive);
   }
@@ -140,12 +140,12 @@ export class LLMController {
 
   get holdSim() { return this.enabled && this.inFlight && this.pauseWhileThinking; }
 
-  request(reason, urgent = false, operatorMessage = null) {
+  // 운영자 지시(rec)는 하나씩 따로 줄을 세운다 — 응답 대기 중 새 지시가 와도 앞 지시를 덮어쓰지 않고, 응답은 보낸 그 지시에 붙는다
+  request(reason, urgent = false, operatorMessage = null, rec = null) {
     if (!this.enabled) return;
-    if (!this.queue) this.queue = { reasons: new Set(), urgent: false, operatorMessage: null };
-    this.queue.reasons.add(reason);
-    this.queue.urgent ||= urgent;
-    if (operatorMessage) this.queue.operatorMessage = operatorMessage;
+    const last = this.queue.at(-1);
+    if (!rec && !operatorMessage && last && !last.rec && !last.operatorMessage) { last.reasons.add(reason); last.urgent ||= urgent; }   // 지시가 아닌 요청끼리는 묶는다
+    else this.queue.push({ reasons: new Set([reason]), urgent, operatorMessage, rec });
     this.pump();
   }
 
@@ -168,7 +168,7 @@ export class LLMController {
       else rec.items.push({ clause: c, source: '내장 해석기', gate: evaluate({ type: 'unknown', clause: c }, sim, this.agent) });
     }
     this.logDialog(rec);
-    if (unknown.length && this.available) { this.pendingDialog = rec; this.request('운영자 지시 해석 (내장 해석기로 알 수 없는 문장)', true, unknown.join(' / ')); }
+    if (unknown.length && this.available) this.request('운영자 지시 해석 (내장 해석기로 알 수 없는 문장)', true, unknown.join(' / '), rec);
     return true;
   }
 
@@ -187,7 +187,7 @@ export class LLMController {
       }
     }
     this.logDialog(rec);
-    if (unknown.length && this.available) { this.pendingDialog = rec; this.request(`${ctx.name} 운영자 지시 해석 (내장 해석기로 알 수 없는 문장)`, true, `[대상 Zone: ${ctx.name} (zone=${zk}) — zone_command 도구로 반영하거나, 할 수 없으면 도구 없이 이유를 답하십시오] ${unknown.join(' / ')}`); }
+    if (unknown.length && this.available) this.request(`${ctx.name} 운영자 지시 해석 (내장 해석기로 알 수 없는 문장)`, true, `[대상 Zone: ${ctx.name} (zone=${zk}) — zone_command 도구로 반영하거나, 할 수 없으면 도구 없이 이유를 답하십시오] ${unknown.join(' / ')}`, rec);
     return true;
   }
 
@@ -277,8 +277,8 @@ export class LLMController {
   }
 
   async pump() {
-    if (this.inFlight || !this.queue || !this.enabled) return;
-    const job = this.queue; this.queue = null;
+    if (this.inFlight || !this.queue.length || !this.enabled) return;
+    const job = this.queue.shift(), rec = job.rec ?? null;
     const gen = this.gen;
     this.inFlight = true;
     const trigger = [...job.reasons].join(' / ');
@@ -288,9 +288,9 @@ export class LLMController {
       const out = await this.runTurn({ snapshot: this.snapshot(), trigger, urgent: job.urgent, operatorMessage: job.operatorMessage, history: this.history.slice(-HISTORY) });
       if (gen !== this.gen) return;
       this.calls++; this.costUSD += out.costUSD; this.tokensIn += out.usage.input_tokens; this.tokensOut += out.usage.output_tokens;
-      for (const a of out.actions) this.apply(a);
+      this.pendingDialog = rec;   // apply()가 해석 결과를 붙일 지시 = 이 요청을 보낸 지시
+      try { for (const a of out.actions) this.apply(a); } finally { this.pendingDialog = null; }
       for (const r of out.rejected) this.sim.log('warn', `Agent 제안 반려 · ${r.name}`, { obs: r.input.reason, dec: r.error });
-      const rec = this.pendingDialog; this.pendingDialog = null;
       if (rec) {
         for (const it of rec.items) if (it.gate.verdict === 'pending') { it.gate.verdict = rec.agentItems?.length ? 'delegated' : 'reject'; it.gate.reason = rec.agentItems?.length ? 'Agent가 해석해 아래 조치로 전환' : `Agent 판단: ${(out.text || '공정 조치로 해석하지 못함').replace(/\s+/g, ' ').slice(0, 160)}`; it.gate.checks[0].text += rec.agentItems?.length ? ' → 해석됨' : ' → 조치 없음'; it.reply = out.text; }
         this.logDialog(rec, rec.agentItems?.length ? rec.agentItems : rec.items.filter((i) => i.source === 'Agent'));   // Agent가 조치하지 않았으면 미반영과 그 원인(Agent 판단)을 보고
@@ -302,14 +302,14 @@ export class LLMController {
       this.status = `${(out.latencyMs / 1000).toFixed(1)}초 응답 · 조치 ${out.actions.length}건`;
     } catch (e) {
       if (gen !== this.gen) return;
-      if (this.pendingDialog) { for (const it of this.pendingDialog.items) if (it.gate.verdict === 'pending') { it.gate.verdict = 'reject'; it.gate.reason = `Agent 호출 실패: ${e.message}`; } this.pendingDialog = null; }
+      if (rec) for (const it of rec.items) if (it.gate.verdict === 'pending') { it.gate.verdict = 'reject'; it.gate.reason = `Agent 호출 실패: ${e.message}`; }
       this.sim.log('alert', 'Agent 호출 실패', { obs: e.message, act: '정책 기반 에이전트로 계속 운영 · 지시를 더 짧게 다시 입력해 보세요' });
       this.status = `오류: ${e.message}`;
     } finally {
       if (gen === this.gen) {
         this.inFlight = false;
         this.onChange?.();
-        if (this.queue) setTimeout(() => this.pump(), 500);
+        if (this.queue.length) setTimeout(() => this.pump(), 500);
       }
     }
   }

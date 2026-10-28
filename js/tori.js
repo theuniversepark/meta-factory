@@ -442,7 +442,7 @@ export class Tori {
     this.btnEl.classList.add('menu');
   }
   play(topic) { this.unhold(); this.restoreSpeed(); this.topic = topic; this.list = null; this.ev = undefined; this.qInj = undefined; this.guard = undefined; this.netOff = undefined; this.flushed = undefined; this.prop = undefined; this.applied = undefined; this.go(0); }
-  unhold() { clearInterval(this.holdT); if (this.held) { this.held = false; this.h.pause?.(false); } }
+  unhold() { clearInterval(this.holdT); if (this.held) { this.held = false; if (this.heldByMe) this.h.pause?.(false); this.heldByMe = false; } }   // 토리가 직접 멈춘 경우에만 다시 재생 (사용자가 멈춰 둔 공장은 그대로)
   restoreSpeed() { if (this.ev?.quiet) this.ev.quiet = false;   // 인시던트 예시를 「AI 감지」 전에 벗어나면 감지를 막아 둔 이벤트를 풀어 준다
     if (this.spd0 != null) this.h.speed?.(this.spd0); this.spd0 = undefined; if (this.netOff) { fos(this)?.setOnline(true); this.netOff = false; } if (this.applied === true && this.prop?.status === 'applied') { adv(this)?.revert(this.prop.id); this.applied = 'reverted'; } }   // KPI 주제에서 시연 적용 중 벗어나면 되돌림   // 인시던트 예시 배속 · FacOS 상위망 단절 시험 되돌림   // 인시던트 예시가 1배속으로 늦춘 것을 되돌림   // 시나리오(현장 이벤트 · 공정 편차)는 한 번 재생에 한 번만
 
@@ -452,11 +452,11 @@ export class Tori {
     if (i >= S.length) return this.close();
     this.clearHl(); clearInterval(this.liveT); clearInterval(this.followT); this.unhold();
     const s = S[i], back = i < this.step; this.step = i; this.open = true; this.el.classList.remove('mini'); this.btnEl.classList.remove('menu');
+    if (s.mode && this.h.mode?.() !== s.mode) { this.h.setMode?.(s.mode); this.list = null; }   // 단계를 바꾸면 그 단계에 맞는 안내만 다시 고른다 (예: 보안 계층은 피지컬AI에서만)   // 단계 동작(act)보다 먼저 — 모드를 바꾸면 공장이 새로 시작하므로 act는 새 공장을 보고 판단한다 (KPI 첫 단계 30배속)
     if (s.act && !back) s.act(this);   // 이전으로 돌아올 때는 다시 실행하지 않음 (이벤트를 또 만들지 않게)
-    if (s.mode && this.h.mode?.() !== s.mode) { this.h.setMode?.(s.mode); this.list = null; }   // 단계를 바꾸면 그 단계에 맞는 안내만 다시 고른다 (예: 보안 계층은 피지컬AI에서만)
     if (s.view) this.h.flyTo?.(s.view);
     if (s.cam) { const c = typeof s.cam === 'function' ? s.cam(this) : s.cam; if (c) this.h.camTo?.(c); }   // 그 현장으로 이동 · 확대
-    if (s.hold) { const f = () => { if (!this.held && s.hold(this)) { this.held = true; this.h.pause?.(true); } }; f(); this.holdT = setInterval(f, 300); }   // 명령이 내려지면 설명하는 동안 현장을 멈춤
+    if (s.hold) { const f = () => { if (!this.held && s.hold(this)) { this.held = true; this.heldByMe = this.h.paused?.() === false; if (this.heldByMe) this.h.pause?.(true); } }; f(); this.holdT = setInterval(f, 300); }   // 명령이 내려지면 설명하는 동안 현장을 멈춤
     if (s.follow) { const f = () => { const p = this.h.moverPos?.(s.follow(this)); if (p) this.h.camTo?.({ x: p.x, z: p.z, d: 9, ms: 900 }); }; f(); this.followT = setInterval(f, 1000); }   // 출동 로봇을 따라간다
     clearTimeout(this.panelT);
     if (s.panel !== undefined) {   // 현장을 3초 보여 준 뒤 관련 창 (null = 창 닫기)
@@ -491,7 +491,7 @@ export class Tori {
     for (const e of els) {
       for (const k of ['left', 'right']) if (shut(k, b.classList.contains(`hide-${k}`)) && e.closest(`.panel.${k}`)) need.set(k, [() => this.h.side?.(k, false), () => this.h.side?.(k, true)]);
       if (ap && shut('facos', ap.classList.contains('facos-folded')) && e.closest('#facosSum, #zoneAgentBox')) need.set('facos', [() => ap.classList.remove('facos-folded'), () => ap.classList.add('facos-folded')]);
-      for (let d = e.closest('details'); d; d = d.parentElement?.closest('details')) if (shut(d, !d.open)) { const det = d; need.set(det, [() => { det.open = true; }, () => { det.open = false; }]); }
+      for (let d = e.closest('details'); d; d = d.parentElement?.closest('details')) if (shut(d, !d.open)) { const det = d; need.set(det, [() => { det.dataset.tori = '1'; det.open = true; }, () => { det.dataset.tori = '1'; det.open = false; }]); }   // data-tori: 잠시 펼침 — 사용자 설정으로 저장하지 않음 (ui.js)
     }
     for (const [k, undo] of this.revealed) if (!need.has(k)) { undo(); this.revealed.delete(k); }
     for (const [k, [open, undo]] of need) if (!this.revealed.has(k)) { open(); this.revealed.set(k, undo); }

@@ -1461,12 +1461,12 @@ function renderCctvPanel(force) {
 
 // ── 양쪽 패널 숨기기/보이기 (버튼 ◀ ▶, 단축키 [ ]) — 상태는 브라우저에 기억 ─────────────────
 const sidePanels = { left: document.getElementById('tglLeft'), right: document.getElementById('tglRight') };
-function setSide(side, hide) {
+function setSide(side, hide, save = true) {   // save=false: 토리 안내가 잠시 펼침 (사용자 설정은 그대로)
   document.body.classList.toggle(`hide-${side}`, hide);
   const b = sidePanels[side], name = side === 'left' ? '왼쪽 패널(정밀조립Zone)' : '오른쪽 패널(자율운영 에이전트)', key = side === 'left' ? '[' : ']';
   b.textContent = (side === 'left') === hide ? '▶' : '◀';
   b.title = `${name} ${hide ? '보이기' : '숨기기'} · 단축키 ${key}`;
-  try { localStorage.setItem(`metafactory.hide.${side}`, hide ? '1' : '0'); } catch { /* 저장소 없음 */ }
+  if (save) try { localStorage.setItem(`metafactory.hide.${side}`, hide ? '1' : '0'); } catch { /* 저장소 없음 */ }
 }
 for (const side of ['left', 'right']) {
   let h = false; try { h = localStorage.getItem(`metafactory.hide.${side}`) === '1'; } catch { /* 무시 */ }
@@ -1738,7 +1738,7 @@ const tori = new Tori({ flyTo: (k) => toriCam({ view: k }), camTo: toriCam, open
   quietEvent: toriEvent, speed: toriSpeed, moverPos: toriMover, pause: toriPause, sim: () => sim, setMode: (k) => document.querySelector(`#modeSeg button[data-mode="${k}"]`)?.click(), mode: () => modeKey,
   injectEvent: () => { const n = sim.fieldSeq ?? 0; document.getElementById('btnEvent').click(); return (sim.fieldSeq ?? 0) > n ? sim.fieldEvents.at(-1) : null; },   // ⚠ 현장 이벤트 버튼과 같은 동작 · 새로 생긴 이벤트
   look: (x, z) => { persp.position.set(x + 3, 24, z + 22); ctlP.target.set(x, 0, z); ctlP.update(); },
-  side: (k, hide) => setSide(k, hide) });   // 안내 로봇 (js/tori.js) — 처음 접속이면 인사
+  side: (k, hide) => setSide(k, hide, false), paused: () => !running });   // 토리가 잠시 펼친 패널은 저장하지 않는다 · 사용자가 멈춰 뒀는지   // 안내 로봇 (js/tori.js) — 처음 접속이면 인사
 tori.greetIfFirst();
 if (blenderErr) sim.log('warn', 'Blender 모델을 불러오지 못함', { obs: blenderErr, act: '기본 도형 모델로 계속' });
 frame();

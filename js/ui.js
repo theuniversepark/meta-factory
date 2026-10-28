@@ -59,7 +59,7 @@ export class UI {
     // FACOS 요약 칩 · 로그 필터: 누르면 공장 운영 로그를 그 존으로 거른다 (수동으로 고르면 왼쪽 Zone 연동은 끈다)
     // 정밀조립 존 에이전트 블록: 접고 펼친 상태 기억 (기본 접힘 — 공장 운영 로그 공간)
     const za = $('zoneAgentBox'); try { za.open = localStorage.getItem('metafactory.zoneAgentOpen') === '1'; } catch { /* 기본 접힘 */ }
-    za.addEventListener('toggle', () => { try { localStorage.setItem('metafactory.zoneAgentOpen', za.open ? '1' : '0'); } catch { /* 이번 실행만 */ } });
+    za.addEventListener('toggle', () => { if (za.dataset.tori) { delete za.dataset.tori; return; } try { localStorage.setItem('metafactory.zoneAgentOpen', za.open ? '1' : '0'); } catch { /* 이번 실행만 */ } });
     for (const id of ['logFilter', 'facosSum']) $(id).addEventListener('click', (e) => { const b = e.target.closest('[data-lf]'); if (!b) return; $('logFollow').checked = false; this.setLogFilter(b.dataset.lf); this.renderFacos(); });
     $('detail').addEventListener('click', (e) => {
       const b = e.target.closest('button[data-act]');
