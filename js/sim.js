@@ -1509,7 +1509,7 @@ export class Simulation {
       this.trace?.inspect(st, it, it.defect ? 'MISS' : 'OK');
     } else {
       const p = (m.defectBase / 4) * (st.def.defectMul ?? 1) * (1 + (100 - st.health) / 50) * (1 + st.drift * 1.5) * (this.vla?.defectFactor(st) ?? 1) * (this.trace?.envMul(st) ?? 1);   // 환경 이상(공정별 민감 요인)도 불량 확률에
-      const made = !it.defect && this.rand() < p;
+      const made = !it.defect && (st.forceDefect > 0 ? (st.forceDefect--, true) : this.rand() < p);   // forceDefect: 안내 시나리오(토리 품질 관리)가 공정 편차와 함께 건 「다음 N개 불량」 — 없으면 난수 흐름 그대로
       if (made) { it.defect = true; it.defectBy = st.id; st.c.defects++; }
       if (st.def.type === 'pack') { const u = this.serials?.issue(it, { cell: st.id, name: st.name }); if (u) st.lastMark = { t: this.time, id: u.serial, grade: u.mark?.grade }; }   // 검사·포장셀 최종 외관·라벨 검사 합격 → 제품 시리얼 발행 · QR 라벨 부착 · 판독 검증
       this.trace?.done(st, it, made, p);

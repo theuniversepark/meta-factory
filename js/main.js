@@ -1681,25 +1681,47 @@ function toriCam(c) {
   if (c.view) { const [p, t] = ZONE_VIEWS[c.view]; return tweenCam(p, t); }
   let { x, z } = c; const d = c.d ?? 24;
   if (c.station) { const sv = view.stationViews.find((v) => v.st.id === c.station); if (!sv) return; const w = sv.group.getWorldPosition(new THREE.Vector3()); x = w.x; z = w.z; }
-  tweenCam([x + d * 0.12, d, z + d * 0.9], [x, 0, z]);
+  tweenCam([x + d * 0.12, d, z + d * 0.9], [x, 0, z], c.ms);
 }
 // 토리 안내용 창: 오케스트레이터(Factory OS 오더) · FAC(구매오더) · 품질 추적(탭 · 선택 제품 · EPCIS 조회)
 function toriPanel(p) {
   document.body.classList.add('tori-tour');
   if (p.kind === 'orch') { orchView.show(); orchView.tab = p.tab; orchView.render(true); }
   else if (p.kind === 'fac') { facTab = p.tab ?? 'po'; document.getElementById('btnFac').click(); }
+  else if (p.kind === 'robot') { if (modeKey === 'dark' && [...sim.movers, ...(sim.drones ?? [])].some((m) => m.id === p.id)) { view.selectRobot({ type: 'mover', id: p.id }); ui.showRobot(); robotTimer = 1; camTimer = 1; } }   // 로봇 정보 창 (그 로봇 카메라 영상 · AI 검출)
+  else if (p.kind === 'orchInc') { const inc = sim.orch.incidents.find((i) => i.key === p.key); orchView.show(); orchView.tab = 'flow'; if (inc) orchView.sel = inc.id; orchView.render(true); }   // 그 인시던트 흐름도
+  else if (p.kind === 'zd') { zdState.tab = p.tab ?? 'live'; openZoneDash(p.zone ?? 'main'); }
   else if (p.kind === 'trace') {
     traceState.tab = p.tab ?? 'trace'; traceState.q = '';
+    if (p.caseId) traceState.caseId = p.caseId; if (p.capaId) traceState.capaId = p.capaId;
     if (p.tab === 'serial') traceState.sid = p.id ?? null; else traceState.serial = p.id ?? null;
     traceModal.classList.remove('hidden'); renderTrace(true);
     if (p.epcis) setTimeout(() => traceBody.querySelector('[data-qt-epcis]')?.click(), 600);   // 발행 → 적재 → 팔레트 → 출하 이벤트 사슬
   }
 }
+// 토리 품질 관리 시나리오: 조립셀 하나에 공정 편차(드리프트)를 일으키고 다음 2개를 불량으로 — 체결셀 전수 검사가 잡아 사례 · AI 원인 분석 · 8D로 이어진다
+function toriQualityDrift() {
+  const st = ['DT_ASSY', 'EA_ASSY'].map((id) => sim.processing.find((x) => x.id === id && !x.standby)).find(Boolean); if (!st) return null;
+  st.drift = Math.max(st.drift, 0.6); st.forceDefect = 2;
+  sim.log('warn', `[시나리오] 공정 편차 주입 · ${st.name}`, { obs: '안내(토리 품질 관리) 시연 — 드리프트 60% · 다음 2개 불량', act: '체결셀 전수 검사 → 불량 사례 · AI 원인 분석 · 8D' });
+  return { id: st.id, name: st.name, t: sim.time };
+}
 function toriClosePanels() {
-  document.body.classList.remove('tori-tour'); orchView.hide();
+  document.body.classList.remove('tori-tour'); orchView.hide(); zdModal.classList.add('hidden');
+  if (ui.robotMode) { view.selectRobot(null); ui.hideDetail(); }
   facModal.classList.add('hidden'); clearInterval(facTimer); traceModal.classList.add('hidden');
 }
-const tori = new Tori({ flyTo: (k) => toriCam({ view: k }), camTo: toriCam, openPanel: toriPanel, closePanels: toriClosePanels, sim: () => sim, setMode: (k) => document.querySelector(`#modeSeg button[data-mode="${k}"]`)?.click(), mode: () => modeKey,
+// 토리 인시던트 예시: 흐름도를 바로 열지 않고 현장 이벤트만 만든다 (⚠ 버튼은 흐름도를 함께 연다) · 배속 · 이동체 위치
+function toriEvent() {
+  const ev = camWall.injectRandom();   // 정밀조립Zone · 움직이는 로봇 카메라 앞 (그 카메라가 곧 감지)
+  if (ev) sim.log('warn', `[시나리오] 현장 이벤트 발생 · ${ev.label}`, { obs: '안내(토리 인시던트 예시) — 아직 아무도 인지하지 못한 상태, 로봇 카메라 영상의 AI 추론으로 감지되면 자율 대응합니다' });
+  return ev ?? null;
+}
+const toriSpeed = (v) => { if (v == null) return speed; document.querySelector(`#speedSeg [data-speed="${v}"]`)?.click(); return v; };
+const toriPause = (v) => { if (running === v) playBtn.click(); };   // v=true 멈춤 (▶ 버튼과 같은 상태)
+const toriMover = (id) => { const m = [...sim.movers, ...(sim.drones ?? [])].find((x) => x.id === id); return m ? { x: m.x, z: m.z } : null; };
+const tori = new Tori({ flyTo: (k) => toriCam({ view: k }), camTo: toriCam, openPanel: toriPanel, closePanels: toriClosePanels, qualityDrift: toriQualityDrift,
+  quietEvent: toriEvent, speed: toriSpeed, moverPos: toriMover, pause: toriPause, sim: () => sim, setMode: (k) => document.querySelector(`#modeSeg button[data-mode="${k}"]`)?.click(), mode: () => modeKey,
   injectEvent: () => { const n = sim.fieldSeq ?? 0; document.getElementById('btnEvent').click(); return (sim.fieldSeq ?? 0) > n ? sim.fieldEvents.at(-1) : null; },   // ⚠ 현장 이벤트 버튼과 같은 동작 · 새로 생긴 이벤트
   look: (x, z) => { persp.position.set(x + 3, 24, z + 22); ctlP.target.set(x, 0, z); ctlP.update(); } });   // 안내 로봇 (js/tori.js) — 처음 접속이면 인사
 tori.greetIfFirst();

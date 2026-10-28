@@ -17,16 +17,22 @@ const store = { get: (k) => { try { return localStorage.getItem(k); } catch { re
 
 // 흐름 막대: 제품 ID 추적 7단계 (아래 작은 글씨 = 그 단계에서 붙는 ID)
 const CHAIN = [['오더', ''], ['자재', '원자재 로트'], ['투입', '생산 ID'], ['공정', '셀별 이력'], ['판정', '제품 ID'], ['출하', '팔레트 SSCC'], ['이후', '조회 · 리콜']];
-function chainSvg(at) {
-  const W = 336, H = 70, n = CHAIN.length, gap = W / n;
-  const nodes = CHAIN.map(([l, sub], k) => { const x = gap * k + gap / 2, on = at < 0 || k <= at, cur = k === at;
+const QCHAIN = [['예방', '건강·보정'], ['전수', '토크·각도'], ['샘플', '정밀검사'], ['대응', '봉쇄·경보'], ['원인', 'AI 분석'], ['개선', '8D·정책'], ['감시', '관리도']];   // 품질 관리 7단계
+function chainSvg(at, C = CHAIN) {
+  const W = 336, H = 70, n = C.length, gap = W / n;
+  const nodes = C.map(([l, sub], k) => { const x = gap * k + gap / 2, on = at < 0 || k <= at, cur = k === at;
     return `<g class="tr-n${on ? ' on' : ''}${cur ? ' cur' : ''}"><rect x="${x - 19}" y="10" width="38" height="22" rx="11"/><text x="${x}" y="25" text-anchor="middle">${l}</text>${sub ? `<text x="${x}" y="${k % 2 ? 62 : 48}" text-anchor="middle" class="tr-sub">${sub}</text>` : ''}</g>`; }).join('');
-  const arrows = CHAIN.slice(1).map((_, k) => { const x1 = gap * k + gap / 2 + 20, x2 = gap * (k + 1) + gap / 2 - 22, on = at < 0 || k < at;
+  const arrows = C.slice(1).map((_, k) => { const x1 = gap * k + gap / 2 + 20, x2 = gap * (k + 1) + gap / 2 - 22, on = at < 0 || k < at;
     return `<path d="M${x1} 21 L${x2} 21" class="tr-a${on ? ' on' : ''}" marker-end="url(#tc-h${on ? '1' : '0'})"/>`; }).join('');
-  return `<svg class="tori-ring" viewBox="0 0 ${W} ${H}" role="img" aria-label="제품 ID 추적: ${CHAIN.map((c) => c[0]).join(' → ')}"><defs>${[0, 1].map((o) => `<marker id="tc-h${o}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="tr-h${o ? ' on' : ''}"/></marker>`).join('')}</defs>${arrows}${nodes}</svg>`;
+  return `<svg class="tori-ring" viewBox="0 0 ${W} ${H}" role="img" aria-label="${C.map((c) => c[0]).join(' → ')}"><defs>${[0, 1].map((o) => `<marker id="tc-h${o}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="tr-h${o ? ' on' : ''}"/></marker>`).join('')}</defs>${arrows}${nodes}</svg>`;
 }
 // 실제 제품 예시 (시뮬레이션의 시리얼 서비스 · 제품 추적에서 읽음)
 const prodKo = (p) => PRODUCTS[p]?.label ?? p;
+// 인시던트 예시: 그 인시던트 흐름도의 단계 · 시각 · 출동 로봇 도착
+const RADIUS = { leak: 1.3, debris: 1.0, intrusion: 2.2, smoke: 1.8 };
+const inc = (T, kind) => T.ev?.inc?.steps?.find((x) => x.kind === kind);
+const at = (T, x) => `+${sec(x.t - T.ev.t0)}`;
+const arrived = (T) => !!T.ev?.inc?.steps?.some((x) => x.kind === 'act' && /현장 도착|현장 대기/.test(x.text));
 const clock = (t) => { const x = Math.floor(t) + 8 * 3600; return `${String(Math.floor(x / 3600) % 24).padStart(2, '0')}:${String(Math.floor(x / 60) % 60).padStart(2, '0')}`; };
 const ex = {
   order: (s) => { const F = s?.fos; if (!F) return null; const o = F.orders.find((x) => x.status === 'open' && x.evidenced !== true) ?? F.orders[0]; return o ? { o, good: F.main?.reconcile?.(o.id)?.good ?? 0 } : null; },
@@ -36,6 +42,14 @@ const ex = {
   shipped: (s) => s?.serials?.units?.findLast((u) => u.loc === 'shipped' && u.serial) ?? null,
 };
 const cellName = (s, id) => s?.processing?.find((st) => st.id === id)?.name ?? id;
+// 품질 예시: 주입 뒤 생긴 불량 사례 · 그 사례의 8D · 최근 샘플 로트
+const qx = {
+  caseAfter: (s, t0) => (t0 == null ? null : s?.trace?.cases?.find((c) => c.kind === 'inline' && c.t >= t0) ?? null),
+  capaOf: (s, c) => (c ? s?.capa?.list?.find((k) => k.cases?.includes(c.id)) ?? null : null),
+  lot: (s) => (s?.serials?.lots ?? []).reduce((a, l) => (!a || l.t > a.t ? l : a), null),
+  cells: (s) => (s?.processing ?? []).filter((st) => !st.standby && !['SRC', 'SINK'].includes(st.id)),
+};
+const LOT_KO = { hold: '출하 보류 · 판정 대기', released: '합격 · 보류 해제', contain: '불합격 · 봉쇄', sorting: '봉쇄 · 선별 검사 중', done: '선별 · 처분 완료' };
 
 // 고리 그림: 데이터 폐루프 6단계 · 플라이휠 5단계 (마지막 → 처음으로 이어짐)
 const RINGS = {
@@ -55,23 +69,45 @@ const TOPICS = {
     { say: '오른쪽 패널은 공장 운영 AI예요. 고장 · 공급 차질 · 현장 이벤트를 관찰 → 판단 → 실행한 기록이 남아요. 아래 입력창에 "포장셀 속도 80%"처럼 지시할 수도 있어요.', hl: ['#agentPanel'] },
     { say: '위쪽 버튼에서는 로봇 데이터로 VLA 학습, 운영 AI 학습, KPI 영향 분석, 품질 추적, Zone 대시보드를 볼 수 있어요.', hl: ['#btnVla', '#btnAios', '#btnImpact', '#btnTrace', '#btnZoneDash'] },
     { say: '아래 버튼으로 설비 고장이나 현장 이벤트를 일부러 일으켜 보세요. 에이전트가 어떻게 대응하는지 볼 수 있어요. CCTV · 5G · 센서 배치도 여기서 봐요.', hl: ['#btnFault', '#btnEvent', '#btnCctv'] },
-    { say: '설비를 누르면 상세 정보가, 🏷 라벨 버튼을 누르면 이름표가 보여요. 저를 누르면 인시던트 해결 예시, 제품 ID 추적, 데이터 폐루프 · 플라이휠, 매뉴얼 · 앱 내려받기도 안내해 드려요!', view: 'all', hl: ['#btnLabels'], end: true },
+    { say: '설비를 누르면 상세 정보가, 🏷 라벨 버튼을 누르면 이름표가 보여요. 저를 누르면 인시던트 해결 예시, 제품 ID 추적, 품질 관리, 데이터 폐루프와 플라이휠, 매뉴얼 · 앱 내려받기도 안내해 드려요!', view: 'all', hl: ['#btnLabels'], end: true },
   ] },
-  // 인시던트 해결 예시: 실제로 현장 이벤트를 일으키고, 시뮬레이션의 이벤트 기록(감지 · 대응 로봇 · 처리 시각)을 1초마다 읽어 진행 상황을 말한다
+  // 인시던트 해결 예시 (3막): ① 현장 — 이벤트를 조용히 만들고 그 자리로 확대, 감지한 로봇의 카메라 영상 → ② 오케스트레이터 — 그 인시던트 흐름도로
+  //   보고 · 판단 · 명령 · 배정 → ③ 해결된 현장 — 출동 로봇을 따라가며 처리 · 정상화 · 기록. 진행하는 동안 시뮬레이션 1배속 (끝나면 원래 배속)
   incident: { name: '인시던트 해결 예시', steps: [
-    { say: '예시로 현장에 문제를 하나 일으켜 볼게요. 피지컬AI 단계의 정밀조립Zone이에요. 「다음」을 누르면 로봇 카메라 앞에 바닥 누유 · 이물질 · 연기 의심 · 무단 진입 중 하나가 생겨요.', mode: 'dark', view: 'precision' },
-    { act: (T) => { T.ev = T.h.injectEvent?.() ?? null; if (T.ev) T.h.look?.(T.ev.x, T.ev.z); }, hl: ['#btnEvent'],
-      voice: '방금 현장에 문제가 생겼어요. 아직 아무도 모르는 상태예요. 화면이 그 자리로 이동했어요. 빨간 표지와 빛기둥이 보이죠? 화면 위쪽에 오케스트레이터 흐름도도 열렸어요.',
-      say: (T) => T.ev ? `방금 「${T.ev.label}」 상황이 생겼어요 (우선순위 P${prioOf(T.ev)}). 아직 아무도 모르는 상태예요. 화면이 그 자리로 이동했어요 — 빨간 표지와 빛기둥이 보이죠? 화면 위쪽에 오케스트레이터 흐름도도 열렸어요.` : '지금은 현장 이벤트를 만들 수 없어요. 피지컬AI 단계에서 ⚠ 현장 이벤트 버튼으로 다시 해 보세요.' },
-    { live: true, ready: (T) => !T.ev || T.ev.detected || T.ev.cleared, hl: ['#orchPanel'], voice: '첫째, AI 감지. 근처 로봇 카메라 영상을 AI가 추론해 이상을 찾아요. 감지되면 인시던트가 열리고, 주변 AMR과 로봇은 속도를 줄이거나 반경 밖으로 돌아가요.',
-      say: (T) => `① AI 감지 — 근처 로봇 카메라 영상을 AI가 추론해 이상을 찾아요. ${!T.ev ? '' : T.ev.detected ? `${ga(T.ev.detectedBy)} ${sec(T.ev.tDetect - T.ev.t0)} 만에 감지했어요 (신뢰도 ${Math.round((T.ev.conf ?? 0) * 100)}%).` : '지금 찾는 중이에요…'} 감지되면 인시던트가 열리고, 주변 AMR · 로봇은 속도를 줄이거나 반경 밖으로 돌아가요.` },
-    { hl: ['#orchPanel'], voice: '둘째, 보고와 판단. 셀이 공장 오케스트레이터에 보고하면, 오케스트레이터가 화재와 인명, 시설과 작업 안전, 생산 정지 순으로 우선순위를 정하고 대응 로봇을 골라요. 피지컬AI 단계는 판단이 1.5초, 화재와 인명 사고는 0.4초예요.',
-      say: (T) => `② 보고 · 판단 — 셀이 공장 오케스트레이터에 보고하면, 오케스트레이터가 우선순위(P1 화재 · 인명 → P2 시설 · 작업 안전 → P3 생산 정지 …)를 정하고 대응 로봇을 골라요. 피지컬AI 단계는 판단이 1.5초, 화재 · 인명(P1)은 0.4초예요.${T.ev ? ` 이번 건은 ${ieyo(`P${prioOf(T.ev)}`)}.` : ''}` },
-    { live: true, ready: (T) => !T.ev || !!T.ev.responder || T.ev.type === 'intrusion' || T.ev.cleared, voice: '셋째, 피지컬AI 출동. 정비 휴머노이드는 흡착포와 수거 도구, 소화기를 챙겨 가고, 사족보행 로봇은 열화상과 가스 센서로 점검해요. 순찰 드론도 하늘에서 현장을 확인해요.',
-      say: (T) => `③ 피지컬AI 출동 — ${!T.ev ? '' : T.ev.type === 'intrusion' ? '사람이 안전구역을 나갈 때까지 주변 로봇이 안전 속도로 기다려요.' : T.ev.responder ? `${ga(T.ev.responder)} 출동했어요.` : '대응 로봇을 배정하는 중이에요…'} 정비 휴머노이드는 흡착포 · 수거 도구 · 소화기를 챙겨 가고, 사족보행 로봇은 열화상 · 가스 센서로 점검해요. 순찰 드론도 하늘에서 현장을 확인해요.` },
-    { live: true, ready: (T) => !T.ev || T.ev.cleared, hl: ['#btnOrch', '#btnImpact'], voice: '넷째, 해결과 기록. 처리가 끝나면 흐름도에 감지부터 셀 자체 조치, 상위 보고, 판단, 명령, 조치, 완료 확인까지의 시각이 남아요. 이 기록은 KPI 영향 분석과 운영 AI 학습 데이터가 돼요.',
-      say: (T) => `④ 해결 · 기록 — ${!T.ev ? '' : T.ev.cleared ? `${sec((T.ev.tClear ?? T.ev.t0) - T.ev.t0)} 만에 처리가 끝났어요.` : '처리 중이에요… 끝나면 여기에 시간이 나와요.'} 흐름도에는 감지 → 셀 자체 조치 → 상위 보고 → 판단 → 명령 → 조치 → 완료 확인 시각이 남고, 이 기록은 KPI 영향 분석과 운영 AI(AIOS) 학습 데이터가 돼요.` },
-    { say: '이렇게 AI는 보고 판단하고, 피지컬AI 로봇은 직접 가서 해결해요. 사람은 흐름도와 대시보드로 확인하고 필요할 때만 지시하면 돼요. ⚡ 설비 고장이나 ⚠ 현장 이벤트 버튼으로 다른 상황도 시험해 보세요!', hl: ['#btnFault', '#btnEvent'], end: true },
+    { act: (T) => { if (T.spd0 === undefined) { T.spd0 = T.h.speed?.() ?? null; T.h.speed?.(1); } }, mode: 'dark', view: 'precision',
+      voice: '예시로 현장에 문제를 하나 일으켜 볼게요. 잘 보이도록 시뮬레이션을 1배속으로 늦췄어요. 먼저 현장, 다음은 오케스트레이터, 마지막으로 해결된 현장 순서로 보여 드릴게요.',
+      say: '예시로 현장에 문제를 하나 일으켜 볼게요. 잘 보이도록 시뮬레이션을 1배속으로 늦췄어요 (안내가 끝나면 원래 배속으로). 먼저 ① 현장 → ② 오케스트레이터 → ③ 해결된 현장 순서로 보여 드릴게요.' },
+    // ── 1막 현장 ──
+    { act: (T) => { if (T.ev === undefined) T.ev = T.h.quietEvent?.() ?? null; }, cam: (T) => T.ev && { x: T.ev.x, z: T.ev.z, d: 9 }, hl: ['#btnEvent'],
+      voice: '현장입니다. 방금 로봇 카메라 앞에 문제가 생겼어요. 빨간 표지와 빛기둥이 보이죠? 아직 아무도 모르는 상태예요.',
+      say: (T) => T.ev ? `현장 — 방금 「${T.ev.label}」 상황이 생겼어요 (우선순위 P${prioOf(T.ev)} · 위험 반경 ${RADIUS[T.ev.type] ?? 1.2}m). 빨간 표지와 빛기둥이 보이죠? 아직 아무도 모르는 상태예요.` : '지금은 현장 이벤트를 만들 수 없어요. 피지컬AI 단계에서 ⚠ 현장 이벤트 버튼으로 다시 해 보세요.' },
+    { live: true, ready: (T) => !T.ev || T.ev.detected || T.ev.cleared,
+      voice: '주변을 지나는 로봇의 카메라 영상을 AI가 계속 추론하고 있어요. 이상한 물체나 사람이 보이면 바로 감지해요.',
+      say: (T) => `AI 감지 — 주변을 지나는 로봇 카메라 영상을 AI가 계속 추론하고 있어요. ${!T.ev ? '' : T.ev.detected ? `${ga(T.ev.detectedBy)} 감지했어요!` : `지금 찾는 중이에요… (${sec((T.h.sim?.()?.time ?? T.ev.t0) - T.ev.t0)} 경과)`}` },
+    { cam: (T) => { const p = T.ev && T.h.moverPos?.(T.ev.detectedBy); return p ? { x: p.x, z: p.z, d: 8 } : T.ev && { x: T.ev.x, z: T.ev.z, d: 9 }; },
+      panel: (T) => T.ev?.detectedBy && { kind: 'robot', id: T.ev.detectedBy }, hold: (T) => !!inc(T, 'command'),
+      voice: '이 로봇이 감지했어요. 잠시 뒤 열리는 로봇 정보 창에서 그 로봇의 카메라 영상과 AI 검출 상자를 볼 수 있어요. 감지하자마자 셀은 스스로 감속하고 우회해요.',
+      say: (T) => !T.ev?.detected ? '아직 감지되지 않았어요. 조금 더 기다려 볼게요.' : `${ga(T.ev.detectedBy)} ${sec(T.ev.tDetect - T.ev.t0)} 만에 감지했어요 (신뢰도 ${Math.round((T.ev.conf ?? 0) * 100)}%). 잠시 뒤 열리는 로봇 정보 창에 그 카메라 영상과 AI 검출 상자가 보여요. 감지 즉시 셀 자체 조치 — ${T.ev.type === 'intrusion' ? '주변 로봇 협동 감속 · 접근 금지 구역 표시' : '감지 로봇 감속 · 우회 · 구역 표시'}.${T.held ? ' (설명하는 동안 현장은 잠시 멈춰 둘게요)' : ''}` },
+    // ── 2막 오케스트레이터 ──
+    { panel: (T) => T.ev?.inc && { kind: 'orchInc', key: `ev:${T.ev.id}` }, hl: ['#orchPanel'], live: true, hold: (T) => !!inc(T, 'command'), ready: (T) => !T.ev?.inc || !!inc(T, 'command') || T.ev.cleared,
+      voice: '이제 오케스트레이터입니다. 셀이 상위로 보고하면, 공장 오케스트레이터가 우선순위를 정해요. 화재와 인명이 먼저, 그다음 시설과 작업 안전, 생산 정지 순이에요.',
+      say: (T) => { const r = inc(T, 'report'), d = inc(T, 'decide'); return `오케스트레이터 — 흐름도에 이 인시던트가 열려 있어요. 감지 → 셀 자체 조치 → ${r ? `상위 보고(${at(T, r)})` : '상위 보고'} → ${d ? `판단(${at(T, d)})` : '판단 중…'}. 우선순위는 P1 화재 · 인명 → P2 시설 · 작업 안전 → P3 생산 정지 순이고, 이번 건은 ${ieyo(`P${prioOf(T.ev ?? {})}`)}.`; } },
+    { hl: ['#orchPanel'], live: true, hold: (T) => !!inc(T, 'command'),
+      voice: '판단이 끝나면 명령이 내려가요. 하던 일이 덜 급한 로봇을 골라 배정하고, 하던 일은 처리 뒤에 이어서 해요. 주변 셀에는 안전 감속이나 보호 정지 명령이 함께 가요.',
+      say: (T) => { const c = inc(T, 'command'); return `명령 · 배정 — ${c ? `${c.text.replace(/^명령:\s*/, '')} (${at(T, c)})` : '명령을 내리는 중이에요…'}${T.ev?.cmdCells?.length ? ` · 셀 ${T.ev.cmdCells.length}곳에 ${T.ev.type === 'intrusion' ? '안전 감속' : '보호 정지'} 명령` : ''}. 덜 급한 일을 하던 로봇을 골라 배정하고, 하던 일은 처리 뒤 이어서 해요.${T.held ? ' (설명하는 동안 현장은 잠시 멈췄어요 — 다음 단계에서 다시 움직여요)' : ''}`; } },
+    // ── 3막 해결된 현장 ──
+    { panel: null, follow: (T) => T.ev?.responder, cam: (T) => T.ev && !T.ev.responder && { x: T.ev.x, z: T.ev.z, d: 10 }, live: true, ready: (T) => !T.ev || T.ev.cleared || !T.ev.responder || arrived(T),
+      voice: '다시 현장입니다. 배정된 로봇을 따라가 볼게요. 정비 휴머노이드는 정비실에서 도구를 챙겨 가고, 사족보행 로봇은 열화상과 가스 센서로 점검하러 가요.',
+      say: (T) => !T.ev ? '' : T.ev.type === 'intrusion' ? '출동 — 사람 진입은 로봇이 다가가지 않아요. 주변 셀이 안전 속도로 기다리고, 원격 관제 요원을 불러요. 사람이 구역을 나가면 정상 속도로 돌아가요.' : `출동 — ${T.ev.responder ? `화면이 ${T.ev.responder} 로봇을 따라가고 있어요. ${arrived(T) ? '현장에 도착했어요!' : T.h.sim?.()?.movers?.find((m) => m.id === T.ev.responder)?.task ?? '이동 중이에요…'}` : '대응 로봇을 기다리는 중이에요…'}` },
+    { cam: (T) => T.ev && { x: T.ev.x, z: T.ev.z, d: 8 }, live: true, ready: (T) => !T.ev || T.ev.cleared,
+      voice: '로봇이 현장에서 처리하고 있어요. 이동 중인 다른 로봇들은 위험 반경을 피해 돌아가요.',
+      say: (T) => `처리 중 — ${!T.ev ? '' : T.ev.cleared ? '처리가 끝났어요!' : `${T.ev.responder ? `${ga(T.ev.responder)} ` : ''}${T.ev.type === 'smoke' ? '열화상 · 가스 센서로 점검' : T.ev.type === 'intrusion' ? '진입자가 나가기를 기다리는' : '흡착 · 수거'} 중이에요. 다른 로봇들은 위험 반경을 피해 돌아가요.`}` },
+    { cam: (T) => T.ev && { x: T.ev.x, z: T.ev.z, d: 10 },
+      voice: '해결됐어요. 빨간 표지가 사라지고, 멈췄던 셀과 로봇은 정상 속도로 돌아갔어요. 도구는 정비실에 반납해요.',
+      say: (T) => !T.ev ? '' : `해결 — 표지가 사라지고 셀 · 로봇이 정상 속도로 돌아갔어요. 발생부터 해결까지 ${sec((T.ev.tClear ?? T.ev.t0) - T.ev.t0)} (감지 ${sec((T.ev.tDetect ?? T.ev.t0) - T.ev.t0)} · 대응 ${sec((T.ev.tClear ?? T.ev.t0) - (T.ev.tDetect ?? T.ev.t0))}).${T.ev.type === 'smoke' ? ' 점검 결과 발열 · 연소 흔적이 없어 알람을 해제했어요.' : ''}` },
+    { panel: (T) => T.ev?.inc && { kind: 'orchInc', key: `ev:${T.ev.id}` }, hl: ['#btnOrch', '#btnImpact'], end: true,
+      voice: '흐름도에 감지부터 완료 확인까지 모든 시각이 남았어요. 이 기록은 KPI 영향 분석과 운영 AI 학습 데이터가 돼요. 이렇게 AI는 보고 판단하고, 피지컬AI 로봇은 직접 가서 해결해요.',
+      say: (T) => `기록 — 흐름도에 감지 → 자체 조치 → 보고 → 판단 → 명령 → 조치 → 완료 확인 ${T.ev?.inc?.steps?.length ?? ''}단계 시각이 남았어요. 이 기록은 KPI 영향 분석과 운영 AI(AIOS) 학습 데이터가 돼요. AI는 보고 판단하고, 피지컬AI 로봇은 직접 가서 해결해요. ⚡ 설비 고장 · ⚠ 현장 이벤트 버튼으로 다른 상황도 시험해 보세요!` },
   ] },
   loop: { name: '데이터 폐루프', steps: [
     { say: '메타팩토리의 데이터는 한 번 쓰고 끝나지 않아요. 현장에서 모은 데이터가 엣지와 서버를 거쳐 AI 학습 · 모니터링에 쓰이고, 그 결과가 다시 현장 제어로 돌아와요. 이 닫힌 고리를 데이터 폐루프라고 해요.', ring: 'loop', at: -1, view: 'all' },
@@ -122,8 +158,49 @@ const TOPICS = {
     { chain: 7, cam: { view: 'all' }, panel: null, end: true,
       say: '제품 ID 하나로 오더 · 자재 · 공정 · 품질 · 출하가 이어지면, 문제가 생겨도 원인과 범위를 바로 찾을 수 있어요. 이 데이터는 품질 원인 분석과 AI 학습, 고객 신뢰의 바탕이 돼요.' },
   ] },
+  // 품질 관리: 예방 → 공정 내 전수 검사 → 정밀검사 샘플링 → 불량 대응 → AI 원인 분석 → 재발 방지(8D) → 모니터링
+  //  · 2단계에서 조립셀 하나에 공정 편차를 일으켜(main.js toriQualityDrift) 실제 불량 사례가 생기게 하고, 4~6단계는 그 사례를 따라간다
+  //  · 8D의 「정책 반영하시겠습니까?」는 사람이 결정하는 버튼이라 토리는 누르지 않고 보여 주기만 한다
+  quality: { name: '품질 관리 — 예방부터 불량 대응 · 재발 방지까지', steps: [
+    { qchain: -1, cam: { view: 'all' }, panel: null,
+      say: '품질은 세 겹으로 지켜요. 문제가 생기기 전에 막는 예방, 모든 제품을 재는 공정 내 전수 검사, 정밀검사Zone의 샘플링 검사예요. 그래도 불량이 나오면 봉쇄하고, AI가 원인을 찾고, 8D로 재발을 막아요. 현장과 화면으로 따라가 볼게요.' },
+    { qchain: 0, cam: { station: 'EA_FAST', d: 13 }, panel: { kind: 'zd', tab: 'live' }, hl: ['#btnZoneDash'], live: true,
+      voice: '첫째, 예방. 셀마다 설비 건강도와 공정 드리프트, 공정 능력 Cpk를 계속 지켜봐요. 건강도가 떨어지면 예지정비를, 드리프트가 쌓이면 재보정을 하고, 피지컬AI 단계에서는 순찰 로봇이 미세한 편차를 찾아 셀이 스스로 재보정해요. 온도와 습도, 진동 같은 환경 이상도 민감한 공정의 불량 위험으로 반영돼요.',
+      say: (T) => { const C = qx.cells(T.h.sim?.()), s = T.h.sim?.(); const low = C.reduce((a, st) => { const cpk = s.assess?.(st)?.cpk ?? 0; return !a || cpk < a.cpk ? { st, cpk } : a; }, null);
+        return `① 예방 — 셀마다 설비 건강도 · 공정 드리프트 · 공정 능력(Cpk)을 계속 지켜봐요. 건강도가 떨어지면 예지정비, 드리프트가 쌓이면 재보정, 피지컬AI 단계는 순찰 로봇이 미세 편차를 찾아 셀이 스스로 재보정해요.${C.length ? ` 지금 정밀조립 셀 ${C.length}곳 평균 건강도 ${Math.round(C.reduce((a, st) => a + st.health, 0) / C.length)}%${low ? `, Cpk 최저 ${low.cpk.toFixed(2)}(${low.st.name})` : ''}.` : ''} 환경 이상(온습도 · 진동)도 민감 공정 불량 위험에 반영돼요.`; } },
+    { qchain: 1, act: (T) => { if (T.qInj === undefined) T.qInj = T.h.qualityDrift?.() ?? null; }, cam: (T) => ({ station: T.qInj?.id ?? 'DT_ASSY', d: 11 }), panel: { kind: 'trace', tab: 'ng' }, hl: ['#btnTrace'],
+      voice: '둘째, 공정 내 전수 검사. 체결셀은 모든 제품의 체결 토크와 각도를 재서 판정하고, 부품분류셀은 비전으로 부품을 확인해요. 유연생산과 적응가공도 각자 치수와 외관, 정밀 측정으로 전수 검사해요. 지금 시험으로 조립셀 하나에 공정 편차를 일으켰어요. 이 셀을 지난 제품은 체결셀 전수 검사에서 걸러질 거예요.',
+      say: (T) => `② 공정 내 전수 검사 — 체결셀은 모든 제품의 체결 토크 · 각도를 재서 판정하고, 부품분류셀은 비전으로 부품을 확인해요(유연생산 · 적응가공도 치수 · 외관 · 정밀 측정으로 전수 검사). ${T.qInj ? `지금 시험으로 ${T.qInj.name}에 공정 편차(드리프트 60%)를 일으켰어요. 이 셀을 지난 제품은 체결셀 전수 검사에서 걸러질 거예요.` : '(이 라인에서는 편차 시연을 할 수 없어요.)'}` },
+    { qchain: 2, cam: { view: 'insp' }, panel: { kind: 'trace', tab: 'hold' }, hl: ['#btnTrace'], live: true,
+      voice: '셋째, 정밀검사 샘플링. 검사 AMR이 세 생산 Zone에서 일정 개수마다 한 개씩 샘플을 가져오면, 비전과 3D 스캔, 초음파, 정밀 측정, CT로 검사하고 AI가 합격, 판정 불확실, 불합격을 판정해요. 샘플을 가져가는 순간 그 로트는 출하가 보류되고, 합격이면 풀리고 불합격이면 봉쇄돼요.',
+      say: (T) => { const l = qx.lot(T.h.sim?.()); return `③ 정밀검사 샘플링 — 검사 AMR이 세 생산 Zone에서 N개마다 1개씩 샘플을 가져오면 비전 · 3D 스캔 · 초음파 · 정밀 측정 · CT로 검사하고 AI가 OK · 판정 불확실 · NG로 판정해요. 샘플을 가져가는 순간 그 로트는 출하 보류 → OK면 해제, NG면 봉쇄(로트 + 앞뒤 10분) · 재작업 · 폐기 처분 · 샘플링 강화.${l ? ` 최근 로트 ${l.id}(${prodKo(l.product)} ${l.members?.length ?? 0}개) — ${LOT_KO[l.status] ?? l.status}.` : ''}`; } },
+    { qchain: 3, ready: (T) => !T.qInj || !!qx.caseAfter(T.h.sim?.(), T.qInj.t), cam: (T) => ({ station: T.qInj?.id === 'EA_ASSY' ? 'EA_FAST' : 'DT_FAST', d: 11 }),
+      panel: (T) => { const c = qx.caseAfter(T.h.sim?.(), T.qInj?.t); return { kind: 'trace', tab: 'ng', caseId: c?.id }; }, hl: ['#btnTrace'], live: true,
+      voice: '넷째, 불량 대응. 체결셀 전수 검사에서 불량이 나오면 그 제품을 격리하고 불량 사례가 열려요. 같은 시간대에 원인 후보 셀을 지난 다른 제품도 출하를 보류하고 다시 검사하도록 봉쇄해요. Zone 오케스트레이터와 총괄 오케스트레이터에는 품질 경보가 올라가요.',
+      say: (T) => { const c = qx.caseAfter(T.h.sim?.(), T.qInj?.t); return c ? `④ 불량 대응 — ${c.detectedName}에서 ${c.serial} 불량 판정(NG). 사례 ${c.id}가 열리고, 같은 시간대에 원인 후보 셀을 지난 제품 ${c.suspects?.length ?? 0}개를 출하 보류 · 재검으로 봉쇄했어요. Zone · 총괄 오케스트레이터에 품질 경보(Quality Alert)가 올라가요.` : '④ 불량 대응 — 편차가 생긴 셀을 지난 제품이 체결셀 전수 검사에 닿기를 기다리는 중이에요…'; } },
+    { qchain: 4, cam: (T) => { const c = qx.caseAfter(T.h.sim?.(), T.qInj?.t), st = c?.rca?.causes?.[0]?.station; return { station: st ?? T.qInj?.id ?? 'DT_ASSY', d: 10 }; },
+      panel: (T) => { const c = qx.caseAfter(T.h.sim?.(), T.qInj?.t); return { kind: 'trace', tab: 'ng', caseId: c?.id }; }, hl: ['#btnTrace'],
+      voice: '다섯째, AI 원인 분석. 불량 제품의 이력을 따라 지난 셀마다 그 순간의 불량 확률과 검사에서 나온 불량 유형을 맞춰 보고, 설비 열화, 공정 드리프트, 환경 요인으로 원인을 나눠요. 같은 셀, 같은 운반 AMR, 같은 원자재 로트의 불량률도 비교해요. 분석 데이터는 AI 학습용으로 내려받을 수 있어요.',
+      say: (T) => { const s = T.h.sim?.(), c = qx.caseAfter(s, T.qInj?.t), top = c?.rca?.causes?.[0], S = s?.trace?.stats; const tot = c?.rca?.causes?.reduce((a, x) => a + x.score, 0) || 1;
+        return `⑤ AI 원인 분석 — 불량 제품의 이력을 따라 지난 셀마다 그 순간 불량 확률과 검사 NG 유형을 맞춰 보고, 설비 열화 · 공정 드리프트 · 환경 요인으로 원인을 나눠요(같은 셀 · AMR · 원자재 로트 불량률도 비교).${top ? ` 이번 1순위는 「${top.label}」 ${Math.round((top.score / tot) * 100)}% — ${top.station === T.qInj?.id ? `실제로 편차를 일으킨 ${T.qInj.name}과 일치해요.` : `편차를 일으킨 곳은 ${T.qInj?.name ?? '-'}이에요.`}` : ''}${S?.cases ? ` 누적 1순위 적중 ${S.top1}/${S.cases}.` : ''}`; } },
+    { qchain: 5, cam: { view: 'precision' }, panel: (T) => { const s = T.h.sim?.(), k = qx.capaOf(s, qx.caseAfter(s, T.qInj?.t)); return { kind: 'trace', tab: 'capa', capaId: k?.id }; }, hl: ['#btnTrace'], live: true,
+      voice: '여섯째, 재발 방지. 8D로 처리해요. 격리, 팀 구성, 문제 기술, 임시 조치, 근본 원인, 대책 순서로 진행하고, 대책은 운영 정책 변경안으로 나와요. 정책 반영은 사람이 결정해요. 반영하면 일정 시간 불량률로 효과를 검증하고, FMEA를 갱신해 종결해요.',
+      say: (T) => { const s = T.h.sim?.(), k = qx.capaOf(s, qx.caseAfter(s, T.qInj?.t)); return `⑥ 재발 방지 — 8D로 처리해요: D0 격리 → D1 팀 → D2 문제 기술 → D3 임시 조치(봉쇄 · 재보정) → D4 근본 원인(AI) → D5 대책(운영 정책 변경안) → 사람이 「정책 반영」 결정 → D6 효과 검증(반영 후 불량률) → D7 FMEA 갱신 → D8 종결.${k ? ` 지금 ${k.id}는 ${k.stage} 단계${k.status === 'approval' ? ` — 대책 「${k.proposal?.title ?? '정책 변경'}」의 반영 여부를 기다려요(결정은 사람이)` : ''}.` : ''}`; } },
+    { qchain: 6, cam: { view: 'precision' }, panel: { kind: 'zd', tab: 'qa' }, hl: ['#btnZoneDash'],
+      voice: '일곱째, 모니터링. Zone 대시보드의 관리도는 측정값의 평균과 산포를 그려, 규칙에 맞지 않는 움직임이 보이면 불량이 나기 전에 알려 줘요. 공정 변수와 품질의 상관, 불량 유형 파레토, OEE의 품질 손실도 함께 봐요.',
+      say: '⑦ 모니터링 — Zone 대시보드의 관리도(X̄-R · I-MR)는 측정값의 평균과 산포를 그려, Western Electric 규칙에 어긋나는 움직임이 보이면 불량이 나기 전에 알려 줘요. 공정 변수 ↔ 품질 상관(산점도), NG 유형 파레토, OEE의 품질 손실도 함께 봐요.' },
+    { qchain: 7, cam: { view: 'all' }, panel: null, end: true,
+      say: '예방하고, 검사하고, 대응하고, 개선하는 고리가 계속 돌면서 품질이 좋아져요. 모든 품질 기록은 제품 ID로 이어져 있어서, 언제든 그 제품과 공정, 원인까지 거슬러 올라갈 수 있어요.' },
+  ] },
   // 매뉴얼 · 앱 내려받기 — 앱 내려받기는 웹 버전(⬇ 버튼이 보일 때)에서만 안내한다 (맥 · 윈도우 앱과 npm start에는 내려받기 기능이 없음)
   docs: { name: '매뉴얼 · 앱 내려받기', steps: [
+    // 매뉴얼 전에: Claude API 키를 넣으면 달라지는 것 (js/llm.js · js/agentcore.js · js/designer.js) — 키가 없어도 정책 기반 에이전트 · 내장 해석기로 공장은 그대로 돈다
+    { hl: ['#btnSettings', '#engineSeg'],
+      voice: '매뉴얼 전에 하나 알려 드릴게요. Claude API 키를 등록하면, 오른쪽 패널을 대화 기반으로 바꿔 Claude와 함께 공장을 운영할 수 있어요. 키가 없어도 정책 기반 에이전트와 내장 해석기로 공장은 그대로 돌아가요.',
+      say: () => `매뉴얼 전에 — Claude API 키(sk-ant-…)를 등록하면 오른쪽 패널을 「대화 기반」으로 바꿔 Claude와 함께 공장을 운영할 수 있어요. 키가 없어도 정책 기반 에이전트 · 내장 해석기로 공장은 그대로 돌아가요. ${document.body.classList.contains('app') ? `⚙ 설정에서 넣은 키는 ${document.body.classList.contains('win') ? '이 PC에 암호화(DPAPI)' : '맥 키체인'}에만 보관되고 화면으로는 전달되지 않아요.` : !document.body.classList.contains('webkey') ? 'npm start로 실행했다면 서버를 켤 때 ANTHROPIC_API_KEY 환경변수로 키를 넣어요.' : '웹 버전은 ⚙ 설정에서 넣은 키를 이 브라우저에만 두고 Claude API를 직접 불러요. 공유 페이지는 키 없이 보는 분의 Claude 계정으로도 써요.'}` },
+    { hl: ['#agentPanel', '#btnSettings'],
+      voice: '키를 등록하면 특히 세 가지가 좋아져요. 첫째, 내장 해석기가 모르는 표현이나 여러 조건이 섞인 지시도 Claude가 공장 상태를 보고 해석해 실행해요. 둘째, 지금 정비요청이 뭐가 있는지, 5G에 이상이 없는지처럼 물으면 공장 데이터를 근거로 답해요. 셋째, 앱에서는 공정 설계 Agent가 말이나 공정도 파일로 라인을 설계해 줘요.',
+      say: () => `키를 넣으면 효과적인 기능 — ① 자유로운 운영 지시: 내장 해석기가 모르는 표현 · 여러 조건이 섞인 지시(예: "병목 줄이고 재공은 낮춰 줘")를 Claude가 공장 상태를 보고 해석해 정비 예약 · 사이클 모드 · 투입 간격 · 투입 보류 · 셀 명령 · 혼류 비율 · Zone 명령 · 긴급 조달로 실행 ② 상황 질문: "진행 중인 정비요청은?" "5G 이상 있어?"처럼 물으면 설비 상태 · CCTV 이벤트 · 5G · 배터리 · FAC 기록을 근거로 답 ③ 공정 설계 Agent: 말이나 📎 공정도 · 레이아웃 파일로 라인 설계${document.body.classList.contains('app') ? '' : document.body.classList.contains('webkey') ? ' (앱 · npm start에서)' : ''}. Claude가 생각하는 동안은 시뮬레이션이 잠시 멈춰요.` },
     { voice: '책 모양의 사용자 가이드 버튼을 누르면 사용자 가이드 PDF를 내려받아요. 설치부터 화면 구성, 운영 시나리오 실습, 데이터 내보내기, 문제 해결까지 담겨 있어요.', say: '📘 버튼을 누르면 사용자 가이드(PDF)를 내려받아요. 설치부터 화면 구성, 운영 시나리오 실습, 데이터 내보내기, 문제 해결까지 담겨 있어요.', hl: ['#btnGuide'] },
     { when: () => isWeb(), voice: '앱 내려받기 버튼에서는 맥과 윈도우 앱을 내려받을 수 있어요. 맥은 애플 실리콘, 윈도우는 64비트 10과 11이에요. 앱에서는 서버 저장, MQTT 발행, MP4 녹화, 자연어 공정 설계 Agent까지 전체 기능을 내 컴퓨터에서 써요.', say: '⬇ 버튼에서는 맥(Apple Silicon)과 윈도우(64비트 10 · 11) 앱을 내려받을 수 있어요. 앱에서는 서버 저장 · MQTT 발행 · MP4 녹화 · 자연어 공정 설계 Agent까지 전체 기능을 내 컴퓨터에서 써요.', hl: ['#btnApps'] },
     { when: () => isWeb(), say: '맥은 압축을 풀어 응용 프로그램 폴더로 옮기고 처음 한 번 우클릭 → 열기, 윈도우는 폴더째 풀고 Meta-Factory.exe를 실행해 「PC 보호」 창이 뜨면 추가 정보 → 실행을 누르면 돼요. 그러면 지금 이 화면을 내 컴퓨터에서 그대로 확인할 수 있어요.', hl: ['#btnApps'] },
@@ -134,6 +211,9 @@ const TOPICS = {
 // 맥의 Eddy · Reed · Rocko 같은 다국어 공용 음성은 외국인 억양이라 쓰지 않는다
 const MALE_KO = [/injoon/i, /hyunsu/i, /지안|jian/i, /유나|yuna/i, /heami/i, /sunhi/i];
 const koVoice = (all) => { const ko = all.filter((v) => /^ko/i.test(v.lang)); for (const re of MALE_KO) { const v = ko.find((x) => re.test(x.name)); if (v) return v; } return ko.find((v) => !/eddy|flo|grandma|grandpa|reed|rocko|sandy|shelley/i.test(v.name)) ?? ko[0] ?? null; };
+// 데이터 폐루프와 플라이휠은 하나의 주제로 이어서 설명한다 (폐루프 마지막 단계가 플라이휠로 넘어가는 다리)
+TOPICS.data = { name: '데이터 폐루프와 플라이휠', steps: [...TOPICS.loop.steps.map((st) => ({ ...st, end: false, next: undefined })), ...TOPICS.fly.steps] };
+delete TOPICS.loop; delete TOPICS.fly;
 const isWeb = () => { const b = document.getElementById('btnApps'); return !!b && !b.hidden; };
 const prioOf = (ev) => ({ intrusion: 1, smoke: 1 })[ev.type] ?? 2;   // js/sim.js FIELD_EVENTS prio
 const sec = (s) => `${Math.max(0, s).toFixed(1)}초`;   // 시뮬레이션 시간
@@ -205,33 +285,39 @@ export class Tori {
 
   // 주제 메뉴 (작은 토리를 누르면)
   menu() {
-    clearInterval(this.liveT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.step = -1; this.open = true; this.el.classList.remove('mini');
+    this.unhold(); this.restoreSpeed(); clearInterval(this.liveT); clearInterval(this.followT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.step = -1; this.open = true; this.el.classList.remove('mini');
     this.nEl.textContent = ''; this.figEl.innerHTML = '';
     this.say(MENU_SAY);
-    this.btnEl.innerHTML = ['tour', 'incident', 'trace', 'loop', 'fly', 'docs'].map((k) => [k, TOPICS[k]]).map(([k, T]) => `<button type="button" data-t="topic" data-k="${k}">${T.name}</button>`).join('');
+    this.btnEl.innerHTML = ['tour', 'incident', 'trace', 'quality', 'data', 'docs'].map((k) => [k, TOPICS[k]]).map(([k, T]) => `<button type="button" data-t="topic" data-k="${k}">${T.name}</button>`).join('');
     this.btnEl.classList.add('menu');
   }
-  play(topic) { this.topic = topic; this.list = null; this.ev = null; this.go(0); }
+  play(topic) { this.unhold(); this.restoreSpeed(); this.topic = topic; this.list = null; this.ev = undefined; this.qInj = undefined; this.go(0); }
+  unhold() { clearInterval(this.holdT); if (this.held) { this.held = false; this.h.pause?.(false); } }
+  restoreSpeed() { if (this.spd0 != null) this.h.speed?.(this.spd0); this.spd0 = undefined; }   // 인시던트 예시가 1배속으로 늦춘 것을 되돌림   // 시나리오(현장 이벤트 · 공정 편차)는 한 번 재생에 한 번만
 
   go(i) {
     const S = this.steps();
     if (i < 0) return;
     if (i >= S.length) return this.close();
-    this.clearHl(); clearInterval(this.liveT);
+    this.clearHl(); clearInterval(this.liveT); clearInterval(this.followT); this.unhold();
     const s = S[i], back = i < this.step; this.step = i; this.open = true; this.el.classList.remove('mini'); this.btnEl.classList.remove('menu');
     if (s.act && !back) s.act(this);   // 이전으로 돌아올 때는 다시 실행하지 않음 (이벤트를 또 만들지 않게)
     if (s.mode && this.h.mode?.() !== s.mode) this.h.setMode?.(s.mode);
     if (s.view) this.h.flyTo?.(s.view);
     if (s.cam) { const c = typeof s.cam === 'function' ? s.cam(this) : s.cam; if (c) this.h.camTo?.(c); }   // 그 현장으로 이동 · 확대
+    if (s.hold) { const f = () => { if (!this.held && s.hold(this)) { this.held = true; this.h.pause?.(true); } }; f(); this.holdT = setInterval(f, 300); }   // 명령이 내려지면 설명하는 동안 현장을 멈춤
+    if (s.follow) { const f = () => { const p = this.h.moverPos?.(s.follow(this)); if (p) this.h.camTo?.({ x: p.x, z: p.z, d: 9, ms: 900 }); }; f(); this.followT = setInterval(f, 1000); }   // 출동 로봇을 따라간다
     clearTimeout(this.panelT);
     if (s.panel !== undefined) {   // 현장을 3초 보여 준 뒤 관련 창 (null = 창 닫기)
       this.h.closePanels?.(); this.panelOpen = false;
-      const p = typeof s.panel === 'function' ? s.panel(this) : s.panel;
-      if (p) this.panelT = setTimeout(() => { if (this.cur() === s && this.open) { this.h.openPanel?.(p); this.panelOpen = true; } }, PANEL_MS);
+      if (s.panel) this.panelT = setTimeout(() => {   // 창 내용은 열 때 정한다 (그 사이 생긴 사례 · 제품 반영)
+        const p = typeof s.panel === 'function' ? s.panel(this) : s.panel;
+        if (p && this.cur() === s && this.open) { this.h.openPanel?.(p); this.panelOpen = true; }
+      }, PANEL_MS);
     }
     for (const q of s.hl ?? []) document.querySelector(q)?.classList.add('tori-hl');
     this.nEl.textContent = `${TOPICS[this.topic].name}${i ? ` · ${i} / ${S.length - 1}` : ''}`;
-    this.figEl.innerHTML = s.ring ? ringSvg(s.ring, s.at) : s.chain != null ? chainSvg(s.chain) : '';
+    this.figEl.innerHTML = s.ring ? ringSvg(s.ring, s.at) : s.chain != null ? chainSvg(s.chain) : s.qchain != null ? chainSvg(s.qchain, QCHAIN) : '';
     const last = s.end || i === S.length - 1, nextLabel = s.start ? '둘러보기 시작 ▶' : last && s.next ? `${TOPICS[s.next].name} ▶` : last ? '마치기' : '다음 ▶';
     this.btnEl.innerHTML = `${i ? '<button type="button" data-t="prev">◀ 이전</button>' : ''}${i === 0 && this.topic === 'tour' ? '<button type="button" data-t="skip">다음에</button>' : ''}<button type="button" data-t="menu">주제</button><button type="button" data-t="next" class="primary">${nextLabel}</button>`;
     const text = () => (typeof s.say === 'function' ? s.say(this) : s.say);
@@ -241,7 +327,7 @@ export class Tori {
     store.set(SEEN, '1');
   }
   say(text, voice) { this.sayEl.textContent = text; this.talkT = Math.min(6, 1.2 + text.length * 0.045); this.speak(voice ?? text); }   // 말하는 입 모양 (글자 수만큼)
-  close() { clearInterval(this.liveT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.open = false; this.step = -1; this.el.classList.add('mini'); this.stopVoice(); this.talkT = 0; }
+  close() { this.unhold(); this.restoreSpeed(); clearInterval(this.liveT); clearInterval(this.followT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.open = false; this.step = -1; this.el.classList.add('mini'); this.stopVoice(); this.talkT = 0; }
   clearHl() { document.querySelectorAll('.tori-hl').forEach((e) => e.classList.remove('tori-hl')); }
   // ── 자동 넘김 ─────────────────
   cancelAuto() { this.autoTok = (this.autoTok ?? 0) + 1; clearTimeout(this.autoT); this.onSpoken = null; this.el.querySelector('[data-t="next"]')?.classList.remove('auto'); }
