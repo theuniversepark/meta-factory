@@ -1669,7 +1669,37 @@ let blenderErr = null;
 await loadBlenderAssets().catch((e) => { blenderErr = e.message; });
 document.body.dataset.render = RENDER.loaded ? 'blender' : '3d';
 start('smart');
-const tori = new Tori({ flyTo, setMode: (k) => document.querySelector(`#modeSeg button[data-mode="${k}"]`)?.click(), mode: () => modeKey,
+// 토리 안내용 카메라: 지금 시점에서 목표 시점으로 부드럽게 이동 · 확대 (1.2초) — Zone 시점(ZONE_VIEWS) · 좌표(x, z, 높이 d) · 설비(셀 ID)
+let camTw = null;
+function tweenCam(p, t, ms = 1200) {
+  const p0 = persp.position.clone(), t0 = ctlP.target.clone(), P = new THREE.Vector3(...p), T = new THREE.Vector3(...t), start = performance.now(), id = (camTw = {});
+  const step = (now) => { if (camTw !== id) return; const k = Math.min(1, (now - start) / ms), e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+    persp.position.lerpVectors(p0, P, e); ctlP.target.lerpVectors(t0, T, e); ctlP.update(); if (k < 1) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
+function toriCam(c) {
+  if (c.view) { const [p, t] = ZONE_VIEWS[c.view]; return tweenCam(p, t); }
+  let { x, z } = c; const d = c.d ?? 24;
+  if (c.station) { const sv = view.stationViews.find((v) => v.st.id === c.station); if (!sv) return; const w = sv.group.getWorldPosition(new THREE.Vector3()); x = w.x; z = w.z; }
+  tweenCam([x + d * 0.12, d, z + d * 0.9], [x, 0, z]);
+}
+// 토리 안내용 창: 오케스트레이터(Factory OS 오더) · FAC(구매오더) · 품질 추적(탭 · 선택 제품 · EPCIS 조회)
+function toriPanel(p) {
+  document.body.classList.add('tori-tour');
+  if (p.kind === 'orch') { orchView.show(); orchView.tab = p.tab; orchView.render(true); }
+  else if (p.kind === 'fac') { facTab = p.tab ?? 'po'; document.getElementById('btnFac').click(); }
+  else if (p.kind === 'trace') {
+    traceState.tab = p.tab ?? 'trace'; traceState.q = '';
+    if (p.tab === 'serial') traceState.sid = p.id ?? null; else traceState.serial = p.id ?? null;
+    traceModal.classList.remove('hidden'); renderTrace(true);
+    if (p.epcis) setTimeout(() => traceBody.querySelector('[data-qt-epcis]')?.click(), 600);   // 발행 → 적재 → 팔레트 → 출하 이벤트 사슬
+  }
+}
+function toriClosePanels() {
+  document.body.classList.remove('tori-tour'); orchView.hide();
+  facModal.classList.add('hidden'); clearInterval(facTimer); traceModal.classList.add('hidden');
+}
+const tori = new Tori({ flyTo: (k) => toriCam({ view: k }), camTo: toriCam, openPanel: toriPanel, closePanels: toriClosePanels, sim: () => sim, setMode: (k) => document.querySelector(`#modeSeg button[data-mode="${k}"]`)?.click(), mode: () => modeKey,
   injectEvent: () => { const n = sim.fieldSeq ?? 0; document.getElementById('btnEvent').click(); return (sim.fieldSeq ?? 0) > n ? sim.fieldEvents.at(-1) : null; },   // ⚠ 현장 이벤트 버튼과 같은 동작 · 새로 생긴 이벤트
   look: (x, z) => { persp.position.set(x + 3, 24, z + 22); ctlP.target.set(x, 0, z); ctlP.update(); } });   // 안내 로봇 (js/tori.js) — 처음 접속이면 인사
 tori.greetIfFirst();

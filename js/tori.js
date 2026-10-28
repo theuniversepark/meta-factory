@@ -2,7 +2,7 @@
 // 주제별로 안내한다: 메타팩토리 둘러보기(단계 · Zone 카메라 이동 · 주요 버튼 강조) · 인시던트 해결 예시(실제로 현장 이벤트를 일으켜 진행 상황을 읽어 줌)
 //   · 데이터 폐루프 · 데이터 플라이휠(고리 그림에 지금 단계 표시) · 매뉴얼·앱 내려받기
 // 접으면 작은 얼굴만 남고, 누르면 주제 메뉴.
-// 자동 넘김: 말이 끝난 뒤(음성이 없으면 읽는 시간 뒤) 2초 동안 「다음」을 누르지 않으면 다음 단계로 — 첫 인사 · 메뉴 · 주제 마지막 단계는 기다림,
+// 자동 넘김: 말이 끝난 뒤(음성이 없으면 읽는 시간 뒤) 1초 동안 「다음」을 누르지 않으면 다음 단계로 (첫 인사도 둘러보기 시작) — 메뉴 · 주제 마지막 단계는 기다림,
 //   실제로 일어나기를 기다리는 단계(인시던트 감지 · 출동 · 처리)는 ready()가 참이 된 뒤부터 (최대 90초)
 // 그리기: 토리 전용 캔버스를 WebGPU(three/webgpu WebGPURenderer)로 — 메인 3D 화면(WebGL)과 따로라 공장 화면 속도와 무관
 //   WebGPU를 쓸 수 없는 브라우저 · 공유 아티팩트에서는 같은 장면을 WebGL로 그린다 (모양 · 동작 같음)
@@ -10,9 +10,32 @@
 //   브라우저는 사용자가 화면을 누르기 전에는 소리를 막으므로, 그 전에 나온 말은 첫 클릭 때 읽는다 (앱은 처음부터 — electron/main.mjs autoplayPolicy)
 // 안내 내용은 앱의 실제 구성에서 가져왔다: 센서망 계층(js/sensors.js) · VLA 학습·배포(js/vla.js) · AIOS(js/aios.js) · 데이터 연동(js/datahub.js)
 import * as THREE from 'three';
+import { PRODUCTS } from './serial.js';
 
 const SEEN = 'mf.tori.seen', VOICE = 'mf.tori.voice';
 const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* 사생활 보호 모드 등 */ } } };
+
+// 흐름 막대: 제품 ID 추적 7단계 (아래 작은 글씨 = 그 단계에서 붙는 ID)
+const CHAIN = [['오더', ''], ['자재', '원자재 로트'], ['투입', '생산 ID'], ['공정', '셀별 이력'], ['판정', '제품 ID'], ['출하', '팔레트 SSCC'], ['이후', '조회 · 리콜']];
+function chainSvg(at) {
+  const W = 336, H = 70, n = CHAIN.length, gap = W / n;
+  const nodes = CHAIN.map(([l, sub], k) => { const x = gap * k + gap / 2, on = at < 0 || k <= at, cur = k === at;
+    return `<g class="tr-n${on ? ' on' : ''}${cur ? ' cur' : ''}"><rect x="${x - 19}" y="10" width="38" height="22" rx="11"/><text x="${x}" y="25" text-anchor="middle">${l}</text>${sub ? `<text x="${x}" y="${k % 2 ? 62 : 48}" text-anchor="middle" class="tr-sub">${sub}</text>` : ''}</g>`; }).join('');
+  const arrows = CHAIN.slice(1).map((_, k) => { const x1 = gap * k + gap / 2 + 20, x2 = gap * (k + 1) + gap / 2 - 22, on = at < 0 || k < at;
+    return `<path d="M${x1} 21 L${x2} 21" class="tr-a${on ? ' on' : ''}" marker-end="url(#tc-h${on ? '1' : '0'})"/>`; }).join('');
+  return `<svg class="tori-ring" viewBox="0 0 ${W} ${H}" role="img" aria-label="제품 ID 추적: ${CHAIN.map((c) => c[0]).join(' → ')}"><defs>${[0, 1].map((o) => `<marker id="tc-h${o}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="tr-h${o ? ' on' : ''}"/></marker>`).join('')}</defs>${arrows}${nodes}</svg>`;
+}
+// 실제 제품 예시 (시뮬레이션의 시리얼 서비스 · 제품 추적에서 읽음)
+const prodKo = (p) => PRODUCTS[p]?.label ?? p;
+const clock = (t) => { const x = Math.floor(t) + 8 * 3600; return `${String(Math.floor(x / 3600) % 24).padStart(2, '0')}:${String(Math.floor(x / 60) % 60).padStart(2, '0')}`; };
+const ex = {
+  order: (s) => { const F = s?.fos; if (!F) return null; const o = F.orders.find((x) => x.status === 'open' && x.evidenced !== true) ?? F.orders[0]; return o ? { o, good: F.main?.reconcile?.(o.id)?.good ?? 0 } : null; },
+  wip: (s, minSteps = 0) => s?.trace?.recent?.findLast((r) => r.status === 'wip' && !r.serial && r.steps.length >= minSteps) ?? null,
+  serial: (s) => s?.serials?.units?.findLast((u) => u.serial && u.zone === 'main') ?? s?.serials?.units?.findLast((u) => u.serial) ?? null,
+  pallet: (s) => s?.serials?.pallets?.[0] ?? null,
+  shipped: (s) => s?.serials?.units?.findLast((u) => u.loc === 'shipped' && u.serial) ?? null,
+};
+const cellName = (s, id) => s?.processing?.find((st) => st.id === id)?.name ?? id;
 
 // 고리 그림: 데이터 폐루프 6단계 · 플라이휠 5단계 (마지막 → 처음으로 이어짐)
 const RINGS = {
@@ -32,7 +55,7 @@ const TOPICS = {
     { say: '오른쪽 패널은 공장 운영 AI예요. 고장 · 공급 차질 · 현장 이벤트를 관찰 → 판단 → 실행한 기록이 남아요. 아래 입력창에 "포장셀 속도 80%"처럼 지시할 수도 있어요.', hl: ['#agentPanel'] },
     { say: '위쪽 버튼에서는 로봇 데이터로 VLA 학습, 운영 AI 학습, KPI 영향 분석, 품질 추적, Zone 대시보드를 볼 수 있어요.', hl: ['#btnVla', '#btnAios', '#btnImpact', '#btnTrace', '#btnZoneDash'] },
     { say: '아래 버튼으로 설비 고장이나 현장 이벤트를 일부러 일으켜 보세요. 에이전트가 어떻게 대응하는지 볼 수 있어요. CCTV · 5G · 센서 배치도 여기서 봐요.', hl: ['#btnFault', '#btnEvent', '#btnCctv'] },
-    { say: '설비를 누르면 상세 정보가, 🏷 라벨 버튼을 누르면 이름표가 보여요. 저를 누르면 인시던트 해결 예시, 데이터 폐루프 · 플라이휠, 매뉴얼 · 앱 내려받기도 안내해 드려요!', view: 'all', hl: ['#btnLabels'], end: true },
+    { say: '설비를 누르면 상세 정보가, 🏷 라벨 버튼을 누르면 이름표가 보여요. 저를 누르면 인시던트 해결 예시, 제품 ID 추적, 데이터 폐루프 · 플라이휠, 매뉴얼 · 앱 내려받기도 안내해 드려요!', view: 'all', hl: ['#btnLabels'], end: true },
   ] },
   // 인시던트 해결 예시: 실제로 현장 이벤트를 일으키고, 시뮬레이션의 이벤트 기록(감지 · 대응 로봇 · 처리 시각)을 1초마다 읽어 진행 상황을 말한다
   incident: { name: '인시던트 해결 예시', steps: [
@@ -69,6 +92,36 @@ const TOPICS = {
     { say: '성능 향상 → 다시 운영 — 더 잘 일하는 로봇이 더 많은, 더 좋은 데이터를 만들어 바퀴가 다시 돌아요. 바퀴를 빨리 돌리는 열쇠는 데이터 품질이라서, 같은 기준 시계와 스텝 시각 · 보간 여부 · 영상 시각 차이까지 기록해요.', ring: 'fly', at: 4 },
     { say: '데이터 폐루프가 길이라면, 데이터 플라이휠은 그 길을 돌수록 빨라지는 힘이에요. 궁금한 주제가 있으면 언제든 저를 눌러 주세요!', ring: 'fly', at: 5, end: true },
   ] },
+  // 제품 ID 추적: 단계마다 그 현장으로 카메라를 옮겨 확대하고(cam), 3초 뒤 관련 창을 연다(panel) — 설명을 메타팩토리 기능과 바로 연결
+  trace: { name: '제품 ID 추적 — 오더부터 출하 이후까지', tour: true, steps: [
+    { chain: -1, cam: { view: 'precision' }, panel: null,
+      say: '제품 하나의 일생은 ID로 이어져요. 생산에 들어갈 때 생산 ID, 품질검사에 합격하면 제품 고유 ID, 출하할 때는 팔레트 ID가 붙어요. 오더부터 출하 이후까지 그 흐름을 현장과 화면으로 따라가 볼게요.' },
+    { chain: 0, cam: { view: 'all' }, panel: { kind: 'orch', tab: 'fos' }, hl: ['#orchPanel'],
+      voice: '첫째, 오더. 공장 오케스트레이터가 오더를 받아 각 Zone에 배정해요. 양품 목표와 혼류 비율, 납기가 함께 내려가고, 앱에서는 ERPNext 작업지시와도 연동돼요. 오케스트레이터 창의 Factory OS 탭에서 오더 진행을 볼 수 있어요.',
+      say: (T) => { const o = ex.order(T.h.sim?.()); return `① 오더 — 공장 오케스트레이터가 오더를 받아 Zone에 배정해요.${o ? ` 지금 오더는 ${o.o.id}: 양품 목표 ${o.o.target}개 중 ${o.good}개 완료, 납기 ${clock(o.o.due)}.` : ''} 양품 목표 · 혼류 비율 · 납기가 함께 내려가고, 앱에서는 ERPNext 작업지시와도 연동돼요.`; }, live: true },
+    { chain: 1, cam: { x: -46, z: 33, d: 22 }, panel: { kind: 'fac', tab: 'po' }, hl: ['#btnFac'],
+      voice: '둘째, 자재 준비. 창고 재고가 재주문점 아래로 내려가면 구매오더가 확정되고, 입고 트럭이 이 도크로 들어와요. 들어온 자재에는 원자재 로트가 붙고, AGV가 투입구까지 날라요. FAC 창에서 구매오더와 입고 전표, 재고를 볼 수 있어요.',
+      say: '② 자재 준비 — 창고 재고가 재주문점 아래로 내려가면 구매오더가 확정되고, 입고 트럭이 이 도크(왼쪽 벽)로 들어와요. 들어온 자재에는 원자재 로트가 붙고, AGV가 투입구까지 날라요. FAC 창에서 구매오더 · 입고 전표 · 재고를 볼 수 있어요.' },
+    { chain: 2, cam: { station: 'SRC', d: 11 }, panel: null,
+      voice: '셋째, 생산 투입. 자재가 투입구에서 AMR 지그에 오르는 순간 생산 ID가 붙어요. 이후 공정 기록은 모두 이 생산 ID에 쌓여요.',
+      say: (T) => { const r = ex.wip(T.h.sim?.()); return `③ 생산 투입 — 자재가 투입구에서 AMR 지그에 오르는 순간 생산 ID가 붙어요.${r ? ` 방금 투입된 ${eun(prodKo(r.product))} ${r.wip} · 원자재 로트 ${r.lot}${r.amr ? ` · 운반 ${r.amr}` : ''}이에요.` : ''} 이후 공정 기록은 모두 이 ID에 쌓여요.`; }, live: true },
+    { chain: 3, act: (T) => { T.exWip = ex.wip(T.h.sim?.(), 2) ?? ex.wip(T.h.sim?.()); },
+      cam: (T) => ({ station: T.exWip?.steps.at(-1)?.id ?? 'DT_ASSY', d: 12 }), panel: (T) => ({ kind: 'trace', tab: 'trace', id: T.exWip?.wip }), hl: ['#btnTrace'],
+      voice: '넷째, 생산 중 추적. 셀을 지날 때마다 그 셀의 로봇과 VLA 모델 버전, 운반 AMR, 설비 건강도, 체결 토크 같은 공정 측정값, 그 자리 환경값이 이 제품의 이력으로 기록돼요. 품질 추적 창에서 셀별 이력을 볼 수 있어요.',
+      say: (T) => { const r = T.exWip, s = T.h.sim?.(); return `④ 생산 중 추적 — 셀을 지날 때마다 로봇 · VLA 모델 버전 · 운반 AMR · 설비 건강도 · 공정 측정값(체결 토크 · 각도 · 압입 하중) · 그 자리 환경값이 기록돼요.${r ? ` 지금 ${eun(r.wip)} ${cellName(s, r.steps.at(-1)?.id)}에 있고, 지금까지 셀 ${r.steps.length}곳의 기록이 쌓였어요.` : ''}`; }, live: true },
+    { chain: 4, act: (T) => { T.exSer = ex.serial(T.h.sim?.()); }, cam: { station: 'PACK', d: 11 }, panel: (T) => ({ kind: 'trace', tab: 'serial', id: T.exSer?.serial }), hl: ['#btnTrace'],
+      voice: '다섯째, 품질 판정. 체결셀에서 토크와 각도를 전수 검사하고, 검사 포장셀에서 합격하면 중앙 발행기가 제품 고유 ID를 발행해요. QR 라벨이나 금속 각인으로 표시하고 바로 판독해 검증해요. 불합격이면 불량 사례가 열리고 AI가 원인 셀을 찾아요.',
+      say: (T) => { const u = T.exSer; return `⑤ 품질 판정 — 체결셀에서 토크 · 각도를 전수 검사하고, 검사·포장셀에서 합격하면 중앙 발행기가 제품 고유 ID를 발행해요(품목별 순차 · 재사용 없음).${u ? ` 최근 합격한 ${prodKo(u.product)}: 제품 ID ${u.serial} ← 생산 ID ${u.wip}, ${u.mark?.symbol === 'DM' ? '금속 각인 DataMatrix' : 'QR 라벨(GS1 Digital Link)'} 판독 등급 ${u.mark?.grade ?? '-'}.` : ''} 불합격이면 불량 사례가 열리고 AI가 원인 셀을 찾아요.`; } },
+    { chain: 5, act: (T) => { T.exPal = ex.pallet(T.h.sim?.()); }, cam: { x: 47, z: -25, d: 26 }, panel: (T) => ({ kind: 'trace', tab: 'serial', id: T.exPal?.units?.[0] }), hl: ['#btnTrace'],
+      voice: '여섯째, 포장과 출하. 합격품은 팔레트에 실리고, 팔레트마다 SSCC가 붙어 팔레트와 제품 ID가 묶여요. 트럭과 출하 시각도 함께 기록돼요. 정밀검사 샘플 결과에 따라 로트 출하를 보류하거나 풀어요.',
+      say: (T) => { const p = T.exPal; return `⑥ 포장 · 출하 — 합격품은 팔레트에 실리고, 팔레트마다 SSCC가 붙어 팔레트와 제품 ID가 묶여요(EPCIS 묶음 이벤트). 트럭 · 출하 시각도 기록돼요.${p ? ` 최근 팔레트 ${p.sscc}에 ${prodKo(p.product)} ${p.units.length}개${p.truck ? ` · ${p.truck}로 출하` : ' · 출하 대기'}.` : ' 아직 만들어진 팔레트가 없어요.'} 정밀검사 샘플 결과에 따라 로트 출하를 보류하거나 풀어요.`; } },
+    { chain: 6, act: (T) => { T.exShip = ex.shipped(T.h.sim?.()); }, cam: { x: 56, z: -25, d: 34 },
+      panel: (T) => (T.exShip ? { kind: 'trace', tab: T.exShip.zone === 'main' ? 'trace' : 'serial', id: T.exShip.serial, epcis: true } : { kind: 'trace', tab: 'serial' }), hl: ['#btnTrace'],
+      voice: '일곱째, 출하 이후. 제품 라벨의 QR 코드로 제품 ID를 조회하면 생산 이력까지 이어져요. 문제가 생기면 트럭에서 팔레트, 제품 ID로 리콜 범위를 찾고, 거꾸로 원인 셀과 로트, 시간대로 영향 범위를 좁혀요. 모든 기록은 GS1 EPCIS 표준 이벤트라 고객사와 협력사 시스템과 공유할 수 있어요. 이 시뮬레이터는 출하까지 기록하고, 판매 이후 A/S와 반품 데이터도 같은 ID로 이어 붙일 수 있는 구조예요.',
+      say: (T) => { const u = T.exShip; return `⑦ 출하 이후 — 제품 라벨의 QR(GS1 Digital Link)로 제품 ID를 조회하면 생산 이력까지 이어져요. 문제가 생기면 트럭 → 팔레트 → 제품 ID로 리콜 범위를, 거꾸로 원인 셀 · 로트 · 시간대로 영향 범위를 찾아요.${u ? ` 예: ${eun(u.serial)} ${u.ship?.truck ?? '트럭'}에 실려 출하됐고, EPCIS 저장소에 발행 → 적재 → 팔레트 → 출하 이벤트가 남아 있어요.` : ' (아직 출하된 제품이 없어 조회 예시는 생략해요.)'} 시뮬레이터는 출하까지 기록하고, 판매 이후 A/S · 반품 데이터도 같은 ID로 이어 붙일 수 있는 구조예요.`; } },
+    { chain: 7, cam: { view: 'all' }, panel: null, end: true,
+      say: '제품 ID 하나로 오더 · 자재 · 공정 · 품질 · 출하가 이어지면, 문제가 생겨도 원인과 범위를 바로 찾을 수 있어요. 이 데이터는 품질 원인 분석과 AI 학습, 고객 신뢰의 바탕이 돼요.' },
+  ] },
   // 매뉴얼 · 앱 내려받기 — 앱 내려받기는 웹 버전(⬇ 버튼이 보일 때)에서만 안내한다 (맥 · 윈도우 앱과 npm start에는 내려받기 기능이 없음)
   docs: { name: '매뉴얼 · 앱 내려받기', steps: [
     { voice: '책 모양의 사용자 가이드 버튼을 누르면 사용자 가이드 PDF를 내려받아요. 설치부터 화면 구성, 운영 시나리오 실습, 데이터 내보내기, 문제 해결까지 담겨 있어요.', say: '📘 버튼을 누르면 사용자 가이드(PDF)를 내려받아요. 설치부터 화면 구성, 운영 시나리오 실습, 데이터 내보내기, 문제 해결까지 담겨 있어요.', hl: ['#btnGuide'] },
@@ -86,7 +139,7 @@ const prioOf = (ev) => ({ intrusion: 1, smoke: 1 })[ev.type] ?? 2;   // js/sim.j
 const sec = (s) => `${Math.max(0, s).toFixed(1)}초`;   // 시뮬레이션 시간
 // 받침에 맞는 조사: 끝 글자가 한글이면 받침, 숫자면 읽는 소리(일 · 삼 · 육 · 칠 · 팔 · 영 → 받침), 영문 L · M · N · R은 받침으로 본다
 const final = (w) => { const c = String(w).trim().slice(-1); if (/[가-힣]/.test(c)) return (c.charCodeAt(0) - 0xac00) % 28 > 0; if (/\d/.test(c)) return '013678'.includes(c); return /[lmnr]/i.test(c); };
-const ga = (w) => `${w}${final(w) ? '이' : '가'}`, ieyo = (w) => `${w}${final(w) ? '이에요' : '예요'}`;
+const ga = (w) => `${w}${final(w) ? '이' : '가'}`, eun = (w) => `${w}${final(w) ? '은' : '는'}`, ieyo = (w) => `${w}${final(w) ? '이에요' : '예요'}`;
 
 // 고리 그림 (SVG): 단계를 원 위에 놓고 화살표로 잇는다 · at = 지금 단계(-1 = 전체 소개, 마지막+1 = 한 바퀴 완성)
 function ringSvg(key, at) {
@@ -111,7 +164,7 @@ export const voiceKey = (t) => { let h = 0x811c9dc5; for (const c of speakText(t
 // 녹음할 문장 전체: 고정 문장은 말풍선 그대로, 실시간 수치가 들어가는 단계는 voice(수치 없는 읽을 글)
 export function narration() { return [MENU_SAY, ...Object.values(TOPICS).flatMap((T) => T.steps.map((s) => s.voice ?? (typeof s.say === 'string' ? s.say : null)).filter(Boolean))]; }
 const VOICE_DIR = new URL('../assets/tori/voice/', import.meta.url).href;
-const AUTO_MS = 2000, READY_MAX_MS = 90000;
+const AUTO_MS = 1000, READY_MAX_MS = 90000, PANEL_MS = 3000;   // 현장을 보여 준 뒤 창을 열기까지
 const readMs = (t) => 1500 + speakText(t).length * 150;   // 소리 없이 읽는 시간 (초당 약 7자)
 
 export class Tori {
@@ -152,10 +205,10 @@ export class Tori {
 
   // 주제 메뉴 (작은 토리를 누르면)
   menu() {
-    clearInterval(this.liveT); this.cancelAuto(); this.clearHl(); this.step = -1; this.open = true; this.el.classList.remove('mini');
+    clearInterval(this.liveT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.step = -1; this.open = true; this.el.classList.remove('mini');
     this.nEl.textContent = ''; this.figEl.innerHTML = '';
     this.say(MENU_SAY);
-    this.btnEl.innerHTML = ['tour', 'incident', 'loop', 'fly', 'docs'].map((k) => [k, TOPICS[k]]).map(([k, T]) => `<button type="button" data-t="topic" data-k="${k}">${T.name}</button>`).join('');
+    this.btnEl.innerHTML = ['tour', 'incident', 'trace', 'loop', 'fly', 'docs'].map((k) => [k, TOPICS[k]]).map(([k, T]) => `<button type="button" data-t="topic" data-k="${k}">${T.name}</button>`).join('');
     this.btnEl.classList.add('menu');
   }
   play(topic) { this.topic = topic; this.list = null; this.ev = null; this.go(0); }
@@ -169,9 +222,16 @@ export class Tori {
     if (s.act && !back) s.act(this);   // 이전으로 돌아올 때는 다시 실행하지 않음 (이벤트를 또 만들지 않게)
     if (s.mode && this.h.mode?.() !== s.mode) this.h.setMode?.(s.mode);
     if (s.view) this.h.flyTo?.(s.view);
+    if (s.cam) { const c = typeof s.cam === 'function' ? s.cam(this) : s.cam; if (c) this.h.camTo?.(c); }   // 그 현장으로 이동 · 확대
+    clearTimeout(this.panelT);
+    if (s.panel !== undefined) {   // 현장을 3초 보여 준 뒤 관련 창 (null = 창 닫기)
+      this.h.closePanels?.(); this.panelOpen = false;
+      const p = typeof s.panel === 'function' ? s.panel(this) : s.panel;
+      if (p) this.panelT = setTimeout(() => { if (this.cur() === s && this.open) { this.h.openPanel?.(p); this.panelOpen = true; } }, PANEL_MS);
+    }
     for (const q of s.hl ?? []) document.querySelector(q)?.classList.add('tori-hl');
     this.nEl.textContent = `${TOPICS[this.topic].name}${i ? ` · ${i} / ${S.length - 1}` : ''}`;
-    this.figEl.innerHTML = s.ring ? ringSvg(s.ring, s.at) : '';
+    this.figEl.innerHTML = s.ring ? ringSvg(s.ring, s.at) : s.chain != null ? chainSvg(s.chain) : '';
     const last = s.end || i === S.length - 1, nextLabel = s.start ? '둘러보기 시작 ▶' : last && s.next ? `${TOPICS[s.next].name} ▶` : last ? '마치기' : '다음 ▶';
     this.btnEl.innerHTML = `${i ? '<button type="button" data-t="prev">◀ 이전</button>' : ''}${i === 0 && this.topic === 'tour' ? '<button type="button" data-t="skip">다음에</button>' : ''}<button type="button" data-t="menu">주제</button><button type="button" data-t="next" class="primary">${nextLabel}</button>`;
     const text = () => (typeof s.say === 'function' ? s.say(this) : s.say);
@@ -181,18 +241,18 @@ export class Tori {
     store.set(SEEN, '1');
   }
   say(text, voice) { this.sayEl.textContent = text; this.talkT = Math.min(6, 1.2 + text.length * 0.045); this.speak(voice ?? text); }   // 말하는 입 모양 (글자 수만큼)
-  close() { clearInterval(this.liveT); this.cancelAuto(); this.clearHl(); this.open = false; this.step = -1; this.el.classList.add('mini'); this.stopVoice(); this.talkT = 0; }
+  close() { clearInterval(this.liveT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.open = false; this.step = -1; this.el.classList.add('mini'); this.stopVoice(); this.talkT = 0; }
   clearHl() { document.querySelectorAll('.tori-hl').forEach((e) => e.classList.remove('tori-hl')); }
   // ── 자동 넘김 ─────────────────
   cancelAuto() { this.autoTok = (this.autoTok ?? 0) + 1; clearTimeout(this.autoT); this.onSpoken = null; this.el.querySelector('[data-t="next"]')?.classList.remove('auto'); }
   scheduleAuto(s, last) {
     this.cancelAuto();
-    if (s.start || s.end || last) return;   // 첫 인사 · 주제 마지막 단계는 사용자가 고른다
+    if (s.end || last) return;   // 주제 마지막 단계는 기다린다 (첫 인사도 1초 뒤 둘러보기 시작)
     const tok = this.autoTok, t0 = performance.now();
     const countdown = () => {
       if (tok !== this.autoTok || !this.open) return;
       if (s.ready && !s.ready(this) && performance.now() - t0 < READY_MAX_MS) { this.autoT = setTimeout(countdown, 500); return; }   // 실제로 일어날 때까지
-      const b = this.el.querySelector('[data-t="next"]'); b?.classList.remove('auto'); void b?.offsetWidth; b?.classList.add('auto');   // 2초 차오르는 막대
+      const b = this.el.querySelector('[data-t="next"]'); b?.classList.remove('auto'); void b?.offsetWidth; b?.classList.add('auto');   // 1초 차오르는 막대
       this.autoT = setTimeout(() => { if (tok === this.autoTok && this.open) this.go(this.step + 1); }, AUTO_MS);
     };
     // 말이 끝나면 시작 — 음성이 재생 중이면 끝날 때, 아니면 읽는 시간 뒤

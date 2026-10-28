@@ -1259,8 +1259,13 @@ details.zone-agent:not([open]) { padding-bottom: 7px; } details.zone-agent:not([
 .tori-ring .tr-n.cur rect { fill: #37a0ff; stroke: #37a0ff; }
 .tori-ring .tr-n.cur text { fill: #fff; font-weight: 700; }
 .tori-ring .tr-c { fill: #9fd0ff; font-size: 12px; font-weight: 700; }
-/* 토리 자동 넘김: 「다음」 버튼이 2초 동안 차오른다 (js/tori.js AUTO_MS) */
+/* 토리 자동 넘김: 「다음」 버튼이 1초 동안 차오른다 (js/tori.js AUTO_MS) */
 .tori-btns button[data-t="next"] { position: relative; overflow: hidden; }
-.tori-btns button[data-t="next"].auto::after { content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: rgba(255, 255, 255, 0.85); transform-origin: left; animation: tori-auto 2s linear forwards; }
+.tori-btns button[data-t="next"].auto::after { content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: rgba(255, 255, 255, 0.85); transform-origin: left; animation: tori-auto 1s linear forwards; }
 @keyframes tori-auto { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @media (prefers-reduced-motion: reduce) { .tori-btns button[data-t="next"].auto::after { animation-duration: 0.01s; } }
+.tori-ring .tr-sub { fill: var(--muted); font-size: 10px; }
+.tori-ring .tr-n.cur .tr-sub, .tori-ring .tr-n.on .tr-sub { fill: #9fd0ff; }
+/* 토리가 연 창: 뒤의 현장이 비치게 배경을 옅게, 토리는 창 위에 */
+body.tori-tour .modal { background: rgba(0, 0, 0, 0.18); }
+body.tori-tour .tori { z-index: 30; }
