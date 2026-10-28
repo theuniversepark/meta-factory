@@ -20,6 +20,7 @@ const store = { get: (k) => { try { return localStorage.getItem(k); } catch { re
 const CHAIN = [['오더', ''], ['자재', '원자재 로트'], ['투입', '생산 ID'], ['공정', '셀별 이력'], ['판정', '제품 ID'], ['출하', '팔레트 SSCC'], ['이후', '조회 · 리콜']];
 const FCHAIN = [['공장', 'FacOS'], ['게이트', 'A2A'], ['Zone', '오케스트레이터'], ['셀', 'OCS'], ['엣지', '스킬'], ['기록', 'FAC']];   // FacOS 계층
 const KCHAIN = [['손실', '원인 11종'], ['제안', '운영값'], ['트윈', '30분×3'], ['결정', '적용·보류'], ['실측', '10분'], ['학습', '이력']];   // KPI 개선 6단계
+const LCHAIN = [['현장', '셀 엣지'], ['AAS', '시계열'], ['OPC UA', 'PubSub'], ['TSN', '유선'], ['이음5G', '이동 로봇'], ['서버', 'MQTT · DB']];   // 현장 데이터 전달 6단계
 const QCHAIN = [['예방', '건강·보정'], ['전수', '토크·각도'], ['샘플', '정밀검사'], ['대응', '봉쇄·경보'], ['원인', 'AI 분석'], ['개선', '8D·정책'], ['감시', '관리도']];   // 품질 관리 7단계
 function chainSvg(at, C = CHAIN) {
   const W = 336, H = 70, n = C.length, gap = W / n;
@@ -86,7 +87,7 @@ const TOPICS = {
     { say: '오른쪽 패널은 공장 운영 AI예요. 고장 · 공급 차질 · 현장 이벤트를 관찰 → 판단 → 실행한 기록이 남아요. 아래 입력창에 "포장셀 속도 80%"처럼 지시할 수도 있어요.', hl: ['#agentPanel'] },
     { say: '위쪽 버튼에서는 로봇 데이터로 VLA 학습, 운영 AI 학습, KPI 영향 분석, 품질 추적, Zone 대시보드를 볼 수 있어요.', hl: ['#btnVla', '#btnAios', '#btnImpact', '#btnTrace', '#btnZoneDash'] },
     { say: '아래 버튼으로 설비 고장이나 현장 이벤트를 일부러 일으켜 보세요. 에이전트가 어떻게 대응하는지 볼 수 있어요. CCTV · 5G · 센서 배치도 여기서 봐요.', hl: ['#btnFault', '#btnEvent', '#btnCctv'] },
-    { say: '설비를 누르면 상세 정보가, 🏷 라벨 버튼을 누르면 이름표가 보여요. 저를 누르면 FacOS 공장 운영 SW, 인시던트 해결 예시, 제품 ID 추적, 품질 관리, KPI 영향 · 개선, 데이터 폐루프와 플라이휠, 매뉴얼 · 앱 내려받기도 안내해 드려요!', view: 'all', hl: ['#btnLabels'], end: true },
+    { say: '설비를 누르면 상세 정보가, 🏷 라벨 버튼을 누르면 이름표가 보여요. 저를 누르면 FacOS 공장 운영 SW, 인시던트 해결 예시, 제품 ID 추적, 품질 관리, KPI 영향 · 개선, 데이터 폐루프와 플라이휠, 현장 데이터 전달(AAS · OPC UA · TSN · 이음5G), 매뉴얼 · 앱 내려받기도 안내해 드려요!', view: 'all', hl: ['#btnLabels'], end: true },
   ] },
   // FacOS — 공장 운영 SW: 계층(공장 → 게이트 → Zone → 셀 → 엣지 → 기록) · 오더 · 결정 요청 · A2A 가드레일 · 상위망 단절 · 셀 게이트 · 현장 감지 · 보안 · FAC
   //   가드레일 시험 · 상위망 단절 시험은 토리가 직접 실행 (운영에 영향 없음 · 단절은 다음 단계 · 주제를 벗어나면 복구)
@@ -233,7 +234,7 @@ const TOPICS = {
     { say: '학습 → 배포 — 새 모델은 검증 성공률이 나아졌을 때만 배포돼요. 로봇 한 대에 먼저 배포해 지켜본 뒤 전체로 넓히고, 운영 AI는 디지털트윈에서 지금 정책과 비교해 검증한 뒤 추천 모드부터 적용해요. 나빠지면 자동으로 되돌려요.', ring: 'fly', at: 2, hl: ['#btnVla', '#btnAios'] },
     { say: '배포 → 성능 향상 — 좋아진 모델로 성공한 작업이 늘고, 고장 · 현장 이벤트 같은 새 상황의 데이터도 쌓여요. 에피소드마다 어떤 모델 버전으로 일했는지 남아서 버전별 성과를 비교할 수 있어요.', ring: 'fly', at: 3, hl: ['#btnImpact'] },
     { say: '성능 향상 → 다시 운영 — 더 잘 일하는 로봇이 더 많은, 더 좋은 데이터를 만들어 바퀴가 다시 돌아요. 바퀴를 빨리 돌리는 열쇠는 데이터 품질이라서, 같은 기준 시계와 스텝 시각 · 보간 여부 · 영상 시각 차이까지 기록해요.', ring: 'fly', at: 4 },
-    { say: '데이터 폐루프가 길이라면, 데이터 플라이휠은 그 길을 돌수록 빨라지는 힘이에요. 궁금한 주제가 있으면 언제든 저를 눌러 주세요!', ring: 'fly', at: 5, end: true },
+    { say: '데이터 폐루프가 길이라면, 데이터 플라이휠은 그 길을 돌수록 빨라지는 힘이에요. 이어서 현장 데이터가 어떤 표준과 네트워크를 거쳐 서버까지 가는지 볼까요?', ring: 'fly', at: 5, end: true, next: 'link' },
   ] },
   // 제품 ID 추적: 단계마다 그 현장으로 카메라를 옮겨 확대하고(cam), 3초 뒤 관련 창을 연다(panel) — 설명을 메타팩토리 기능과 바로 연결
   trace: { name: '제품 ID 추적 — 오더부터 출하 이후까지', tour: true, steps: [
@@ -300,6 +301,31 @@ const TOPICS = {
       say: '예방하고, 검사하고, 대응하고, 개선하는 고리가 계속 돌면서 품질이 좋아져요. 모든 품질 기록은 제품 ID로 이어져 있어서, 언제든 그 제품과 공정, 원인까지 거슬러 올라갈 수 있어요.' },
   ] },
   // 매뉴얼 · 앱 내려받기 — 앱 내려받기는 웹 버전(⬇ 버튼이 보일 때)에서만 안내한다 (맥 · 윈도우 앱과 npm start에는 내려받기 기능이 없음)
+  // 현장 데이터 전달 — 앱 구현: AAS 서브모델 · TimeSeries(js/aas.js) · OPC UA PubSub JSON over MQTT · pcap(js/datahub.js · js/pcap.js) · 이음5G 특화망(js/net5g.js) · PTP 기준 시계(js/sensors.js)
+  // TSN 스케줄(802.1Qbv) 자체는 시뮬레이션하지 않는다 — 기준 시계 동기 · 명령 전달 지연까지만 모사하므로 말풍선에 그렇게 밝힌다
+  link: { name: '현장 데이터 전달', steps: [
+    { mode: 'dark', view: 'all', lchain: -1,
+      voice: '현장 데이터가 서버까지 어떻게 가는지 따라가 볼게요. 설비와 로봇, 센서 값은 AAS 표준 시계열로 만들어지고, OPC UA 메시지로 바뀌어, 고정 설비는 TSN 유선망으로, 이동 로봇은 이음5G 특화망으로 공장 중앙 서버에 모여요.',
+      say: '현장 데이터가 서버까지 어떻게 가는지 따라가 볼게요. 설비 · 로봇 · 센서 값은 AAS 표준 시계열로 만들어지고 → OPC UA PubSub 메시지가 되어 → 고정 설비는 TSN 유선망, 이동 로봇은 이음5G 특화망을 타고 → 공장 중앙 서버에 같은 기준 시각으로 모여요. 실시간성과 정주기성을 지키는 것이 핵심이에요.' },
+    { view: 'precision', hl: ['#btnSensors'], lchain: 0,
+      voice: '먼저 현장입니다. 셀 설비의 상태와 사이클, 로봇의 관절과 손끝, 진동과 온도 같은 센서 값이 끊임없이 나와요. 셀 엣지가 이 값을 모으면서, 공장 기준 시계와 맞춘 시각을 하나하나 붙여요.',
+      say: '① 현장 — 셀 설비의 상태 · 사이클 · 전력, 로봇의 관절 · 손끝 · 그리퍼, 진동 · 온도 같은 센서 값이 끊임없이 나와요. 셀 엣지가 이 값을 모으면서 공장 기준 시계(PTP)와 맞춘 시각을 하나하나 붙여요.' },
+    { panel: { kind: 'data' }, hl: ['#btnData'], lchain: 1,
+      voice: 'AAS는 설비와 로봇마다 붙는 디지털 명판이에요. 명판, 기술 사양, 현재 값, 시계열 서브모델로 나뉘고, 수집한 값은 시각과 함께 시계열 레코드로 쌓여요. 그래서 어느 시스템이든 같은 이름과 같은 단위로 데이터를 읽을 수 있어요.',
+      say: '② AAS 시계열 — 설비 · 로봇마다 디지털 명판인 AAS(자산 관리 셸)가 있어요. 명판(Nameplate) · 기술 사양(TechnicalData) · 현재 값(OperationalData) · 시계열(TimeSeries, IDTA 02008) 서브모델로 나뉘고, 수집한 값은 시각과 함께 시계열 레코드로 쌓여요. 어느 시스템이든 같은 이름 · 같은 단위로 읽을 수 있어요.' },
+    { panel: { kind: 'data' }, hl: ['#btnData'], lchain: 2,
+      voice: '이 값을 OPC UA PubSub 메시지로 만들어, 정해진 주기마다 발행해요. 받는 쪽은 일일이 요청하지 않고 구독만 하면 실시간으로 받아요. 데이터 연동 창에서 실제 메시지와 패킷 기록을 볼 수 있어요.',
+      say: '③ OPC UA PubSub — AAS로 정의한 값을 OPC UA PubSub(Part 14) 메시지로 만들어 정해진 주기마다 발행해요. 받는 쪽은 일일이 요청하지 않고 구독만 하면 실시간으로 받아요. 데이터 연동 창에서 실제 메시지와 패킷 덤프(pcap)를 볼 수 있어요.' },
+    { panel: { kind: 'sensors' }, view: 'precision', hl: ['#btnSensors'], lchain: 3,
+      voice: '셀 로봇과 설비처럼 자리를 지키는 장비는 TSN을 지원하는 유선망으로 보내요. 모든 스위치가 같은 시계를 쓰고, 중요한 메시지에는 정해진 시간 칸을 내줘서, 다른 데이터가 몰려도 정해진 주기와 지연 안에 도착해요. 오케스트레이터의 셀 명령도 이 길로 내려가요.',
+      say: '④ TSN 유선망 — 셀 로봇 · 설비처럼 자리를 지키는 장비는 TSN(시간 민감형 네트워크)을 지원하는 유선 이더넷으로 보내요. 모든 스위치가 같은 시계(IEEE 802.1AS)를 쓰고, 중요한 메시지에 정해진 시간 칸(802.1Qbv)을 내줘서 다른 트래픽이 몰려도 정해진 주기 · 정해진 지연 안에 도착해요. 오케스트레이터의 셀 명령도 이 길(OPC UA PubSub/TSN)로 내려가요. (시뮬레이터는 기준 시계 동기와 명령 전달 지연까지 모사해요)' },
+    { panel: { kind: 'net5g' }, view: 'all', hl: ['#btnNet5g'], lchain: 4,
+      voice: '움직이는 로봇은 선을 꽂을 수 없어서 이음5G 특화망으로 보내요. 정해진 슬롯마다 보내 주기를 지키고, 지연은 10밀리초 안이에요. 기지국을 옮겨 가도 끊김과 유실이 없어요. 5G와 TSN을 연동하면 유선망과 같은 시계, 같은 주기로 이어져요. 바닥의 색은 신호 세기 지도예요.',
+      say: '⑤ 이음5G 특화망 — AMR · 휴머노이드 · 사족보행 · 드론처럼 움직이는 로봇은 선을 꽂을 수 없어서 이음5G(n79 4.7GHz · 100MHz)로 보내요. 설정 그랜트로 정해진 슬롯마다 보내 주기를 지키고, 지연은 p99 10ms 안, 기지국을 옮겨 갈 때도 DAPS 핸드오버로 끊김 · 유실 없이 이어져요. 5G-TSN 연동(3GPP Rel-16)을 쓰면 유선 TSN과 같은 시계 · 같은 주기로 이어져요. 바닥의 색은 신호 세기(RSRP) 지도예요.' },
+    { panel: { kind: 'data' }, hl: ['#btnData'], lchain: 5, end: true,
+      voice: '유선과 5G로 온 메시지는 공장 중앙의 MQTT 브로커로 모이고, AAS 저장소와 센서 DB, 운영 데이터셋에 쌓여요. 모두 같은 기준 시각을 가지고 있어서, 로봇 영상과 설비 값, 센서 값을 한 줄로 맞춰 AI 학습과 모니터링, 디지털 트윈에 바로 쓸 수 있어요.',
+      say: '⑥ 서버 — 유선과 5G로 온 메시지는 공장 중앙의 MQTT 브로커(UNS)로 모이고, AAS 저장소 · 센서 DB · 운영 데이터셋에 쌓여요. 모두 같은 기준 시각을 가지고 있어서 로봇 영상 · 설비 값 · 센서 값을 한 줄로 맞춰 AI 학습 · 모니터링 · 디지털 트윈에 바로 쓸 수 있어요.' },
+  ] },
   docs: { name: '매뉴얼 · 앱 내려받기', steps: [
     // 매뉴얼 전에: Claude API 키를 넣으면 달라지는 것 (js/llm.js · js/agentcore.js · js/designer.js) — 키가 없어도 정책 기반 에이전트 · 내장 해석기로 공장은 그대로 돈다
     { hl: ['#btnSettings', '#engineSeg'],
@@ -346,7 +372,24 @@ function ringSvg(key, at) {
 // ── 녹음 음성 (assets/tori/voice/<해시>.mp3 · tools/tori-voice.mjs로 만듦) ─────────────────
 // 문장(읽을 글)마다 해시로 파일을 찾는다 — 문장을 고치면 해시가 바뀌어 새로 만들어야 함(없으면 OS 음성)
 export const MENU_SAY = '모두의 AI 팩토리 공장장 토리입니다. 무엇을 안내해 드릴까요?';
-export const speakText = (t) => String(t).replace(/\s*→\s*/g, ', ').replace(/\s*·\s*/g, ', ').replace(/[①②③④⑤⑥]/g, '').replace(/[\u{1F300}-\u{1FAFF}\u{2190}-\u{21FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu, '').replace(/\s+/g, ' ').trim();
+// 읽을 글: 말풍선 글자는 그대로 두고 소리만 고친다 — 약어 발음 · 붙은 낱말 띄우기 · 쉼(—는 마침표, 괄호 속 약어는 읽지 않음)
+const PRON = [[/피지컬\s*AI/g, '피지컬 에이아이'], [/Fac\s?OS/gi, '팩오에스'], [/AIOS/g, '에이아이오에스'], [/AI-ready/g, '에이아이 레디'], [/(?<![A-Za-z])AI(?![A-Za-z])/g, '에이아이'],
+  [/VLA/g, '브이엘에이'], [/Outbox/gi, '아웃박스'], [/(?<![A-Za-z])FAC(?![A-Za-z])/g, '팩'], [/AMMR/g, '에이엠엠알'], [/(?<![A-Za-z])AMR(?![A-Za-z])/g, '에이엠알'], [/(?<![A-Za-z])SW(?![A-Za-z])/g, '소프트웨어'],
+  [/ERPNext/g, '이알피넥스트'], [/SSCC/g, '에스에스씨씨'], [/EPCIS/g, '이피씨아이에스'], [/FMEA/g, '에프엠이에이'], [/(?<![A-Za-z])UPH(?![A-Za-z])/g, '유피에이치'], [/(?<![A-Za-z])AAS(?![A-Za-z])/g, '에이에이에스'],
+  [/(?<![A-Za-z])3D(?![A-Za-z])/g, '쓰리디'], [/(?<![A-Za-z])8D(?![A-Za-z])/g, '에잇디'], [/이음5G/g, '이음 파이브지'], [/(?<![A-Za-z])5G(?![A-Za-z])/g, '파이브지'], [/A\/S/g, '에이에스'], [/e-axle/g, '이액슬'], [/Zone/g, '존'],
+  [/OPC UA/g, '오피씨 유에이'], [/PubSub/g, '펍섭'], [/(?<![A-Za-z])TSN(?![A-Za-z])/g, '티에스엔'], [/MQTT/g, '엠큐티티'], [/(?<![A-Za-z])PTP(?![A-Za-z])/g, '피티피'], [/(?<![A-Za-z])DB(?![A-Za-z])/g, '디비']];
+const SPACE = [[/메타팩토리/g, '메타 팩토리'], [/자율공장/g, '자율 공장'], [/디지털트윈/g, '디지털 트윈'], [/정비요청/g, '정비 요청'], [/구매오더/g, '구매 오더'], [/작업지시/g, '작업 지시'], [/예지정비/g, '예지 정비'],
+  [/부품분류/g, '부품 분류'], [/외관검사/g, '외관 검사'], [/([가-힣])셀(?![가-힣])/g, '$1 셀'], [/([가-힣])셀(?=[이은을에의과로도마])/g, '$1 셀']];
+const ro = (w) => { const c = w.charCodeAt(w.length - 1) - 0xac00, j = c % 28; return c < 0 || c > 11171 || j === 0 || j === 8 ? '로' : '으로'; };   // 받침 없거나 ㄹ이면 「로」
+export const speakText = (t) => {
+  let s = String(t).replace(/[①②③④⑤⑥]/g, '').replace(/[\u{1F300}-\u{1FAFF}\u{2190}-\u{21FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu, (c) => (c === '→' ? c : ''))
+    .replace(/\s*\([^)]*\)/g, '')   // 괄호 속 보충(약어 · 예시)은 소리로 읽지 않는다
+    .replace(/(^|[.!?]\s+)([가-힣]+(?: [가-힣]+)?) → ([가-힣]+(?: [가-힣]+)?) — /g, (_, p, a, b) => `${p}${a}에서 ${b}${ro(b)}. `)   // 「운영 → 데이터 —」 → 「운영에서 데이터로.」
+    .replace(/\s+—\s+/g, '. ').replace(/—/g, ', ').replace(/\s*→\s*/g, ', ').replace(/\s*·\s*/g, ', ')
+    .replace(/([가-힣])([A-Za-z])/g, '$1 $2');   // 「정밀조립Zone」처럼 한글에 붙은 영문은 띄워 읽는다
+  for (const [re, w] of [...PRON, ...SPACE]) s = s.replace(re, w);
+  return s.replace(/\s*,\s*(,\s*)+/g, ', ').replace(/\.\s*,/g, '.').replace(/\s+/g, ' ').trim();
+};
 export const voiceKey = (t) => { let h = 0x811c9dc5; for (const c of speakText(t)) { h ^= c.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, '0'); };
 // 녹음할 문장 전체: 고정 문장은 말풍선 그대로, 실시간 수치가 들어가는 단계는 voice(수치 없는 읽을 글)
 export function narration() { return [MENU_SAY, ...Object.values(TOPICS).flatMap((T) => T.steps.flatMap((s) => (s.voice && typeof s.voice === 'object' ? Object.values(s.voice) : [s.voice ?? (typeof s.say === 'string' ? s.say : null)])).filter(Boolean))]; }   // 상황별 음성(voice: { 종류: 문장 } · vk가 고름)은 모두 녹음
@@ -395,7 +438,7 @@ export class Tori {
     this.unhold(); this.restoreSpeed(); clearInterval(this.liveT); clearInterval(this.followT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.reveal([]); this.step = -1; this.open = true; this.el.classList.remove('mini');
     this.nEl.textContent = ''; this.figEl.innerHTML = '';
     this.say(MENU_SAY);
-    this.btnEl.innerHTML = ['tour', 'facos', 'incident', 'trace', 'quality', 'kpi', 'data', 'docs'].map((k) => [k, TOPICS[k]]).map(([k, T]) => `<button type="button" data-t="topic" data-k="${k}">${T.name}</button>`).join('');
+    this.btnEl.innerHTML = ['tour', 'facos', 'incident', 'trace', 'quality', 'kpi', 'data', 'link', 'docs'].map((k) => [k, TOPICS[k]]).map(([k, T]) => `<button type="button" data-t="topic" data-k="${k}">${T.name}</button>`).join('');
     this.btnEl.classList.add('menu');
   }
   play(topic) { this.unhold(); this.restoreSpeed(); this.topic = topic; this.list = null; this.ev = undefined; this.qInj = undefined; this.guard = undefined; this.netOff = undefined; this.flushed = undefined; this.prop = undefined; this.applied = undefined; this.go(0); }
@@ -427,7 +470,7 @@ export class Tori {
     this.reveal(hls);
     for (const e of hls) e.classList.add('tori-hl');
     this.nEl.textContent = `${TOPICS[this.topic].name}${i ? ` · ${i} / ${S.length - 1}` : ''}`;
-    this.figEl.innerHTML = s.ring ? ringSvg(s.ring, s.at) : s.chain != null ? chainSvg(s.chain) : s.qchain != null ? chainSvg(s.qchain, QCHAIN) : s.fchain != null ? chainSvg(s.fchain, FCHAIN) : s.kchain != null ? chainSvg(s.kchain, KCHAIN) : '';
+    this.figEl.innerHTML = s.ring ? ringSvg(s.ring, s.at) : s.chain != null ? chainSvg(s.chain) : s.qchain != null ? chainSvg(s.qchain, QCHAIN) : s.fchain != null ? chainSvg(s.fchain, FCHAIN) : s.kchain != null ? chainSvg(s.kchain, KCHAIN) : s.lchain != null ? chainSvg(s.lchain, LCHAIN) : '';
     const last = s.end || i === S.length - 1, nextLabel = s.start ? '둘러보기 시작 ▶' : last && s.next ? `${TOPICS[s.next].name} ▶` : last ? '마치기' : '다음 ▶';
     this.btnEl.innerHTML = `${i ? '<button type="button" data-t="prev">◀ 이전</button>' : ''}${i === 0 && this.topic === 'tour' ? '<button type="button" data-t="skip">다음에</button>' : ''}<button type="button" data-t="menu">주제</button><button type="button" data-t="next" class="primary">${nextLabel}</button>`;
     const text = () => (typeof s.say === 'function' ? s.say(this) : s.say);

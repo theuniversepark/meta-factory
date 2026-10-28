@@ -1687,6 +1687,9 @@ function toriCam(c) {
 function toriPanel(p) {
   document.body.classList.add('tori-tour');
   if (p.kind === 'orch') { orchView.show(); orchView.tab = p.tab; orchView.render(true); }
+  else if (p.kind === 'data') { if (dataModal.classList.contains('hidden')) document.getElementById('btnData').click(); }   // 데이터 연동 창 (AAS · OPC UA PubSub · pcap)
+  else if (p.kind === 'sensors') { if (document.getElementById('sensorModal').classList.contains('hidden')) document.getElementById('btnSensors').click(); }   // 센서망 창 (계층 · PTP 기준 시계)
+  else if (p.kind === 'net5g') { if (!netBtn.classList.contains('on')) { netBtn.click(); toriNet = true; } }   // 이음5G 신호 지도 · 요약 카드 (토리가 켠 것만 닫을 때 끈다)
   else if (p.kind === 'fac') { facTab = p.tab ?? 'po'; document.getElementById('btnFac').click(); }
   else if (p.kind === 'robot') { if (modeKey === 'dark' && [...sim.movers, ...(sim.drones ?? [])].some((m) => m.id === p.id)) { view.selectRobot({ type: 'mover', id: p.id }); ui.showRobot(); robotTimer = 1; camTimer = 1; } }   // 로봇 정보 창 (그 로봇 카메라 영상 · AI 검출)
   else if (p.kind === 'orchInc') { const inc = sim.orch.incidents.find((i) => i.key === p.key); orchView.show(); orchView.tab = 'flow'; if (inc) orchView.sel = inc.id; orchView.render(true); }   // 그 인시던트 흐름도
@@ -1712,11 +1715,14 @@ function toriQualityDrift() {
   sim.log('warn', `[시나리오] 공정 편차 주입 · ${st.name}`, { obs: '안내(토리 품질 관리) 시연 — 드리프트 60% · 다음 2개 불량', act: '체결셀 전수 검사 → 불량 사례 · AI 원인 분석 · 8D' });
   return { id: st.id, name: st.name, t: sim.time };
 }
+let toriNet = false;   // 토리가 이음5G 지도를 켰는지 (사용자가 켠 지도는 끄지 않는다)
 function toriClosePanels() {
   document.body.classList.remove('tori-tour'); orchView.hide(); zdModal.classList.add('hidden');
   if (ui.robotMode) { view.selectRobot(null); ui.hideDetail(); }
   facModal.classList.add('hidden'); clearInterval(facTimer); traceModal.classList.add('hidden');
   fcModal.classList.add('hidden'); fcView = null; impactModal.classList.add('hidden');
+  dataModal.classList.add('hidden'); clearInterval(dataTimer); document.getElementById('sensorModal').classList.add('hidden');
+  if (toriNet && netBtn.classList.contains('on')) netBtn.click(); toriNet = false;
 }
 // 토리 인시던트 예시: 흐름도를 바로 열지 않고 현장 이벤트만 만든다 (⚠ 버튼은 흐름도를 함께 연다) · 배속 · 이동체 위치
 function toriEvent() {
