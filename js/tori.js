@@ -2,7 +2,7 @@
 // 주제별로 안내한다: 메타팩토리 둘러보기(단계 · Zone 카메라 이동 · 주요 버튼 강조) · 인시던트 해결 예시(실제로 현장 이벤트를 일으켜 진행 상황을 읽어 줌)
 //   · 데이터 폐루프 · 데이터 플라이휠(고리 그림에 지금 단계 표시) · 매뉴얼·앱 내려받기
 // 접으면 작은 얼굴만 남고, 누르면 주제 메뉴.
-// 자동 넘김: 말이 끝난 뒤(음성이 없으면 읽는 시간 뒤) 1초 동안 「다음」을 누르지 않으면 다음 단계로 (첫 인사도 둘러보기 시작) — 메뉴 · 주제 마지막 단계는 기다림,
+// 자동 넘김: 말이 끝난 뒤(음성이 없으면 읽는 시간 뒤) 1초 동안 「다음」을 누르지 않으면 다음 단계로 (첫 인사도 둘러보기 시작) — 주제 마지막 단계는 이어진 다음 주제로(메뉴 순서 · 성과활용 및 기대효과 맺음말에서 멈춤), 메뉴는 기다림,
 //   실제로 일어나기를 기다리는 단계(인시던트 감지 · 출동 · 처리)는 ready()가 참이 된 뒤부터 (최대 90초)
 // 그리기: 토리 전용 캔버스를 WebGPU(three/webgpu WebGPURenderer)로 — 메인 3D 화면(WebGL)과 따로라 공장 화면 속도와 무관
 //   WebGPU를 쓸 수 없는 브라우저 · 공유 아티팩트에서는 같은 장면을 WebGL로 그린다 (모양 · 동작 같음)
@@ -21,6 +21,7 @@ const CHAIN = [['오더', ''], ['자재', '원자재 로트'], ['투입', '생�
 const FCHAIN = [['공장', 'FacOS'], ['게이트', 'A2A'], ['Zone', '오케스트레이터'], ['셀', 'OCS'], ['엣지', '스킬'], ['기록', 'FAC']];   // FacOS 계층
 const KCHAIN = [['손실', '원인 11종'], ['제안', '운영값'], ['트윈', '30분×3'], ['결정', '적용·보류'], ['실측', '10분'], ['학습', '이력']];   // KPI 개선 6단계
 const LCHAIN = [['현장', '셀 엣지'], ['AAS', '시계열'], ['OPC UA', 'PubSub'], ['TSN', '유선'], ['이음5G', '이동 로봇'], ['서버', 'MQTT · DB']];   // 데이터 & 제어명령 파이프라인 6단계
+const OCHAIN = [['실증', '3단계 비교'], ['데이터', '모델 · 데이터셋'], ['표준', '이식'], ['교육', '훈련'], ['생산', '품질'], ['안전', '사람'], ['확산', '산업']];   // 성과활용 및 기대효과
 const QCHAIN = [['예방', '건강·보정'], ['전수', '토크·각도'], ['샘플', '정밀검사'], ['대응', '봉쇄·경보'], ['원인', 'AI 분석'], ['개선', '8D·정책'], ['감시', '관리도']];   // 품질 관리 7단계
 function chainSvg(at, C = CHAIN) {
   const W = 336, H = 70, n = C.length, gap = W / n;
@@ -50,6 +51,7 @@ const at = (T, x) => `+${sec(x.t - T.ev.t0)}`;
 const arrived = (T) => !!T.ev?.responder && !!T.ev.inc?.steps?.some((x) => x.kind === 'act' && x.text.startsWith(`${T.ev.responder} 현장 도착`));   // 따라가는 로봇이 도착했을 때만 (소화기 들고 「현장 대기」하는 휴머노이드는 아님)
 const resp = (T) => (T.ev?.type === 'smoke' ? 'inspect' : T.ev?.type === 'intrusion' ? 'safety' : 'clean');   // 이벤트 종류별 대응 — 음성 문장 고르기
 const took = (T) => { const d = T.ev.tDetect - (T.ev.tq ?? T.ev.t0); return d < 0.5 ? '곧바로' : `${sec(d)} 만에`; };   // 감지를 풀자마자 본 경우
+const pickBot = (T) => { const ms = T.h.sim?.()?.movers ?? [], busy = (m) => m.task && !m.idle && !m.charging && !m.chgNow; return (ms.find((m) => m.kind === 'humanoid' && busy(m)) ?? ms.find(busy) ?? ms.find((m) => m.kind === 'humanoid') ?? ms[0])?.id ?? null; };   // 둘러보기 예시 로봇 — 일하며 움직이는 로봇 (휴머노이드 우선)
 const byRobot = (T) => (T.h.moverPos?.(T.ev?.detectedBy) ? 'robot' : 'cctv');   // 로봇 카메라가 감지했는지, CCTV가 먼저 봤는지
 const clock = (t) => { const x = Math.floor(t) + 8 * 3600; return `${String(Math.floor(x / 3600) % 24).padStart(2, '0')}:${String(Math.floor(x / 60) % 60).padStart(2, '0')}`; };
 const ex = {
@@ -78,16 +80,23 @@ const RINGS = {
 const TOPICS = {
   tour: { name: '메타팩토리 둘러보기', steps: [
     { say: '안녕하세요! 저는 모두의 AI 팩토리 공장장 토리예요. 이곳은 피지컬AI 실증 메타팩토리로, 레거시 공장이 자동화를 거쳐 피지컬AI 자율공장으로 바뀌는 과정을 3D 디지털 트윈으로 보여 주는 시뮬레이터예요. 2분 정도 함께 둘러볼까요?', view: 'all', start: true },
-    { say: '화면 위 단계 버튼으로 레거시 → 자동화 → 피지컬AI를 바꿀 수 있어요. 같은 라인을 세 단계로 운영해서 생산량 · OEE · 재공이 어떻게 달라지는지 비교해요.', hl: ['#modeSeg'] },
-    { say: '지금 피지컬AI 단계로 바꿨어요. 이 단계에서는 휴머노이드 · AMMR · 사족보행 로봇과 드론이 현장을 맡고, 로봇 카메라 영상을 보고 동작을 정하는 VLA 모델이 일해요.', mode: 'dark', hl: ['#modeSeg'] },
+    // 과제정의 (협업지능 피지컬AI 기술실증 테스트베드 플랫폼화 — 연구개발계획서 1p)
+    { view: 'all', say: '이 메타팩토리는 협업지능 피지컬AI 기반 SW 플랫폼의 연구개발 성과를 실제 산업에 적용 · 확산하기 위한 개방형 기술실증 플랫폼이에요. 장비와 공간을 갖추는 데서 그치지 않고, R&D 성과 · 실증장비 · 제조공정 · 데이터 · 디지털트윈 · AI · 통합운영체계 · 기업실증 서비스를 하나의 구조로 연결해 반복해서 쓸 수 있는 실증 플랫폼으로 만드는 것이 이 과제예요.' },
+    { say: '추진 목적은 네 가지예요. 첫째, 개별 장비 중심의 실증공간을 데이터 · AI · 디지털트윈 · 로봇 통합운영체계 기반의 실증 플랫폼으로 고도화해요. 둘째, 피지컬AI R&D 결과물이 실험실에 머물지 않고 기술검증 → 실증 → 현장적용 → 확산으로 이어지게 해요. 셋째, 제조 · 물류 공정에서 피지컬AI의 안전성 · 신뢰성 · 실시간성 · 현장적용성을 검증해요. 넷째, 실데이터와 합성데이터를 다시 R&D와 기업 현장으로 돌려보내는 폐루프형 기술실증 생태계를 만들어요. 이제 공장 안의 Zone을 둘러볼게요.' },
     { say: '가운데가 정밀조립Zone이에요. 도어트림과 e-axle을 혼류 생산하고, 부품분류 → 조립 → 체결 → 검사·포장 6개 셀이 이어져 있어요.', view: 'precision' },
     { say: '뒤쪽은 유연생산Zone이에요. 후드와 도어를 공급·키팅 → 용접 → 실링 → 롤러 헤밍 → 정밀 장착 → 치수·외관검사 순서로 만들어요.', view: 'flex' },
     { say: '앞쪽은 적응가공Zone이에요. 유압블록과 리어커버를 소재 식별 → 5축 가공 · 디버링 · 선삭 → 초정밀 측정 순서로 가공해요.', view: 'adapt' },
     { say: '오른쪽은 정밀검사Zone이에요. 세 Zone에서 시료를 받아 비전 · 3D 스캔 · 정밀측정 · CT로 검사하고 AI가 판정해요.', view: 'insp' },
+    { say: '화면 위 단계 버튼으로 레거시 → 자동화 → 피지컬AI를 바꿀 수 있어요. 같은 라인을 세 단계로 운영해서 생산량 · OEE · 재공이 어떻게 달라지는지 비교해요.', hl: ['#modeSeg'] },
+    { say: '지금 피지컬AI 단계로 바꿨어요. 이 단계에서는 휴머노이드 · AMMR · 사족보행 로봇과 드론이 현장을 맡고, 로봇 카메라 영상을 보고 동작을 정하는 VLA 모델이 일해요.', mode: 'dark', hl: ['#modeSeg'] },
     { say: '오른쪽 패널은 공장 운영 AI예요. 고장 · 공급 차질 · 현장 이벤트를 관찰 → 판단 → 실행한 기록이 남아요. 아래 입력창에 "포장셀 속도 80%"처럼 지시할 수도 있어요.', hl: ['#agentPanel'] },
     { say: '위쪽 버튼에서는 로봇 데이터로 VLA 학습, 운영 AI 학습, KPI 영향 분석, 품질 추적, Zone 대시보드를 볼 수 있어요.', hl: ['#btnVla', '#btnAios', '#btnImpact', '#btnTrace', '#btnZoneDash'] },
     { say: '아래 버튼으로 설비 고장이나 현장 이벤트를 일부러 일으켜 보세요. 에이전트가 어떻게 대응하는지 볼 수 있어요. CCTV · 5G · 센서 배치도 여기서 봐요.', hl: ['#btnFault', '#btnEvent', '#btnCctv'] },
-    { say: '설비를 누르면 상세 정보가, 🏷 라벨 버튼을 누르면 이름표가 보여요. 저를 누르면 FacOS 공장 운영 SW, 인시던트 해결 예시, 제품 ID 추적, 품질 관리, KPI 영향 · 개선, 데이터 폐루프와 플라이휠, 데이터 & 제어명령 파이프라인(AAS · OPC UA · TSN · 이음5G), 매뉴얼 · 앱 내려받기도 안내해 드려요!', view: 'all', hl: ['#btnLabels'], end: true },
+    // 예시로 로봇 하나를 눌러 상세 정보 창(실시간 작업 · 위치 · 배터리 · 5G · 카메라 · 관절)을 보여 준다 — 일하는 휴머노이드 우선, 화면은 그 로봇을 따라간다
+    { act: (T) => { T.bot ??= pickBot(T); }, follow: (T) => T.bot, panel: (T) => T.bot && { kind: 'robot', id: T.bot }, live: true,
+      voice: '설비나 로봇을 누르면 상세 정보 창이 열려요. 예시로 로봇 하나를 눌러 볼게요. 창에는 지금 하는 작업, 위치와 방향, 5G 신호와 핸드오버, 로봇 카메라의 실시간 영상, 배터리와 충전 상태가 보이고, 팔이 있는 로봇은 관절마다 각도와 속도, 토크와 온도도 실시간으로 바뀌어 보여요. 공장 설비를 누르면 상태와 건강도, 고장 위험과 처리 수량을 볼 수 있어요.',
+      say: (T) => `설비나 로봇을 누르면 상세 정보 창이 열려요. 예시로 로봇 하나(${T.bot ?? '—'})를 눌러 볼게요. 창에는 지금 하는 작업 · 위치 · 방위 · 5G 서빙 셀 · 신호 세기 · 핸드오버, 로봇 카메라 실시간 영상, 배터리 · 충전 상태가 보이고, 팔이 있는 로봇은 관절마다 각도 · 속도 · 토크 · 온도도 실시간으로 바뀌어 보여요${(() => { const m = T.h.sim?.()?.movers?.find((x) => x.id === T.bot); return m ? ` (지금: ${m.task ?? '대기'}${m.battery != null ? ` · 배터리 ${Math.round(m.battery)}%` : ''})` : ''; })()}. 공장 설비를 누르면 상태 · 건강도 · 고장 위험 · 처리 수량을 볼 수 있어요.` },
+    { panel: null, say: '🏷 라벨 버튼을 누르면 설비 · 로봇 이름표가 보여요. 저를 누르면 FacOS 공장 운영 SW, 인시던트 해결 예시, 제품 ID 추적, 품질 관리, KPI 영향 · 개선, 데이터 폐루프와 플라이휠, 데이터 & 제어명령 파이프라인(AAS · OPC UA · TSN · 이음5G), 매뉴얼 · 앱 내려받기, 성과활용 및 기대효과도 안내해 드려요!', view: 'all', hl: ['#btnLabels'], end: true, next: 'facos' },
   ] },
   // FacOS — 공장 운영 SW: 계층(공장 → 게이트 → Zone → 셀 → 엣지 → 기록) · 오더 · 결정 요청 · A2A 가드레일 · 상위망 단절 · 셀 게이트 · 현장 감지 · 보안 · FAC
   //   가드레일 시험 · 상위망 단절 시험은 토리가 직접 실행 (운영에 영향 없음 · 단절은 다음 단계 · 주제를 벗어나면 복구)
@@ -213,7 +222,7 @@ const TOPICS = {
         inspect: '해결됐어요. 점검 결과 이상이 없어 알람을 해제했어요. 멈췄던 셀은 다시 돌아가고, 소화기는 정비실에 반납해요.',
         safety: '해결됐어요. 진입자가 구역을 나가서, 감속했던 셀과 로봇은 정상 속도로 돌아갔어요.' },
       say: (T) => !T.ev ? '' : `해결 — 표지가 사라지고 셀 · 로봇이 정상 속도로 돌아갔어요. 감지부터 해결까지 ${sec((T.ev.tClear ?? T.ev.t0) - (T.ev.tDetect ?? T.ev.t0))} (감지 ${sec((T.ev.tDetect ?? T.ev.t0) - (T.ev.tq ?? T.ev.t0))} · 대응 ${sec((T.ev.tClear ?? T.ev.t0) - (T.ev.tDetect ?? T.ev.t0))}).${T.ev.type === 'smoke' ? ' 점검 결과 발열 · 연소 흔적이 없어 알람을 해제했어요.' : ''}` },
-    { panel: (T) => T.ev?.inc && { kind: 'orchInc', key: `ev:${T.ev.id}` }, hl: ['#btnOrch', '#btnImpact'], end: true,
+    { panel: (T) => T.ev?.inc && { kind: 'orchInc', key: `ev:${T.ev.id}` }, hl: ['#btnOrch', '#btnImpact'], end: true, next: 'trace',
       voice: '흐름도에 감지부터 완료 확인까지 모든 시각이 남았어요. 이 기록은 KPI 영향 분석과 운영 AI 학습 데이터가 돼요. 이렇게 AI는 보고 판단하고, 피지컬AI 로봇은 직접 가서 해결해요.',
       say: (T) => `기록 — 흐름도에 감지 → 자체 조치 → 보고 → 판단 → 명령 → 조치 → 완료 확인 ${T.ev?.inc?.steps?.length ?? ''}단계 시각이 남았어요. 이 기록은 KPI 영향 분석과 운영 AI(AIOS) 학습 데이터가 돼요. AI는 보고 판단하고, 피지컬AI 로봇은 직접 가서 해결해요. ⚡ 설비 고장 · ⚠ 현장 이벤트 버튼으로 다른 상황도 시험해 보세요!` },
   ] },
@@ -263,7 +272,7 @@ const TOPICS = {
       panel: (T) => (T.exShip ? { kind: 'trace', tab: T.exShip.zone === 'main' ? 'trace' : 'serial', id: T.exShip.serial, epcis: true } : { kind: 'trace', tab: 'serial' }), hl: ['#btnTrace'],
       voice: '일곱째, 출하 이후. 제품 라벨의 QR 코드로 제품 ID를 조회하면 생산 이력까지 이어져요. 문제가 생기면 트럭에서 팔레트, 제품 ID로 리콜 범위를 찾고, 거꾸로 원인 셀과 로트, 시간대로 영향 범위를 좁혀요. 모든 기록은 GS1 EPCIS 표준 이벤트라 고객사와 협력사 시스템과 공유할 수 있어요. 이 시뮬레이터는 출하까지 기록하고, 판매 이후 A/S와 반품 데이터도 같은 ID로 이어 붙일 수 있는 구조예요.',
       say: (T) => { const u = T.exShip; return `⑦ 출하 이후 — 제품 라벨의 QR(GS1 Digital Link)로 제품 ID를 조회하면 생산 이력까지 이어져요. 문제가 생기면 트럭 → 팔레트 → 제품 ID로 리콜 범위를, 거꾸로 원인 셀 · 로트 · 시간대로 영향 범위를 찾아요.${u ? ` 예: ${eun(u.serial)} ${u.ship?.truck ?? '트럭'}에 실려 출하됐고, EPCIS 저장소에 발행 → 적재 → 팔레트 → 출하 이벤트가 남아 있어요.` : ' (아직 출하된 제품이 없어 조회 예시는 생략해요.)'} 시뮬레이터는 출하까지 기록하고, 판매 이후 A/S · 반품 데이터도 같은 ID로 이어 붙일 수 있는 구조예요.`; } },
-    { chain: 7, cam: { view: 'all' }, panel: null, end: true,
+    { chain: 7, cam: { view: 'all' }, panel: null, end: true, next: 'quality',
       say: '제품 ID 하나로 오더 · 자재 · 공정 · 품질 · 출하가 이어지면, 문제가 생겨도 원인과 범위를 바로 찾을 수 있어요. 이 데이터는 품질 원인 분석과 AI 학습, 고객 신뢰의 바탕이 돼요.' },
   ] },
   // 품질 관리: 예방 → 공정 내 전수 검사 → 정밀검사 샘플링 → 불량 대응 → AI 원인 분석 → 재발 방지(8D) → 모니터링
@@ -297,7 +306,7 @@ const TOPICS = {
     { qchain: 6, cam: { view: 'precision' }, panel: { kind: 'zd', tab: 'qa' }, hl: ['#btnZoneDash'],
       voice: '일곱째, 모니터링. Zone 대시보드의 관리도는 측정값의 평균과 산포를 그려, 규칙에 맞지 않는 움직임이 보이면 불량이 나기 전에 알려 줘요. 공정 변수와 품질의 상관, 불량 유형 파레토, OEE의 품질 손실도 함께 봐요.',
       say: '⑦ 모니터링 — Zone 대시보드의 관리도(X̄-R · I-MR)는 측정값의 평균과 산포를 그려, Western Electric 규칙에 어긋나는 움직임이 보이면 불량이 나기 전에 알려 줘요. 공정 변수 ↔ 품질 상관(산점도), NG 유형 파레토, OEE의 품질 손실도 함께 봐요.' },
-    { qchain: 7, cam: { view: 'all' }, panel: null, end: true,
+    { qchain: 7, cam: { view: 'all' }, panel: null, end: true, next: 'kpi',
       say: '예방하고, 검사하고, 대응하고, 개선하는 고리가 계속 돌면서 품질이 좋아져요. 모든 품질 기록은 제품 ID로 이어져 있어서, 언제든 그 제품과 공정, 원인까지 거슬러 올라갈 수 있어요.' },
   ] },
   // 매뉴얼 · 앱 내려받기 — 앱 내려받기는 웹 버전(⬇ 버튼이 보일 때)에서만 안내한다 (맥 · 윈도우 앱과 npm start에는 내려받기 기능이 없음)
@@ -322,11 +331,11 @@ const TOPICS = {
     { panel: { kind: 'net5g' }, view: 'all', hl: ['#btnNet5g'], lchain: 4,
       voice: '움직이는 로봇은 선을 꽂을 수 없어서 이음5G 특화망으로 보내요. 정해진 슬롯마다 보내 주기를 지키고, 지연은 10밀리초 안이에요. 기지국을 옮겨 가도 끊김과 유실이 없어요. 5G와 TSN을 연동하면 유선망과 같은 시계, 같은 주기로 이어져요. 바닥의 색은 신호 세기 지도예요.',
       say: '⑤ 이음5G 특화망 — AMR · 휴머노이드 · 사족보행 · 드론처럼 움직이는 로봇은 선을 꽂을 수 없어서 이음5G(n79 4.7GHz · 100MHz)로 보내요. 설정 그랜트로 정해진 슬롯마다 보내 주기를 지키고, 지연은 p99 10ms 안, 기지국을 옮겨 갈 때도 DAPS 핸드오버로 끊김 · 유실 없이 이어져요. 5G-TSN 연동(3GPP Rel-16)을 쓰면 유선 TSN과 같은 시계 · 같은 주기로 이어져요. 바닥의 색은 신호 세기(RSRP) 지도예요.' },
-    { panel: { kind: 'data' }, hl: ['#btnData'], lchain: 5, end: true,
+    { panel: { kind: 'data' }, hl: ['#btnData'], lchain: 5, end: true, next: 'docs',
       voice: '유선과 5G로 온 메시지는 공장 중앙의 MQTT 브로커로 모이고, AAS 저장소와 센서 DB, 운영 데이터셋에 쌓여요. 모두 같은 기준 시각을 가지고 있어서, 로봇 영상과 설비 값, 센서 값을 한 줄로 맞춰 AI 학습과 모니터링, 디지털 트윈에 바로 쓸 수 있어요.',
       say: '⑥ 서버 — 유선과 5G로 온 메시지는 공장 중앙의 MQTT 브로커(UNS)로 모이고, AAS 저장소 · 센서 DB · 운영 데이터셋에 쌓여요. 모두 같은 기준 시각을 가지고 있어서 로봇 영상 · 설비 값 · 센서 값을 한 줄로 맞춰 AI 학습 · 모니터링 · 디지털 트윈에 바로 쓸 수 있어요.' },
   ] },
-  docs: { name: '매뉴얼 · 앱 내려받기', steps: [
+  docs: { name: '매뉴얼 · 앱 내려받기', next: 'outcome', steps: [
     // 매뉴얼 전에: Claude API 키를 넣으면 달라지는 것 (js/llm.js · js/agentcore.js · js/designer.js) — 키가 없어도 정책 기반 에이전트 · 내장 해석기로 공장은 그대로 돈다
     { hl: ['#btnSettings', '#engineSeg'],
       voice: '매뉴얼 전에 하나 알려 드릴게요. Claude API 키를 등록하면, 오른쪽 패널을 대화 기반으로 바꿔 Claude와 함께 공장을 운영할 수 있어요. 키가 없어도 정책 기반 에이전트와 내장 해석기로 공장은 그대로 돌아가요.',
@@ -338,6 +347,28 @@ const TOPICS = {
     { when: () => isWeb(), voice: '앱 내려받기 버튼에서는 맥과 윈도우 앱을 내려받을 수 있어요. 맥은 애플 실리콘, 윈도우는 64비트 10과 11이에요. 앱에서는 서버 저장, MQTT 발행, MP4 녹화, 자연어 공정 설계 Agent까지 전체 기능을 내 컴퓨터에서 써요.', say: '⬇ 버튼에서는 맥(Apple Silicon)과 윈도우(64비트 10 · 11) 앱을 내려받을 수 있어요. 앱에서는 서버 저장 · MQTT 발행 · MP4 녹화 · 자연어 공정 설계 Agent까지 전체 기능을 내 컴퓨터에서 써요.', hl: ['#btnApps'] },
     { when: () => isWeb(), say: '맥은 압축을 풀어 응용 프로그램 폴더로 옮기고 처음 한 번 우클릭 → 열기, 윈도우는 폴더째 풀고 Meta-Factory.exe를 실행해 「PC 보호」 창이 뜨면 추가 정보 → 실행을 누르면 돼요. 그러면 지금 이 화면을 내 컴퓨터에서 그대로 확인할 수 있어요.', hl: ['#btnApps'] },
     { when: () => document.body.classList.contains('app'), say: '지금 쓰시는 앱은 서버 저장 · MQTT 발행 · 녹화 · 공정 설계 Agent가 모두 이 컴퓨터에서 동작해요. 데이터는 앱 데이터 폴더에 쌓이고, ⚙ 설정에서 Claude API 키를 넣으면 대화 기반 Agent도 쓸 수 있어요.', hl: ['#btnSettings'] },
+  ] },
+  // 성과활용 및 기대효과 — 모든 주제의 끝 (자동 넘김은 여기 맺음말에서 멈춤). 앱에 실제로 있는 기능(3단계 비교 · 데이터 내려받기 · 표준 연동 · 시나리오 주입)으로 활용을,
+  // 수치 약속 없이 기대효과를 정리한다
+  outcome: { name: '성과활용 및 기대효과', steps: [
+    { mode: 'dark', view: 'all', ochain: -1,
+      say: '마지막 주제예요. 이 메타팩토리에서 나온 성과를 어떻게 활용하고, 어떤 효과를 기대하는지 정리해 볼게요. 활용은 도입 전 실증, 데이터와 모델, 표준 기반 이식, 교육과 훈련의 네 가지이고, 기대효과는 생산성과 품질, 안전과 사람, 산업 확산의 세 가지예요.' },
+    { hl: ['#btnCompare', '#modeSeg'], ochain: 0,
+      say: '① 도입 전 실증 — 같은 라인을 레거시 · 자동화 · 피지컬AI로 똑같은 조건에서 8시간씩 돌려, 생산량 · OEE · 재공이 어떻게 달라지는지 「📊 3단계 8시간 비교」로 미리 확인해요. 설비와 로봇을 사기 전에 디지털 트윈에서 효과와 위험을 따져 보고 결정할 수 있어요.' },
+    { hl: ['#btnVla', '#btnAios', '#btnData'], ochain: 1,
+      say: '② 데이터와 모델 — 로봇 카메라 영상과 동작을 담은 VLA 에피소드, 공장 운영 AI(AIOS)의 운영 데이터셋, AAS · EPCIS 형식의 설비 · 제품 데이터를 그대로 내려받을 수 있어요. 실제 로봇 학습과 운영 AI 개발, 품질 원인 분석에 다시 쓰이는 데이터 자산이에요.' },
+    { hl: ['#btnData', '#btnFac'], ochain: 2,
+      say: '③ 표준 기반 이식 — 설비는 AAS, 통신은 OPC UA PubSub, 제품 추적은 GS1 EPCIS, 업무 기록은 ERP(ERPNext) 연동으로 만들었어요. 같은 표준을 쓰는 실제 설비 · MES · ERP에 그대로 이어 붙일 수 있어서, 메타팩토리에서 검증한 운영 방식을 실제 공장으로 옮겨 갈 수 있어요.' },
+    { hl: ['#btnFault', '#btnEvent'], ochain: 3,
+      say: '④ 교육과 훈련 — 설비 고장 · 자재 공급 차질 · 현장 이벤트를 원할 때 일으켜, 운영자와 엔지니어가 AI 에이전트 · 오케스트레이터와 함께 대응하는 과정을 안전하게 훈련해요. 웹과 맥 · 윈도우 앱으로 누구나 바로 실습할 수 있고, 저 토리가 안내해요.' },
+    { view: 'precision', hl: ['#btnImpact', '#btnTrace'], ochain: 4,
+      say: '기대효과 ① 생산성과 품질 — 고장과 현장 이벤트에 AI가 스스로 대응해 멈추는 시간을 줄이고, KPI 영향 분석과 디지털 트윈 검증으로 운영값을 계속 개선해요. 제품 ID로 모든 이력을 추적해 불량 원인을 빨리 찾고 재발을 막아요.' },
+    { hl: ['#btnCctv', '#btnEvent'], ochain: 5,
+      say: '기대효과 ② 안전과 사람 — 위험하고 반복되는 일은 휴머노이드 · AMMR · 사족보행 로봇과 드론이 맡고, 사람이 무인 구역에 들어오면 바로 감지해 주변 로봇을 감속시켜요. 사람은 현장의 위험에서 벗어나 판단과 개선, 더 가치 있는 일에 집중하게 돼요.' },
+    { view: 'all', ochain: 6,
+      say: '기대효과 ③ 산업 확산 — 큰 투자 전에 여기서 먼저 시험해 보면 도입 위험과 비용을 줄일 수 있어서, 규모가 작은 제조 현장도 피지컬AI 자율공장으로 한 걸음씩 나아갈 수 있어요. 공장이 운영될수록 데이터가 쌓이고 모델이 좋아지는 플라이휠이 산업 전체로 넓어지는 거예요.' },
+    { view: 'all', end: true,
+      say: '마지막으로 인사드릴게요. 피지컬AI 실증 메타팩토리의 목표는, 레거시 공장이 자동화를 거쳐 AI가 보고 판단하고 로봇이 직접 해결하는 자율공장으로 가는 길을 디지털 트윈에서 먼저 실증하고, 그 성과를 실제 제조 현장으로 넓히는 거예요. 멈추지 않는 공장, 스스로 좋아지는 공장, 사람이 더 안전하고 가치 있게 일하는 공장 — 모두의 AI 팩토리, 함께 만들어 가요. 지금까지 공장장 토리였습니다. 감사합니다!' },
   ] },
 };
 // 녹음이 없는 문장(실시간 수치 등)만 OS 음성으로 읽는다 — 한국어 원어민 음성을 먼저 (Edge InJoon 남성 · 맥 지안 · 유나 · 윈도우 Heami)
@@ -376,9 +407,10 @@ export const MENU_SAY = '모두의 AI 팩토리 공장장 토리입니다. 무�
 const PRON = [[/피지컬\s*AI/g, '피지컬 에이아이'], [/Fac\s?OS/gi, '팩오에스'], [/AIOS/g, '에이아이오에스'], [/AI-ready/g, '에이아이 레디'], [/(?<![A-Za-z])AI(?![A-Za-z])/g, '에이아이'],
   [/VLA/g, '브이엘에이'], [/Outbox/gi, '아웃박스'], [/(?<![A-Za-z])FAC(?![A-Za-z])/g, '팩'], [/AMMR/g, '에이엠엠알'], [/(?<![A-Za-z])AMR(?![A-Za-z])/g, '에이엠알'], [/(?<![A-Za-z])SW(?![A-Za-z])/g, '소프트웨어'],
   [/ERPNext/g, '이알피넥스트'], [/SSCC/g, '에스에스씨씨'], [/EPCIS/g, '이피씨아이에스'], [/FMEA/g, '에프엠이에이'], [/(?<![A-Za-z])UPH(?![A-Za-z])/g, '유피에이치'], [/(?<![A-Za-z])AAS(?![A-Za-z])/g, '에이에이에스'],
-  [/(?<![A-Za-z])3D(?![A-Za-z])/g, '쓰리디'], [/(?<![A-Za-z])8D(?![A-Za-z])/g, '에잇디'], [/이음5G/g, '이음 파이브지'], [/(?<![A-Za-z])5G(?![A-Za-z])/g, '파이브지'], [/A\/S/g, '에이에스'], [/e-axle/g, '이액슬'], [/Zone/g, '존'], [/\s*&\s*/g, '와 '], [/제어명령/g, '제어 명령'],
-  [/OPC UA/g, '오피씨 유에이'], [/PubSub/g, '펍섭'], [/(?<![A-Za-z])TSN(?![A-Za-z])/g, '티에스엔'], [/MQTT/g, '엠큐티티'], [/(?<![A-Za-z])PTP(?![A-Za-z])/g, '피티피'], [/(?<![A-Za-z])DB(?![A-Za-z])/g, '디비']];
-const SPACE = [[/메타팩토리/g, '메타 팩토리'], [/자율공장/g, '자율 공장'], [/디지털트윈/g, '디지털 트윈'], [/정비요청/g, '정비 요청'], [/구매오더/g, '구매 오더'], [/작업지시/g, '작업 지시'], [/예지정비/g, '예지 정비'],
+  [/(?<![A-Za-z])3D(?![A-Za-z])/g, '쓰리디'], [/(?<![A-Za-z])8D(?![A-Za-z])/g, '에잇디'], [/이음5G/g, '이음 파이브지'], [/(?<![A-Za-z])5G(?![A-Za-z])/g, '파이브지'], [/A\/S/g, '에이에스'], [/e-axle/g, '이액슬'], [/Zone/g, '존'], [/R&D/g, '알앤디'], [/\s*&\s*/g, '와 '], [/토리(예요|입니다|였습니다)/g, (_, e) => `토리 ${e === '예요' ? '이에요' : e}`], [/제어명령/g, '제어 명령'],
+  [/OPC UA/g, '오피씨 유에이'], [/PubSub/g, '펍섭'], [/(?<![A-Za-z])TSN(?![A-Za-z])/g, '티에스엔'], [/MQTT/g, '엠큐티티'], [/(?<![A-Za-z])PTP(?![A-Za-z])/g, '피티피'], [/(?<![A-Za-z])DB(?![A-Za-z])/g, '디비'],
+  [/Meta-Factory\.exe를/g, '메타 팩토리 실행 파일을'], [/Meta-Factory\.exe/g, '메타 팩토리 실행 파일'], [/Factory OS/g, '팩토리 오에스'], [/Claude/g, '클로드'], [/Agent/g, '에이전트'], [/(?<![A-Za-z])ID(?![A-Za-z0-9])/g, '아이디'], [/(?<![A-Za-z])OEE(?![A-Za-z0-9])/g, '오이이'], [/(?<![A-Za-z])KPI(?![A-Za-z0-9])/g, '케이피아이'], [/(?<![A-Za-z])CCTV(?![A-Za-z0-9])/g, '씨씨티비'], [/(?<![A-Za-z])OCS(?![A-Za-z0-9])/g, '오씨에스'], [/(?<![A-Za-z])QR(?![A-Za-z0-9])/g, '큐알'], [/(?<![A-Za-z])API(?![A-Za-z0-9])/g, '에이피아이'], [/(?<![A-Za-z])PLC(?![A-Za-z0-9])/g, '피엘씨'], [/(?<![A-Za-z])CT(?![A-Za-z0-9])/g, '씨티'], [/(?<![A-Za-z])AGV(?![A-Za-z0-9])/g, '에이지브이'], [/(?<![A-Za-z])GS1(?![A-Za-z0-9])/g, '지에스원'], [/(?<![A-Za-z])Cpk(?![A-Za-z0-9])/g, '씨피케이'], [/(?<![A-Za-z])PDF(?![A-Za-z0-9])/g, '피디에프'], [/(?<![A-Za-z])MP4(?![A-Za-z0-9])/g, '엠피포'], [/(?<![A-Za-z])PC(?![A-Za-z0-9])/g, '피씨'], [/(?<![A-Za-z])RMS(?![A-Za-z0-9])/g, '알엠에스'], [/(?<![A-Za-z])FFT(?![A-Za-z0-9])/g, '에프에프티'], [/(?<![A-Za-z])ERP(?![A-Za-z0-9])/g, '이알피'], [/(?<![A-Za-z])MES(?![A-Za-z0-9])/g, '엠이에스']];
+const SPACE = [[/메타팩토리/g, '메타 팩토리'], [/성과활용/g, '성과 활용'], [/자율공장/g, '자율 공장'], [/디지털트윈/g, '디지털 트윈'], [/정비요청/g, '정비 요청'], [/구매오더/g, '구매 오더'], [/작업지시/g, '작업 지시'], [/예지정비/g, '예지 정비'],
   [/부품분류/g, '부품 분류'], [/외관검사/g, '외관 검사'], [/([가-힣])셀(?![가-힣])/g, '$1 셀'], [/([가-힣])셀(?=[이은을에의과로도마])/g, '$1 셀']];
 const ro = (w) => { const c = w.charCodeAt(w.length - 1) - 0xac00, j = c % 28; return c < 0 || c > 11171 || j === 0 || j === 8 ? '로' : '으로'; };   // 받침 없거나 ㄹ이면 「로」
 export const speakText = (t) => {
@@ -414,7 +446,7 @@ export class Tori {
     this.figEl = this.el.querySelector('.tori-fig'); this.btnEl = this.el.querySelector('.tori-btns');
     this.el.addEventListener('click', (e) => {
       const b = e.target.closest('[data-t]'), t = b?.dataset.t;
-      if (t === 'next') { const s = this.cur(); if (s?.end && s.next) this.play(s.next); else this.go(this.step + 1); }
+      if (t === 'next') { const s = this.cur(), nx = s && this.nextTopic(s); if (nx) this.play(nx); else this.go(this.step + 1); }
       else if (t === 'prev') this.go(this.step - 1);
       else if (t === 'topic') this.play(b.dataset.k);
       else if (t === 'menu') this.menu();
@@ -427,6 +459,8 @@ export class Tori {
     this.initGfx().catch((e) => console.warn('[토리] 그리기 시작 실패', e));
   }
   syncVoice() { const b = this.el.querySelector('[data-t="voice"]'); b.classList.toggle('on', this.voice); b.hidden = !('speechSynthesis' in window); }
+  // 주제 마지막 단계의 다음 주제: 단계에 적힌 next, 없으면 주제에 적힌 next (매뉴얼처럼 환경마다 마지막 단계가 다른 주제)
+  nextTopic(s) { const S = this.steps(), last = s.end || s === S[S.length - 1]; return last ? (s.next ?? TOPICS[this.topic].next ?? null) : null; }
   steps() { return (this.list ??= TOPICS[this.topic].steps.filter((st) => !st.when || st.when(this))); }   // 환경에 맞는 단계만 (웹 · 앱)
   cur() { return this.step >= 0 ? this.steps()[this.step] : null; }
 
@@ -438,10 +472,10 @@ export class Tori {
     this.unhold(); this.restoreSpeed(); clearInterval(this.liveT); clearInterval(this.followT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.reveal([]); this.step = -1; this.open = true; this.el.classList.remove('mini');
     this.nEl.textContent = ''; this.figEl.innerHTML = '';
     this.say(MENU_SAY);
-    this.btnEl.innerHTML = ['tour', 'facos', 'incident', 'trace', 'quality', 'kpi', 'data', 'link', 'docs'].map((k) => [k, TOPICS[k]]).map(([k, T]) => `<button type="button" data-t="topic" data-k="${k}">${T.name}</button>`).join('');
+    this.btnEl.innerHTML = ['tour', 'facos', 'incident', 'trace', 'quality', 'kpi', 'data', 'link', 'docs', 'outcome'].map((k) => [k, TOPICS[k]]).map(([k, T]) => `<button type="button" data-t="topic" data-k="${k}">${T.name}</button>`).join('');
     this.btnEl.classList.add('menu');
   }
-  play(topic) { this.unhold(); this.restoreSpeed(); this.topic = topic; this.list = null; this.ev = undefined; this.qInj = undefined; this.guard = undefined; this.netOff = undefined; this.flushed = undefined; this.prop = undefined; this.applied = undefined; this.go(0); }
+  play(topic) { this.unhold(); this.restoreSpeed(); this.topic = topic; this.list = null; this.ev = undefined; this.qInj = undefined; this.guard = undefined; this.netOff = undefined; this.flushed = undefined; this.prop = undefined; this.applied = undefined; this.bot = undefined; this.go(0); }
   unhold() { clearInterval(this.holdT); if (this.held) { this.held = false; if (this.heldByMe) this.h.pause?.(false); this.heldByMe = false; } }   // 토리가 직접 멈춘 경우에만 다시 재생 (사용자가 멈춰 둔 공장은 그대로)
   restoreSpeed() { if (this.ev?.quiet) this.ev.quiet = false;   // 인시던트 예시를 「AI 감지」 전에 벗어나면 감지를 막아 둔 이벤트를 풀어 준다
     if (this.spd0 != null) this.h.speed?.(this.spd0); this.spd0 = undefined; if (this.netOff) { fos(this)?.setOnline(true); this.netOff = false; } if (this.applied === true && this.prop?.status === 'applied') { adv(this)?.revert(this.prop.id); this.applied = 'reverted'; } }   // KPI 주제에서 시연 적용 중 벗어나면 되돌림   // 인시던트 예시 배속 · FacOS 상위망 단절 시험 되돌림   // 인시던트 예시가 1배속으로 늦춘 것을 되돌림   // 시나리오(현장 이벤트 · 공정 편차)는 한 번 재생에 한 번만
@@ -470,8 +504,8 @@ export class Tori {
     this.reveal(hls);
     for (const e of hls) e.classList.add('tori-hl');
     this.nEl.textContent = `${TOPICS[this.topic].name}${i ? ` · ${i} / ${S.length - 1}` : ''}`;
-    this.figEl.innerHTML = s.ring ? ringSvg(s.ring, s.at) : s.chain != null ? chainSvg(s.chain) : s.qchain != null ? chainSvg(s.qchain, QCHAIN) : s.fchain != null ? chainSvg(s.fchain, FCHAIN) : s.kchain != null ? chainSvg(s.kchain, KCHAIN) : s.lchain != null ? chainSvg(s.lchain, LCHAIN) : '';
-    const last = s.end || i === S.length - 1, nextLabel = s.start ? '둘러보기 시작 ▶' : last && s.next ? `${TOPICS[s.next].name} ▶` : last ? '마치기' : '다음 ▶';
+    this.figEl.innerHTML = s.ring ? ringSvg(s.ring, s.at) : s.chain != null ? chainSvg(s.chain) : s.qchain != null ? chainSvg(s.qchain, QCHAIN) : s.fchain != null ? chainSvg(s.fchain, FCHAIN) : s.kchain != null ? chainSvg(s.kchain, KCHAIN) : s.lchain != null ? chainSvg(s.lchain, LCHAIN) : s.ochain != null ? chainSvg(s.ochain, OCHAIN) : '';
+    const last = s.end || i === S.length - 1, nx = this.nextTopic(s), nextLabel = s.start ? '둘러보기 시작 ▶' : nx ? `${TOPICS[nx].name} ▶` : last ? '마치기' : '다음 ▶';
     this.btnEl.innerHTML = `${i ? '<button type="button" data-t="prev">◀ 이전</button>' : ''}${i === 0 && this.topic === 'tour' ? '<button type="button" data-t="skip">다음에</button>' : ''}<button type="button" data-t="menu">주제</button><button type="button" data-t="next" class="primary">${nextLabel}</button>`;
     const text = () => (typeof s.say === 'function' ? s.say(this) : s.say);
     this.say(text(), s.voice && typeof s.voice === 'object' ? s.voice[s.vk(this)] : s.voice);
@@ -500,13 +534,14 @@ export class Tori {
   cancelAuto() { this.autoTok = (this.autoTok ?? 0) + 1; clearTimeout(this.autoT); this.onSpoken = null; this.el.querySelector('[data-t="next"]')?.classList.remove('auto'); }
   scheduleAuto(s, last) {
     this.cancelAuto();
-    if (s.end || last) return;   // 주제 마지막 단계는 기다린다 (첫 인사도 1초 뒤 둘러보기 시작)
+    const nx = this.nextTopic(s);   // 주제 마지막 단계: 다음 주제가 이어져 있으면 말이 끝나고 1초 뒤 그 주제로 (메뉴 순서 — 성과활용 및 기대효과 맺음말에서 멈춤)
+    if ((s.end || last) && !nx) return;
     const tok = this.autoTok, t0 = performance.now();
     const countdown = () => {
       if (tok !== this.autoTok || !this.open) return;
       if (s.ready && !s.ready(this) && performance.now() - t0 < READY_MAX_MS) { this.autoT = setTimeout(countdown, 500); return; }   // 실제로 일어날 때까지
       const b = this.el.querySelector('[data-t="next"]'); b?.classList.remove('auto'); void b?.offsetWidth; b?.classList.add('auto');   // 1초 차오르는 막대
-      this.autoT = setTimeout(() => { if (tok === this.autoTok && this.open) this.go(this.step + 1); }, AUTO_MS);
+      this.autoT = setTimeout(() => { if (tok === this.autoTok && this.open) { if (nx) this.play(nx); else this.go(this.step + 1); } }, AUTO_MS);
     };
     // 말이 끝나면 시작 — 음성이 재생 중이면 끝날 때, 아니면 읽는 시간 뒤
     if (this.speaking) this.onSpoken = () => { this.onSpoken = null; countdown(); };
