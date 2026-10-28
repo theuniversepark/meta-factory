@@ -11,6 +11,7 @@
 // 안내 내용은 앱의 실제 구성에서 가져왔다: 센서망 계층(js/sensors.js) · VLA 학습·배포(js/vla.js) · AIOS(js/aios.js) · 데이터 연동(js/datahub.js)
 import * as THREE from 'three';
 import { PRODUCTS } from './serial.js';
+import { LEVERS } from './impact.js';
 
 const SEEN = 'mf.tori.seen', VOICE = 'mf.tori.voice';
 const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* 사생활 보호 모드 등 */ } } };
@@ -18,6 +19,7 @@ const store = { get: (k) => { try { return localStorage.getItem(k); } catch { re
 // 흐름 막대: 제품 ID 추적 7단계 (아래 작은 글씨 = 그 단계에서 붙는 ID)
 const CHAIN = [['오더', ''], ['자재', '원자재 로트'], ['투입', '생산 ID'], ['공정', '셀별 이력'], ['판정', '제품 ID'], ['출하', '팔레트 SSCC'], ['이후', '조회 · 리콜']];
 const FCHAIN = [['공장', 'FacOS'], ['게이트', 'A2A'], ['Zone', '오케스트레이터'], ['셀', 'OCS'], ['엣지', '스킬'], ['기록', 'FAC']];   // FacOS 계층
+const KCHAIN = [['손실', '원인 11종'], ['제안', '운영값'], ['트윈', '30분×3'], ['결정', '적용·보류'], ['실측', '10분'], ['학습', '이력']];   // KPI 개선 6단계
 const QCHAIN = [['예방', '건강·보정'], ['전수', '토크·각도'], ['샘플', '정밀검사'], ['대응', '봉쇄·경보'], ['원인', 'AI 분석'], ['개선', '8D·정책'], ['감시', '관리도']];   // 품질 관리 7단계
 function chainSvg(at, C = CHAIN) {
   const W = 336, H = 70, n = C.length, gap = W / n;
@@ -33,6 +35,13 @@ const prodKo = (p) => PRODUCTS[p]?.label ?? p;
 const fos = (T) => T.h.sim?.()?.fos ?? null;
 const fosOrder = (F) => { const o = F?.orders.find((x) => x.status === 'open' && x.evidenced !== true) ?? F?.orders[0]; return o ? { o, good: F.main.reconcile(o.id)?.good ?? 0 } : null; };
 const DEC_KO = { policy: '정책 승인', 'due-risk': '납기 위험', timeout: '응답 시간 초과', 'first-article': '초품 불합격', 'tool-stock': '공구 재고', 'machine-pm': '주축 예지정비', 'insp-priority': '정밀검사 우선순위' };
+// KPI 영향 · 개선 주제: 손실 분석 · 개선 제안 · 트윈 검증 · 결정 (js/impact.js)
+const adv = (T) => T.h.sim?.()?.impact?.advisor ?? null;
+const lossTop = (T) => T.h.sim?.()?.impact?.report(1800)?.rows?.[0] ?? null;
+const pickProp = (T) => { const A = adv(T); if (!A) return null; const L = A.items.filter((p) => p.lever); return L.find((p) => p.status === 'verified' && p.twin?.recommend === 'apply') ?? L.find((p) => p.status === 'verified') ?? L.find((p) => p.status === 'verifying' || p.status === 'new') ?? null; };
+const levV = (p, v) => { const L = LEVERS[p.lever]; return L ? `${Number.isInteger(v) ? v : (+v).toFixed(2)}${L.unit}` : `${v}`; };   // 운영값 + 단위
+const REC_KO = { apply: '적용 권장', neutral: '효과 미미', hold: '보류 권장' };
+const signed = (v, d = 1) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(d)}`;
 // 인시던트 예시: 그 인시던트 흐름도의 단계 · 시각 · 출동 로봇 도착
 const RADIUS = { leak: 1.3, debris: 1.0, intrusion: 2.2, smoke: 1.8 };
 const inc = (T, kind) => T.ev?.inc?.steps?.find((x) => x.kind === kind);
@@ -74,7 +83,7 @@ const TOPICS = {
     { say: '오른쪽 패널은 공장 운영 AI예요. 고장 · 공급 차질 · 현장 이벤트를 관찰 → 판단 → 실행한 기록이 남아요. 아래 입력창에 "포장셀 속도 80%"처럼 지시할 수도 있어요.', hl: ['#agentPanel'] },
     { say: '위쪽 버튼에서는 로봇 데이터로 VLA 학습, 운영 AI 학습, KPI 영향 분석, 품질 추적, Zone 대시보드를 볼 수 있어요.', hl: ['#btnVla', '#btnAios', '#btnImpact', '#btnTrace', '#btnZoneDash'] },
     { say: '아래 버튼으로 설비 고장이나 현장 이벤트를 일부러 일으켜 보세요. 에이전트가 어떻게 대응하는지 볼 수 있어요. CCTV · 5G · 센서 배치도 여기서 봐요.', hl: ['#btnFault', '#btnEvent', '#btnCctv'] },
-    { say: '설비를 누르면 상세 정보가, 🏷 라벨 버튼을 누르면 이름표가 보여요. 저를 누르면 FacOS 공장 운영 SW, 인시던트 해결 예시, 제품 ID 추적, 품질 관리, 데이터 폐루프와 플라이휠, 매뉴얼 · 앱 내려받기도 안내해 드려요!', view: 'all', hl: ['#btnLabels'], end: true },
+    { say: '설비를 누르면 상세 정보가, 🏷 라벨 버튼을 누르면 이름표가 보여요. 저를 누르면 FacOS 공장 운영 SW, 인시던트 해결 예시, 제품 ID 추적, 품질 관리, KPI 영향 · 개선, 데이터 폐루프와 플라이휠, 매뉴얼 · 앱 내려받기도 안내해 드려요!', view: 'all', hl: ['#btnLabels'], end: true },
   ] },
   // FacOS — 공장 운영 SW: 계층(공장 → 게이트 → Zone → 셀 → 엣지 → 기록) · 오더 · 결정 요청 · A2A 가드레일 · 상위망 단절 · 셀 게이트 · 현장 감지 · 보안 · FAC
   //   가드레일 시험 · 상위망 단절 시험은 토리가 직접 실행 (운영에 영향 없음 · 단절은 다음 단계 · 주제를 벗어나면 복구)
@@ -117,6 +126,41 @@ const TOPICS = {
     { panel: { kind: 'orch', tab: 'fos' }, hl: ['#btnOrch', '#facos'], fchain: -1, live: true, end: true, next: 'incident',
       voice: '정리하면, FacOS는 오더부터 결정, 명령 검증, 기록까지 공장의 운영 규칙을 지키게 해요. 이제 인시던트 해결 예시에서 FacOS가 실제로 움직이는 모습을 볼까요?',
       say: (T) => { const K = fos(T)?.kpi(); return `정리 — FacOS는 오더 → 결정 → 명령 검증 → 기록까지 운영 규칙을 지키게 해요.${K ? ` 지금 지표: 이상 판단 10초 이내 ${K.judgeRate == null ? '-' : `${Math.round(K.judgeRate * 100)}%`} · 수량 정산 오차 ${K.recon?.err ?? '-'} · 명령 검증 승인 ${K.ocsOk} / 거부 ${K.ocsRej} · A2A 메시지 ${K.msgs}건(차단 ${K.blocked}).` : ''} 다음 — 인시던트 해결 예시에서 FacOS가 실제로 움직이는 모습을 봐요!`; } },
+  ] },
+  // KPI 영향 · 개선: 손실 분석 → 개선 제안 → 디지털트윈 검증 → 결정(적용 · 보류 · 되돌리기) → 실측 → 이력
+  //   적용 · 되돌리기는 트윈이 「적용 권장」일 때만 토리가 시연하고 운영값을 원래대로 남긴다 (실제 개선 결정은 사용자가)
+  //   공장 시간 5분 전에는 제안이 없으므로, 제안이 생길 때까지 잠시 30배속 (다음 단계에서 원래 배속)
+  kpi: { name: 'KPI 영향 · 개선', steps: [
+    { act: (T) => { const A = adv(T), s = T.h.sim?.(); if (A && !A.items.some((p) => p.lever) && T.spd0 === undefined) { T.spd0 = T.h.speed?.() ?? null; T.h.speed?.(30); } },
+      mode: 'dark', panel: { kind: 'impact', focus: 'loss' }, hl: ['#btnImpact'], kchain: -1, live: true, ready: (T) => !adv(T) || adv(T).items.some((p) => p.lever),
+      voice: 'UPH가 떨어졌다는 것만으로는 손을 쓸 수 없어요. 어디서, 왜, 얼마나 잃었는지 알아야 개선할 수 있죠. KPI 영향 개선 창은 손실을 원인별로 나누고, 고칠 방법을 제안하고, 디지털 트윈으로 미리 검증한 뒤 결정을 물어요.',
+      say: (T) => `KPI 영향 · 개선 — 「UPH가 떨어졌다」만으로는 손을 쓸 수 없어요. 어디서 · 왜 · 얼마나 잃었는지 알아야 고치죠. 이 창은 손실을 원인별로 나누고 → 고칠 방법을 제안하고 → 디지털트윈으로 미리 검증한 뒤 → 결정을 물어요.${T.spd0 !== undefined && !adv(T)?.items.some((p) => p.lever) ? ' (첫 제안은 공장 시간 5분 뒤부터 나와서, 잠시 30배속으로 돌리는 중이에요)' : ''}` },
+    { act: (T) => T.restoreSpeed(), hl: ['#btnImpact'], kchain: 0, live: true,
+      voice: '먼저 손실 분석이에요. 셀이 가동하지 못한 시간을 설비 고장, 정비, 자재 공급 차질, 현장 이벤트, 흐름 대기, 품질 불량 같은 열한 가지 원인으로 나누고, UPH와 OEE, 재공, 전력 손실로 바꿔 보여 줘요.',
+      say: (T) => { const r = lossTop(T); return `① 손실 분석 — 가동하지 못한 시간을 원인 11가지(설비 고장 · 예지정비 · 재보정 · 결품 · 공급 차질 · 현장 이벤트 · 정지 명령 · 흐름 대기 · 출하 대기 · 속도 · 품질)로 나눠 UPH · OEE · 재공 · 전력 손실로 바꿔요.${r && r.oeePts > 0 ? ` 최근 30분 1순위는 ${r.icon} ${r.label}: OEE −${(r.oeePts * 100).toFixed(1)}%p · UPH −${r.uph.toFixed(1)}${r.wip > 0.05 ? ` · 재공 +${r.wip.toFixed(1)}` : ''}.` : ''}`; } },
+    { act: (T) => { if (T.prop === undefined) T.prop = pickProp(T); }, panel: (T) => ({ kind: 'impact', focus: T.prop?.id ?? null }), hl: ['#btnImpact'], kchain: 1,
+      voice: '손실이 기준을 넘으면 실제 운영값을 바꾸는 개선 제안이 생겨요. 예지정비 시작 시점, 재보정 기준, 투입 간격, AMR 선행 배차, 셀 절전 대기 같은 값이에요. 제안마다 근거, 기대 효과, 부작용이 함께 나와요.',
+      say: (T) => { const p = T.prop; return p ? `② 개선 제안 — 「${p.title}」: 근거 ${p.why}. 바꿀 값 ${p.lever ? `${LEVERS[p.lever]?.label ?? p.lever} ${levV(p, p.from)} → ${levV(p, p.to)}` : ''}. 기대 효과 ${p.expect}. 부작용 ${p.trade}. 제안마다 근거 · 기대 효과 · 부작용이 함께 나와요.` : '② 개선 제안 — 지금은 손실이 기준 아래라 제안이 없어요. 손실이 기준을 넘으면 예지정비 시작 시점 · 재보정 기준 · 투입 간격 · AMR 선행 배차 · 셀 절전 대기 같은 실제 운영값을 바꾸는 제안이 생겨요.'; } },
+    { hl: ['#btnImpact'], kchain: 2, live: true, ready: (T) => !T.prop || !!T.prop.twin || T.prop.status === 'applied',
+      voice: '바로 적용하지 않고 디지털 트윈으로 먼저 검증해요. 지금 운영값과 제안 운영값으로 30분씩, 조건을 바꿔 세 번 돌리고, 실제 공장에서 일어난 현장 이벤트도 똑같이 재연해요. 결과는 적용 권장, 효과 미미, 보류 권장 중 하나예요.',
+      say: (T) => { const p = T.prop, t = p?.twin; return `③ 트윈 검증 — 현재 vs 제안 운영값을 30분 × 시드 3으로 돌리고, 실제로 일어난 현장 이벤트도 똑같이 재연해요. ${!p ? '' : t ? `결과: ${REC_KO[t.recommend]} — UPH ${t.uphCur.toFixed(0)} → ${t.uphCand.toFixed(0)} · OEE ${signed((t.oeeCand - t.oeeCur) * 100)}%p · 재공 ${signed(t.wipCand - t.wipCur)} · 전력 ${signed((t.kwhCand - t.kwhCur) * 1000)}Wh/개.` : `검증 중… ${Math.round((p.progress ?? 0) * 100)}%`}`; } },
+    { act: (T) => { const A = adv(T), p = T.prop; if (A && p && T.applied === undefined) T.applied = p.twin?.recommend === 'apply' && p.status === 'verified' ? A.apply(p.id) : false; },
+      panel: (T) => ({ kind: 'impact', focus: T.prop?.id ?? null }), hl: ['#btnImpact'], kchain: 3,
+      voice: '결정의 첫째는 적용이에요. 트윈에서 적용 권장이 나오고 부작용을 감당할 수 있을 때 적용하면, 운영값이 바로 바뀌고 10분 동안 적용 전과 실측을 비교해요.',
+      say: (T) => `④ 결정 · 적용 — 언제: 트윈 「적용 권장」 + 부작용을 감당할 수 있을 때. 적용하면 운영값이 바로 바뀌고, 적용 전 10분 vs 적용 후 10분을 실측으로 비교해요.${T.applied ? ` 시연으로 「${T.prop.title}」을 적용했어요 (${levV(T.prop, T.prop.from)} → ${levV(T.prop, T.prop.to)}) — 다음 단계에서 되돌려 원래대로 둘게요.` : T.prop?.twin ? ` 이번 제안은 「${REC_KO[T.prop.twin.recommend]}」이라 적용은 시연하지 않을게요.` : ''}` },
+    { hl: ['#btnImpact'], kchain: 3,
+      voice: '둘째는 보류예요. 트윈에서 보류 권장이나 효과 미미가 나왔을 때, 또는 납기 직전이나 고장 대응 중처럼 지금 바꾸면 곤란할 때 보류해요. 보류는 거절이 아니라 지금은 아니라는 뜻이에요. 30분 뒤에도 근거가 남아 있으면 다시 물어요.',
+      say: '⑤ 결정 · 보류 — 언제: 트윈 「보류 권장」 · 「효과 미미」, 또는 지금 바꾸면 곤란할 때(납기 직전 · 고장 대응 중). 보류는 거절이 아니라 「지금은 아님」 — 30분 동안 다시 묻지 않고, 그 뒤에도 손실 근거가 남아 있으면 다시 올라와요. 근거가 사라지면 제안도 저절로 정리돼요.' },
+    { act: (T) => { const A = adv(T), p = T.prop; if (A && p && T.applied && p.status === 'applied') { A.revert(p.id); T.applied = 'reverted'; } },
+      panel: (T) => ({ kind: 'impact', focus: T.prop?.id ?? null }), hl: ['#btnImpact'], kchain: 4,
+      voice: '셋째는 되돌리기예요. 적용 뒤 10분 실측이 트윈 예측과 다르게 나빠졌다면 되돌려요. 10분 양품 수가 적으면 우연한 변동만으로도 UPH가 몇 퍼센트 흔들리니까, 화면의 신뢰 범위 안내도 함께 보세요.',
+      say: (T) => `⑥ 결정 · 되돌리기 — 언제: 적용 후 10분 실측이 트윈 예측과 다르게 나빠졌을 때. 원래 운영값으로 돌아가고 실측 해석이 남아요. 10분 양품이 적으면 우연 변동만으로 UPH가 ±몇 % 흔들리니, 화면의 신뢰 범위 안내도 함께 봐요.${T.applied === 'reverted' ? ` 시연한 「${T.prop.title}」은 방금 되돌려 원래 값(${levV(T.prop, T.prop.from)})으로 두었어요.` : ''}` },
+    { panel: { kind: 'impact', focus: 'log' }, hl: ['#btnImpact'], kchain: 5, live: true,
+      voice: '모든 결정은 의사결정 이력과 운영 로그에 남아요. 누가, 언제, 무엇을 바꿨고 결과가 어땠는지가 쌓여서, 운영 AI 학습 데이터와 운영 규칙을 고치는 근거가 돼요.',
+      say: (T) => { const L = adv(T)?.log ?? []; return `⑦ 의사결정 이력 — 누가 · 언제 · 무엇을 바꿨고 결과가 어땠는지가 남아요${L.length ? ` (지금 ${L.length}건 — 최근: ${L.slice(0, 2).map((x) => `${x.act} 「${x.title}」`).join(' · ')})` : ''}. 이 기록은 운영 AI(AIOS) 학습 데이터와 운영 규칙을 고치는 근거가 돼요.`; } },
+    { hl: ['#btnImpact'], kchain: -1, end: true, next: 'data',
+      voice: '활용 팁 세 가지예요. 결정은 검증, 적용, 실측, 판단 순서로 하세요. 보류는 거절이 아니라 지금은 아니라는 뜻이에요. 되돌리기는 실패가 아니라 학습이에요. 트윈과 실제 공장의 차이를 알려 주는 귀한 데이터가 되거든요.',
+      say: '활용 팁 — ① 결정 순서는 검증 → 적용 → 실측 → 판단 (검증 없이 적용하면 실측에만 의존) ② 보류는 거절이 아니라 「지금은 아님」 ③ 되돌리기는 실패가 아니라 학습 — 「트윈은 좋았는데 실측은 나빴다」는 기록이 트윈과 실제 공장의 차이를 알려 주는 데이터가 돼요. 다음은 이 기록이 쌓이는 데이터 폐루프와 플라이휠이에요!' },
   ] },
   // 인시던트 해결 예시 (3막): ① 현장 — 이벤트를 조용히 만들고 그 자리로 확대, 감지한 로봇의 카메라 영상 → ② 오케스트레이터 — 그 인시던트 흐름도로
   //   보고 · 판단 · 명령 · 배정 → ③ 해결된 현장 — 출동 로봇을 따라가며 처리 · 정상화 · 기록. 진행하는 동안 시뮬레이션 1배속 (끝나면 원래 배속)
@@ -335,12 +379,12 @@ export class Tori {
     this.unhold(); this.restoreSpeed(); clearInterval(this.liveT); clearInterval(this.followT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.step = -1; this.open = true; this.el.classList.remove('mini');
     this.nEl.textContent = ''; this.figEl.innerHTML = '';
     this.say(MENU_SAY);
-    this.btnEl.innerHTML = ['tour', 'facos', 'incident', 'trace', 'quality', 'data', 'docs'].map((k) => [k, TOPICS[k]]).map(([k, T]) => `<button type="button" data-t="topic" data-k="${k}">${T.name}</button>`).join('');
+    this.btnEl.innerHTML = ['tour', 'facos', 'incident', 'trace', 'quality', 'kpi', 'data', 'docs'].map((k) => [k, TOPICS[k]]).map(([k, T]) => `<button type="button" data-t="topic" data-k="${k}">${T.name}</button>`).join('');
     this.btnEl.classList.add('menu');
   }
-  play(topic) { this.unhold(); this.restoreSpeed(); this.topic = topic; this.list = null; this.ev = undefined; this.qInj = undefined; this.guard = undefined; this.netOff = undefined; this.flushed = undefined; this.go(0); }
+  play(topic) { this.unhold(); this.restoreSpeed(); this.topic = topic; this.list = null; this.ev = undefined; this.qInj = undefined; this.guard = undefined; this.netOff = undefined; this.flushed = undefined; this.prop = undefined; this.applied = undefined; this.go(0); }
   unhold() { clearInterval(this.holdT); if (this.held) { this.held = false; this.h.pause?.(false); } }
-  restoreSpeed() { if (this.spd0 != null) this.h.speed?.(this.spd0); this.spd0 = undefined; if (this.netOff) { fos(this)?.setOnline(true); this.netOff = false; } }   // 인시던트 예시 배속 · FacOS 상위망 단절 시험 되돌림   // 인시던트 예시가 1배속으로 늦춘 것을 되돌림   // 시나리오(현장 이벤트 · 공정 편차)는 한 번 재생에 한 번만
+  restoreSpeed() { if (this.spd0 != null) this.h.speed?.(this.spd0); this.spd0 = undefined; if (this.netOff) { fos(this)?.setOnline(true); this.netOff = false; } if (this.applied === true && this.prop?.status === 'applied') { adv(this)?.revert(this.prop.id); this.applied = 'reverted'; } }   // KPI 주제에서 시연 적용 중 벗어나면 되돌림   // 인시던트 예시 배속 · FacOS 상위망 단절 시험 되돌림   // 인시던트 예시가 1배속으로 늦춘 것을 되돌림   // 시나리오(현장 이벤트 · 공정 편차)는 한 번 재생에 한 번만
 
   go(i) {
     const S = this.steps();
@@ -364,7 +408,7 @@ export class Tori {
     }
     for (const q of s.hl ?? []) document.querySelector(q)?.classList.add('tori-hl');
     this.nEl.textContent = `${TOPICS[this.topic].name}${i ? ` · ${i} / ${S.length - 1}` : ''}`;
-    this.figEl.innerHTML = s.ring ? ringSvg(s.ring, s.at) : s.chain != null ? chainSvg(s.chain) : s.qchain != null ? chainSvg(s.qchain, QCHAIN) : s.fchain != null ? chainSvg(s.fchain, FCHAIN) : '';
+    this.figEl.innerHTML = s.ring ? ringSvg(s.ring, s.at) : s.chain != null ? chainSvg(s.chain) : s.qchain != null ? chainSvg(s.qchain, QCHAIN) : s.fchain != null ? chainSvg(s.fchain, FCHAIN) : s.kchain != null ? chainSvg(s.kchain, KCHAIN) : '';
     const last = s.end || i === S.length - 1, nextLabel = s.start ? '둘러보기 시작 ▶' : last && s.next ? `${TOPICS[s.next].name} ▶` : last ? '마치기' : '다음 ▶';
     this.btnEl.innerHTML = `${i ? '<button type="button" data-t="prev">◀ 이전</button>' : ''}${i === 0 && this.topic === 'tour' ? '<button type="button" data-t="skip">다음에</button>' : ''}<button type="button" data-t="menu">주제</button><button type="button" data-t="next" class="primary">${nextLabel}</button>`;
     const text = () => (typeof s.say === 'function' ? s.say(this) : s.say);
