@@ -12,7 +12,7 @@ const ZSKILL = { kit: ['부품 ID 인식·혼류 판별', '키팅 (AMMR)'], loca
 const ZCOMMON = ['동작 감시 (두 번째 눈)', '설비 LLM (알람 해석)', '인터록 (규칙)'];
 const tile = (k, v, sub, tone = '') => `<div class="fos-tile ${tone}"><span>${k}</span><b>${v}</b><small>${sub}</small></div>`;
 const RULES = [
-  ['자율복구 한계', '셀 OCS: 재보정·자율 보정 1회 · RECOVER에서 못 풀면 존(Manufacturing Agent)에 영향·증거·필요 지원 보고'],
+  ['자율복구 한계', '셀 OCS: AI 운영 정책에 따라 재보정·자율 보정 1회 · 스스로 풀지 못하면 존(Manufacturing Agent)에 영향·증거·필요 지원 보고'],
   ['자원 점유', '정비 인력·AMR은 자기 Zone 우선 · 긴급수리 20초(예지정비·재보정 60초) 대기 뒤 공장 오케스트레이터 결정으로 Zone 간 지원'],
   ['보고 정책', '셀 → 존은 이상 이벤트만 · 안전(P1)·보안·출하품 영향은 모든 계층에 즉시 동시 통보'],
   ['재개 정책', '접수 ACK만으로 재개하지 않는다 — 결정(대상·권한자·버전·제약·재개 조건) 또는 결과 메시지 뒤'],
