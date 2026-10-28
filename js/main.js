@@ -1730,7 +1730,8 @@ const toriMover = (id) => { const m = [...sim.movers, ...(sim.drones ?? [])].fin
 const tori = new Tori({ flyTo: (k) => toriCam({ view: k }), camTo: toriCam, openPanel: toriPanel, closePanels: toriClosePanels, qualityDrift: toriQualityDrift,
   quietEvent: toriEvent, speed: toriSpeed, moverPos: toriMover, pause: toriPause, sim: () => sim, setMode: (k) => document.querySelector(`#modeSeg button[data-mode="${k}"]`)?.click(), mode: () => modeKey,
   injectEvent: () => { const n = sim.fieldSeq ?? 0; document.getElementById('btnEvent').click(); return (sim.fieldSeq ?? 0) > n ? sim.fieldEvents.at(-1) : null; },   // ⚠ 현장 이벤트 버튼과 같은 동작 · 새로 생긴 이벤트
-  look: (x, z) => { persp.position.set(x + 3, 24, z + 22); ctlP.target.set(x, 0, z); ctlP.update(); } });   // 안내 로봇 (js/tori.js) — 처음 접속이면 인사
+  look: (x, z) => { persp.position.set(x + 3, 24, z + 22); ctlP.target.set(x, 0, z); ctlP.update(); },
+  side: (k, hide) => setSide(k, hide) });   // 안내 로봇 (js/tori.js) — 처음 접속이면 인사
 tori.greetIfFirst();
 if (blenderErr) sim.log('warn', 'Blender 모델을 불러오지 못함', { obs: blenderErr, act: '기본 도형 모델로 계속' });
 frame();

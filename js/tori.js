@@ -376,7 +376,7 @@ export class Tori {
 
   // 주제 메뉴 (작은 토리를 누르면)
   menu() {
-    this.unhold(); this.restoreSpeed(); clearInterval(this.liveT); clearInterval(this.followT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.step = -1; this.open = true; this.el.classList.remove('mini');
+    this.unhold(); this.restoreSpeed(); clearInterval(this.liveT); clearInterval(this.followT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.reveal([]); this.step = -1; this.open = true; this.el.classList.remove('mini');
     this.nEl.textContent = ''; this.figEl.innerHTML = '';
     this.say(MENU_SAY);
     this.btnEl.innerHTML = ['tour', 'facos', 'incident', 'trace', 'quality', 'kpi', 'data', 'docs'].map((k) => [k, TOPICS[k]]).map(([k, T]) => `<button type="button" data-t="topic" data-k="${k}">${T.name}</button>`).join('');
@@ -406,7 +406,9 @@ export class Tori {
         if (p && this.cur() === s && this.open) { this.h.openPanel?.(p); this.panelOpen = true; }
       }, PANEL_MS);
     }
-    for (const q of s.hl ?? []) document.querySelector(q)?.classList.add('tori-hl');
+    const hls = (s.hl ?? []).map((q) => document.querySelector(q)).filter(Boolean);
+    this.reveal(hls);
+    for (const e of hls) e.classList.add('tori-hl');
     this.nEl.textContent = `${TOPICS[this.topic].name}${i ? ` · ${i} / ${S.length - 1}` : ''}`;
     this.figEl.innerHTML = s.ring ? ringSvg(s.ring, s.at) : s.chain != null ? chainSvg(s.chain) : s.qchain != null ? chainSvg(s.qchain, QCHAIN) : s.fchain != null ? chainSvg(s.fchain, FCHAIN) : s.kchain != null ? chainSvg(s.kchain, KCHAIN) : '';
     const last = s.end || i === S.length - 1, nextLabel = s.start ? '둘러보기 시작 ▶' : last && s.next ? `${TOPICS[s.next].name} ▶` : last ? '마치기' : '다음 ▶';
@@ -418,8 +420,22 @@ export class Tori {
     store.set(SEEN, '1');
   }
   say(text, voice) { this.sayEl.textContent = text; this.talkT = Math.min(6, 1.2 + text.length * 0.045); this.speak(voice ?? text); }   // 말하는 입 모양 (글자 수만큼)
-  close() { this.unhold(); this.restoreSpeed(); clearInterval(this.liveT); clearInterval(this.followT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.open = false; this.step = -1; this.el.classList.add('mini'); this.stopVoice(); this.talkT = 0; }
+  close() { this.unhold(); this.restoreSpeed(); clearInterval(this.liveT); clearInterval(this.followT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.reveal([]); this.open = false; this.step = -1; this.el.classList.add('mini'); this.stopVoice(); this.talkT = 0; }
   clearHl() { document.querySelectorAll('.tori-hl').forEach((e) => e.classList.remove('tori-hl')); }
+  // 가리킬 곳이 접힌 메뉴 안이면 먼저 펼친다 — 숨긴 왼쪽 · 오른쪽 패널, 접힌 FACOS 머리, 닫힌 존 에이전트 설정
+  // 이 단계가 더는 가리키지 않으면 사용자가 둔 대로 다시 접는다 (연달아 가리키는 동안은 그대로 — 깜빡이지 않게)
+  reveal(els) {
+    const need = new Map(), b = document.body, ap = document.getElementById('agentPanel');   // 키 → [펼치기, 되접기]
+    this.revealed ??= new Map();
+    const shut = (k, now) => now || this.revealed.has(k);   // 내가 펼친 것은 사용자에게는 아직 접힌 것
+    for (const e of els) {
+      for (const k of ['left', 'right']) if (shut(k, b.classList.contains(`hide-${k}`)) && e.closest(`.panel.${k}`)) need.set(k, [() => this.h.side?.(k, false), () => this.h.side?.(k, true)]);
+      if (ap && shut('facos', ap.classList.contains('facos-folded')) && e.closest('#facosSum, #zoneAgentBox')) need.set('facos', [() => ap.classList.remove('facos-folded'), () => ap.classList.add('facos-folded')]);
+      for (let d = e.closest('details'); d; d = d.parentElement?.closest('details')) if (shut(d, !d.open)) { const det = d; need.set(det, [() => { det.open = true; }, () => { det.open = false; }]); }
+    }
+    for (const [k, undo] of this.revealed) if (!need.has(k)) { undo(); this.revealed.delete(k); }
+    for (const [k, [open, undo]] of need) if (!this.revealed.has(k)) { open(); this.revealed.set(k, undo); }
+  }
   // ── 자동 넘김 ─────────────────
   cancelAuto() { this.autoTok = (this.autoTok ?? 0) + 1; clearTimeout(this.autoT); this.onSpoken = null; this.el.querySelector('[data-t="next"]')?.classList.remove('auto'); }
   scheduleAuto(s, last) {
