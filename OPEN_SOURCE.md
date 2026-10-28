@@ -29,6 +29,7 @@
 | Eclipse BaSyx Python SDK 2.2 · Compliance Tool | MIT | https://github.com/eclipse-basyx/basyx-python-sdk | 내보낸 AASX·AAS JSON·XML(메타모델 v3.1)이 BaSyx로 엄격 파싱되는지 검증 (`tests/aasbasyx.mjs`, 별도 빌드한 Jin-AASX 가상환경 사용 · 앱에 포함하지 않음) |
 | Node.js · npm | MIT 등 | https://nodejs.org | 서버 실행, 시뮬레이션 자동 시험(`npm test`) |
 | Python 3 | PSF | https://python.org | 개발 보조 스크립트, AAS 검증 |
+| edge-tts 7.3 (Python) | 저장소 LICENSE 참조 | https://github.com/rany2/edge-tts | 토리(안내 아바타) 음성 녹음 생성(`npm run tori:voice` · `tools/tori-voice.mjs`) — Microsoft Edge 읽기 기능의 신경망 음성 `ko-KR-InJoonNeural`을 키 없이 호출하는 비공식 도구. 만들 때만 쓰고 앱 실행 중에는 쓰지 않음 |
 | Git · GitHub CLI | GPL-2.0 · MIT | https://git-scm.com · https://cli.github.com | 형상 관리, 저장소·배포 상태 확인 |
 | macOS codesign | Apple 기본 도구 | — | Mac 앱 서명 (ad-hoc) |
 | FFmpeg (libx264 포함) | LGPL-2.1-or-later / GPL-2.0-or-later (libx264 사용 빌드) | https://ffmpeg.org | 로봇 카메라·CCTV 녹화 영상(WebM)을 MP4(H.264)로 변환하고 카메라별로 잘라 냄 (`server/video-convert.mjs`). **앱에 포함하지 않고** 이 컴퓨터에 설치된 ffmpeg를 외부 프로그램으로 실행만 함 (FFMPEG_PATH → Homebrew → ~/.local/bin → PATH 순으로 찾음). 없으면 WebM으로만 저장 |
@@ -45,6 +46,8 @@
 | https://console.anthropic.com/settings/keys | 설정 화면의 API 키 발급 안내 링크 |
 | 과학기술정보통신부 — https://www.msit.go.kr (세로형·가로형 로고 SVG: https://commons.wikimedia.org/wiki/File:Ministry_of_Science_and_ICT_of_the_Republic_of_Korea_Logo_(vertical).svg · https://commons.wikimedia.org/wiki/File:Ministry_of_Science_and_ICT_of_the_Republic_of_Korea_Logo_(horizontal).svg) · 정보통신산업진흥원 — https://www.nipa.kr (CI 원본: https://www.nipa.kr/home/4-4-5) | 서버 랙 양옆 로고·앞쪽 바닥 표시 이미지 `assets/msit_logo.png` · `assets/nipa_logo.png` · `assets/msit_nipa_ci_v2.png` 출처 (바닥 표시는 공식 가로형 시그니처를 쓰고 로고타입만 진한 회색으로 굵게 처리) |
 | 사용자 제공 이미지 | 도어트림 실물 이미지 `assets/doortrim.png` · e-axle 실물 단면 이미지 `assets/eaxle.png` (부품분류셀 이후 AMR 위 제품 표시) |
+| 사용자 제공 이미지 (캐릭터) | 안내 아바타 토리 — 공장장 캐릭터 이미지 `assets/tori/manager.png` (원본 1254px를 512px로 줄임) |
+| Microsoft 신경망 음성 (ko-KR-InJoonNeural) | 토리 안내 음성 녹음 `assets/tori/voice/*.mp3` — edge-tts로 미리 만든 파일. 앱 실행 중에는 접속하지 않음. 공개 배포물에 넣는 것에 대한 이용 조건은 확인되지 않음(정식 Azure Speech 등으로 다시 만들 수 있게 생성 도구를 분리함) |
 
 - AAS 데이터 안의 `https://admin-shell.io/...`, `https://camtic.or.kr/aas/metafactory/...` 등은 의미 식별자(semanticId·id)이며 실행 중 접속하지 않습니다.
 - 폰트는 외부에서 받지 않고 운영체제 기본 폰트(Apple SD Gothic Neo, 대체 Noto Sans KR·맑은 고딕)를 씁니다.

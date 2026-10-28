@@ -2,6 +2,8 @@
 // 주제별로 안내한다: 메타팩토리 둘러보기(단계 · Zone 카메라 이동 · 주요 버튼 강조) · 인시던트 해결 예시(실제로 현장 이벤트를 일으켜 진행 상황을 읽어 줌)
 //   · 데이터 폐루프 · 데이터 플라이휠(고리 그림에 지금 단계 표시) · 매뉴얼·앱 내려받기
 // 접으면 작은 얼굴만 남고, 누르면 주제 메뉴.
+// 자동 넘김: 말이 끝난 뒤(음성이 없으면 읽는 시간 뒤) 2초 동안 「다음」을 누르지 않으면 다음 단계로 — 첫 인사 · 메뉴 · 주제 마지막 단계는 기다림,
+//   실제로 일어나기를 기다리는 단계(인시던트 감지 · 출동 · 처리)는 ready()가 참이 된 뒤부터 (최대 90초)
 // 그리기: 토리 전용 캔버스를 WebGPU(three/webgpu WebGPURenderer)로 — 메인 3D 화면(WebGL)과 따로라 공장 화면 속도와 무관
 //   WebGPU를 쓸 수 없는 브라우저 · 공유 아티팩트에서는 같은 장면을 WebGL로 그린다 (모양 · 동작 같음)
 // 말: 말풍선 글자와 브라우저 내장 한국어 음성(speechSynthesis — 설치 · 비용 없음)을 함께 · 🔊로 음성만 끌 수 있음
@@ -36,14 +38,15 @@ const TOPICS = {
   incident: { name: '인시던트 해결 예시', steps: [
     { say: '예시로 현장에 문제를 하나 일으켜 볼게요. 피지컬AI 단계의 정밀조립Zone이에요. 「다음」을 누르면 로봇 카메라 앞에 바닥 누유 · 이물질 · 연기 의심 · 무단 진입 중 하나가 생겨요.', mode: 'dark', view: 'precision' },
     { act: (T) => { T.ev = T.h.injectEvent?.() ?? null; if (T.ev) T.h.look?.(T.ev.x, T.ev.z); }, hl: ['#btnEvent'],
+      voice: '방금 현장에 문제가 생겼어요. 아직 아무도 모르는 상태예요. 화면이 그 자리로 이동했어요. 빨간 표지와 빛기둥이 보이죠? 화면 위쪽에 오케스트레이터 흐름도도 열렸어요.',
       say: (T) => T.ev ? `방금 「${T.ev.label}」 상황이 생겼어요 (우선순위 P${prioOf(T.ev)}). 아직 아무도 모르는 상태예요. 화면이 그 자리로 이동했어요 — 빨간 표지와 빛기둥이 보이죠? 화면 위쪽에 오케스트레이터 흐름도도 열렸어요.` : '지금은 현장 이벤트를 만들 수 없어요. 피지컬AI 단계에서 ⚠ 현장 이벤트 버튼으로 다시 해 보세요.' },
-    { live: true, hl: ['#orchPanel'],
+    { live: true, ready: (T) => !T.ev || T.ev.detected || T.ev.cleared, hl: ['#orchPanel'], voice: '첫째, AI 감지. 근처 로봇 카메라 영상을 AI가 추론해 이상을 찾아요. 감지되면 인시던트가 열리고, 주변 AMR과 로봇은 속도를 줄이거나 반경 밖으로 돌아가요.',
       say: (T) => `① AI 감지 — 근처 로봇 카메라 영상을 AI가 추론해 이상을 찾아요. ${!T.ev ? '' : T.ev.detected ? `${ga(T.ev.detectedBy)} ${sec(T.ev.tDetect - T.ev.t0)} 만에 감지했어요 (신뢰도 ${Math.round((T.ev.conf ?? 0) * 100)}%).` : '지금 찾는 중이에요…'} 감지되면 인시던트가 열리고, 주변 AMR · 로봇은 속도를 줄이거나 반경 밖으로 돌아가요.` },
-    { hl: ['#orchPanel'],
+    { hl: ['#orchPanel'], voice: '둘째, 보고와 판단. 셀이 공장 오케스트레이터에 보고하면, 오케스트레이터가 화재와 인명, 시설과 작업 안전, 생산 정지 순으로 우선순위를 정하고 대응 로봇을 골라요. 피지컬AI 단계는 판단이 1.5초, 화재와 인명 사고는 0.4초예요.',
       say: (T) => `② 보고 · 판단 — 셀이 공장 오케스트레이터에 보고하면, 오케스트레이터가 우선순위(P1 화재 · 인명 → P2 시설 · 작업 안전 → P3 생산 정지 …)를 정하고 대응 로봇을 골라요. 피지컬AI 단계는 판단이 1.5초, 화재 · 인명(P1)은 0.4초예요.${T.ev ? ` 이번 건은 ${ieyo(`P${prioOf(T.ev)}`)}.` : ''}` },
-    { live: true,
+    { live: true, ready: (T) => !T.ev || !!T.ev.responder || T.ev.type === 'intrusion' || T.ev.cleared, voice: '셋째, 피지컬AI 출동. 정비 휴머노이드는 흡착포와 수거 도구, 소화기를 챙겨 가고, 사족보행 로봇은 열화상과 가스 센서로 점검해요. 순찰 드론도 하늘에서 현장을 확인해요.',
       say: (T) => `③ 피지컬AI 출동 — ${!T.ev ? '' : T.ev.type === 'intrusion' ? '사람이 안전구역을 나갈 때까지 주변 로봇이 안전 속도로 기다려요.' : T.ev.responder ? `${ga(T.ev.responder)} 출동했어요.` : '대응 로봇을 배정하는 중이에요…'} 정비 휴머노이드는 흡착포 · 수거 도구 · 소화기를 챙겨 가고, 사족보행 로봇은 열화상 · 가스 센서로 점검해요. 순찰 드론도 하늘에서 현장을 확인해요.` },
-    { live: true, hl: ['#btnOrch', '#btnImpact'],
+    { live: true, ready: (T) => !T.ev || T.ev.cleared, hl: ['#btnOrch', '#btnImpact'], voice: '넷째, 해결과 기록. 처리가 끝나면 흐름도에 감지부터 셀 자체 조치, 상위 보고, 판단, 명령, 조치, 완료 확인까지의 시각이 남아요. 이 기록은 KPI 영향 분석과 운영 AI 학습 데이터가 돼요.',
       say: (T) => `④ 해결 · 기록 — ${!T.ev ? '' : T.ev.cleared ? `${sec((T.ev.tClear ?? T.ev.t0) - T.ev.t0)} 만에 처리가 끝났어요.` : '처리 중이에요… 끝나면 여기에 시간이 나와요.'} 흐름도에는 감지 → 셀 자체 조치 → 상위 보고 → 판단 → 명령 → 조치 → 완료 확인 시각이 남고, 이 기록은 KPI 영향 분석과 운영 AI(AIOS) 학습 데이터가 돼요.` },
     { say: '이렇게 AI는 보고 판단하고, 피지컬AI 로봇은 직접 가서 해결해요. 사람은 흐름도와 대시보드로 확인하고 필요할 때만 지시하면 돼요. ⚡ 설비 고장이나 ⚠ 현장 이벤트 버튼으로 다른 상황도 시험해 보세요!', hl: ['#btnFault', '#btnEvent'], end: true },
   ] },
@@ -68,15 +71,16 @@ const TOPICS = {
   ] },
   // 매뉴얼 · 앱 내려받기 — 앱 내려받기는 웹 버전(⬇ 버튼이 보일 때)에서만 안내한다 (맥 · 윈도우 앱과 npm start에는 내려받기 기능이 없음)
   docs: { name: '매뉴얼 · 앱 내려받기', steps: [
-    { say: '📘 버튼을 누르면 사용자 가이드(PDF)를 내려받아요. 설치부터 화면 구성, 운영 시나리오 실습, 데이터 내보내기, 문제 해결까지 담겨 있어요.', hl: ['#btnGuide'] },
-    { when: () => isWeb(), say: '⬇ 버튼에서는 맥(Apple Silicon)과 윈도우(64비트 10 · 11) 앱을 내려받을 수 있어요. 앱에서는 서버 저장 · MQTT 발행 · MP4 녹화 · 자연어 공정 설계 Agent까지 전체 기능을 내 컴퓨터에서 써요.', hl: ['#btnApps'] },
+    { voice: '책 모양의 사용자 가이드 버튼을 누르면 사용자 가이드 PDF를 내려받아요. 설치부터 화면 구성, 운영 시나리오 실습, 데이터 내보내기, 문제 해결까지 담겨 있어요.', say: '📘 버튼을 누르면 사용자 가이드(PDF)를 내려받아요. 설치부터 화면 구성, 운영 시나리오 실습, 데이터 내보내기, 문제 해결까지 담겨 있어요.', hl: ['#btnGuide'] },
+    { when: () => isWeb(), voice: '앱 내려받기 버튼에서는 맥과 윈도우 앱을 내려받을 수 있어요. 맥은 애플 실리콘, 윈도우는 64비트 10과 11이에요. 앱에서는 서버 저장, MQTT 발행, MP4 녹화, 자연어 공정 설계 Agent까지 전체 기능을 내 컴퓨터에서 써요.', say: '⬇ 버튼에서는 맥(Apple Silicon)과 윈도우(64비트 10 · 11) 앱을 내려받을 수 있어요. 앱에서는 서버 저장 · MQTT 발행 · MP4 녹화 · 자연어 공정 설계 Agent까지 전체 기능을 내 컴퓨터에서 써요.', hl: ['#btnApps'] },
     { when: () => isWeb(), say: '맥은 압축을 풀어 응용 프로그램 폴더로 옮기고 처음 한 번 우클릭 → 열기, 윈도우는 폴더째 풀고 Meta-Factory.exe를 실행해 「PC 보호」 창이 뜨면 추가 정보 → 실행을 누르면 돼요. 그러면 지금 이 화면을 내 컴퓨터에서 그대로 확인할 수 있어요.', hl: ['#btnApps'] },
     { when: () => document.body.classList.contains('app'), say: '지금 쓰시는 앱은 서버 저장 · MQTT 발행 · 녹화 · 공정 설계 Agent가 모두 이 컴퓨터에서 동작해요. 데이터는 앱 데이터 폴더에 쌓이고, ⚙ 설정에서 Claude API 키를 넣으면 대화 기반 Agent도 쓸 수 있어요.', hl: ['#btnSettings'] },
   ] },
 };
-// 한국어 음성: 남성 공장장 캐릭터라 남성 음성을 먼저 고른다 (맥 Eddy · Reed · Rocko · Grandpa · 지안, 윈도우 · Edge InJoon) — 없으면 있는 한국어 음성
-const MALE_KO = [/eddy/i, /reed/i, /rocko/i, /grandpa/i, /지안|jian/i, /injoon/i, /minsu|민수/i];
-const koVoice = (all) => { const ko = all.filter((v) => /^ko/i.test(v.lang)); for (const re of MALE_KO) { const v = ko.find((x) => re.test(x.name)); if (v) return v; } return ko[0] ?? null; };
+// 녹음이 없는 문장(실시간 수치 등)만 OS 음성으로 읽는다 — 한국어 원어민 음성을 먼저 (Edge InJoon 남성 · 맥 지안 · 유나 · 윈도우 Heami)
+// 맥의 Eddy · Reed · Rocko 같은 다국어 공용 음성은 외국인 억양이라 쓰지 않는다
+const MALE_KO = [/injoon/i, /hyunsu/i, /지안|jian/i, /유나|yuna/i, /heami/i, /sunhi/i];
+const koVoice = (all) => { const ko = all.filter((v) => /^ko/i.test(v.lang)); for (const re of MALE_KO) { const v = ko.find((x) => re.test(x.name)); if (v) return v; } return ko.find((v) => !/eddy|flo|grandma|grandpa|reed|rocko|sandy|shelley/i.test(v.name)) ?? ko[0] ?? null; };
 const isWeb = () => { const b = document.getElementById('btnApps'); return !!b && !b.hidden; };
 const prioOf = (ev) => ({ intrusion: 1, smoke: 1 })[ev.type] ?? 2;   // js/sim.js FIELD_EVENTS prio
 const sec = (s) => `${Math.max(0, s).toFixed(1)}초`;   // 시뮬레이션 시간
@@ -98,6 +102,17 @@ function ringSvg(key, at) {
   const mid = key === 'loop' ? '데이터 폐루프' : '플라이휠';
   return `<svg class="tori-ring" viewBox="0 0 ${W} ${H}" role="img" aria-label="${mid}: ${L.join(' → ')} → ${L[0]}"><defs>${[0, 1].map((o) => `<marker id="tr-h${o}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="tr-h${o ? ' on' : ''}"/></marker>`).join('')}</defs>${arcs}${nodes}<text x="${cx}" y="${cy + 4}" text-anchor="middle" class="tr-c">↻ ${mid}</text></svg>`;
 }
+
+// ── 녹음 음성 (assets/tori/voice/<해시>.mp3 · tools/tori-voice.mjs로 만듦) ─────────────────
+// 문장(읽을 글)마다 해시로 파일을 찾는다 — 문장을 고치면 해시가 바뀌어 새로 만들어야 함(없으면 OS 음성)
+export const MENU_SAY = '무엇을 안내해 드릴까요?';
+export const speakText = (t) => String(t).replace(/\s*→\s*/g, ', ').replace(/\s*·\s*/g, ', ').replace(/[①②③④⑤⑥]/g, '').replace(/[\u{1F300}-\u{1FAFF}\u{2190}-\u{21FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu, '').replace(/\s+/g, ' ').trim();
+export const voiceKey = (t) => { let h = 0x811c9dc5; for (const c of speakText(t)) { h ^= c.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, '0'); };
+// 녹음할 문장 전체: 고정 문장은 말풍선 그대로, 실시간 수치가 들어가는 단계는 voice(수치 없는 읽을 글)
+export function narration() { return [MENU_SAY, ...Object.values(TOPICS).flatMap((T) => T.steps.map((s) => s.voice ?? (typeof s.say === 'string' ? s.say : null)).filter(Boolean))]; }
+const VOICE_DIR = new URL('../assets/tori/voice/', import.meta.url).href;
+const AUTO_MS = 2000, READY_MAX_MS = 90000;
+const readMs = (t) => 1500 + speakText(t).length * 150;   // 소리 없이 읽는 시간 (초당 약 7자)
 
 export class Tori {
   // hooks: flyTo(viewKey) · setMode(modeKey) · mode() 지금 단계
@@ -121,10 +136,11 @@ export class Tori {
       else if (t === 'topic') this.play(b.dataset.k);
       else if (t === 'menu') this.menu();
       else if (t === 'close' || t === 'skip') this.close();
-      else if (t === 'voice') { this.voice = !this.voice; store.set(VOICE, this.voice ? '1' : '0'); this.syncVoice(); if (this.voice) this.speak(this.sayEl.textContent); else window.speechSynthesis?.cancel(); }
+      else if (t === 'voice') { this.voice = !this.voice; store.set(VOICE, this.voice ? '1' : '0'); this.syncVoice(); if (this.voice) this.speak(this.cur()?.voice ?? this.sayEl.textContent); else this.stopVoice(); if (this.cur()) this.scheduleAuto(this.cur(), this.step === this.steps().length - 1); }
       else if (e.target === this.cv && !this.open) this.menu();
     });
     this.syncVoice();
+    fetch(`${VOICE_DIR}index.json`).then((r) => (r.ok ? r.json() : [])).then((k) => { this.recorded = new Set(k); }).catch(() => { this.recorded = new Set(); });   // 녹음된 문장 목록
     this.initGfx().catch((e) => console.warn('[토리] 그리기 시작 실패', e));
   }
   syncVoice() { const b = this.el.querySelector('[data-t="voice"]'); b.classList.toggle('on', this.voice); b.hidden = !('speechSynthesis' in window); }
@@ -136,9 +152,9 @@ export class Tori {
 
   // 주제 메뉴 (작은 토리를 누르면)
   menu() {
-    clearInterval(this.liveT); this.clearHl(); this.step = -1; this.open = true; this.el.classList.remove('mini');
+    clearInterval(this.liveT); this.cancelAuto(); this.clearHl(); this.step = -1; this.open = true; this.el.classList.remove('mini');
     this.nEl.textContent = ''; this.figEl.innerHTML = '';
-    this.say('무엇을 안내해 드릴까요?');
+    this.say(MENU_SAY);
     this.btnEl.innerHTML = ['tour', 'incident', 'loop', 'fly', 'docs'].map((k) => [k, TOPICS[k]]).map(([k, T]) => `<button type="button" data-t="topic" data-k="${k}">${T.name}</button>`).join('');
     this.btnEl.classList.add('menu');
   }
@@ -159,26 +175,57 @@ export class Tori {
     const last = s.end || i === S.length - 1, nextLabel = s.start ? '둘러보기 시작 ▶' : last && s.next ? `${TOPICS[s.next].name} ▶` : last ? '마치기' : '다음 ▶';
     this.btnEl.innerHTML = `${i ? '<button type="button" data-t="prev">◀ 이전</button>' : ''}${i === 0 && this.topic === 'tour' ? '<button type="button" data-t="skip">다음에</button>' : ''}<button type="button" data-t="menu">주제</button><button type="button" data-t="next" class="primary">${nextLabel}</button>`;
     const text = () => (typeof s.say === 'function' ? s.say(this) : s.say);
-    this.say(text());
+    this.say(text(), s.voice);
+    this.scheduleAuto(s, i === S.length - 1);
     if (s.live) this.liveT = setInterval(() => { const t = text(); if (t !== this.sayEl.textContent) this.sayEl.textContent = t; }, 1000);   // 진행 상황을 1초마다 다시 읽음 (소리는 처음 한 번)
     store.set(SEEN, '1');
   }
-  say(text) { this.sayEl.textContent = text; this.talkT = Math.min(6, 1.2 + text.length * 0.045); this.speak(text); }   // 말하는 입 모양 (글자 수만큼)
-  close() { clearInterval(this.liveT); this.clearHl(); this.open = false; this.step = -1; this.el.classList.add('mini'); window.speechSynthesis?.cancel(); this.talkT = 0; }
+  say(text, voice) { this.sayEl.textContent = text; this.talkT = Math.min(6, 1.2 + text.length * 0.045); this.speak(voice ?? text); }   // 말하는 입 모양 (글자 수만큼)
+  close() { clearInterval(this.liveT); this.cancelAuto(); this.clearHl(); this.open = false; this.step = -1; this.el.classList.add('mini'); this.stopVoice(); this.talkT = 0; }
   clearHl() { document.querySelectorAll('.tori-hl').forEach((e) => e.classList.remove('tori-hl')); }
+  // ── 자동 넘김 ─────────────────
+  cancelAuto() { this.autoTok = (this.autoTok ?? 0) + 1; clearTimeout(this.autoT); this.onSpoken = null; this.el.querySelector('[data-t="next"]')?.classList.remove('auto'); }
+  scheduleAuto(s, last) {
+    this.cancelAuto();
+    if (s.start || s.end || last) return;   // 첫 인사 · 주제 마지막 단계는 사용자가 고른다
+    const tok = this.autoTok, t0 = performance.now();
+    const countdown = () => {
+      if (tok !== this.autoTok || !this.open) return;
+      if (s.ready && !s.ready(this) && performance.now() - t0 < READY_MAX_MS) { this.autoT = setTimeout(countdown, 500); return; }   // 실제로 일어날 때까지
+      const b = this.el.querySelector('[data-t="next"]'); b?.classList.remove('auto'); void b?.offsetWidth; b?.classList.add('auto');   // 2초 차오르는 막대
+      this.autoT = setTimeout(() => { if (tok === this.autoTok && this.open) this.go(this.step + 1); }, AUTO_MS);
+    };
+    // 말이 끝나면 시작 — 음성이 재생 중이면 끝날 때, 아니면 읽는 시간 뒤
+    if (this.speaking) this.onSpoken = () => { this.onSpoken = null; countdown(); };
+    else this.autoT = setTimeout(countdown, readMs(this.sayEl.textContent));
+  }
+  spoken() { this.speaking = false; this.talkT = 0; this.onSpoken?.(); }
+
   speak(text) {
-    const S = window.speechSynthesis; if (!this.voice || !S || !text) return;
-    // 아직 사용자가 화면을 누른 적이 없으면 소리가 막힌다 — 첫 클릭 때 지금 말풍선을 읽는다
+    this.stopVoice(); if (!this.voice || !text) return;
+    // 아직 사용자가 화면을 누른 적이 없으면 소리가 막힌다 — 첫 클릭 때 지금 말을 읽는다 (앱은 처음부터 — electron/main.mjs autoplayPolicy)
     if (navigator.userActivation && !navigator.userActivation.hasBeenActive && !document.body.classList.contains('app')) {
-      if (!this.waitTap) { this.waitTap = true; addEventListener('pointerdown', () => { this.waitTap = false; setTimeout(() => { if (this.open && this.sayEl.textContent) this.speak(this.sayEl.textContent); }, 0); }, { once: true, capture: true }); }
+      this.pending = text;
+      if (!this.waitTap) { this.waitTap = true; addEventListener('pointerdown', () => { this.waitTap = false; setTimeout(() => { if (this.open && this.pending) this.speak(this.pending); }, 0); }, { once: true, capture: true }); }
       return;
     }
-    S.cancel();
-    const u = new SpeechSynthesisUtterance(text.replace(/→/g, ',').replace(/·/g, ',').replace(/[①②③④⑤⑥]/g, '')); u.lang = 'ko-KR'; u.rate = 1.05;
+    this.pending = null;
+    const key = voiceKey(text);
+    if (this.recorded?.has(key)) {   // 녹음 (자연스러운 한국어 남성 음성)
+      const a = this.audio = new Audio(`${VOICE_DIR}${key}.mp3`);
+      this.speaking = true;
+      a.onplay = () => { this.talkT = 60; }; a.onended = a.onerror = () => { if (this.audio === a) this.spoken(); };
+      a.play().catch(() => { if (this.audio === a) { this.speaking = false; this.talkT = 0; } });
+      return;
+    }
+    const S = window.speechSynthesis; if (!S) return;   // 녹음이 없으면 OS 한국어 음성
+    const u = new SpeechSynthesisUtterance(speakText(text)); u.lang = 'ko-KR'; u.rate = 1.05;
     u.voice = koVoice(S.getVoices());
-    u.onstart = () => { this.talkT = 60; }; u.onend = () => { this.talkT = 0; };
-    S.speak(u);
+    this.speaking = true;
+    u.onstart = () => { this.talkT = 60; }; u.onend = u.onerror = () => { if (this.utter === u) this.spoken(); };
+    this.utter = u; S.speak(u);
   }
+  stopVoice() { this.speaking = false; this.utter = null; window.speechSynthesis?.cancel(); if (this.audio) { this.audio.pause(); this.audio = null; } }
 
   // ── 아바타 (공장장 그림 애니메이션) ─────────────────
   // 투명 배경 PNG(assets/tori/manager.png)를 격자 판에 붙이고, 판의 꼭짓점을 매 프레임 조금씩 옮겨 움직임을 만든다:

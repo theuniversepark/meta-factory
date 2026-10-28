@@ -1259,3 +1259,8 @@ details.zone-agent:not([open]) { padding-bottom: 7px; } details.zone-agent:not([
 .tori-ring .tr-n.cur rect { fill: #37a0ff; stroke: #37a0ff; }
 .tori-ring .tr-n.cur text { fill: #fff; font-weight: 700; }
 .tori-ring .tr-c { fill: #9fd0ff; font-size: 12px; font-weight: 700; }
+/* 토리 자동 넘김: 「다음」 버튼이 2초 동안 차오른다 (js/tori.js AUTO_MS) */
+.tori-btns button[data-t="next"] { position: relative; overflow: hidden; }
+.tori-btns button[data-t="next"].auto::after { content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: rgba(255, 255, 255, 0.85); transform-origin: left; animation: tori-auto 2s linear forwards; }
+@keyframes tori-auto { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@media (prefers-reduced-motion: reduce) { .tori-btns button[data-t="next"].auto::after { animation-duration: 0.01s; } }
