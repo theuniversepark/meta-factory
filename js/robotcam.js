@@ -103,6 +103,7 @@ export class RobotCamWall {
       pin(byId(ev.responder), `${L} 대응`);
       for (const m of sim.techs) if (m.tool === 'smoke') pin(m, `${L} 소화 대기`);
       pin(byId(ev.detectedBy), `${L} 감지`);
+      if (!ev.detected && (ev.quiet || ev.tq != null)) pin(byId(ev.seenBy), '');   // 토리 예시: 멈춰 둔 동안 영상이 돌아가 버리지 않게 (표지는 없음 — 아직 아무도 모름)
     }
     for (const q of sim.quads) if (q.scanning) pin(q, '열화상 정밀 점검');
     for (const d of sim.drones ?? []) if (d.mission) pin(d, d.arrived ? '사고 현장 중계' : '현장 출동');
@@ -595,7 +596,9 @@ export class RobotCamWall {
       const x = pos.x + fx.x * d - fx.z * lat, z = pos.z + fx.z * d + fx.x * lat;
       const inside = this.sim.stations.some((st) => Math.abs(x - st.x) < 3.2 && Math.abs(z - st.z) < 3.2);
       if (inside || Math.abs(x) > 34 || Math.abs(z) > 17 || inExtraZone({ x, z }, 0.5)) continue;   // 확장 Zone 셀 위에는 만들지 않는다
-      return this.sim.injectFieldEvent(type, x, z);
+      const ev = this.sim.injectFieldEvent(type, x, z);
+      if (ev) ev.seenBy = f.robot;   // 이 카메라 앞에 만들었다 (토리 예시: 감지를 풀 때까지 이 영상을 벽에 고정)
+      return ev;
     }
     return null;
   }

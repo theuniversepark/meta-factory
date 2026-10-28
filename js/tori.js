@@ -46,7 +46,10 @@ const signed = (v, d = 1) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(d)}`;
 const RADIUS = { leak: 1.3, debris: 1.0, intrusion: 2.2, smoke: 1.8 };
 const inc = (T, kind) => T.ev?.inc?.steps?.find((x) => x.kind === kind);
 const at = (T, x) => `+${sec(x.t - T.ev.t0)}`;
-const arrived = (T) => !!T.ev?.inc?.steps?.some((x) => x.kind === 'act' && /현장 도착|현장 대기/.test(x.text));
+const arrived = (T) => !!T.ev?.responder && !!T.ev.inc?.steps?.some((x) => x.kind === 'act' && x.text.startsWith(`${T.ev.responder} 현장 도착`));   // 따라가는 로봇이 도착했을 때만 (소화기 들고 「현장 대기」하는 휴머노이드는 아님)
+const resp = (T) => (T.ev?.type === 'smoke' ? 'inspect' : T.ev?.type === 'intrusion' ? 'safety' : 'clean');   // 이벤트 종류별 대응 — 음성 문장 고르기
+const took = (T) => { const d = T.ev.tDetect - (T.ev.tq ?? T.ev.t0); return d < 0.5 ? '곧바로' : `${sec(d)} 만에`; };   // 감지를 풀자마자 본 경우
+const byRobot = (T) => (T.h.moverPos?.(T.ev?.detectedBy) ? 'robot' : 'cctv');   // 로봇 카메라가 감지했는지, CCTV가 먼저 봤는지
 const clock = (t) => { const x = Math.floor(t) + 8 * 3600; return `${String(Math.floor(x / 3600) % 24).padStart(2, '0')}:${String(Math.floor(x / 60) % 60).padStart(2, '0')}`; };
 const ex = {
   order: (s) => { const F = s?.fos; if (!F) return null; const o = F.orders.find((x) => x.status === 'open' && x.evidenced !== true) ?? F.orders[0]; return o ? { o, good: F.main?.reconcile?.(o.id)?.good ?? 0 } : null; },
@@ -169,16 +172,19 @@ const TOPICS = {
       voice: '예시로 현장에 문제를 하나 일으켜 볼게요. 잘 보이도록 시뮬레이션을 1배속으로 늦췄어요. 먼저 현장, 다음은 오케스트레이터, 마지막으로 해결된 현장 순서로 보여 드릴게요.',
       say: '예시로 현장에 문제를 하나 일으켜 볼게요. 잘 보이도록 시뮬레이션을 1배속으로 늦췄어요 (안내가 끝나면 원래 배속으로). 먼저 ① 현장 → ② 오케스트레이터 → ③ 해결된 현장 순서로 보여 드릴게요.' },
     // ── 1막 현장 ──
-    { act: (T) => { if (T.ev === undefined) T.ev = T.h.quietEvent?.() ?? null; }, cam: (T) => T.ev && { x: T.ev.x, z: T.ev.z, d: 9 }, hl: ['#btnEvent'],
+    // 말과 현장을 맞춘다: 이벤트를 만든 뒤 「AI 감지」 단계까지 현장을 멈추고 감지도 막는다 (ev.quiet) → 감지되면 감지 로봇 설명이 끝날 때까지 다시 멈춤
+    { act: (T) => { if (T.ev === undefined) T.ev = T.h.quietEvent?.() ?? null; }, hold: (T) => !!T.ev, cam: (T) => T.ev && { x: T.ev.x, z: T.ev.z, d: 9 }, hl: ['#btnEvent'],
       voice: '현장입니다. 방금 로봇 카메라 앞에 문제가 생겼어요. 빨간 표지와 빛기둥이 보이죠? 아직 아무도 모르는 상태예요.',
       say: (T) => T.ev ? `현장 — 방금 「${T.ev.label}」 상황이 생겼어요 (우선순위 P${prioOf(T.ev)} · 위험 반경 ${RADIUS[T.ev.type] ?? 1.2}m). 빨간 표지와 빛기둥이 보이죠? 아직 아무도 모르는 상태예요.` : '지금은 현장 이벤트를 만들 수 없어요. 피지컬AI 단계에서 ⚠ 현장 이벤트 버튼으로 다시 해 보세요.' },
-    { live: true, ready: (T) => !T.ev || T.ev.detected || T.ev.cleared,
+    { act: (T) => { if (T.ev?.quiet) { T.ev.quiet = false; T.ev.tq = T.h.sim?.()?.time; } }, hold: (T) => !!T.ev?.detected, live: true, ready: (T) => !T.ev || T.ev.detected || T.ev.cleared,
       voice: '주변을 지나는 로봇의 카메라 영상을 AI가 계속 추론하고 있어요. 이상한 물체나 사람이 보이면 바로 감지해요.',
       say: (T) => `AI 감지 — 주변을 지나는 로봇 카메라 영상을 AI가 계속 추론하고 있어요. ${!T.ev ? '' : T.ev.detected ? `${ga(T.ev.detectedBy)} 감지했어요!` : `지금 찾는 중이에요… (${sec((T.h.sim?.()?.time ?? T.ev.t0) - T.ev.t0)} 경과)`}` },
     { cam: (T) => { const p = T.ev && T.h.moverPos?.(T.ev.detectedBy); return p ? { x: p.x, z: p.z, d: 8 } : T.ev && { x: T.ev.x, z: T.ev.z, d: 9 }; },
-      panel: (T) => T.ev?.detectedBy && { kind: 'robot', id: T.ev.detectedBy }, hold: (T) => !!inc(T, 'command'),
-      voice: '이 로봇이 감지했어요. 잠시 뒤 열리는 로봇 정보 창에서 그 로봇의 카메라 영상과 AI 검출 상자를 볼 수 있어요. 감지하자마자 셀은 스스로 감속하고 우회해요.',
-      say: (T) => !T.ev?.detected ? '아직 감지되지 않았어요. 조금 더 기다려 볼게요.' : `${ga(T.ev.detectedBy)} ${sec(T.ev.tDetect - T.ev.t0)} 만에 감지했어요 (신뢰도 ${Math.round((T.ev.conf ?? 0) * 100)}%). 잠시 뒤 열리는 로봇 정보 창에 그 카메라 영상과 AI 검출 상자가 보여요. 감지 즉시 셀 자체 조치 — ${T.ev.type === 'intrusion' ? '주변 로봇 협동 감속 · 접근 금지 구역 표시' : '감지 로봇 감속 · 우회 · 구역 표시'}.${T.held ? ' (설명하는 동안 현장은 잠시 멈춰 둘게요)' : ''}` },
+      panel: (T) => T.ev?.detectedBy && byRobot(T) === 'robot' && { kind: 'robot', id: T.ev.detectedBy }, hold: () => true,   // 감지한 그 순간의 카메라 화면을 보여 준다
+      vk: byRobot, voice: {
+        robot: '이 로봇이 감지했어요. 잠시 뒤 열리는 로봇 정보 창에서 그 로봇의 카메라 영상과 AI 검출 상자를 볼 수 있어요. 감지하자마자 셀은 스스로 감속하고 우회해요.',
+        cctv: '이번에는 CCTV 영상 AI가 먼저 감지했어요. 감지하자마자 셀은 스스로 감속하고, 주변 로봇은 그 구역을 우회해요.' },
+      say: (T) => !T.ev?.detected ? '아직 감지되지 않았어요. 조금 더 기다려 볼게요.' : byRobot(T) === 'cctv' ? `${ga(T.ev.detectedBy)} ${took(T)} 감지했어요 (신뢰도 ${Math.round((T.ev.conf ?? 0) * 100)}%). 감지 즉시 셀 자체 조치 — ${T.ev.type === 'intrusion' ? '주변 로봇 협동 감속 · 접근 금지 구역 표시' : '주변 로봇 감속 · 우회 · 구역 표시'}. (설명하는 동안 현장은 잠시 멈춰 둘게요)` : `${ga(T.ev.detectedBy)} ${took(T)} 감지했어요 (신뢰도 ${Math.round((T.ev.conf ?? 0) * 100)}%). 잠시 뒤 열리는 로봇 정보 창에 그 카메라 영상과 AI 검출 상자가 보여요. 감지 즉시 셀 자체 조치 — ${T.ev.type === 'intrusion' ? '주변 로봇 협동 감속 · 접근 금지 구역 표시' : '감지 로봇 감속 · 우회 · 구역 표시'}.${T.held ? ' (설명하는 동안 현장은 잠시 멈춰 둘게요)' : ''}` },
     // ── 2막 오케스트레이터 ──
     { panel: (T) => T.ev?.inc && { kind: 'orchInc', key: `ev:${T.ev.id}` }, hl: ['#orchPanel'], live: true, hold: (T) => !!inc(T, 'command'), ready: (T) => !T.ev?.inc || !!inc(T, 'command') || T.ev.cleared,
       voice: '이제 오케스트레이터입니다. 셀이 상위로 보고하면, 공장 오케스트레이터가 우선순위를 정해요. 화재와 인명이 먼저, 그다음 시설과 작업 안전, 생산 정지 순이에요.',
@@ -187,15 +193,25 @@ const TOPICS = {
       voice: '판단이 끝나면 명령이 내려가요. 하던 일이 덜 급한 로봇을 골라 배정하고, 하던 일은 처리 뒤에 이어서 해요. 주변 셀에는 안전 감속이나 보호 정지 명령이 함께 가요.',
       say: (T) => { const c = inc(T, 'command'); return `명령 · 배정 — ${c ? `${c.text.replace(/^명령:\s*/, '')} (${at(T, c)})` : '명령을 내리는 중이에요…'}${T.ev?.cmdCells?.length ? ` · 셀 ${T.ev.cmdCells.length}곳에 ${T.ev.type === 'intrusion' ? '안전 감속' : '보호 정지'} 명령` : ''}. 덜 급한 일을 하던 로봇을 골라 배정하고, 하던 일은 처리 뒤 이어서 해요.${T.held ? ' (설명하는 동안 현장은 잠시 멈췄어요 — 다음 단계에서 다시 움직여요)' : ''}`; } },
     // ── 3막 해결된 현장 ──
-    { panel: null, follow: (T) => T.ev?.responder, cam: (T) => T.ev && !T.ev.responder && { x: T.ev.x, z: T.ev.z, d: 10 }, live: true, ready: (T) => !T.ev || T.ev.cleared || !T.ev.responder || arrived(T),
-      voice: '다시 현장입니다. 배정된 로봇을 따라가 볼게요. 정비 휴머노이드는 정비실에서 도구를 챙겨 가고, 사족보행 로봇은 열화상과 가스 센서로 점검하러 가요.',
+    { panel: null, follow: (T) => T.ev?.responder, cam: (T) => T.ev && !T.ev.responder && { x: T.ev.x, z: T.ev.z, d: 10 }, live: true,
+      hold: arrived, ready: (T) => !T.ev || T.ev.cleared || resp(T) === 'safety' || arrived(T),   // 따라가는 로봇이 도착하면 멈추고 다음 단계에서 처리를 보여 준다
+      vk: resp, voice: {
+        clean: '다시 현장입니다. 배정된 로봇을 따라가 볼게요. 정비 휴머노이드가 정비실에서 도구를 챙겨 현장으로 가요.',
+        inspect: '다시 현장입니다. 배정된 로봇을 따라가 볼게요. 사족보행 로봇은 열화상과 가스 센서로 점검하러 가고, 정비 휴머노이드는 소화기를 챙겨 옆에서 대기해요.',
+        safety: '다시 현장입니다. 사람이 들어온 경우에는 로봇이 다가가지 않아요. 주변 셀은 안전 속도로 기다리고, 원격 관제 요원을 불러요.' },
       say: (T) => !T.ev ? '' : T.ev.type === 'intrusion' ? '출동 — 사람 진입은 로봇이 다가가지 않아요. 주변 셀이 안전 속도로 기다리고, 원격 관제 요원을 불러요. 사람이 구역을 나가면 정상 속도로 돌아가요.' : `출동 — ${T.ev.responder ? `화면이 ${T.ev.responder} 로봇을 따라가고 있어요. ${arrived(T) ? '현장에 도착했어요!' : T.h.sim?.()?.movers?.find((m) => m.id === T.ev.responder)?.task ?? '이동 중이에요…'}` : '대응 로봇을 기다리는 중이에요…'}` },
-    { cam: (T) => T.ev && { x: T.ev.x, z: T.ev.z, d: 8 }, live: true, ready: (T) => !T.ev || T.ev.cleared,
-      voice: '로봇이 현장에서 처리하고 있어요. 이동 중인 다른 로봇들은 위험 반경을 피해 돌아가요.',
+    { cam: (T) => T.ev && { x: T.ev.x, z: T.ev.z, d: 8 }, live: true, ready: (T) => !T.ev || T.ev.cleared, hold: (T) => !!T.ev?.cleared,   // 처리가 끝나면 멈춰 해결 장면을 보여 준다
+      vk: resp, voice: {
+        clean: '로봇이 현장에서 처리하고 있어요. 이동 중인 다른 로봇들은 위험 반경을 피해 돌아가요.',
+        inspect: '사족보행 로봇이 열화상과 가스 센서로 점검하고 있어요. 이동 중인 다른 로봇들은 위험 반경을 피해 돌아가요.',
+        safety: '진입한 사람이 구역을 나가기를 기다리고 있어요. 이동 중인 다른 로봇들은 위험 반경을 피해 돌아가요.' },
       say: (T) => `처리 중 — ${!T.ev ? '' : T.ev.cleared ? '처리가 끝났어요!' : `${T.ev.responder ? `${ga(T.ev.responder)} ` : ''}${T.ev.type === 'smoke' ? '열화상 · 가스 센서로 점검' : T.ev.type === 'intrusion' ? '진입자가 나가기를 기다리는' : '흡착 · 수거'} 중이에요. 다른 로봇들은 위험 반경을 피해 돌아가요.`}` },
     { cam: (T) => T.ev && { x: T.ev.x, z: T.ev.z, d: 10 },
-      voice: '해결됐어요. 빨간 표지가 사라지고, 멈췄던 셀과 로봇은 정상 속도로 돌아갔어요. 도구는 정비실에 반납해요.',
-      say: (T) => !T.ev ? '' : `해결 — 표지가 사라지고 셀 · 로봇이 정상 속도로 돌아갔어요. 발생부터 해결까지 ${sec((T.ev.tClear ?? T.ev.t0) - T.ev.t0)} (감지 ${sec((T.ev.tDetect ?? T.ev.t0) - T.ev.t0)} · 대응 ${sec((T.ev.tClear ?? T.ev.t0) - (T.ev.tDetect ?? T.ev.t0))}).${T.ev.type === 'smoke' ? ' 점검 결과 발열 · 연소 흔적이 없어 알람을 해제했어요.' : ''}` },
+      vk: resp, voice: {
+        clean: '해결됐어요. 빨간 표지가 사라지고, 멈췄던 셀과 로봇은 정상 속도로 돌아갔어요. 도구는 정비실에 반납해요.',
+        inspect: '해결됐어요. 점검 결과 이상이 없어 알람을 해제했어요. 멈췄던 셀은 다시 돌아가고, 소화기는 정비실에 반납해요.',
+        safety: '해결됐어요. 진입자가 구역을 나가서, 감속했던 셀과 로봇은 정상 속도로 돌아갔어요.' },
+      say: (T) => !T.ev ? '' : `해결 — 표지가 사라지고 셀 · 로봇이 정상 속도로 돌아갔어요. 감지부터 해결까지 ${sec((T.ev.tClear ?? T.ev.t0) - (T.ev.tDetect ?? T.ev.t0))} (감지 ${sec((T.ev.tDetect ?? T.ev.t0) - (T.ev.tq ?? T.ev.t0))} · 대응 ${sec((T.ev.tClear ?? T.ev.t0) - (T.ev.tDetect ?? T.ev.t0))}).${T.ev.type === 'smoke' ? ' 점검 결과 발열 · 연소 흔적이 없어 알람을 해제했어요.' : ''}` },
     { panel: (T) => T.ev?.inc && { kind: 'orchInc', key: `ev:${T.ev.id}` }, hl: ['#btnOrch', '#btnImpact'], end: true,
       voice: '흐름도에 감지부터 완료 확인까지 모든 시각이 남았어요. 이 기록은 KPI 영향 분석과 운영 AI 학습 데이터가 돼요. 이렇게 AI는 보고 판단하고, 피지컬AI 로봇은 직접 가서 해결해요.',
       say: (T) => `기록 — 흐름도에 감지 → 자체 조치 → 보고 → 판단 → 명령 → 조치 → 완료 확인 ${T.ev?.inc?.steps?.length ?? ''}단계 시각이 남았어요. 이 기록은 KPI 영향 분석과 운영 AI(AIOS) 학습 데이터가 돼요. AI는 보고 판단하고, 피지컬AI 로봇은 직접 가서 해결해요. ⚡ 설비 고장 · ⚠ 현장 이벤트 버튼으로 다른 상황도 시험해 보세요!` },
@@ -333,7 +349,7 @@ export const MENU_SAY = '모두의 AI 팩토리 공장장 토리입니다. 무�
 export const speakText = (t) => String(t).replace(/\s*→\s*/g, ', ').replace(/\s*·\s*/g, ', ').replace(/[①②③④⑤⑥]/g, '').replace(/[\u{1F300}-\u{1FAFF}\u{2190}-\u{21FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu, '').replace(/\s+/g, ' ').trim();
 export const voiceKey = (t) => { let h = 0x811c9dc5; for (const c of speakText(t)) { h ^= c.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, '0'); };
 // 녹음할 문장 전체: 고정 문장은 말풍선 그대로, 실시간 수치가 들어가는 단계는 voice(수치 없는 읽을 글)
-export function narration() { return [MENU_SAY, ...Object.values(TOPICS).flatMap((T) => T.steps.map((s) => s.voice ?? (typeof s.say === 'string' ? s.say : null)).filter(Boolean))]; }
+export function narration() { return [MENU_SAY, ...Object.values(TOPICS).flatMap((T) => T.steps.flatMap((s) => (s.voice && typeof s.voice === 'object' ? Object.values(s.voice) : [s.voice ?? (typeof s.say === 'string' ? s.say : null)])).filter(Boolean))]; }   // 상황별 음성(voice: { 종류: 문장 } · vk가 고름)은 모두 녹음
 const VOICE_DIR = new URL('../assets/tori/voice/', import.meta.url).href;
 const AUTO_MS = 1000, READY_MAX_MS = 90000, PANEL_MS = 3000;   // 현장을 보여 준 뒤 창을 열기까지
 const readMs = (t) => 1500 + speakText(t).length * 150;   // 소리 없이 읽는 시간 (초당 약 7자)
@@ -384,7 +400,8 @@ export class Tori {
   }
   play(topic) { this.unhold(); this.restoreSpeed(); this.topic = topic; this.list = null; this.ev = undefined; this.qInj = undefined; this.guard = undefined; this.netOff = undefined; this.flushed = undefined; this.prop = undefined; this.applied = undefined; this.go(0); }
   unhold() { clearInterval(this.holdT); if (this.held) { this.held = false; this.h.pause?.(false); } }
-  restoreSpeed() { if (this.spd0 != null) this.h.speed?.(this.spd0); this.spd0 = undefined; if (this.netOff) { fos(this)?.setOnline(true); this.netOff = false; } if (this.applied === true && this.prop?.status === 'applied') { adv(this)?.revert(this.prop.id); this.applied = 'reverted'; } }   // KPI 주제에서 시연 적용 중 벗어나면 되돌림   // 인시던트 예시 배속 · FacOS 상위망 단절 시험 되돌림   // 인시던트 예시가 1배속으로 늦춘 것을 되돌림   // 시나리오(현장 이벤트 · 공정 편차)는 한 번 재생에 한 번만
+  restoreSpeed() { if (this.ev?.quiet) this.ev.quiet = false;   // 인시던트 예시를 「AI 감지」 전에 벗어나면 감지를 막아 둔 이벤트를 풀어 준다
+    if (this.spd0 != null) this.h.speed?.(this.spd0); this.spd0 = undefined; if (this.netOff) { fos(this)?.setOnline(true); this.netOff = false; } if (this.applied === true && this.prop?.status === 'applied') { adv(this)?.revert(this.prop.id); this.applied = 'reverted'; } }   // KPI 주제에서 시연 적용 중 벗어나면 되돌림   // 인시던트 예시 배속 · FacOS 상위망 단절 시험 되돌림   // 인시던트 예시가 1배속으로 늦춘 것을 되돌림   // 시나리오(현장 이벤트 · 공정 편차)는 한 번 재생에 한 번만
 
   go(i) {
     const S = this.steps();
@@ -414,7 +431,7 @@ export class Tori {
     const last = s.end || i === S.length - 1, nextLabel = s.start ? '둘러보기 시작 ▶' : last && s.next ? `${TOPICS[s.next].name} ▶` : last ? '마치기' : '다음 ▶';
     this.btnEl.innerHTML = `${i ? '<button type="button" data-t="prev">◀ 이전</button>' : ''}${i === 0 && this.topic === 'tour' ? '<button type="button" data-t="skip">다음에</button>' : ''}<button type="button" data-t="menu">주제</button><button type="button" data-t="next" class="primary">${nextLabel}</button>`;
     const text = () => (typeof s.say === 'function' ? s.say(this) : s.say);
-    this.say(text(), s.voice);
+    this.say(text(), s.voice && typeof s.voice === 'object' ? s.voice[s.vk(this)] : s.voice);
     this.scheduleAuto(s, i === S.length - 1);
     if (s.live) this.liveT = setInterval(() => { const t = text(); if (t !== this.sayEl.textContent) this.sayEl.textContent = t; }, 1000);   // 진행 상황을 1초마다 다시 읽음 (소리는 처음 한 번)
     store.set(SEEN, '1');

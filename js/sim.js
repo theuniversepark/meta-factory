@@ -1897,7 +1897,7 @@ export class Simulation {
   }
   // 로봇 카메라 영상에서 처음 인식했을 때 (by: 이동체·로봇 이름, conf: 추론 신뢰도)
   detectFieldEvent(ev, by, conf) {
-    if (ev.detected || ev.cleared) return;
+    if (ev.detected || ev.cleared || ev.quiet) return;   // quiet: 토리 인시던트 예시가 「AI 감지」 단계 전까지 감지를 막아 둔 이벤트
     ev.detected = true; ev.detectedBy = by; ev.conf = conf; ev.tDetect = this.time;
     const o = this.orch, inc = o.open('field', `ev:${ev.id}`, `현장 이벤트 · ${FIELD_EVENTS[ev.type].label}`, by, { where: { x: ev.x, z: ev.z }, prio: FIELD_EVENTS[ev.type].prio ?? 2 });
     inc.ev = ev;

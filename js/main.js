@@ -1721,6 +1721,7 @@ function toriClosePanels() {
 // 토리 인시던트 예시: 흐름도를 바로 열지 않고 현장 이벤트만 만든다 (⚠ 버튼은 흐름도를 함께 연다) · 배속 · 이동체 위치
 function toriEvent() {
   const ev = camWall.injectRandom();   // 정밀조립Zone · 움직이는 로봇 카메라 앞 (그 카메라가 곧 감지)
+  if (ev) ev.quiet = true;   // 토리가 「AI 감지」 단계에서 풀 때까지 아무도 감지하지 않는다 (말과 현장을 맞춤)
   if (ev) sim.log('warn', `[시나리오] 현장 이벤트 발생 · ${ev.label}`, { obs: '안내(토리 인시던트 예시) — 아직 아무도 인지하지 못한 상태, 로봇 카메라 영상의 AI 추론으로 감지되면 자율 대응합니다' });
   return ev ?? null;
 }

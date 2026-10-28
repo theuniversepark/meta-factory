@@ -220,7 +220,7 @@ export class CCTVAgent {
       const cams = camerasSeeing(plan, ev.x, ev.z); if (!cams.length) continue;
       const cam = cams.sort((a, b) => Math.hypot(a.x - ev.x, a.z - ev.z) - Math.hypot(b.x - ev.x, b.z - ev.z))[0], model = EVENT_MODEL[ev.type] ?? 'detect';
       const conf = Math.round((0.86 + ((ev.id * 7) % 10) / 100) * 100) / 100;
-      if (!ev.detected && s.time - ev.t0 >= 2) {
+      if (!ev.detected && !ev.quiet && s.time - (ev.tq ?? ev.t0) >= 2) {   // tq: 토리 예시가 감지를 풀어 준 시각
         ev.cctv = cam.id;
         s.detectFieldEvent(ev, `CCTV 에이전트 (${cam.id})`, conf);
         ev.cctvLogged = true;
