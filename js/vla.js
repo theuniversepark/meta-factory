@@ -32,6 +32,11 @@ export const VIDEO_FPS = { cell: EP_HZ, mobile: EP_HZ / 2 };
 // 스텝의 카메라 묶음(휴머노이드·AMMR 4대)은 기록하는 그 자리에서 한꺼번에 찍는다: 다음 프레임으로 미루면 장면이 이미 움직여 영상이 관절 기록과 어긋나고,
 // 일부 카메라만 빠지는 일도 생긴다. 이번 프레임 한도를 넘는 스텝은 통째로 프레임 없이 기록한다 (관절·동작 기록은 그대로)
 const CAP_PER_FRAME = 4;
+// 스텝은 시뮬레이션 시각 격자(에피소드 시작 + k / EP_HZ)에 맞춘다: 3D 자세는 화면 프레임마다 한 번(그 순간 보이는 시각 tDisp)만 정해지므로,
+// 프레임마다 읽은 자세(표본)를 앞뒤 표본 사이 보간으로 격자 시각에 맞춘다 (fps · 배속과 무관하게 EP_HZ) — 관절 · 손끝은 선형, 그리퍼 · 단계는 앞 표본 값
+// 두 표본 간격이 MAX_GAP(시뮬레이션 초)을 넘으면(배속이 높고 화면이 느릴 때) 그 사이는 보간하지 않고 표본 시각에 스텝 하나를 두고 격자를 다시 맞춘다
+// 카메라 프레임은 그 프레임에 실제로 찍은 시각을 따로 남긴다 (스텝 시각과 차이 frame_dt)
+const MAX_GAP = 1.0;
 const two = (n, w = 6) => String(n).padStart(w, '0');
 
 // VLA 6축 로봇의 작업 단계 (factory.animVLA 키프레임과 같은 구간)
@@ -69,15 +74,16 @@ export class EpisodeRecorder {
     return out;
   }
   // 이동 휴머노이드 관절·베이스 자세 (3D 모델에서 읽는다)
-  mobileState(R) {
-    const u = R.mv.g.userData, m = R.m, a = (o) => Math.round((o?.rotation.x ?? 0) * 1e4) / 1e4;
+  // 베이스 위치 · 방향도 3D(보이는 자세와 같은 시각)에서 읽는다 — b: 월드 위치, g: 모델 그룹
+  mobileState(R, b, g) {
+    const u = R.mv.g.userData, a = (o) => Math.round((o?.rotation.x ?? 0) * 1e4) / 1e4;
     return [Math.round((u.waist?.rotation.y ?? 0) * 1e4) / 1e4, Math.round((u.head?.rotation.y ?? 0) * 1e4) / 1e4, a(u.armL), a(u.elbowL), a(u.armR), a(u.elbowR), a(u.legL), a(u.kneeL), a(u.legR), a(u.kneeR),
-      Math.round(m.x * 1000), Math.round(m.z * 1000), Math.round(Math.atan2(Math.sin(m.heading), Math.cos(m.heading)) * 1e4) / 1e4];
+      Math.round(b.x * 1000), Math.round(b.z * 1000), Math.round(Math.atan2(Math.sin(g.rotation.y), Math.cos(g.rotation.y)) * 1e4) / 1e4];
   }
   // 카메라 프레임 요청: 카메라가 여럿이면(휴머노이드·AMMR) 네 시점을 같은 시각으로 함께 — 이번 프레임 끝(shoot)에 한꺼번에 찍는다
   queueFrames(rec, step, ref, cams, onShot) {
     if (cams) rec.multiCam = true;
-    this.req.push({ rec, step, ref, cams, onShot });
+    this.req.push({ rec, step, ref, cams, onShot, ct: Math.round((this.tDisp - rec.t0) * 1000) / 1000 });   // ct: 실제로 찍는 시각 (에피소드 기준)
   }
   // 이번 프레임 요청을 찍는다: 가장 오래 못 찍은 에피소드부터 CAP_PER_FRAME장까지 (동시에 기록 중인 로봇끼리 고르게) · 넘는 요청은 그 스텝 프레임 없음
   // 요청과 같은 프레임 안이라 장면은 스텝을 기록한 그때 그대로
@@ -91,7 +97,8 @@ export class EpisodeRecorder {
       if (shots + need > CAP_PER_FRAME) { this.skipped = (this.skipped ?? 0) + 1; continue; }   // 프레임 없음 (없는 영상 파일을 가리키지 않게)
       shots += need; rec.lastShot = t;
       const n = two(rec.nFrame = (rec.nFrame ?? -1) + 1, 3);
-      const shot = (fname, cam, r) => rec.frames.push({ file: fname, cam, t: step.t, data: this.camWall.captureFrame(r, 160, 120) });
+      const shot = (fname, cam, r) => rec.frames.push({ file: fname, cam, t: q.ct, data: this.camWall.captureFrame(r, 160, 120) });
+      step.frame_dt = Math.round((q.ct - step.t) * 1000);   // 영상이 스텝보다 늦게 찍힌 시간 (ms)
       if (!cams) { const fname = `frame_${n}.jpg`; step.frame = fname; shot(fname, null, ref); }
       else { step.frames = {}; for (const cam of cams) { const fname = `${cam}/frame_${n}.jpg`; step.frames[cam] = fname; shot(fname, cam, { ...ref, cam }); } step.frame = step.frames.head; }
       q.onShot?.();
@@ -100,9 +107,32 @@ export class EpisodeRecorder {
   }
   list(uid) { return this.byRobot.get(uid) ?? []; }
 
-  update() {
+  // 표본 → 격자 스텝들 (rec.steps에 붙이고 이번에 생긴 스텝 목록을 돌려줌) · final: 끝난 에피소드 — 마지막 스텝은 실제 끝 시각
+  resample(rec, smp, final) {
+    const G = 1 / EP_HZ, out = [], p = rec.prev, hub = this.hub;
+    const mk = (tt, src, interp) => ({ i: rec.steps.length + out.length, t: Math.round((tt - rec.t0) * 1000) / 1000, ts: hub.iso(tt), state: src.state, tcp_mm: src.tcp_mm, gripper: src.gripper, phase: src.phase, interp, frame: null });
+    rec.k ??= 0;
+    if (p && smp.t - p.t > MAX_GAP) {   // 너무 먼 표본 사이 — 보간하지 않고 표본 시각에 스텝 하나, 격자는 그 다음부터
+      out.push(mk(smp.t, smp, false)); rec.gaps = (rec.gaps ?? 0) + 1;
+      rec.k = Math.floor((smp.t - rec.t0) / G + 1e-6) + 1;
+    } else {
+      for (let tt = rec.t0 + rec.k * G; tt <= smp.t + 1e-6; tt = rec.t0 + (++rec.k) * G) {
+        if (Math.abs(tt - smp.t) < 1e-6 || !p || tt < p.t) { out.push(mk(tt, smp, Math.abs(tt - smp.t) >= 1e-6)); continue; }
+        const a = (tt - p.t) / (smp.t - p.t), L = (x, y) => x.map((v, n) => v + (y[n] - v) * a);
+        out.push(mk(tt, { state: L(p.state, smp.state).map((v) => Math.round(v * 1e4) / 1e4), tcp_mm: L(p.tcp_mm, smp.tcp_mm).map(Math.round), gripper: p.gripper, phase: p.phase }, true));
+      }
+    }
+    const last = out.at(-1) ?? rec.steps.at(-1);
+    if (final && (!last || Math.round((smp.t - rec.t0) * 1000) / 1000 > last.t)) out.push(mk(smp.t, smp, false));
+    rec.prev = smp;
+    for (const s of out) rec.steps.push(s);
+    return out;
+  }
+
+  // tDisp: 지금 3D 자세가 보여 주는 시뮬레이션 시각 (main.js — 화면 보간으로 sim.time보다 최대 한 간격 이를 수 있음)
+  update(tDisp) {
     if (!this.on || !this.sim) return;
-    const sim = this.sim, t = sim.time;
+    const sim = this.sim, t = this.tDisp = tDisp ?? sim.time;
     this.req = []; this.ending = [];   // 이번 프레임 카메라 요청 · 끝난 에피소드 (찍은 뒤에 마감 — 마지막 스텝 프레임까지 담기게)
     for (const R of this.robots()) {
       if (R.mobile) { this.updateMobile(R, t); continue; }
@@ -123,19 +153,16 @@ export class EpisodeRecorder {
       if (!rec) continue;
       const ended = !st.item || st.item.id !== rec.item || st.done || p >= 0.999;
       const broken = ['DOWN', 'ESTOP', 'PSTOP'].includes(st.state);
-      if (t - rec.lastSample >= 1 / EP_HZ - 1e-6 || ended || broken) {
-        rec.lastSample = t;
+      {
         const q = r.joints().map((v, k) => Math.round(v * (r.jointDefs?.[k]?.unit === 'mm' ? 1000 : 1e4)) / (r.jointDefs?.[k]?.unit === 'mm' ? 1 : 1e4));
         const b = r.root.getWorldPosition(r.root.position.clone()), w = r.tip.getWorldPosition(r.tip.position.clone());
         const tcp = [Math.round((w.x - b.x) * 1000), Math.round(-(w.z - b.z) * 1000), Math.round((w.y - b.y) * 1000)];
         const phase = r.vla ? phaseOf(u) : ammrPhase(st.ammr?.[i]);
         const grip = r.vla ? (r.vla.held.visible ? 1 : 0) : st.ammr?.[i]?.carry ? 1 : 0;
-        const step = { i: rec.steps.length, t: Math.round((t - rec.t0) * 1000) / 1000, ts: this.hub.iso(t), state: q, tcp_mm: tcp, gripper: grip, phase, frame: null };
-        if (this.video || phase !== rec.lastPhase || rec.steps.length - (rec.lastFrameStep ?? -99) >= EP_HZ) {   // 영상: 스텝마다 · 사진: 단계가 바뀌거나 1초마다
-          const k = rec.steps.length;
-          this.queueFrames(rec, step, { type: 'cell', stationId: st.id, idx: i }, r.cams ? EP_CAMS : null, () => { rec.lastPhase = phase; rec.lastFrameStep = k; });   // 못 찍었으면 다음 스텝에 다시
+        const out = this.resample(rec, { t, state: q, tcp_mm: tcp, gripper: grip, phase }, ended || broken), step = out.at(-1);   // 영상은 이번 프레임에 생긴 마지막 스텝(지금 시각에 가장 가까움)에
+        if (step && (this.video || phase !== rec.lastPhase || step.i - (rec.lastFrameStep ?? -99) >= EP_HZ)) {   // 영상: 스텝마다 · 사진: 단계가 바뀌거나 1초마다
+          this.queueFrames(rec, step, { type: 'cell', stationId: st.id, idx: i }, r.cams ? EP_CAMS : null, () => { rec.lastPhase = phase; rec.lastFrameStep = step.i; });   // 못 찍었으면 다음 스텝에 다시
         }
-        rec.steps.push(step);
       }
       if (ended || broken) this.ending.push([rec, broken ? `중단: ${st.state}` : null]);
     }
@@ -157,15 +184,13 @@ export class EpisodeRecorder {
     }
     if (!rec) { if (!task) this.lastTask?.delete(uid); return; }
     const ended = m.idle || (m.task && m.task !== rec.task && !/차례 대기/.test(m.task)), over = t - rec.t0 > MOBILE_MAX_S;   // 도구 보관대 차례 대기는 같은 작업
-    if (t - rec.lastSample >= 1 / EP_HZ - 1e-6 || ended || over) {
-      rec.lastSample = t;
+    {
       const u = R.mv.g.userData, g = R.mv.g, b = g.getWorldPosition(g.position.clone()), w = u.cams.handR.getWorldPosition(g.position.clone());
-      const c = Math.cos(-m.heading), sn = Math.sin(-m.heading), dx = w.x - b.x, dz = w.z - b.z;
+      const c = Math.cos(-g.rotation.y), sn = Math.sin(-g.rotation.y), dx = w.x - b.x, dz = w.z - b.z;
       const phase = m.moving ? 'navigate' : 'manipulate';
-      const step = { i: rec.steps.length, t: Math.round((t - rec.t0) * 1000) / 1000, ts: this.hub.iso(t), state: this.mobileState(R),
-        tcp_mm: [Math.round((dx * sn + dz * c) * 1000), Math.round(-(dx * c - dz * sn) * 1000), Math.round(w.y * 1000)], gripper: m.tool || m.carry ? 1 : 0, phase, frame: null };
-      if (this.video ? rec.steps.length % 2 === 0 : (phase !== rec.lastPhase || t - rec.lastFrameT >= MOBILE_FRAME_S)) this.queueFrames(rec, step, { type: 'mover', id: m.id }, EP_CAMS, () => { rec.lastPhase = phase; rec.lastFrameT = t; });
-      rec.steps.push(step);
+      const out = this.resample(rec, { t, state: this.mobileState(R, b, g),
+        tcp_mm: [Math.round((dx * sn + dz * c) * 1000), Math.round(-(dx * c - dz * sn) * 1000), Math.round(w.y * 1000)], gripper: m.tool || m.carry ? 1 : 0, phase }, ended || over), step = out.at(-1);
+      if (step && (this.video ? step.i - (rec.lastFrameStep ?? -99) >= 2 : (phase !== rec.lastPhase || t - rec.lastFrameT >= MOBILE_FRAME_S))) this.queueFrames(rec, step, { type: 'mover', id: m.id }, EP_CAMS, () => { rec.lastPhase = phase; rec.lastFrameT = t; rec.lastFrameStep = step.i; });   // 영상: 2스텝마다
     }
     if (ended || over) this.ending.push([rec, over ? '시간 제한 (3분)' : null]);
   }
@@ -191,7 +216,7 @@ export class EpisodeRecorder {
     // 스텝 → 영상 타임스탬프 (그 카메라의 그 시각 프레임; 캡처가 건너뛴 스텝은 직전 프레임)
     for (const s of ep.steps) {
       s.video = {};
-      for (const [cam, v] of Object.entries(videos)) { let k = 0; while (k + 1 < v.times.length && v.times[k + 1] <= s.t + 1e-6) k++; s.video[cam] = Math.round((v.times[k] - v.t0) * 1000) / 1000; }
+      for (const [cam, v] of Object.entries(videos)) { let k = 0; while (k + 1 < v.times.length && Math.abs(v.times[k + 1] - s.t) <= Math.abs(v.times[k] - s.t)) k++;   /* 시각이 가장 가까운 프레임 */ s.video[cam] = Math.round((v.times[k] - v.t0) * 1000) / 1000; }
     }
     for (const v of Object.values(videos)) delete v.times;
     ep.videos = videos; ep.frames = [];   // 영상으로 묶었으니 낱장 사진은 버린다 (메모리)
@@ -211,6 +236,7 @@ export class EpisodeRecorder {
       success: !abort && !defect && rec.steps.length >= 3, termination: abort ?? (defect ? '품질 불량' : '정상 완료'),
       steps: rec.steps, frames: rec.frames, jointNames: (rec.robot.jointDefs ?? []).map((j) => j.name), jointUnits: (rec.robot.jointDefs ?? []).map((j) => (j.unit === 'mm' ? 'mm' : 'rad')),
       cameras: rec.multiCam ? EP_CAMS : ['wrist'], task: rec.task ?? null, mobile: !!rec.mobile,
+      sampling: { hz: EP_HZ, interpolated: rec.steps.filter((x) => x.interp).length, gaps: rec.gaps ?? 0 },   // 격자 스텝 중 보간한 수 · 표본 간격이 너무 길어 격자를 다시 맞춘 횟수
     };
     if (ep.length < 3) return;
     ep.frameCount = rec.frames.length;
@@ -255,6 +281,8 @@ export async function buildEpisodesZip(uid, eps, runId) {
         : { 'observation.image': { dtype: 'jpeg', shape: [120, 160, 3], desc: '로봇 카메라 프레임 (작업 단계가 바뀔 때 · 1초마다)' } }),
       action: { dtype: 'float32', shape: [e0?.jointNames?.length ?? 0], desc: '다음 스텝 관절 목표 (절대값)' },
       phase: { dtype: 'string', values: [...PHASES, 'assemble', 'navigate', 'manipulate'] },
+      interpolated: { dtype: 'bool', desc: `true = 화면 프레임에서 읽은 앞뒤 자세를 이 스텝 시각(${1 / EP_HZ}초 격자)으로 보간한 값 (관절 · 손끝 선형, 그리퍼 · 단계는 앞 값)` },
+      frame_dt_ms: { dtype: 'int32', desc: '카메라 프레임을 찍은 시각 − 스텝 시각 (ms, 프레임이 있는 스텝만)' },
       'episode.instruction': { dtype: 'string', desc: '자연어 작업 지시' },
       'episode.success': { dtype: 'bool', desc: '품질 결과 라벨 (불량·중단이면 false)' },
     },
@@ -264,7 +292,7 @@ export async function buildEpisodesZip(uid, eps, runId) {
   files.push({ path: 'meta/episodes.jsonl', data: eps.map((e) => JSON.stringify({ episode: e.id, instruction: e.instruction, success: e.success, termination: e.termination, product: e.product, item_id: e.item_id, model_version: e.model_version, start: e.start, end: e.end, duration_s: e.duration_s, length: e.length, frames: e.frameCount ?? e.frames.length, videos: e.videos ? Object.fromEntries(Object.entries(e.videos).map(([c, v]) => [c, `videos/${e.id}/${v.file}`])) : undefined, cameras: e.cameras ?? ['wrist'], task: e.task ?? undefined })).join('\n') + '\n' });
   for (const e of eps) {
     const img = (s) => (e.videos && s.video ? Object.fromEntries(Object.entries(e.videos).map(([c, v]) => [c === 'wrist' ? 'observation.image' : `observation.images.${c}`, { path: `videos/${e.id}/${v.file}`, timestamp: s.video[c] ?? 0 }])) : s.frames ? Object.fromEntries(EP_CAMS.map((c) => [`observation.images.${c}`, s.frames[c] ? `videos/${e.id}/${s.frames[c]}` : null])) : { 'observation.image': s.frame ? `videos/${e.id}/${s.frame}` : null });
-    files.push({ path: `data/${e.id}.jsonl`, data: e.steps.map((s) => JSON.stringify({ step: s.i, t: s.t, timestamp: s.ts, 'observation.state': s.state, 'observation.tcp_mm': s.tcp_mm, 'observation.gripper': s.gripper, action: s.action, phase: s.phase, ...img(s) })).join('\n') + '\n' });
+    files.push({ path: `data/${e.id}.jsonl`, data: e.steps.map((s) => JSON.stringify({ step: s.i, t: s.t, timestamp: s.ts, 'observation.state': s.state, 'observation.tcp_mm': s.tcp_mm, 'observation.gripper': s.gripper, action: s.action, phase: s.phase, interpolated: !!s.interp, ...(s.frame_dt != null ? { frame_dt_ms: s.frame_dt } : {}), ...img(s) })).join('\n') + '\n' });
     for (const v of Object.values(e.videos ?? {})) files.push({ path: `videos/${e.id}/${v.file}`, data: v.data });   // 카메라별 MP4
     for (const f of e.frames) { const d = await f.data; if (d) files.push({ path: `videos/${e.id}/${f.file}`, data: d }); }
   }

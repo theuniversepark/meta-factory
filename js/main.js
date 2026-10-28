@@ -1638,7 +1638,7 @@ function frame() {
   if (view.telemetry && ui.robotMode) placeRobotPanel();
   if (screenTimer > 0.6 && modeKey !== 'traditional') { screenTimer = 0; view.drawScreen(sim.kpi(), agent.lastThought, { hub: hub.stats(), msgs: hub.msgs, bytes: hub.bytes }); }
   });
-  perf.run('ep', () => epRec.update());
+  perf.run('ep', () => epRec.update(sim.time - (1 - (running && !llm.holdSim ? stepAcc / SIM_DT : 1)) * SIM_DT));   // 지금 3D 자세가 보여 주는 시각 (화면 보간 — interp.apply와 같은 비율)
   vlaTimer += rdt; if (vlaTimer > 0.5) perf.run('dash', () => { vlaTimer = 0; renderVla(); renderAios(); renderImpact(); renderTrace(); zdTimer += 0.5; if (zdTimer >= 2) { zdTimer = 0; renderZoneDash(); } aiosUpload(); renderFacos(); renderFacosView(); renderSensors(); sensorFlush(); updateSensor3d(); });
   cctvT += rdt; if (cctvSel && cctvT > 0.12) { cctvT = 0; perf.run('cctvp', renderCctvPanel); }
   if (!glLost) {

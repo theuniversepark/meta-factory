@@ -40,9 +40,12 @@ app.whenReady().then(async () => {
     // 에피소드 카메라 프레임 점검: 카메라 4대 에피소드는 카메라마다 프레임 수가 같아야 한다 (한 스텝의 묶음을 한꺼번에 찍음 · js/vla.js)
     report.episodes = await js(`(()=>{const e=window.__twin.epRec,eps=[...e.byRobot.values()].flat(),multi=eps.filter(x=>(x.cameras?.length??0)>1);
       const cnt=(x)=>x.videos?Object.fromEntries(Object.entries(x.videos).map(([c,v])=>[c,v.frames])):x.frames.reduce((m,f)=>(m[f.cam??'main']=(m[f.cam??'main']??0)+1,m),{});
-      return {episodes:eps.length,multiCam:multi.length,uneven:multi.filter(x=>new Set(Object.values(cnt(x))).size>1).length,skippedSteps:e.skipped??0,video:e.video,sample:multi.slice(-3).map(x=>({id:x.id,frames:cnt(x),steps:x.steps.length}))};})()`);
+      return {episodes:eps.length,multiCam:multi.length,uneven:multi.filter(x=>new Set(Object.values(cnt(x))).size>1).length,skippedSteps:e.skipped??0,video:e.video,sample:multi.slice(-3).map(x=>({id:x.id,frames:cnt(x),steps:x.steps.length})),
+      grid:(()=>{const d=eps.flatMap(x=>x.steps.slice(1,-1).map((s,k)=>+(s.t-x.steps[k].t).toFixed(3)));const on=d.filter(v=>Math.abs(v-0.2)<0.002).length;const st=eps.flatMap(x=>x.steps);const fd=st.filter(s=>s.frame_dt!=null).map(s=>s.frame_dt).sort((a,b)=>a-b);
+        return {intervals:d.length,on02:on,interp:st.filter(s=>s.interp).length,steps:st.length,gaps:eps.reduce((a,x)=>a+(x.sampling?.gaps??0),0),frameDtMedian:fd[fd.length>>1]??null,frameDtMax:fd.at(-1)??null};})()};})()`);
     console.log(`\n에피소드 ${report.episodes.episodes}개 (카메라 4대 ${report.episodes.multiCam}개 · 카메라별 프레임 수 다름 ${report.episodes.uneven}개) · 한도로 프레임 없이 기록한 스텝 ${report.episodes.skippedSteps} · 영상 방식 ${report.episodes.video}`);
     for (const x of report.episodes.sample) console.log(`  ${x.id} 스텝 ${x.steps} · ${JSON.stringify(x.frames)}`);
+    { const g = report.episodes.grid; console.log(`  스텝 간격 0.2초: ${g.on02}/${g.intervals} · 보간 스텝 ${g.interp}/${g.steps} · 격자 다시 맞춤 ${g.gaps}회 · 영상−스텝 시각 차 중앙 ${g.frameDtMedian}ms (최대 ${g.frameDtMax}ms)`); }
     const f = path.join(out, `report-${report.at.replace(/[:.]/g, '-')}.json`); fs.writeFileSync(f, JSON.stringify(report, null, 2));
     console.log(`\n저장: ${path.relative(process.cwd(), f)}`);
     clearTimeout(timer); app.exit(0);
