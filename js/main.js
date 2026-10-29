@@ -1468,6 +1468,16 @@ function setSide(side, hide, save = true) {   // save=false: 토리 안내가 �
   b.title = `${name} ${hide ? '보이기' : '숨기기'} · 단축키 ${key}`;
   if (save) try { localStorage.setItem(`metafactory.hide.${side}`, hide ? '1' : '0'); } catch { /* 저장소 없음 */ }
 }
+// 오른쪽 아래 공정 설계 — 좌우 패널처럼 오른쪽으로 숨기기/보이기 (단축키 \ · 한글 자판 ₩ · 설정 기억)
+const tglDock = document.getElementById('tglDock');
+function setDock(hide, save = true) {
+  document.body.classList.toggle('hide-dock', hide);
+  tglDock.textContent = hide ? '◀' : '▶';
+  tglDock.title = `공정 설계 ${hide ? '보이기' : '숨기기'} · 단축키 \\`;
+  if (save) try { localStorage.setItem('metafactory.hide.dock', hide ? '1' : '0'); } catch { /* 저장소 없음 */ }
+}
+{ let h = false; try { h = localStorage.getItem('metafactory.hide.dock') === '1'; } catch { /* 무시 */ } setDock(h); }
+tglDock.addEventListener('click', () => setDock(!document.body.classList.contains('hide-dock')));
 for (const side of ['left', 'right']) {
   let h = false; try { h = localStorage.getItem(`metafactory.hide.${side}`) === '1'; } catch { /* 무시 */ }
   setSide(side, h);
@@ -1480,6 +1490,7 @@ addEventListener('keydown', (e) => {
   if (e.key === 'p' || e.key === 'P') perf.toggle();   // 구간별 성능 표시 (js/perf.js)
   else if (e.key === '[') setSide('left', !document.body.classList.contains('hide-left'));
   else if (e.key === ']') setSide('right', !document.body.classList.contains('hide-right'));
+  else if (e.key === '\\' || e.key === '₩') setDock(!document.body.classList.contains('hide-dock'));
   else if (e.key.startsWith('Arrow')) { panKeys.add(e.key); e.preventDefault(); }
 });
 addEventListener('keyup', (e) => { if (e.key.startsWith('Arrow')) panKeys.delete(e.key); });

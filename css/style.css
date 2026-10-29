@@ -768,6 +768,13 @@ body.hide-right .panel.right { transform: translateX(calc(100% + 16px)); opacity
 .side-tgl:hover { color: var(--ink); border-color: #3fd0c9; }
 #tglLeft { left: calc(var(--lx) - 23px); } #tglRight { right: calc(var(--rx) - 23px); }   /* 패널 가장자리에 걸쳐 둔다 */
 body.hide-left #tglLeft { left: 12px; } body.hide-right #tglRight { right: 12px; }
+/* 오른쪽 아래 공정 설계도 같은 방식으로 오른쪽으로 숨김 — 버튼은 창 왼쪽 가장자리 아래쪽에 걸쳐 둔다 (펼치면 넓어진 폭을 따라감) */
+:root { --dw: 340px; } @media (max-width: 1100px) { :root { --dw: 280px; } }
+body:has(.dock.open) { --dw: min(600px, calc(100vw - 24px)); }
+.dock { transition: transform 0.22s ease, opacity 0.22s ease; }
+body.hide-dock .dock { transform: translateX(calc(100% + 16px)); opacity: 0; pointer-events: none; }
+#tglDock { top: auto; bottom: 16px; transform: none; height: 30px; z-index: 9; right: calc(var(--dw) + 12px - 11px); }
+body.hide-dock #tglDock { right: 12px; }
 
 /* CCTV 커버리지 요약 카드 (📹 CCTV 켜면) */
 #cctvCard { position: fixed; left: var(--lx); bottom: 120px; z-index: 6; max-width: 520px; display: flex; flex-direction: column; gap: 3px; padding: 8px 12px; border-radius: 10px; border: 1px solid #37e8ff; background: rgba(13, 17, 23, 0.88); backdrop-filter: blur(8px); font-size: 11.5px; color: var(--ink2); }
