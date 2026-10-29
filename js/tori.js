@@ -21,7 +21,7 @@ const CHAIN = [['오더', ''], ['자재', '원자재 로트'], ['투입', '생�
 const FCHAIN = [['공장', 'FacOS'], ['게이트', 'A2A'], ['Zone', '오케스트레이터'], ['셀', 'OCS'], ['엣지', '스킬'], ['기록', 'FAC']];   // FacOS 계층
 const KCHAIN = [['손실', '원인 11종'], ['제안', '운영값'], ['트윈', '30분×3'], ['결정', '적용·보류'], ['실측', '10분'], ['학습', '이력']];   // KPI 개선 6단계
 const LCHAIN = [['현장', '셀 엣지'], ['AAS', '시계열'], ['OPC UA', 'PubSub'], ['TSN', '유선'], ['이음5G', '이동 로봇'], ['서버', 'MQTT · DB']];   // 데이터 & 제어명령 파이프라인 6단계
-const OCHAIN = [['실증', '3단계 비교'], ['데이터', '모델 · 데이터셋'], ['표준', '이식'], ['교육', '훈련'], ['생산', '품질'], ['안전', '사람'], ['확산', '산업']];   // 성과활용 및 기대효과
+const OCHAIN = [['성과활용', '실증 · 데이터 · 교육'], ['기대효과', '생산 · 안전 · 확산'], ['맺음말', '']];   // 성과활용 및 기대효과
 const QCHAIN = [['예방', '건강·보정'], ['전수', '토크·각도'], ['샘플', '정밀검사'], ['대응', '봉쇄·경보'], ['원인', 'AI 분석'], ['개선', '8D·정책'], ['감시', '관리도']];   // 품질 관리 7단계
 function chainSvg(at, C = CHAIN) {
   const W = 336, H = 70, n = C.length, gap = W / n;
@@ -82,12 +82,13 @@ const TOPICS = {
     { say: '안녕하세요! 저는 모두의 AI 팩토리 공장장 토리예요. 이곳은 피지컬AI 실증 메타팩토리로, 레거시 공장이 자동화를 거쳐 피지컬AI 자율공장으로 바뀌는 과정을 3D 디지털 트윈으로 보여 주는 시뮬레이터예요. 2분 정도 함께 둘러볼까요?', view: 'all', start: true },
     // 과제정의 (협업지능 피지컬AI 기술실증 테스트베드 플랫폼화 — 연구개발계획서 1p)
     { view: 'all', say: '이 메타팩토리는 협업지능 피지컬AI 기반 SW 플랫폼의 연구개발 성과를 실제 산업에 적용 · 확산하기 위한 개방형 기술실증 플랫폼이에요. 장비와 공간을 갖추는 데서 그치지 않고, R&D 성과 · 실증장비 · 제조공정 · 데이터 · 디지털트윈 · AI · 통합운영체계 · 기업실증 서비스를 하나의 구조로 연결해 반복해서 쓸 수 있는 실증 플랫폼으로 만드는 것이 이 과제예요.' },
-    { say: '추진 목적은 네 가지예요. 첫째, 개별 장비 중심의 실증공간을 데이터 · AI · 디지털트윈 · 로봇 통합운영체계 기반의 실증 플랫폼으로 고도화해요. 둘째, 피지컬AI R&D 결과물이 실험실에 머물지 않고 기술검증 → 실증 → 현장적용 → 확산으로 이어지게 해요. 셋째, 제조 · 물류 공정에서 피지컬AI의 안전성 · 신뢰성 · 실시간성 · 현장적용성을 검증해요. 넷째, 실데이터와 합성데이터를 다시 R&D와 기업 현장으로 돌려보내는 폐루프형 기술실증 생태계를 만들어요. 이제 공장 안의 Zone을 둘러볼게요.' },
+    { say: '추진 목적은 한마디로, 피지컬AI 연구 성과가 실험실에 머물지 않고 이 메타팩토리에서 기술검증 → 실증 → 현장적용 → 확산까지 이어지게 하는 거예요. 데이터 · AI · 디지털트윈 · 로봇을 하나로 운영하며 안전성 · 신뢰성 · 실시간성을 검증하고, 여기서 쌓인 데이터는 다시 연구와 기업 현장으로 돌아가요. 이제 공장 안의 Zone을 둘러볼게요.' },
     { say: '가운데가 정밀조립Zone이에요. 도어트림과 e-axle을 혼류 생산하고, 부품분류 → 조립 → 체결 → 검사·포장 6개 셀이 이어져 있어요.', view: 'precision' },
     { say: '뒤쪽은 유연생산Zone이에요. 후드와 도어를 공급·키팅 → 용접 → 실링 → 롤러 헤밍 → 정밀 장착 → 치수·외관검사 순서로 만들어요.', view: 'flex' },
     { say: '앞쪽은 적응가공Zone이에요. 유압블록과 리어커버를 소재 식별 → 5축 가공 · 디버링 · 선삭 → 초정밀 측정 순서로 가공해요.', view: 'adapt' },
     { say: '오른쪽은 정밀검사Zone이에요. 세 Zone에서 시료를 받아 비전 · 3D 스캔 · 정밀측정 · CT로 검사하고 AI가 판정해요.', view: 'insp' },
-    { say: '화면 위 단계 버튼으로 레거시 → 자동화 → 피지컬AI를 바꿀 수 있어요. 같은 라인을 세 단계로 운영해서 생산량 · OEE · 재공이 어떻게 달라지는지 비교해요.', hl: ['#modeSeg'] },
+    { say: '화면 위 단계 버튼으로 레거시 → 자동화 → 피지컬AI를 바꿀 수 있어요. 같은 라인을 세 단계로 운영해서 생산량 · OEE · 재공(공정 안에 머문 미완성품, WIP)이 어떻게 달라지는지 비교해요.', hl: ['#modeSeg'],
+      voice: '화면 위 단계 버튼으로 레거시, 자동화, 피지컬AI를 바꿀 수 있어요. 같은 라인을 세 단계로 운영해서 생산량과 OEE, 그리고 재공, 즉 공정 안에 머물러 있는 미완성품이 어떻게 달라지는지 비교해요.' },
     { say: '지금 피지컬AI 단계로 바꿨어요. 이 단계에서는 휴머노이드 · AMMR · 사족보행 로봇과 드론이 현장을 맡고, 로봇 카메라 영상을 보고 동작을 정하는 VLA 모델이 일해요.', mode: 'dark', hl: ['#modeSeg'] },
     { say: '오른쪽 패널은 공장 운영 AI예요. 고장 · 공급 차질 · 현장 이벤트를 관찰 → 판단 → 실행한 기록이 남아요. 아래 입력창에 "포장셀 속도 80%"처럼 지시할 수도 있어요.', hl: ['#agentPanel'] },
     { say: '위쪽 버튼에서는 로봇 데이터로 VLA 학습, 운영 AI 학습, KPI 영향 분석, 품질 추적, Zone 대시보드를 볼 수 있어요.', hl: ['#btnVla', '#btnAios', '#btnImpact', '#btnTrace', '#btnZoneDash'] },
@@ -149,8 +150,8 @@ const TOPICS = {
       voice: 'UPH가 떨어졌다는 것만으로는 손을 쓸 수 없어요. 어디서, 왜, 얼마나 잃었는지 알아야 개선할 수 있죠. KPI 영향 개선 창은 손실을 원인별로 나누고, 고칠 방법을 제안하고, 디지털 트윈으로 미리 검증한 뒤 결정을 물어요.',
       say: (T) => `KPI 영향 · 개선 — 「UPH가 떨어졌다」만으로는 손을 쓸 수 없어요. 어디서 · 왜 · 얼마나 잃었는지 알아야 고치죠. 이 창은 손실을 원인별로 나누고 → 고칠 방법을 제안하고 → 디지털트윈으로 미리 검증한 뒤 → 결정을 물어요.${T.spd0 !== undefined && !adv(T)?.items.some((p) => p.lever) ? ' (첫 제안은 공장 시간 5분 뒤부터 나와서, 잠시 30배속으로 돌리는 중이에요)' : ''}` },
     { act: (T) => T.restoreSpeed(), hl: ['#btnImpact'], kchain: 0, live: true,
-      voice: '먼저 손실 분석이에요. 셀이 가동하지 못한 시간을 설비 고장, 정비, 자재 공급 차질, 현장 이벤트, 흐름 대기, 품질 불량 같은 열한 가지 원인으로 나누고, UPH와 OEE, 재공, 전력 손실로 바꿔 보여 줘요.',
-      say: (T) => { const r = lossTop(T); return `① 손실 분석 — 가동하지 못한 시간을 원인 11가지(설비 고장 · 예지정비 · 재보정 · 결품 · 공급 차질 · 현장 이벤트 · 정지 명령 · 흐름 대기 · 출하 대기 · 속도 · 품질)로 나눠 UPH · OEE · 재공 · 전력 손실로 바꿔요.${r && r.oeePts > 0 ? ` 최근 30분 1순위는 ${r.icon} ${r.label}: OEE −${(r.oeePts * 100).toFixed(1)}%p · UPH −${r.uph.toFixed(1)}${r.wip > 0.05 ? ` · 재공 +${r.wip.toFixed(1)}` : ''}.` : ''}`; } },
+      voice: '먼저 손실 분석이에요. 셀이 가동하지 못한 시간을 설비 고장, 정비, 자재 공급 차질, 현장 이벤트, 흐름 대기, 품질 불량 같은 열한 가지 원인으로 나누고, UPH와 OEE, 재공, 즉 공정 안에 머물러 있는 미완성품, 그리고 전력 손실로 바꿔 보여 줘요.',
+      say: (T) => { const r = lossTop(T); return `① 손실 분석 — 가동하지 못한 시간을 원인 11가지(설비 고장 · 예지정비 · 재보정 · 결품 · 공급 차질 · 현장 이벤트 · 정지 명령 · 흐름 대기 · 출하 대기 · 속도 · 품질)로 나눠 UPH · OEE · 재공(공정 안에 머문 미완성품, WIP) · 전력 손실로 바꿔요.${r && r.oeePts > 0 ? ` 최근 30분 1순위는 ${r.icon} ${r.label}: OEE −${(r.oeePts * 100).toFixed(1)}%p · UPH −${r.uph.toFixed(1)}${r.wip > 0.05 ? ` · 재공 +${r.wip.toFixed(1)}` : ''}.` : ''}`; } },
     { act: (T) => { if (T.prop === undefined) T.prop = pickProp(T); }, panel: (T) => ({ kind: 'impact', focus: T.prop?.id ?? null }), hl: ['#btnImpact'], kchain: 1,
       voice: '손실이 기준을 넘으면 실제 운영값을 바꾸는 개선 제안이 생겨요. 예지정비 시작 시점, 재보정 기준, 투입 간격, AMR 선행 배차, 셀 절전 대기 같은 값이에요. 제안마다 근거, 기대 효과, 부작용이 함께 나와요.',
       say: (T) => { const p = T.prop; return p ? `② 개선 제안 — 「${p.title}」: 근거 ${p.why}. 바꿀 값 ${p.lever ? `${LEVERS[p.lever]?.label ?? p.lever} ${levV(p, p.from)} → ${levV(p, p.to)}` : ''}. 기대 효과 ${p.expect}. 부작용 ${p.trade}. 제안마다 근거 · 기대 효과 · 부작용이 함께 나와요.` : '② 개선 제안 — 지금은 손실이 기준 아래라 제안이 없어요. 손실이 기준을 넘으면 예지정비 시작 시점 · 재보정 기준 · 투입 간격 · AMR 선행 배차 · 셀 절전 대기 같은 실제 운영값을 바꾸는 제안이 생겨요.'; } },
@@ -232,7 +233,8 @@ const TOPICS = {
     { say: '② 엣지 — 셀 엣지가 센서 값을 모아 RMS · 첨도 · FFT 같은 특징을 뽑고 1초씩 묶어요. 엣지 게이트웨이는 프로토콜을 바꾸고, 연결이 끊겨도 잠시 저장했다가 보내요. 셀 제어기는 VLA 파지 · 체결 판정 같은 엣지 스킬을 현장에서 바로 실행해요.', ring: 'loop', at: 1, hl: ['#btnSensors'] },
     { say: '③ 서버 · 연동 — 존 서버를 거쳐 공장 중앙의 MQTT 브로커(UNS)로 모이고, AAS 모델과 OPC UA PubSub 형식으로 다른 시스템과 주고받아요. 센서 DB, 로봇 에피소드, 운영 데이터셋이 서버에 쌓여요.', ring: 'loop', at: 2, hl: ['#btnData'] },
     { say: '④ AI 학습 — 로봇 데이터와 카메라 영상은 AI-ready 에피소드가 되어 VLA 모델을 학습하고, 생산 · 설비 · 물류 · 에너지 · 품질 데이터는 운영 데이터셋이 되어 공장 운영 AI(AIOS)의 정책을 학습해요.', ring: 'loop', at: 3, hl: ['#btnVla', '#btnAios'], mode: 'dark' },
-    { say: '⑤ 모니터링 — Zone 대시보드에서 OEE · 6대 손실 · 관리도를, FACOS 패널에서 공장 · 존 · 셀 상태를 실시간으로 봐요. KPI 영향 분석은 이벤트가 생산량 · OEE · 재공 · 전력에 미친 손실을 나눠 보여 줘요.', ring: 'loop', at: 4, hl: ['#btnZoneDash', '#btnImpact'] },
+    { say: '⑤ 모니터링 — Zone 대시보드에서 OEE · 6대 손실 · 관리도를, FACOS 패널에서 공장 · 존 · 셀 상태를 실시간으로 봐요. KPI 영향 분석은 이벤트가 생산량 · OEE · 재공(공정 안에 머문 미완성품, WIP) · 전력에 미친 손실을 나눠 보여 줘요.', ring: 'loop', at: 4,
+      voice: '모니터링. 존 대시보드에서 OEE와 6대 손실, 관리도를, FACOS 패널에서 공장과 존, 셀 상태를 실시간으로 봐요. KPI 영향 분석은 이벤트가 생산량과 OEE, 재공, 즉 공정 안에 머물러 있는 미완성품, 그리고 전력에 미친 손실을 나눠 보여 줘요.', hl: ['#btnZoneDash', '#btnImpact'] },
     { say: '⑥ 현장 제어 — 검증된 모델은 로봇과 오케스트레이터에 배포되고, 오케스트레이터는 판단을 셀 현장 명령(정지 · 속도 · 정비 · 투입)으로 내려보내요. 그 결과가 다시 ① 수집으로 돌아오면서 고리가 닫혀요.', ring: 'loop', at: 5, hl: ['#btnOrch'] },
     { say: '정리하면 수집 → 엣지 → 서버 → AI 학습 · 모니터링 → 현장 제어 → 다시 수집이에요. 이 고리가 돌 때마다 공장이 조금씩 더 똑똑해지는데, 그 이야기가 데이터 플라이휠이에요.', ring: 'loop', at: 6, end: true, next: 'fly' },
   ] },
@@ -348,26 +350,13 @@ const TOPICS = {
     { when: () => isWeb(), say: '맥은 압축을 풀어 응용 프로그램 폴더로 옮기고 처음 한 번 우클릭 → 열기, 윈도우는 폴더째 풀고 Meta-Factory.exe를 실행해 「PC 보호」 창이 뜨면 추가 정보 → 실행을 누르면 돼요. 그러면 지금 이 화면을 내 컴퓨터에서 그대로 확인할 수 있어요.', hl: ['#btnApps'] },
     { when: () => document.body.classList.contains('app'), say: '지금 쓰시는 앱은 서버 저장 · MQTT 발행 · 녹화 · 공정 설계 Agent가 모두 이 컴퓨터에서 동작해요. 데이터는 앱 데이터 폴더에 쌓이고, ⚙ 설정에서 Claude API 키를 넣으면 대화 기반 Agent도 쓸 수 있어요.', hl: ['#btnSettings'] },
   ] },
-  // 성과활용 및 기대효과 — 모든 주제의 끝 (자동 넘김은 여기 맺음말에서 멈춤). 앱에 실제로 있는 기능(3단계 비교 · 데이터 내려받기 · 표준 연동 · 시나리오 주입)으로 활용을,
-  // 수치 약속 없이 기대효과를 정리한다
+  // 성과활용 및 기대효과 — 모든 주제의 끝 (자동 넘김은 여기 맺음말에서 멈춤). 메타팩토리 관점의 활용(실증장 · 데이터 공장 · 교육장) → 기대효과(수치 약속 없이) → 맺음말
   outcome: { name: '성과활용 및 기대효과', steps: [
-    { mode: 'dark', view: 'all', ochain: -1,
-      say: '마지막 주제예요. 이 메타팩토리에서 나온 성과를 어떻게 활용하고, 어떤 효과를 기대하는지 정리해 볼게요. 활용은 도입 전 실증, 데이터와 모델, 표준 기반 이식, 교육과 훈련의 네 가지이고, 기대효과는 생산성과 품질, 안전과 사람, 산업 확산의 세 가지예요.' },
-    { hl: ['#btnCompare', '#modeSeg'], ochain: 0,
-      say: '① 도입 전 실증 — 같은 라인을 레거시 · 자동화 · 피지컬AI로 똑같은 조건에서 8시간씩 돌려, 생산량 · OEE · 재공이 어떻게 달라지는지 「📊 3단계 8시간 비교」로 미리 확인해요. 설비와 로봇을 사기 전에 디지털 트윈에서 효과와 위험을 따져 보고 결정할 수 있어요.' },
-    { hl: ['#btnVla', '#btnAios', '#btnData'], ochain: 1,
-      say: '② 데이터와 모델 — 로봇 카메라 영상과 동작을 담은 VLA 에피소드, 공장 운영 AI(AIOS)의 운영 데이터셋, AAS · EPCIS 형식의 설비 · 제품 데이터를 그대로 내려받을 수 있어요. 실제 로봇 학습과 운영 AI 개발, 품질 원인 분석에 다시 쓰이는 데이터 자산이에요.' },
-    { hl: ['#btnData', '#btnFac'], ochain: 2,
-      say: '③ 표준 기반 이식 — 설비는 AAS, 통신은 OPC UA PubSub, 제품 추적은 GS1 EPCIS, 업무 기록은 ERP(ERPNext) 연동으로 만들었어요. 같은 표준을 쓰는 실제 설비 · MES · ERP에 그대로 이어 붙일 수 있어서, 메타팩토리에서 검증한 운영 방식을 실제 공장으로 옮겨 갈 수 있어요.' },
-    { hl: ['#btnFault', '#btnEvent'], ochain: 3,
-      say: '④ 교육과 훈련 — 설비 고장 · 자재 공급 차질 · 현장 이벤트를 원할 때 일으켜, 운영자와 엔지니어가 AI 에이전트 · 오케스트레이터와 함께 대응하는 과정을 안전하게 훈련해요. 웹과 맥 · 윈도우 앱으로 누구나 바로 실습할 수 있고, 저 토리가 안내해요.' },
-    { view: 'precision', hl: ['#btnImpact', '#btnTrace'], ochain: 4,
-      say: '기대효과 ① 생산성과 품질 — 고장과 현장 이벤트에 AI가 스스로 대응해 멈추는 시간을 줄이고, KPI 영향 분석과 디지털 트윈 검증으로 운영값을 계속 개선해요. 제품 ID로 모든 이력을 추적해 불량 원인을 빨리 찾고 재발을 막아요.' },
-    { hl: ['#btnCctv', '#btnEvent'], ochain: 5,
-      say: '기대효과 ② 안전과 사람 — 위험하고 반복되는 일은 휴머노이드 · AMMR · 사족보행 로봇과 드론이 맡고, 사람이 무인 구역에 들어오면 바로 감지해 주변 로봇을 감속시켜요. 사람은 현장의 위험에서 벗어나 판단과 개선, 더 가치 있는 일에 집중하게 돼요.' },
-    { view: 'all', ochain: 6,
-      say: '기대효과 ③ 산업 확산 — 큰 투자 전에 여기서 먼저 시험해 보면 도입 위험과 비용을 줄일 수 있어서, 규모가 작은 제조 현장도 피지컬AI 자율공장으로 한 걸음씩 나아갈 수 있어요. 공장이 운영될수록 데이터가 쌓이고 모델이 좋아지는 플라이휠이 산업 전체로 넓어지는 거예요.' },
-    { view: 'all', end: true,
+    { mode: 'dark', view: 'all', hl: ['#btnCompare', '#btnVla', '#btnAios', '#btnFault'], ochain: 0,
+      say: '성과활용 — 메타팩토리는 세 가지로 쓰여요. 기업이 설비 · 로봇을 들이기 전에 같은 라인을 레거시 · 자동화 · 피지컬AI로 돌려 보고 결정하는 실증장, 로봇 · 운영 데이터를 쌓아 AI를 학습시키는 데이터 공장, 운영자와 엔지니어가 고장 · 현장 이벤트 대응을 안전하게 훈련하는 교육장이에요. AAS · OPC UA · EPCIS 같은 표준으로 만들어, 여기서 검증한 방식을 실제 공장으로 그대로 옮길 수 있어요.' },
+    { view: 'precision', hl: ['#btnImpact', '#btnTrace', '#btnCctv'], ochain: 1,
+      say: '기대효과 — 고장과 이상에 AI가 스스로 대응해 멈추는 시간이 줄고, 제품 ID로 품질을 끝까지 추적해 불량 재발을 막아요. 위험하고 반복되는 일은 로봇이 맡아 사람은 더 안전하게 판단과 개선에 집중하고, 도입 위험이 줄어 더 많은 제조 현장이 피지컬AI 자율공장으로 나아갈 수 있어요.' },
+    { view: 'all', end: true, ochain: 2,
       say: '마지막으로 인사드릴게요. 피지컬AI 실증 메타팩토리의 목표는, 레거시 공장이 자동화를 거쳐 AI가 보고 판단하고 로봇이 직접 해결하는 자율공장으로 가는 길을 디지털 트윈에서 먼저 실증하고, 그 성과를 실제 제조 현장으로 넓히는 거예요. 멈추지 않는 공장, 스스로 좋아지는 공장, 사람이 더 안전하고 가치 있게 일하는 공장 — 모두의 AI 팩토리, 함께 만들어 가요. 지금까지 공장장 토리였습니다. 감사합니다!' },
   ] },
 };
@@ -475,7 +464,8 @@ export class Tori {
     this.btnEl.innerHTML = ['tour', 'facos', 'incident', 'trace', 'quality', 'kpi', 'data', 'link', 'docs', 'outcome'].map((k) => [k, TOPICS[k]]).map(([k, T]) => `<button type="button" data-t="topic" data-k="${k}">${T.name}</button>`).join('');
     this.btnEl.classList.add('menu');
   }
-  play(topic) { this.unhold(); this.restoreSpeed(); this.topic = topic; this.list = null; this.ev = undefined; this.qInj = undefined; this.guard = undefined; this.netOff = undefined; this.flushed = undefined; this.prop = undefined; this.applied = undefined; this.bot = undefined; this.go(0); }
+  play(topic) { this.unhold(); this.restoreSpeed(); clearTimeout(this.panelT); this.h.closePanels?.(); this.panelOpen = false;   // 새 주제는 깨끗한 화면에서 — 앞 주제가 띄운 창(오케스트레이터 · FACOS · KPI · 로봇 정보 · 5G 지도 …)을 닫고 시작
+    this.topic = topic; this.list = null; this.ev = undefined; this.qInj = undefined; this.guard = undefined; this.netOff = undefined; this.flushed = undefined; this.prop = undefined; this.applied = undefined; this.bot = undefined; this.go(0); }
   unhold() { clearInterval(this.holdT); if (this.held) { this.held = false; if (this.heldByMe) this.h.pause?.(false); this.heldByMe = false; } }   // 토리가 직접 멈춘 경우에만 다시 재생 (사용자가 멈춰 둔 공장은 그대로)
   restoreSpeed() { if (this.ev?.quiet) this.ev.quiet = false;   // 인시던트 예시를 「AI 감지」 전에 벗어나면 감지를 막아 둔 이벤트를 풀어 준다
     if (this.spd0 != null) this.h.speed?.(this.spd0); this.spd0 = undefined; if (this.netOff) { fos(this)?.setOnline(true); this.netOff = false; } if (this.applied === true && this.prop?.status === 'applied') { adv(this)?.revert(this.prop.id); this.applied = 'reverted'; } }   // KPI 주제에서 시연 적용 중 벗어나면 되돌림   // 인시던트 예시 배속 · FacOS 상위망 단절 시험 되돌림   // 인시던트 예시가 1배속으로 늦춘 것을 되돌림   // 시나리오(현장 이벤트 · 공정 편차)는 한 번 재생에 한 번만
