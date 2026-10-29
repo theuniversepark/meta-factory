@@ -9,7 +9,7 @@
     { "imports": { "three": "./vendor/three/three.module.js", "three/webgpu": "./vendor/three/three.webgpu.js", "three/addons/": "./vendor/three/addons/" } }
   </script>
 </head>
-<body data-mode="smart">
+<body data-mode="dark">
   <div id="viewport"></div>
   <div id="cctvCard" hidden></div>
   <div id="net5gCard" hidden></div>
@@ -44,8 +44,8 @@
     <button id="btnZoneDash" class="vla-top zd-top" title="Zone별 실시간 모니터링(설비 상태·생산 진행률·시계열) · 종합 설비 효율(OEE·6대 손실 파레토) · 공정–품질 상관·관리도 — 3D Zone 전광판을 눌러도 열림">📈 Zone 대시보드</button>
     <div class="seg" id="modeSeg">
       <button data-mode="traditional">레거시</button><i class="seg-arrow">›</i>
-      <button data-mode="smart" class="on">자동화</button><i class="seg-arrow">›</i>
-      <button data-mode="dark">피지컬AI</button>
+      <button data-mode="smart">자동화</button><i class="seg-arrow">›</i>
+      <button data-mode="dark" class="on">피지컬AI</button>
     </div>
     <button id="btnEstop" class="estop" title="상위 긴급 명령 — 정밀조립Zone 전체 비상정지 (발령 중에는 리셋 명령)">🛑 비상정지</button>
     <div class="timectl">

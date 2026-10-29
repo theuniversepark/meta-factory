@@ -200,7 +200,7 @@ llm.zoneView = () => (zonePick.view === 'precision' ? 'main' : zonePick.view);
 llm.onZoneMix = (key, mix) => { zonePick.mix[key] = mix; saveZonePick(); renderZoneCard(); };
 let sim, agent, agentArch = 'single';   // 에이전트 구조: single · hybrid (혼합형 다중 에이전트)
 const archPref = {};   // 단계별 운영자 선택 (없으면 MODES[단계].agentArch — 피지컬AI 기본 혼합형)
-let modeKey = 'smart', speed = 3, running = true, labelsOn = false;   // 라벨은 꺼진 채 시작 (첫 화면을 깔끔하게 · 하단 「🏷 라벨」로 켬)
+let modeKey = 'dark', speed = 3, running = true, labelsOn = false;   // 라벨은 꺼진 채 시작 (첫 화면을 깔끔하게 · 하단 「🏷 라벨」로 켬)
 const SEED = 20261001;
 const fleetCfg = { amr: { scale: 1, paused: false, count: null }, agv: { scale: 1, paused: false, count: null }, zflex: { scale: 1, paused: false, count: null }, zadapt: { scale: 1, paused: false, count: null } };   // count: 운행 대수 (null = 설치 대수 전부)   // AMR·AGV 관제 설정 (단계·라인을 바꿔도 유지)
 
@@ -1668,7 +1668,7 @@ function frame() {
 let blenderErr = null;
 await loadBlenderAssets().catch((e) => { blenderErr = e.message; });
 document.body.dataset.render = RENDER.loaded ? 'blender' : '3d';
-start('smart');
+start('dark');
 // 토리 안내용 카메라: 지금 시점에서 목표 시점으로 부드럽게 이동 · 확대 (1.2초) — Zone 시점(ZONE_VIEWS) · 좌표(x, z, 높이 d) · 설비(셀 ID)
 let camTw = null;
 function tweenCam(p, t, ms = 1200) {
