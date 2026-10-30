@@ -7,13 +7,15 @@
 // 그리기: 토리 전용 캔버스를 WebGPU(three/webgpu WebGPURenderer)로 — 메인 3D 화면(WebGL)과 따로라 공장 화면 속도와 무관
 //   WebGPU를 쓸 수 없는 브라우저 · 공유 아티팩트에서는 같은 장면을 WebGL로 그린다 (모양 · 동작 같음)
 // 말: 말풍선 글자와 브라우저 내장 한국어 음성(speechSynthesis — 설치 · 비용 없음)을 함께 · 🔊로 음성만 끌 수 있음
+// 언어: 기본 한국어 · 머리의 EN 버튼으로 영어 안내(js/tori-en.js — 말풍선 · 녹음 · 단추 · 그림 글자) · 고른 언어는 기억
 //   브라우저는 사용자가 화면을 누르기 전에는 소리를 막으므로, 그 전에 나온 말은 첫 클릭 때 읽는다 (앱은 처음부터 — electron/main.mjs autoplayPolicy)
 // 안내 내용은 앱의 실제 구성에서 가져왔다: 센서망 계층(js/sensors.js) · VLA 학습·배포(js/vla.js) · AIOS(js/aios.js) · 데이터 연동(js/datahub.js)
 import * as THREE from 'three';
 import { PRODUCTS } from './serial.js';
 import { LEVERS } from './impact.js';
+import { EN, EN_UI, EN_CHAINS, EN_RINGS } from './tori-en.js';
 
-const SEEN = 'mf.tori.seen', VOICE = 'mf.tori.voice';
+const SEEN = 'mf.tori.seen', VOICE = 'mf.tori.voice', LANG = 'mf.tori.lang';
 const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* 사생활 보호 모드 등 */ } } };
 
 // 흐름 막대: 제품 ID 추적 7단계 (아래 작은 글씨 = 그 단계에서 붙는 ID)
@@ -23,10 +25,11 @@ const KCHAIN = [['손실', '원인 11종'], ['제안', '운영값'], ['트윈', 
 const LCHAIN = [['현장', '셀 엣지'], ['AAS', '시계열'], ['OPC UA', 'PubSub'], ['TSN', '유선'], ['이음5G', '이동 로봇'], ['서버', 'MQTT · DB']];   // 데이터 & 제어명령 파이프라인 6단계
 const OCHAIN = [['활용', '실증 · 데이터 · 교육'], ['기대', '생산 · 안전 · 확산'], ['맺음말', '']];   // 활용 및 기대
 const QCHAIN = [['예방', '건강·보정'], ['전수', '토크·각도'], ['샘플', '정밀검사'], ['대응', '봉쇄·경보'], ['원인', 'AI 분석'], ['개선', '8D·정책'], ['감시', '관리도']];   // 품질 관리 7단계
+const textW = (t) => [...t].reduce((a, c) => a + (/[가-힣]/.test(c) ? 11.5 : 6.4), 0);   // 글자 폭 (한글 · 영문)
 function chainSvg(at, C = CHAIN) {
   const W = 336, H = 70, n = C.length, gap = W / n;
-  const nodes = C.map(([l, sub], k) => { const x = gap * k + gap / 2, on = at < 0 || k <= at, cur = k === at;
-    return `<g class="tr-n${on ? ' on' : ''}${cur ? ' cur' : ''}"><rect x="${x - 19}" y="10" width="38" height="22" rx="11"/><text x="${x}" y="25" text-anchor="middle">${l}</text>${sub ? `<text x="${x}" y="${k % 2 ? 62 : 48}" text-anchor="middle" class="tr-sub">${sub}</text>` : ''}</g>`; }).join('');
+  const nodes = C.map(([l, sub], k) => { const x = gap * k + gap / 2, on = at < 0 || k <= at, cur = k === at, w = Math.min(gap - 4, Math.max(38, textW(l) + 12));
+    return `<g class="tr-n${on ? ' on' : ''}${cur ? ' cur' : ''}"><rect x="${x - w / 2}" y="10" width="${w}" height="22" rx="11"/><text x="${x}" y="25" text-anchor="middle">${l}</text>${sub ? `<text x="${x}" y="${k % 2 ? 62 : 48}" text-anchor="middle" class="tr-sub">${sub}</text>` : ''}</g>`; }).join('');
   const arrows = C.slice(1).map((_, k) => { const x1 = gap * k + gap / 2 + 20, x2 = gap * (k + 1) + gap / 2 - 22, on = at < 0 || k < at;
     return `<path d="M${x1} 21 L${x2} 21" class="tr-a${on ? ' on' : ''}" marker-end="url(#tc-h${on ? '1' : '0'})"/>`; }).join('');
   return `<svg class="tori-ring" viewBox="0 0 ${W} ${H}" role="img" aria-label="${C.map((c) => c[0]).join(' → ')}"><defs>${[0, 1].map((o) => `<marker id="tc-h${o}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="tr-h${o ? ' on' : ''}"/></marker>`).join('')}</defs>${arrows}${nodes}</svg>`;
@@ -364,8 +367,10 @@ const TOPICS = {
 // 맥의 Eddy · Reed · Rocko 같은 다국어 공용 음성은 외국인 억양이라 쓰지 않는다
 const MALE_KO = [/injoon/i, /hyunsu/i, /지안|jian/i, /유나|yuna/i, /heami/i, /sunhi/i];
 const koVoice = (all) => { const ko = all.filter((v) => /^ko/i.test(v.lang)); for (const re of MALE_KO) { const v = ko.find((x) => re.test(x.name)); if (v) return v; } return ko.find((v) => !/eddy|flo|grandma|grandpa|reed|rocko|sandy|shelley/i.test(v.name)) ?? ko[0] ?? null; };
+// 영어 안내: 주제별 같은 번호 단계에 en(say · voice)을 붙인다 — 단계 수가 다르면 그 주제는 한국어로 (tests/toriEn.mjs)
+for (const [k, T] of Object.entries(TOPICS)) { const E = EN[k]; T.en = E?.name; if (E?.steps?.length === T.steps.length) T.steps.forEach((st, i) => { st.en = E.steps[i]; }); else if (E) console.warn(`[토리] 영어 안내 단계 수 다름: ${k}`); }
 // 데이터 폐루프와 플라이휠은 하나의 주제로 이어서 설명한다 (폐루프 마지막 단계가 플라이휠로 넘어가는 다리)
-TOPICS.data = { name: '데이터 폐루프와 플라이휠', steps: [...TOPICS.loop.steps.map((st) => ({ ...st, end: false, next: undefined })), ...TOPICS.fly.steps] };
+TOPICS.data = { name: '데이터 폐루프와 플라이휠', en: EN.data.name, steps: [...TOPICS.loop.steps.map((st) => ({ ...st, end: false, next: undefined })), ...TOPICS.fly.steps] };
 delete TOPICS.loop; delete TOPICS.fly;
 const isWeb = () => { const b = document.getElementById('btnApps'); return !!b && !b.hidden; };
 const prioOf = (ev) => ({ intrusion: 1, smoke: 1 })[ev.type] ?? 2;   // js/sim.js FIELD_EVENTS prio
@@ -375,17 +380,17 @@ const final = (w) => { const c = String(w).trim().slice(-1); if (/[가-힣]/.tes
 const ga = (w) => `${w}${final(w) ? '이' : '가'}`, eun = (w) => `${w}${final(w) ? '은' : '는'}`, ieyo = (w) => `${w}${final(w) ? '이에요' : '예요'}`;
 
 // 고리 그림 (SVG): 단계를 원 위에 놓고 화살표로 잇는다 · at = 지금 단계(-1 = 전체 소개, 마지막+1 = 한 바퀴 완성)
-function ringSvg(key, at) {
-  const L = RINGS[key], n = L.length, W = 336, H = 150, cx = W / 2, cy = 74, rx = 128, ry = 50, all = at < 0 || at >= n;
+function ringSvg(key, at, en) {
+  const L = (en ? EN_RINGS : RINGS)[key], n = L.length, W = 336, H = 150, cx = W / 2, cy = 74, rx = 128, ry = 50, all = at < 0 || at >= n;
   const pos = L.map((_, k) => { const a = -Math.PI / 2 + (k / n) * Math.PI * 2; return [cx + rx * Math.cos(a), cy + ry * Math.sin(a)]; });
-  const half = L.map((t) => t.length * 5.5 + 11);   // 칸 반폭 (글자 수)
+  const half = L.map((t) => textW(t) / 2 + 11);   // 칸 반폭 (글자 폭)
   // 화살표는 칸 가장자리에서 시작해 다음 칸 가장자리에서 끝난다 (글자를 가로지르지 않게)
   const edge = ([x, y], [tx, ty], hw) => { const dx = tx - x, dy = ty - y, f = Math.min((hw + 4) / Math.max(1e-6, Math.abs(dx)), 15 / Math.max(1e-6, Math.abs(dy)), 0.45); return [x + dx * f, y + dy * f]; };
   const arcs = pos.map((p1, k) => { const p2 = pos[(k + 1) % n], [x1, y1] = edge(p1, p2, half[k]), [x2, y2] = edge(p2, p1, half[(k + 1) % n] + 3), mx = (x1 + x2) / 2, my = (y1 + y2) / 2, ox = (mx - cx) * 0.15, oy = (my - cy) * 0.15;
     const on = all || k === at; return `<path d="M${x1.toFixed(1)} ${y1.toFixed(1)} Q${(mx + ox).toFixed(1)} ${(my + oy).toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}" class="tr-a${on ? ' on' : ''}" marker-end="url(#tr-h${on ? '1' : '0'})"/>`; }).join('');
   const nodes = pos.map(([x, y], k) => { const on = all || k === at, w = half[k] * 2;
     return `<g class="tr-n${on ? ' on' : ''}${k === at ? ' cur' : ''}"><rect x="${x - w / 2}" y="${y - 11}" width="${w}" height="22" rx="11"/><text x="${x}" y="${y + 4}" text-anchor="middle">${L[k]}</text></g>`; }).join('');
-  const mid = key === 'loop' ? '데이터 폐루프' : '플라이휠';
+  const mid = en ? EN_UI.ring[key] : key === 'loop' ? '데이터 폐루프' : '플라이휠';
   return `<svg class="tori-ring" viewBox="0 0 ${W} ${H}" role="img" aria-label="${mid}: ${L.join(' → ')} → ${L[0]}"><defs>${[0, 1].map((o) => `<marker id="tr-h${o}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="tr-h${o ? ' on' : ''}"/></marker>`).join('')}</defs>${arcs}${nodes}<text x="${cx}" y="${cy + 4}" text-anchor="middle" class="tr-c">↻ ${mid}</text></svg>`;
 }
 
@@ -402,7 +407,17 @@ const PRON = [[/피지컬\s*AI/g, '피지컬 에이아이'], [/Fac\s?OS/gi, '팩
 const SPACE = [[/메타팩토리/g, '메타 팩토리'], [/성과활용/g, '성과 활용'], [/자율공장/g, '자율 공장'], [/디지털트윈/g, '디지털 트윈'], [/정비요청/g, '정비 요청'], [/구매오더/g, '구매 오더'], [/작업지시/g, '작업 지시'], [/예지정비/g, '예지 정비'],
   [/부품분류/g, '부품 분류'], [/외관검사/g, '외관 검사'], [/([가-힣])셀(?![가-힣])/g, '$1 셀'], [/([가-힣])셀(?=[이은을에의과로도마])/g, '$1 셀']];
 const ro = (w) => { const c = w.charCodeAt(w.length - 1) - 0xac00, j = c % 28; return c < 0 || c > 11171 || j === 0 || j === 8 ? '로' : '으로'; };   // 받침 없거나 ㄹ이면 「로」
-export const speakText = (t) => {
+// 영어 읽을 글: 기호만 쉼으로 · 이름은 철자대로 읽게 띄운다
+const PRON_EN = [[/Fac\s?OS|FACOS/g, 'Fac O S'], [/AIOS/g, 'A I O S'], [/AMMRs?/g, (w) => `A M M R${w.endsWith('s') ? 's' : ''}`], [/(?<![A-Za-z])FAC(?![A-Za-z])/g, 'F A C'], [/Cpk/g, 'C P K'], [/PubSub/g, 'Pub Sub'],
+  [/Meta-Factory\.exe/g, 'Meta Factory dot exe'], [/Meta-Factory/g, 'Meta Factory'], [/e-Um 5G/g, 'e-Um five G'], [/(?<![A-Za-z])NG(?![A-Za-z])/g, 'N G'], [/(?<![A-Za-z])P([123])(?![0-9])/g, 'P $1'], [/\bvs\b/g, 'versus'], [/(\d)×/g, '$1 times'], [/×/g, ' by ']];
+const speakEn = (t) => {
+  let s = String(t).replace(/[①②③④⑤⑥⑦]/g, '').replace(/[\u{1F300}-\u{1FAFF}\u{2190}-\u{21FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu, (c) => (c === '→' ? c : ''))
+    .replace(/\s*\([^)]*\)/g, '').replace(/\s+—\s+/g, '. ').replace(/—/g, ', ').replace(/\s*→\s*/g, ', ').replace(/\s*·\s*/g, ', ');
+  for (const [re, w] of PRON_EN) s = s.replace(re, w);
+  return s.replace(/\s*,\s*(,\s*)+/g, ', ').replace(/\.\s*,/g, '.').replace(/\s+/g, ' ').trim();
+};
+export const speakText = (t, lang = 'ko') => {
+  if (lang === 'en') return speakEn(t);
   let s = String(t).replace(/[①②③④⑤⑥]/g, '').replace(/[\u{1F300}-\u{1FAFF}\u{2190}-\u{21FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu, (c) => (c === '→' ? c : ''))
     .replace(/\s*\([^)]*\)/g, '')   // 괄호 속 보충(약어 · 예시)은 소리로 읽지 않는다
     .replace(/(^|[.!?]\s+)([가-힣]+(?: [가-힣]+)?) → ([가-힣]+(?: [가-힣]+)?) — /g, (_, p, a, b) => `${p}${a}에서 ${b}${ro(b)}. `)   // 「운영 → 데이터 —」 → 「운영에서 데이터로.」
@@ -411,21 +426,29 @@ export const speakText = (t) => {
   for (const [re, w] of [...PRON, ...SPACE]) s = s.replace(re, w);
   return s.replace(/\s*,\s*(,\s*)+/g, ', ').replace(/\.\s*,/g, '.').replace(/\s+/g, ' ').trim();
 };
-export const voiceKey = (t) => { let h = 0x811c9dc5; for (const c of speakText(t)) { h ^= c.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, '0'); };
+export const voiceKey = (t, lang = 'ko') => { let h = 0x811c9dc5; for (const c of speakText(t, lang)) { h ^= c.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, '0'); };
 // 녹음할 문장 전체: 고정 문장은 말풍선 그대로, 실시간 수치가 들어가는 단계는 voice(수치 없는 읽을 글)
-export function narration() { return [MENU_SAY, ...Object.values(TOPICS).flatMap((T) => T.steps.flatMap((s) => (s.voice && typeof s.voice === 'object' ? Object.values(s.voice) : [s.voice ?? (typeof s.say === 'string' ? s.say : null)])).filter(Boolean))]; }   // 상황별 음성(voice: { 종류: 문장 } · vk가 고름)은 모두 녹음
-const VOICE_DIR = new URL('../assets/tori/voice/', import.meta.url).href;
+export function narration(lang = 'ko') { const en = lang === 'en'; return [en ? EN_UI.menu : MENU_SAY, ...Object.values(TOPICS).flatMap((T) => T.steps.map((s) => (en ? s.en : s)).filter(Boolean).flatMap((s) => (s.voice && typeof s.voice === 'object' ? Object.values(s.voice) : [s.voice ?? (typeof s.say === 'string' ? s.say : null)])).filter(Boolean))]; }   // 상황별 음성(voice: { 종류: 문장 } · vk가 고름)은 모두 녹음
+const VOICE_DIR = new URL('../assets/tori/voice/', import.meta.url).href, voiceDir = (lang) => (lang === 'en' ? `${VOICE_DIR}en/` : VOICE_DIR);   // 영어 녹음은 voice/en/
 const AUTO_MS = 1000, READY_MAX_MS = 90000, PANEL_MS = 3000;   // 현장을 보여 준 뒤 창을 열기까지
-const readMs = (t) => 1500 + speakText(t).length * 150;   // 소리 없이 읽는 시간 (초당 약 7자)
+const readMs = (t, lang) => 1500 + speakText(t, lang).length * (lang === 'en' ? 65 : 150);   // 소리 없이 읽는 시간 (한글 초당 약 7자 · 영문 약 15자)
+
+const H = { fos, fosOrder, clock, adv, lossTop, inc, arrived, byRobot, ex, qx, prioOf, RADIUS };   // 영어 안내(js/tori-en.js)가 쓰는 공장 상태 도우미
+const KO_UI = { bubble: '토리 안내', name: '토리', voice: '음성으로 읽기', close: '접기', avatar: '토리 — 눌러서 안내 주제 고르기', gpu: '토리를 그리는 방식',
+  prev: '◀ 이전', next: '다음 ▶', topics: '주제', finish: '마치기', later: '다음에', start: '둘러보기 시작 ▶', lang: 'English guide', langBtn: 'EN' };
+const CHAINS = { chain: CHAIN, qchain: QCHAIN, fchain: FCHAIN, kchain: KCHAIN, lchain: LCHAIN, ochain: OCHAIN }, CHAIN_EN = { chain: 'CHAIN', qchain: 'QCHAIN', fchain: 'FCHAIN', kchain: 'KCHAIN', lchain: 'LCHAIN', ochain: 'OCHAIN' };
+const EN_VOICE = [/andrew/i, /guy/i, /christopher/i, /daniel/i, /aaron/i, /alex/i, /google us english/i];
+const enVoice = (all) => { const en = all.filter((v) => /^en/i.test(v.lang)); for (const re of EN_VOICE) { const v = en.find((x) => re.test(x.name)); if (v) return v; } return en.find((v) => /^en-US/i.test(v.lang)) ?? en[0] ?? null; };
 
 export class Tori {
   // hooks: flyTo(viewKey) · setMode(modeKey) · mode() 지금 단계
   constructor(hooks) {
     this.h = hooks; this.topic = 'tour'; this.step = -1; this.open = false; this.talkT = 0; this.voice = store.get(VOICE) !== '0';   // 음성은 기본으로 켬 (🔊로 끄면 기억)
+    this.lang = store.get(LANG) === 'en' ? 'en' : 'ko';   // 안내 언어 — 기본 한국어 (EN 버튼으로 바꾸면 기억)
     this.el = document.createElement('div'); this.el.id = 'tori'; this.el.className = 'tori mini';
     this.el.innerHTML = `<div class="tori-bubble" role="dialog" aria-live="polite" aria-label="토리 안내">
         <div class="tori-h"><b>토리</b><span class="tori-n"></span><span class="tori-gpu" title="토리를 그리는 방식"></span>
-          <button type="button" data-t="voice" title="음성으로 읽기">🔊</button><button type="button" data-t="close" title="접기">✕</button></div>
+          <button type="button" data-t="lang" class="tori-lang"></button><button type="button" data-t="voice" title="음성으로 읽기">🔊</button><button type="button" data-t="close" title="접기">✕</button></div>
         <div class="tori-fig"></div>
         <p class="tori-say"></p>
         <div class="tori-btns"></div>
@@ -440,12 +463,28 @@ export class Tori {
       else if (t === 'topic') this.play(b.dataset.k);
       else if (t === 'menu') this.menu();
       else if (t === 'close' || t === 'skip') this.close();
-      else if (t === 'voice') { this.voice = !this.voice; store.set(VOICE, this.voice ? '1' : '0'); this.syncVoice(); if (this.voice) this.speak(this.cur()?.voice ?? this.sayEl.textContent); else this.stopVoice(); if (this.cur()) this.scheduleAuto(this.cur(), this.step === this.steps().length - 1); }
+      else if (t === 'lang') this.setLang(this.lang === 'en' ? 'ko' : 'en');
+      else if (t === 'voice') { this.voice = !this.voice; store.set(VOICE, this.voice ? '1' : '0'); this.syncVoice(); if (this.voice) this.speak(this.spokenText ?? this.sayEl.textContent); else this.stopVoice(); if (this.cur()) this.scheduleAuto(this.cur(), this.step === this.steps().length - 1); }
       else if (e.target === this.cv && !this.open) this.menu();
     });
-    this.syncVoice();
-    fetch(`${VOICE_DIR}index.json`).then((r) => (r.ok ? r.json() : [])).then((k) => { this.recorded = new Set(k); }).catch(() => { this.recorded = new Set(); });   // 녹음된 문장 목록
+    this.syncVoice(); this.syncLang();
+    this.recorded = {};   // 언어별 녹음된 문장 목록
+    for (const L of ['ko', 'en']) fetch(`${voiceDir(L)}index.json`).then((r) => (r.ok ? r.json() : [])).then((k) => { this.recorded[L] = new Set(k); }).catch(() => { this.recorded[L] = new Set(); });
     this.initGfx().catch((e) => console.warn('[토리] 그리기 시작 실패', e));
+  }
+  // ── 언어 ─────────────────
+  get ui() { return this.lang === 'en' ? EN_UI : KO_UI; }
+  tname(k) { const T = TOPICS[k]; return (this.lang === 'en' && T.en) || T.name; }
+  tx(s) { return (this.lang === 'en' && s.en) || s; }   // 그 단계의 말풍선 · 녹음 문장 (영어가 없으면 한국어)
+  syncLang() {
+    const u = this.ui, q = (sel) => this.el.querySelector(sel);
+    q('[data-t="lang"]').textContent = u.langBtn; q('[data-t="lang"]').title = u.lang; q('[data-t="voice"]').title = u.voice; q('[data-t="close"]').title = u.close;
+    q('.tori-h b').textContent = u.name; q('.tori-bubble').setAttribute('aria-label', u.bubble); this.cv.title = u.avatar; q('.tori-gpu').title = u.gpu; this.el.lang = this.lang;
+  }
+  setLang(L) {   // 지금 보던 단계(또는 메뉴)를 새 언어로 다시 말한다 — 단계 동작 · 카메라는 그대로
+    this.lang = L; store.set(LANG, L); this.syncLang();
+    if (!this.open) return;
+    if (this.step < 0) this.menu(); else { const s = this.cur(); if (s) { this.paint(s, this.step); this.scheduleAuto(s, this.step === this.steps().length - 1); } }
   }
   syncVoice() { const b = this.el.querySelector('[data-t="voice"]'); b.classList.toggle('on', this.voice); b.hidden = !('speechSynthesis' in window); }
   // 주제 마지막 단계의 다음 주제: 단계에 적힌 next, 없으면 주제에 적힌 next (매뉴얼처럼 환경마다 마지막 단계가 다른 주제)
@@ -460,8 +499,8 @@ export class Tori {
   menu() {
     this.unhold(); this.restoreSpeed(); clearInterval(this.liveT); clearInterval(this.followT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.reveal([]); this.step = -1; this.open = true; this.el.classList.remove('mini');
     this.nEl.textContent = ''; this.figEl.innerHTML = '';
-    this.say(MENU_SAY);
-    this.btnEl.innerHTML = ['tour', 'facos', 'incident', 'trace', 'quality', 'kpi', 'data', 'link', 'docs', 'outcome'].map((k) => [k, TOPICS[k]]).map(([k, T]) => `<button type="button" data-t="topic" data-k="${k}">${T.name}</button>`).join('');
+    this.say(this.lang === 'en' ? EN_UI.menu : MENU_SAY);
+    this.btnEl.innerHTML = ['tour', 'facos', 'incident', 'trace', 'quality', 'kpi', 'data', 'link', 'docs', 'outcome'].map((k) => `<button type="button" data-t="topic" data-k="${k}">${this.tname(k)}</button>`).join('');
     this.btnEl.classList.add('menu');
   }
   play(topic) { this.unhold(); this.restoreSpeed(); clearTimeout(this.panelT); this.h.closePanels?.(); this.panelOpen = false;   // 새 주제는 깨끗한 화면에서 — 앞 주제가 띄운 창(오케스트레이터 · FACOS · KPI · 로봇 정보 · 5G 지도 …)을 닫고 시작
@@ -493,17 +532,23 @@ export class Tori {
     const hls = (s.hl ?? []).map((q) => document.querySelector(q)).filter(Boolean);
     this.reveal(hls);
     for (const e of hls) e.classList.add('tori-hl');
-    this.nEl.textContent = `${TOPICS[this.topic].name}${i ? ` · ${i} / ${S.length - 1}` : ''}`;
-    this.figEl.innerHTML = s.ring ? ringSvg(s.ring, s.at) : s.chain != null ? chainSvg(s.chain) : s.qchain != null ? chainSvg(s.qchain, QCHAIN) : s.fchain != null ? chainSvg(s.fchain, FCHAIN) : s.kchain != null ? chainSvg(s.kchain, KCHAIN) : s.lchain != null ? chainSvg(s.lchain, LCHAIN) : s.ochain != null ? chainSvg(s.ochain, OCHAIN) : '';
-    const last = s.end || i === S.length - 1, nx = this.nextTopic(s), nextLabel = s.start ? '둘러보기 시작 ▶' : nx ? `${TOPICS[nx].name} ▶` : last ? '마치기' : '다음 ▶';
-    this.btnEl.innerHTML = `${i ? '<button type="button" data-t="prev">◀ 이전</button>' : ''}${i === 0 && this.topic === 'tour' ? '<button type="button" data-t="skip">다음에</button>' : ''}<button type="button" data-t="menu">주제</button><button type="button" data-t="next" class="primary">${nextLabel}</button>`;
-    const text = () => (typeof s.say === 'function' ? s.say(this) : s.say);
-    this.say(text(), s.voice && typeof s.voice === 'object' ? s.voice[s.vk(this)] : s.voice);
+    this.paint(s, i);
     this.scheduleAuto(s, i === S.length - 1);
-    if (s.live) this.liveT = setInterval(() => { const t = text(); if (t !== this.sayEl.textContent) this.sayEl.textContent = t; }, 1000);   // 진행 상황을 1초마다 다시 읽음 (소리는 처음 한 번)
     store.set(SEEN, '1');
   }
-  say(text, voice) { this.sayEl.textContent = text; this.talkT = Math.min(6, 1.2 + text.length * 0.045); this.speak(voice ?? text); }   // 말하는 입 모양 (글자 수만큼)
+  // 단계의 글 · 그림 · 단추 (언어를 바꾸면 이것만 다시)
+  paint(s, i) {
+    const S = this.steps(), u = this.ui, en = this.lang === 'en', L = this.tx(s); clearInterval(this.liveT);
+    this.nEl.textContent = `${this.tname(this.topic)}${i ? ` · ${i} / ${S.length - 1}` : ''}`;
+    const ck = Object.keys(CHAINS).find((k) => s[k] != null);
+    this.figEl.innerHTML = s.ring ? ringSvg(s.ring, s.at, en) : ck ? chainSvg(s[ck], en ? EN_CHAINS[CHAIN_EN[ck]] : CHAINS[ck]) : '';
+    const last = s.end || i === S.length - 1, nx = this.nextTopic(s), nextLabel = s.start ? u.start : nx ? `${this.tname(nx)} ▶` : last ? u.finish : u.next;
+    this.btnEl.innerHTML = `${i ? `<button type="button" data-t="prev">${u.prev}</button>` : ''}${i === 0 && this.topic === 'tour' ? `<button type="button" data-t="skip">${u.later}</button>` : ''}<button type="button" data-t="menu">${u.topics}</button><button type="button" data-t="next" class="primary">${nextLabel}</button>`;
+    const text = () => (typeof L.say === 'function' ? L.say(this, H) : L.say);
+    this.say(text(), L.voice && typeof L.voice === 'object' ? L.voice[s.vk(this)] : L.voice);
+    if (s.live) this.liveT = setInterval(() => { const t = text(); if (t !== this.sayEl.textContent) this.sayEl.textContent = t; }, 1000);   // 진행 상황을 1초마다 다시 읽음 (소리는 처음 한 번)
+  }
+  say(text, voice) { this.sayEl.textContent = text; this.talkT = Math.min(6, 1.2 + text.length * (this.lang === 'en' ? 0.02 : 0.045)); this.spokenText = voice ?? text; this.speak(this.spokenText); }   // 말하는 입 모양 (글자 수만큼)
   close() { this.unhold(); this.restoreSpeed(); clearInterval(this.liveT); clearInterval(this.followT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.reveal([]); this.open = false; this.step = -1; this.el.classList.add('mini'); this.stopVoice(); this.talkT = 0; }
   clearHl() { document.querySelectorAll('.tori-hl').forEach((e) => e.classList.remove('tori-hl')); }
   // 가리킬 곳이 접힌 메뉴 안이면 먼저 펼친다 — 숨긴 왼쪽 · 오른쪽 패널, 접힌 FACOS 머리, 닫힌 존 에이전트 설정
@@ -535,7 +580,7 @@ export class Tori {
     };
     // 말이 끝나면 시작 — 음성이 재생 중이면 끝날 때, 아니면 읽는 시간 뒤
     if (this.speaking) this.onSpoken = () => { this.onSpoken = null; countdown(); };
-    else this.autoT = setTimeout(countdown, readMs(this.sayEl.textContent));
+    else this.autoT = setTimeout(countdown, readMs(this.sayEl.textContent, this.lang));
   }
   spoken() { this.speaking = false; this.talkT = 0; this.onSpoken?.(); }
 
@@ -548,17 +593,17 @@ export class Tori {
       return;
     }
     this.pending = null;
-    const key = voiceKey(text);
-    if (this.recorded?.has(key)) {   // 녹음 (자연스러운 한국어 남성 음성)
-      const a = this.audio = new Audio(`${VOICE_DIR}${key}.mp3`);
+    const L = this.lang, key = voiceKey(text, L);
+    if (this.recorded[L]?.has(key)) {   // 녹음 (자연스러운 남성 음성 · 한국어 InJoon / 영어 Andrew)
+      const a = this.audio = new Audio(`${voiceDir(L)}${key}.mp3`);
       this.speaking = true;
       a.onplay = () => { this.talkT = 60; }; a.onended = a.onerror = () => { if (this.audio === a) this.spoken(); };
       a.play().catch(() => { if (this.audio === a) { this.speaking = false; this.talkT = 0; } });
       return;
     }
-    const S = window.speechSynthesis; if (!S) return;   // 녹음이 없으면 OS 한국어 음성
-    const u = new SpeechSynthesisUtterance(speakText(text)); u.lang = 'ko-KR'; u.rate = 1.05;
-    u.voice = koVoice(S.getVoices());
+    const S = window.speechSynthesis; if (!S) return;   // 녹음이 없으면 OS 음성 (그 언어)
+    const u = new SpeechSynthesisUtterance(speakText(text, L)); u.lang = L === 'en' ? 'en-US' : 'ko-KR'; u.rate = 1.05;
+    u.voice = (L === 'en' ? enVoice : koVoice)(S.getVoices());
     this.speaking = true;
     u.onstart = () => { this.talkT = 60; }; u.onend = u.onerror = () => { if (this.utter === u) this.spoken(); };
     this.utter = u; S.speak(u);
