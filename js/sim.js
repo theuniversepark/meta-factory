@@ -690,13 +690,13 @@ export class Simulation {
     new SecurityLayer(this).register();   // 피지컬AI 다중 계층 보안 (총괄4): 에이전트 신원(DID/VC) · 데이터·IP · AI 모델 · OT
     this.cctvAgent = new CCTVAgent(this);   // 피지컬AI: CCTV 에이전트 (영상 감시 · 오케스트레이터 보고 · 이벤트 이력)
     this.net = new Private5G(this);   // Private 5G 특화망: 음영 없는 기지국 배치 · 이동 로봇 5G 모뎀 · 핸드오버 · 무손실 업링크 (자동화·피지컬AI)
-    this.fac = new FacLedger(this);   // FAC(FACOS 업무 기록): 발주·재고·설비보전 (자동화·피지컬AI)
+    this.fac = new FacLedger(this);   // FAC(FacOS 업무 기록): 발주·재고·설비보전 (자동화·피지컬AI)
     new ProductTrace(this, seed);   // 제품 추적 관리: 계보 · 공장 환경 센서 · 불량 사례·AI 원인 분석 (js/trace.js)
     if (this.zone) new SerialHub(this, seed);   // 2단 ID: 투입 WIP ID → 최종 검사 합격 시 제품 시리얼·QR/DataMatrix 마킹 · 출하 SSCC · 샘플 NG 봉쇄·처분 (js/serial.js)
     new CapaManager(this);   // 품질 불량 → Zone·총괄 오케스트레이터 8D CAPA → 운영 정책 반영 (js/capa.js)
     if (!this.quiet || opts.sensors) new SensorNet(this);   // 환경·설비 상태 센서망 — 센서 → 셀 엣지 → 게이트웨이 → 존 서버 → 공장 중앙 (js/sensors.js · 헤드리스 시험·트윈은 opts.sensors일 때만)
     new QualityComm(this);   // 불량 판정 리포트 → 메인 서버 → RCA 서버 통신 · 품질 통신 pcap (js/qcomm.js)
-    new FactoryOS(this);   // Factory OS 계층: 공장 오케스트레이터(FacOS) · 정밀조립 Manufacturing Agent · 셀 OCS · A2A 메시지 (js/factoryos.js)
+    new FactoryOS(this);   // FacOS 계층: 공장 오케스트레이터(FacOS) · 정밀조립 Manufacturing Agent · 셀 OCS · A2A 메시지 (js/factoryos.js)
     new WasherMonitor(this);   // 적응가공 유압블록 세척기 공정 데이터 · 청정도 · 필터 정비 요청 (js/washer.js)
     new CmmCellMonitor(this);
     new MatlCellMonitor(this);
@@ -1320,7 +1320,7 @@ export class Simulation {
       role: sort ? { lead: `${P} 키트 4개를 AMR 키트 포켓에 옮겨 담기`, support: `대기 — 다른 제품 담당 (${P}는 맡지 않음)` } : this.zone ? { lead: `${P} ${tray ? '트레이 박스' : '폴딩 크레이트'} 포장 (상자 펴기 → 제품 넣기 → 뚜껑 · 라벨 → AMR에)`, support: `대기 — 다른 제품 담당 (${P}는 맡지 않음)` } : { lead: `${P} ${tray ? '트레이' : '크레이트'} 포장`, support: '작업물 고정 · 라벨' },
     };
     st.gateCount ??= {}; st.gateCount[it.product] = (st.gateCount[it.product] ?? 0) + 1;
-    // 결정 기록 (FACOS 셀·게이트 화면): 최근 40건 + 로봇별 주 작업 횟수
+    // 결정 기록 (FacOS 셀·게이트 화면): 최근 40건 + 로봇별 주 작업 횟수
     st.leadCount ??= {}; for (const i of lead) { const u = st.robotUids?.[i] ?? `#${i + 1}`; st.leadCount[u] = (st.leadCount[u] ?? 0) + 1; }
     (st.gateLog ??= []).push({ t: this.time, item: it.id, product: it.product, text: st.gate.text, lead: lead.map((i) => st.robotUids?.[i] ?? `#${i + 1}`) });
     if (st.gateLog.length > 40) st.gateLog.shift();
@@ -1892,7 +1892,7 @@ export class Simulation {
     this.fieldEvents ??= []; this.fieldSeq = (this.fieldSeq ?? 0) + 1;
     const ev = { id: this.fieldSeq, type, label: E.label, cls: E.cls, severity: E.severity, x, z, t0: this.time, detected: false, cleared: false };
     this.fieldEvents.push(ev);
-    (this.fieldLog ??= []).push(ev); if (this.fieldLog.length > 50) this.fieldLog.shift();   // 처리 끝난 것도 남긴다 (FACOS 현장 감지 화면)
+    (this.fieldLog ??= []).push(ev); if (this.fieldLog.length > 50) this.fieldLog.shift();   // 처리 끝난 것도 남긴다 (FacOS 현장 감지 화면)
     return ev;
   }
   // 로봇 카메라 영상에서 처음 인식했을 때 (by: 이동체·로봇 이름, conf: 추론 신뢰도)

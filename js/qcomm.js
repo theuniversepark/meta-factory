@@ -1,7 +1,7 @@
 // 불량 판정 리포트 전송 · RCA 서버 연동 (품질 통신) — 사례마다 메시지 흐름을 시뮬레이션하고 실제 패킷(pcap)으로 남긴다
 //  ① 검사셀 엣지 → MQTT 브로커 → 메인 서버: 불량 판정 리포트 (MQTT 3.1.1 QoS 1 · CloudEvents 1.0 JSON)
 //       토픽 metafactory/quality/v1/defect/{zone}/{검사셀}
-//  ② 메인 서버(FACOS 품질 모듈) → RCA 서버: 같은 리포트 + 메인 서버 메타 (HTTP/1.1 POST /api/rca/v1/reports → 202 Accepted · 티켓)
+//  ② 메인 서버(FacOS 품질 모듈) → RCA 서버: 같은 리포트 + 메인 서버 메타 (HTTP/1.1 POST /api/rca/v1/reports → 202 Accepted · 티켓)
 //  ③ RCA 서버 분석 → 메인 서버: 원인 확정/재검토 · 우선순위 · 봉쇄 · 대책 (MQTT metafactory/quality/v1/rca/{사례}/result)
 //  ④ 메인 서버 → 셀(Zone 오케스트레이터): 봉쇄 조치 지시 (MQTT …/action/{셀}) → 셀 수신 확인 (MQTT …/ack/{사례})
 //  ⑤ 8D 종결 → 메인 서버 → RCA 서버: 종결 보고 (HTTP POST /api/rca/v1/reports/{티켓}/close → 200)
@@ -13,7 +13,7 @@ import { RcaCore, RCA_SCHEMA } from './rcacore.js';
 
 export const QHOST = {
   broker: { name: 'MQTT 브로커', ip: [10, 20, 0, 10], port: 1883 },
-  main: { name: '메인 서버 (FACOS 품질 모듈)', ip: [10, 20, 0, 20] },
+  main: { name: '메인 서버 (FacOS 품질 모듈)', ip: [10, 20, 0, 20] },
   rca: { name: 'RCA 서버', ip: [10, 20, 0, 30], port: 8080 },
 };
 const EDGE_IP = { DT_FAST: [10, 20, 1, 41], EA_FAST: [10, 20, 1, 42], QIS: [10, 20, 1, 60] };
@@ -70,7 +70,7 @@ export class QualityComm {
   // HTTP 요청 (메인 서버 → RCA 서버)
   post(cm, path, obj, res, status, reason) {
     const body = JSON.stringify(obj), resBody = JSON.stringify(res), tMs = this.ms();
-    for (const P of this.caps()) { P.tag = cm.id; P.http({ key: 'MES-QMS', ip: QHOST.main.ip, server: QHOST.rca, method: 'POST', path, host: `rca.metafactory.local:${QHOST.rca.port}`, headers: { 'X-Correlation-Id': cm.id, 'User-Agent': 'FACOS-QMS/1.0' }, body, status, reason, resBody, tMs, srvMs: 4 }); P.tag = null; }
+    for (const P of this.caps()) { P.tag = cm.id; P.http({ key: 'MES-QMS', ip: QHOST.main.ip, server: QHOST.rca, method: 'POST', path, host: `rca.metafactory.local:${QHOST.rca.port}`, headers: { 'X-Correlation-Id': cm.id, 'User-Agent': 'FacOS-QMS/1.0' }, body, status, reason, resBody, tMs, srvMs: 4 }); P.tag = null; }
     return new TextEncoder().encode(body).length + new TextEncoder().encode(resBody).length;
   }
 
@@ -88,9 +88,9 @@ export class QualityComm {
     this.log(cm, `검사셀 엣지 ${e.st} (${ipStr(e.ip)})`, '메인 서버 (브로커 경유)', 'MQTT', QTOPIC.defect(zone, e.st), n1, `불량 판정 리포트 · QoS 1 · ${c.inspection?.mode ?? 'NG'}`);
     // ② 메인 서버 → RCA 서버 (HTTP)
     this.later(HOP, () => {
-      const R = this.core.receive({ ...rep, receivedBy: 'FACOS-QMS', forwardedAt: this.iso() }, this.iso());
+      const R = this.core.receive({ ...rep, receivedBy: 'FacOS-QMS', forwardedAt: this.iso() }, this.iso());
       cm.ticket = R.body.ticket; cm.status = 'received';
-      const n2 = this.post(cm, '/api/rca/v1/reports', { ...rep, receivedBy: 'FACOS-QMS', forwardedAt: this.iso() }, R.body, R.code, R.code === 202 ? 'Accepted' : 'OK');
+      const n2 = this.post(cm, '/api/rca/v1/reports', { ...rep, receivedBy: 'FacOS-QMS', forwardedAt: this.iso() }, R.body, R.code, R.code === 202 ? 'Accepted' : 'OK');
       this.log(cm, `메인 서버 (${ipStr(QHOST.main.ip)})`, `RCA 서버 (${ipStr(QHOST.rca.ip)}:${QHOST.rca.port})`, 'HTTP', 'POST /api/rca/v1/reports', n2, `${R.code} · 티켓 ${R.body.ticket}`);
       this.sendLive(cm, rep);
       // ③ RCA 서버 분석 → 결과 발행
@@ -100,7 +100,7 @@ export class QualityComm {
         this.log(cm, `RCA 서버 (${ipStr(QHOST.rca.ip)})`, '메인 서버 (브로커 경유)', 'MQTT', QTOPIC.result(c.id), n3, `분석 결과 · ${V.result.priority} · ${V.result.rootCause?.status ?? '-'} ${V.result.rootCause?.label ?? ''}`);
         // ④ 메인 서버 → 셀 봉쇄 지시 → 셀 수신 확인
         this.later(HOP, () => {
-          const act = { caseId: c.id, ticket: cm.ticket, priority: V.result.priority, containment: V.result.containment, hold: (c.suspects ?? []).map((x) => x.serial), issuedBy: 'FACOS-QMS', time: this.iso() };
+          const act = { caseId: c.id, ticket: cm.ticket, priority: V.result.priority, containment: V.result.containment, hold: (c.suspects ?? []).map((x) => x.serial), issuedBy: 'FacOS-QMS', time: this.iso() };
           const n4 = this.pub(cm, 'MES-QMS', QHOST.main.ip, QTOPIC.action(e.st), act, edgeSubs);
           this.log(cm, '메인 서버', `검사셀 엣지 ${e.st} · Zone 오케스트레이터`, 'MQTT', QTOPIC.action(e.st), n4, `봉쇄 조치 지시 ${act.containment.length}건 · 출하 보류 ${act.hold.length}개`);
           this.later(HOP, () => {

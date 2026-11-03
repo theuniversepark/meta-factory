@@ -1,4 +1,4 @@
-// UNS (Unified Namespace) — facOS가 UNS 위에서 동작하도록, 공장 상태·결정·A2A·셀 OCS·명령을 ISA-95 계층 토픽 하나의 트리로 발행한다.
+// UNS (Unified Namespace) — FacOS가 UNS 위에서 동작하도록, 공장 상태·결정·A2A·셀 OCS·명령을 ISA-95 계층 토픽 하나의 트리로 발행한다.
 //   camtic/metafactory                               Enterprise / Site
 //     _meta/namespace                                토픽 규칙 (retain · 탄생 메시지)
 //     _facos/state                                   공장 오케스트레이터 상태 (retain)
@@ -11,7 +11,7 @@
 //     {존}/{셀|_zone}/cmd/request                  외부 명령 요청 (operator · zone 계정 · 게이트웨이 대기열 → applyCommand)
 // 원칙: 상태는 값이 바뀔 때만 발행(Report by Exception) + retain, 이벤트는 retain 없이 그때그때. 명령은 상관 ID(correlationId)로 요청 → 접수 → 실행 → 완료를 묶는다.
 // 렌더링과 분리 — 헤드리스에서도 같은 트리. 시뮬레이션 상태를 바꾸지 않는다(읽기만).
-import { ZONE_ORCH_KEYS, ocsState } from './factoryos.js';
+import { ZONE_ORCH_KEYS, ocsState, zoneOfEp } from './factoryos.js';
 import { COMMANDS } from './commands.js';
 
 export const UNS_ROOT = 'camtic/metafactory';
@@ -28,7 +28,7 @@ const ISA95 = [
 export const UNS_LEVELS = ISA95;
 
 export class UnsNamespace {
-  constructor(sim, { iso = null, root = UNS_ROOT } = {}) { this.root = root; this.iso = iso; this.reset(sim); }
+  constructor(sim, { iso = null, root = UNS_ROOT, run = null } = {}) { this.root = root; this.iso = iso; this.runOf = run; this.reset(sim); }   // run: 실행 ID (데이터 허브 runId) — 서버 FacOS 기록이 실행별 파일로 나눈다
   reset(sim) {
     this.sim = sim; if (sim) sim.uns = this;
     this.tree = new Map();      // 토픽 → { topic, payload, retain, n, t, bytes, kind }
@@ -57,8 +57,8 @@ export class UnsNamespace {
     out.push(props ? { topic, payload, retain, props } : { topic, payload, retain });
   }
 
-  cellUid(id) { const st = this.sim.processing?.find((x) => x.id === id); return seg(st?.uid ?? id); }
-  epSeg(ep) { return ep === 'factory' ? 'factory' : ep.startsWith('zone:') ? seg(ep.slice(5)) : ep === 'cell:*' ? 'main.cells' : ep.startsWith('cell:') ? `main.${this.cellUid(ep.slice(5))}` : seg(ep); }
+  cellUid(id) { const st = this.sim.processing?.find((x) => x.id === id) ?? this.sim.zoneCells?.find((x) => x.id === id); return seg(st?.uid ?? id); }
+  epSeg(ep) { return ep === 'factory' ? 'factory' : ep.startsWith('zone:') ? seg(ep.slice(5)) : ep.startsWith('res:') ? `${seg(ep.slice(4))}.res` : ep === 'cell:*' ? 'main.cells' : ep.startsWith('cell:') ? `${seg(zoneOfEp(ep))}.${this.cellUid(ep.slice(5))}` : seg(ep); }
 
   // 2초마다 (main.js) — telemetry · kpi는 기존 평면 토픽(js/datahub.js unsTelemetry · unsZoneKpi)을 ISA-95 트리로 다시 싣는다
   collect({ telemetry = [], kpi = [] } = {}) {
@@ -75,7 +75,7 @@ export class UnsNamespace {
       }
       for (const d of [...F.decisions].reverse()) {
         if (this.decSeen.has(d)) continue; this.decSeen.add(d);
-        this.put(out, this.t('_facos', 'decision', seg(d.kind)), { kind: d.kind, verdict: d.verdict, text: d.text, target: d.target, authority: d.authority, version: d.version, constraints: d.constraints, resume: d.resume, requestId: d.req }, { kind: 'decision', t: d.t });
+        this.put(out, this.t('_facos', 'decision', seg(d.kind)), { kind: d.kind, verdict: d.verdict, text: d.text, target: d.target, authority: d.authority, version: d.version, constraints: d.constraints, resume: d.resume, requestId: d.req, ...(d.approvedBy ? { approvedBy: d.approvedBy } : {}), ...(d.change ? { change: d.change } : {}) }, { kind: 'decision', t: d.t });
       }
       for (const m of [...F.bus.log].reverse()) {
         if (m.seq <= this.a2aSeq) continue; this.a2aSeq = m.seq;
@@ -113,7 +113,7 @@ export class UnsNamespace {
     return out;
   }
 
-  // 외부 명령 요청 (게이트웨이 대기열 → /api/uns/commands/take) → facOS 명령 경로(sim.cmd.issue → 셀 OCS 검증 · A2A)로 실행.
+  // 외부 명령 요청 (게이트웨이 대기열 → /api/uns/commands/take) → FacOS 명령 경로(sim.cmd.issue → 셀 OCS 검증 · A2A)로 실행.
   //   검증 실패는 바로 {셀}/cmd/done result:rejected (+ 요청자의 응답 토픽). 실행되면 위 명령 4단이 같은 correlationId로 나간다.
   applyCommand(q, now = Date.now()) {
     const s = this.sim, base = this.t(seg(q.zone), seg(q.cell)), corr = String(q.correlationId ?? '').slice(0, 80) || `EXT-${now}`;
@@ -141,7 +141,7 @@ export class UnsNamespace {
   }
 
   meta() {
-    return { version: UNS_VERSION, root: this.root, standard: 'ISA-95 Part 1 장비 계층 (Enterprise/Site → Area → Work Unit → Equipment)', levels: ISA95, areas: UNS_AREAS,
+    return { version: UNS_VERSION, root: this.root, run: this.runOf?.() ?? null, standard: 'ISA-95 Part 1 장비 계층 (Enterprise/Site → Area → Work Unit → Equipment)', levels: ISA95, areas: UNS_AREAS,
       namespaces: { _meta: '토픽 규칙', _facos: '공장 오케스트레이터 · Agent Gateway (상태·오더·결정·A2A)', _zone: '존 오케스트레이터 (상태·KPI·품질 표본·존 전체 명령)' },
       commandRequest: { topic: `${this.root}/{존}/{셀|_zone}/cmd/request`, body: { code: 'COMMANDS 코드 (SPEED · CYCLE_STOP · RESUME …)', arg: '인자 (SPEED는 50·75·100·110)', reason: '사유', correlationId: '상관 ID (MQTT 5는 Correlation Data)', responseTopic: '응답 토픽 (선택 · MQTT 5는 Response Topic)', expirySec: '만료 초 (기본 30 · 최대 300 · MQTT 5는 Message Expiry)' }, accounts: 'operator(모든 존) · zone-{존}(자기 존만) — 익명은 읽기 전용' },
       sparkplug: { group: 'metafactory', edges: 'edge-{존}', devices: '셀', host: 'metafactory-uns-bridge', bridgeTo: `${this.root}/{존}/{셀}/telemetry · edge` },

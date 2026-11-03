@@ -151,7 +151,7 @@ function commTab(sim) {
   const arch = `<div class="qt-arch">
     <span><b>① 검사셀 엣지</b><small>10.20.1.41 · .42 (체결셀) · .60 (정밀검사)</small></span><i>MQTT 3.1.1 QoS 1<br>CloudEvents JSON</i>
     <span><b>MQTT 브로커</b><small>${ipS(QHOST.broker.ip)}:${QHOST.broker.port}</small></span><i>구독 전달</i>
-    <span><b>② 메인 서버</b><small>FACOS 품질 모듈 ${ipS(QHOST.main.ip)}</small></span><i>HTTP/1.1 REST<br>POST /api/rca/v1/reports</i>
+    <span><b>② 메인 서버</b><small>FacOS 품질 모듈 ${ipS(QHOST.main.ip)}</small></span><i>HTTP/1.1 REST<br>POST /api/rca/v1/reports</i>
     <span><b>③ RCA 서버 (더미)</b><small>${ipS(QHOST.rca.ip)}:${QHOST.rca.port}</small></span></div>
     <p class="vla-note">③ 분석 결과는 MQTT <code>${QTOPIC.result('{사례}')}</code>로 메인 서버에 · ④ 봉쇄 조치 지시 <code>${QTOPIC.action('{셀}')}</code> → 셀 수신 확인 <code>${QTOPIC.ack('{사례}')}</code> · ⑤ 8D 종결 보고 HTTP <code>POST …/{티켓}/close</code>. ${live}</p>`;
   const tiles = `<div class="imp-tiles">${tile('리포트 전송', S.reports, `MQTT ${S.mqtt}건 · HTTP ${S.http}건`)}${tile('RCA 분석 완료', S.results, `조치 지시 ${S.actions} · 종결 보고 ${S.closed}`)}${tile('품질 통신 데이터', `${(S.bytes / 1024).toFixed(1)}KB`, `패킷 ${Q.cap.stats.packets.toLocaleString('ko-KR')}개 (TCP 세그먼트·ACK 포함)`)}${tile('RCA 서버 티켓', Q.core.reports.size, Object.entries(Q.core.stats().byPriority).map(([k, v]) => `${k} ${v}`).join(' · ') || '-')}</div>`;

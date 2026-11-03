@@ -108,7 +108,7 @@ body[data-mode="dark"] #modeSeg button.on { background: #6d4aff; }
 
 /* 에이전트 */
 .agent-h { display: flex; gap: 10px; align-items: center; }
-/* FACOS 머리: 눌러 존 요약 칩 · 존 에이전트 설정을 접고 펼침 (main.js) */
+/* FacOS 머리: 눌러 존 요약 칩 · 존 에이전트 설정을 접고 펼침 (main.js) */
 #facosHead { cursor: pointer; border-radius: 8px; user-select: none; }
 #facosHead:hover { background: rgba(255,255,255,0.04); }
 #facosHead:focus-visible { outline: 2px solid #4aa8ff; outline-offset: 2px; }
@@ -721,7 +721,7 @@ table.rb-j .tq i { display: block; height: 100%; }
 /* 공정 설계: 피지컬AI 단계에서만 AMMR인 셀 표시 */
 .st-card .ammr-note { font-size: 10.5px; color: #b89bff; white-space: nowrap; }
 
-/* FACOS 공장 운영 SW 통합 표시 (피지컬AI): 상단 바 아래 가운데, 계층별 실시간 상태 칩 */
+/* FacOS 공장 운영 SW 통합 표시 (피지컬AI): 상단 바 아래 가운데, 계층별 실시간 상태 칩 */
 .dark-only-flex { display: none; }
 body[data-mode="dark"] .dark-only-flex { display: flex; }
 #facos { position: fixed; top: 66px; left: var(--lx); right: var(--rx); z-index: 6; align-items: stretch; gap: 3px; flex-wrap: wrap; justify-content: center; pointer-events: none; }
@@ -740,7 +740,7 @@ body[data-mode="dark"] .dark-only-flex { display: flex; }
 #facos .fc-ic { font-style: normal; margin-right: 3px; }
 @media (max-width: 1500px) { #facos { gap: 2px; } #facos .fc-arw, #facos .fc-ic { display: none; } #facos .fc-l { padding: 2px 5px; } #facos .fc-n { font-size: 9px; } #facos .fc-v { font-size: 10.5px; } #facos .fc-brand { padding: 2px 7px; } }
 
-/* FACOS 계층 상세 창 (자율 에이전트 · 셀·게이트 · 현장 감지) */
+/* FacOS 계층 상세 창 (자율 에이전트 · 셀·게이트 · 현장 감지) */
 #facosBody h4 { margin: 12px 0 6px; font-size: 12.5px; } #facosBody h4 small { font-weight: 400; color: var(--muted); margin-left: 6px; }
 #facosBody h4:first-child { margin-top: 2px; }
 .fc-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; margin-bottom: 4px; }
@@ -756,7 +756,7 @@ body[data-mode="dark"] .dark-only-flex { display: flex; }
 .fc-card { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: rgba(255, 255, 255, 0.02); min-width: 0; }
 .fc-sub { font-size: 11px; color: var(--ink2); margin: 6px 0; }
 
-/* 양쪽 패널 숨기기/보이기 — 가운데 요소(하단 버튼·정보 창·오케스트레이터·FACOS)는 --lx/--rx 기준으로 넓어진다 */
+/* 양쪽 패널 숨기기/보이기 — 가운데 요소(하단 버튼·정보 창·오케스트레이터·FacOS)는 --lx/--rx 기준으로 넓어진다 */
 :root { --lx: 314px; --rx: 364px; }
 @media (max-width: 1100px) { :root { --lx: 270px; --rx: 304px; } }
 body.hide-left { --lx: 44px; }
@@ -909,7 +909,7 @@ em.up { color: var(--good); } em.dn { color: var(--bad); } em.mid { color: var(-
 .engine.arch-row { margin-top: 4px; }
 .arch-cmp { border: 1px solid var(--line); background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 3px 9px; font-size: 11px; color: var(--ink2); }
 .arch-cmp:hover { border-color: var(--accent); color: var(--ink); }
-/* 자율 에이전트 구성 (FACOS 🤖 팝업) */
+/* 자율 에이전트 구성 (FacOS 🤖 팝업) */
 .ai-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
 .ai-bar small { color: var(--ink2); font-size: 11px; }
 .ai-btn { border: 1px solid #b89bff; background: rgba(184, 155, 255, 0.14); color: #e2d6ff; border-radius: 9px; padding: 5px 12px; font-weight: 700; font-size: 12px; }
@@ -1048,7 +1048,7 @@ em.up { color: var(--good); } em.dn { color: var(--bad); } em.mid { color: var(-
 .qt-epcis { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(55, 160, 255, 0.05); } .qt-epcis h5 { margin: 0 0 6px; font-size: 12.5px; } .qt-epcis h5 small { color: var(--muted); font-weight: 400; } .qt-chips { display: flex; flex-wrap: wrap; gap: 4px; font-size: 11px; }
 @media (max-width: 900px) { .qt-unit { grid-template-columns: 1fr; } .qt-grid2.qt-g11 { grid-template-columns: 1fr; } }
 
-/* Factory OS 계층 · 존 간 메시지 (fosview.js) */
+/* FacOS 계층 · 존 간 메시지 (fosview.js) */
 .fos-b { flex: 1; min-height: 0; overflow: auto; padding-right: 4px; }
 .fos-b h4 { margin: 12px 0 5px; font-size: 12.5px; } .fos-b h4 small { color: var(--muted); font-weight: 400; font-size: 11px; }
 .fos-tiles { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-bottom: 8px; }
@@ -1132,7 +1132,7 @@ em.up { color: var(--good); } em.dn { color: var(--bad); } em.mid { color: var(-
 .sn-3d { margin-left: auto; font-size: 12px; }
 .sn-layers td:nth-child(4) { color: var(--muted); }
 
-/* 오른쪽 패널 — FACOS 관점 (공장 요약 · 정밀조립 존 에이전트 · 공장 운영 로그 필터) */
+/* 오른쪽 패널 — FacOS 관점 (공장 요약 · 정밀조립 존 에이전트 · 공장 운영 로그 필터) */
 #agentPanel .agent-avatar.facos { background: linear-gradient(135deg, #f5b82e, #ff7a45); color: #1a1205; font-weight: 800; }
 .agent-avatar.small { width: 30px; height: 30px; font-size: 11px; flex: 0 0 30px; }
 .agent-sub .warn { color: var(--warn); } .agent-sub em.dn { font-style: normal; }
@@ -1290,3 +1290,4 @@ body.tori-tour .tori { z-index: 30; }
 .uns-bridge { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; } .uns-bridge label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--muted); }
 .uns-bridge label.chk { flex-direction: row; align-items: center; gap: 5px; color: var(--ink); } .uns-bridge select { padding: 3px 4px; }
 .uns-bridge-row, .uns-bridge .qt-ins, .uns-bridge .vla-note { grid-column: 1 / -1; } .uns-bridge-row { display: flex; align-items: center; gap: 8px; }
+.fos-srv { border: 1px solid rgba(90, 169, 255, 0.45); border-radius: 7px; padding: 3px 8px; color: var(--ink); text-decoration: none; font-size: 11px; }

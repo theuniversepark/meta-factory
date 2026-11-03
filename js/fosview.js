@@ -1,4 +1,4 @@
-// Factory OS 계층 탭 · 존 간 메시지(A2A) 탭 — 오케스트레이터 창 (orchview.js)에서 그린다
+// FacOS 계층 탭 · 존 간 메시지(A2A) 탭 — 오케스트레이터 창 (orchview.js)에서 그린다
 import { OCS, ocsState, EDGE_SKILLS, MSG, epName, KIND_KO, fosClock as clk } from './factoryos.js';
 import { zoneDef } from './zonedefs.js';
 
@@ -10,6 +10,7 @@ const ZSKILL = { kit: ['부품 ID 인식·혼류 판별', '키팅 (AMMR)'], loca
   matid: ['소재 판별·가공여유 3D 측정'], mill5: ['가공 진단 (주축 부하·진동)', '공구 감시'], turn: ['선삭 · AI 품질 예측', '공구 감시'], deburr: ['사선홀 디버링 경로', '공구 감시'], cmm: ['CMM 측정 판정 · 리워크 적합성'],
   dock: ['ID 리더·도킹'], scan: ['3D 스캔 · 초음파 UT'], oins: ['접촉·광학 복합 정밀측정'], atos: ['블루라이트 Point Cloud 형상편차'], judge: ['AI 판정 (OK · 불확실 · NG)'] };
 const ZCOMMON = ['동작 감시 (두 번째 눈)', '설비 LLM (알람 해석)', '인터록 (규칙)'];
+export const DEC_KIND = { 'maint-support': '정비 지원', 'due-risk': '납기 위험', policy: '정책 승인 (8D)', 'insp-priority': '검사 순서', timeout: '시간 초과', 'first-article': '초품 불합격', 'tool-stock': '공구 재고', 'machine-pm': '주축 예지정비', 'kpi-lever': 'KPI 개선안', 'kpi-revert': '개선안 되돌림', 'aios-policy': 'AIOS 배포', 'aios-rollback': 'AIOS 롤백', mix: '혼류 비율', interval: '투입 간격', expedite: '긴급 조달' };
 const tile = (k, v, sub, tone = '') => `<div class="fos-tile ${tone}"><span>${k}</span><b>${v}</b><small>${sub}</small></div>`;
 const RULES = [
   ['자율복구 한계', '셀 OCS: AI 운영 정책에 따라 재보정·자율 보정 1회 · 스스로 풀지 못하면 존(Manufacturing Agent)에 영향·증거·필요 지원 보고'],
@@ -21,7 +22,7 @@ const RULES = [
 ];
 
 export function fosHTML(sim) {
-  const F = sim.fos; if (!F) return '<p class="vla-note">Factory OS 계층이 없습니다.</p>';
+  const F = sim.fos; if (!F) return '<p class="vla-note">FacOS 계층이 없습니다.</p>';
   const K = F.kpi(), R = K.recon, o = F.orders.find((x) => x.status === 'open' && x.evidenced !== true) ?? F.orders[0];
   const OR = o ? F.main.reconcile(o.id) : null, rate = F.rate(), eta = o && OR && rate > 0 ? sim.time + (o.target - OR.good) / rate : null;
   const tiles = `<div class="fos-tiles">
@@ -55,7 +56,7 @@ export function fosHTML(sim) {
     <div class="fos-lv"><em>셀 OCS<br>· 엣지</em><div class="fos-cells ${Z !== 'main' ? `n${ZO.cells().length}` : ''}">${cells}</div></div></div>
     ${Z === 'main' ? '' : zonePanel(sim, F, Z)}`;
   const ords = F.orders.slice(0, 8).map((x) => { const r = x.recon ?? F.main.reconcile(x.id); return `<tr><td><b>${x.id}</b></td><td>${x.status === 'closed' ? `<b class="qt-chip good">종료</b>` : x.released ? '<b class="qt-chip info">투입 완료</b>' : '<b class="qt-chip warn">진행</b>'}</td><td>${r.good}/${x.target}</td><td>${r.input}</td><td>${r.wip + r.pass}</td><td>${r.hold}</td><td>${r.scrap}</td><td>${clk(x.due)}${x.risk ? ' ⚠' : ''}</td><td>${x.tEnd != null ? `${clk(x.tEnd)}${x.late ? ' (초과)' : ''}` : '-'}</td></tr>`; }).join('');
-  const decs = F.decisions.slice(0, 8).map((d) => `<tr><td>${clk(d.t)}</td><td>${esc({ 'maint-support': '정비 지원', 'due-risk': '납기 위험', policy: '정책 승인', 'insp-priority': '검사 순서', timeout: '시간 초과' }[d.kind] ?? d.kind)}</td><td><b>${esc(d.verdict)}</b> ${esc(d.text)}</td><td>${esc(d.version)}</td><td>${esc(d.constraints || '-')}</td><td>${esc(d.resume || '-')}</td></tr>`).join('');
+  const decs = F.decisions.slice(0, 8).map((d) => `<tr><td>${clk(d.t)}</td><td>${esc((DEC_KIND[d.kind] ?? d.kind))}</td><td><b>${esc(d.verdict)}</b> ${esc(d.text)}</td><td>${esc(d.version)}</td><td>${esc(d.constraints || '-')}</td><td>${esc(d.resume || '-')}</td></tr>`).join('');
   return `${tiles}${tree}
     <div class="fos-grid">
       <div><h4>오더 (공장 → Manufacturing Agent) <small>양품 ${o?.target ?? 100}개 단위 · 불량 보충 투입은 같은 오더 · 존 종료 증빙(정산 오차 0) 확인 후 공장이 종료</small></h4>
@@ -63,6 +64,8 @@ export function fosHTML(sim) {
       <div><h4>공장 결정 <small>결정 메시지 필수 필드: 대상 · 권한자 · 버전 · 제약 · 재개 조건</small></h4>
         <table class="vla-t"><thead><tr><th>시각</th><th>요청</th><th>결정</th><th>버전</th><th>제약</th><th>재개 조건</th></tr></thead><tbody>${decs || '<tr><td colspan="6">아직 결정 요청이 없습니다</td></tr>'}</tbody></table></div>
     </div>
+    <h4>운영 변경 이력 <small>KPI 개선안 · AIOS 정책 · 운영자 지시 · 8D — 모두 공장 결정을 거쳐 계획 버전을 올린 뒤 적용 (상위망 단절이면 보류, 되돌림·롤백은 자율 조치)</small></h4>
+    <table class="vla-t"><thead><tr><th>시각</th><th>종류</th><th>변경</th><th>전 → 후</th><th>승인</th><th>계획</th></tr></thead><tbody>${F.changes.slice(0, 8).map((c) => `<tr><td>${clk(c.t)}</td><td>${esc(DEC_KIND[c.kind] ?? c.kind)}</td><td>${esc(c.title)}</td><td>${c.before || c.after ? `${esc(c.before ?? '-')} → ${esc(c.after ?? '-')}` : '-'}</td><td>${c.verdict === '보류' ? `<b class="qt-chip warn">보류</b> ${esc(c.reason)}` : `${esc(c.verdict)}${c.human ? ` · ${esc(c.by ?? '운영자')}` : c.by ? ` · ${esc(c.by)}` : ''}`}</td><td>${esc(c.version)}</td></tr>`).join('') || '<tr><td colspan="6">아직 운영 변경이 없습니다</td></tr>'}</tbody></table>
     <h4>고정 운영 규칙 6종 <small>llm-wiki 운영 계층 — 수치는 고객 작업표준·장비 사양·계측 후 확정</small></h4>
     <table class="vla-t fos-rules">${RULES.map(([a, b]) => `<tr><td><b>${a}</b></td><td>${b}</td></tr>`).join('')}</table>
     <p class="vla-note">원칙: 명령은 위 → 아래(공장 → 존 → 셀 → 장비), 상태는 아래 → 위, 같은 계층은 핸드셰이크만. 에이전트는 제안하고 오케스트레이터가 권한·인터록·안전 상태를 검증해 확정하며, 안전 PLC가 최종 권한. 계층 구성은 llm-wiki 「팩토리OS 오케스트레이터·에이전트 공장·존·셀 분류」(10/15) — 존 계층·용어는 아직 미확정입니다.</p>`;
@@ -97,10 +100,13 @@ function zonePanel(sim, F, Z) {
 }
 
 // ── 존 간 메시지 (A2A 시퀀스) ─────────────────
-const COLS = [['factory', '공장 (FacOS)'], ['zone:main', '정밀조립'], ['zone:insp', '정밀검사'], ['zone:flex', '유연생산'], ['zone:adapt', '적응가공'], ['cell', '정밀조립 셀 OCS']];
-const colOf = (ep) => { const i = COLS.findIndex(([k]) => k === ep); return i >= 0 ? i : ep.startsWith('cell:') ? 5 : 0; };
-const FLT = { all: '전체', handshake: '핸드셰이크·알림', decision: '결정 요청·결정', command: '명령·오더', blocked: '차단·시간 초과' };
-const fit = (m, f) => f === 'all' || (f === 'blocked' ? m.status === 'blocked' || m.status === 'timeout' : f === 'handshake' ? ['handshake', 'notify'].includes(MSG[m.type]?.cls) : f === 'decision' ? m.type === 'decision.request' || m.type === 'decision' : f === 'command' ? m.type === 'command' || m.type.startsWith('order.') || m.type === 'broadcast' : true);
+const COLS = [['factory', '공장 (FacOS)'], ['zone:main', '정밀조립'], ['zone:insp', '정밀검사'], ['zone:flex', '유연생산'], ['zone:adapt', '적응가공'], ['cell', '셀 OCS · 실행 자원']];
+const colOf = (ep) => { const i = COLS.findIndex(([k]) => k === ep); return i >= 0 ? i : ep.startsWith('cell:') || ep.startsWith('res:') ? 5 : 0; };
+const FLT = { all: '전체', incident: '인시던트', handshake: '핸드셰이크·알림', decision: '결정 요청·결정', command: '명령·오더', blocked: '차단·시간 초과' };
+const fit = (m, f) => f === 'all' || (f === 'incident' ? m.type.startsWith('incident.') || m.subject?.incident != null : f === 'blocked' ? m.status === 'blocked' || m.status === 'timeout' : f === 'handshake' ? ['handshake', 'notify'].includes(MSG[m.type]?.cls) : f === 'decision' ? m.type === 'decision.request' || m.type === 'decision' : f === 'command' ? m.type === 'command' || m.type.startsWith('order.') || m.type === 'broadcast' : true);
+// 서버 FacOS 기록 (앱 — server/facos-store.mjs): 실행별 data/facos/<run>.jsonl · 웹 버전은 서버가 없어 화면 기록만
+const fosSrv = (sim) => { const S = sim.uns?.broker?.facos; if (!S) return '<small>서버 기록 없음 (웹 버전 — 화면 기록만)</small>';
+  return `<a class="fos-srv" href="/api/facos/v1/export${S.run ? `?run=${encodeURIComponent(S.run)}` : ''}" download title="서버에 쌓인 이 실행의 FacOS 기록 (A2A · 결정 · 오더 · 계획 버전)">⬇ 서버 기록 ${S.written ? `${S.seq}줄` : ''}</a><small>data/facos/${esc(S.file ?? '-')} · A2A ${S.counts?.a2a ?? 0} · 결정 ${S.counts?.decision ?? 0} · 오더 ${S.counts?.order ?? 0} · 계획 ${S.counts?.plan ?? 0}${S.error ? ` · <b class="dn">${esc(S.error)}</b>` : ''}</small>`; };
 export function a2aHTML(sim) {
   const F = sim.fos; if (!F) return '';
   const st = fosState, L = F.bus.log.filter((m) => m.type !== 'ack' && fit(m, st.flt)).slice(0, 80), sel = F.bus.log.find((m) => m.msgId === st.msg) ?? L[0];
@@ -111,7 +117,7 @@ export function a2aHTML(sim) {
   }).join('');
   const json = sel ? JSON.stringify((({ msgId, seq, corr, from, to, type, subject, body, authority, planVersion, t, status }) => ({ msgId, seq, corr, from, to, type, subject, body, authority, planVersion, t: clk(t), status }))(sel), null, 2) : '';
   return `<div class="a2a-bar"><div class="seg small">${Object.entries(FLT).map(([k, l]) => `<button type="button" data-fos-flt="${k}" class="${st.flt === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-      <button type="button" data-fos-net>${F.online ? '🔌 상위망 단절 시험' : '🔗 상위망 복구 (Outbox 전송)'}</button><button type="button" data-fos-guard>🛡 가드레일 시험 (존 → 존 명령)</button><button type="button" data-fos-dl>⬇ 메시지 기록 (.jsonl)</button>
+      <button type="button" data-fos-net>${F.online ? '🔌 상위망 단절 시험' : '🔗 상위망 복구 (Outbox 전송)'}</button><button type="button" data-fos-guard>🛡 가드레일 시험 (존 → 존 명령)</button><button type="button" data-fos-dl>⬇ 메시지 기록 (.jsonl)</button>${fosSrv(sim)}
       <small>메시지 ${F.bus.stats.sent} · 차단 ${F.bus.stats.blocked} · 시간 초과 ${F.bus.stats.timeouts} · Outbox ${F.bus.outbox.length}</small></div>
     <div class="a2a-b"><div class="a2a-seq"><div class="a2a-head"><small></small><div class="a2a-lanes">${COLS.map(([, l]) => `<b>${l}</b>`).join('')}</div><span>메시지</span></div><div class="a2a-list">${rows || '<p class="vla-note">아직 메시지가 없습니다.</p>'}</div></div>
       <div class="a2a-side"><h4>메시지 계약 <small>${sel ? `${epName(sel.from)} → ${epName(sel.to)}` : ''}</small></h4><pre>${esc(json)}</pre>

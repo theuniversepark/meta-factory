@@ -71,7 +71,7 @@ console.log('== MQTT 3.1.1 (양방향)');
 check('접속: CONNECT ↔ CONNACK, SUBSCRIBE ↔ SUBACK 짝', mq.conn === mq.connack && mq.conn === P.clients.size && mq.sub === mq.suback && mq.sub > 0, `클라이언트 ${P.clients.size} · 구독 ${mq.sub}`);
 const unacked = [...pubIds].filter((x) => !ackIds.has(x)).length;
 check('QoS 1 PUBLISH마다 같은 패킷 ID의 PUBACK이 반대 방향으로 (양방향, 미확인 0)', mq.pub > 0 && unacked === 0 && mq.ack === mq.pub, `PUBLISH ${mq.pub} · PUBACK ${mq.ack}`);
-check('양방향: 클라이언트 → 브로커 · 브로커 → 구독자(FACOS) 전달', up > 0 && down > 0 && P.stats.publishDown > 0, `업 ${up} · 다운 ${down} · 전달 ${P.stats.publishDown}`);
+check('양방향: 클라이언트 → 브로커 · 브로커 → 구독자(FacOS) 전달', up > 0 && down > 0 && P.stats.publishDown > 0, `업 ${up} · 다운 ${down} · 전달 ${P.stats.publishDown}`);
 check('AAS·OPC UA 토픽: 자산 데이터 · 이벤트 · 상위 명령', [...topics].some((t) => /opcua\/json\/data\/.+\/AM_|AMR/.test(t)) && [...topics].some((t) => t.endsWith('/Events')) && [...topics].some((t) => t.endsWith('/Commands')), `토픽 ${topics.size}종`);
 check('상위 명령이 브로커 → 셀·로봇으로 다운링크', cmdDown > 0, `${cmdDown}건`);
 check('이동 로봇은 5G 단말 주소(10.45.x.x)로 발행', g5 > 0, `${g5}패킷 · 5G 단말 ${P.hosts()['5g']}대`);

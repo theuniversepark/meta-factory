@@ -1,4 +1,4 @@
-// Factory OS — 공장 · 존 · 셀 · 엣지 오케스트레이터 계층 (llm-wiki 「팩토리OS의 오케스트레이터·에이전트 공장·존·셀 분류」 10/15 · 「셀·존·공장 운영 계층」 Ver5 · V12)
+// FacOS (Factory OS) — 공장 · 존 · 셀 · 엣지 오케스트레이터 계층 (llm-wiki 「팩토리OS의 오케스트레이터·에이전트 공장·존·셀 분류」 10/15 · 「셀·존·공장 운영 계층」 Ver5 · V12)
 // 1단계: 정밀조립Zone
 //  · 공장 오케스트레이터 (FacOS): 오더 배정·종료(존 증빙 확인) · 결정 요청 처리(정비 인력 Zone 간 지원 · 납기 위험 · 정책 승인 · 정밀검사 우선순위 · 응답 시간 초과) · 방송
 //    Agent Gateway = 가드레일(계층 권한표) · 탐색(에이전트 등록부·역량) · 라우팅. 모든 에이전트 간 메시지를 A2A 기록으로 남긴다
@@ -43,9 +43,12 @@ export const MSG = {
   'handover.ready': { ko: '인계 준비', cls: 'handshake' }, 'handover.ack': { ko: '인수 확인', cls: 'handshake' }, 'quality.alert': { ko: '품질 알림', cls: 'notify' },
   'quality.hold': { ko: '출하 보류·봉쇄', cls: 'event' }, 'quality.disposition': { ko: '처분 결과', cls: 'event' },
   status: { ko: '상태 보고', cls: 'event' }, ack: { ko: '수신 확인', cls: 'event' },
+  'incident.report': { ko: '인시던트 보고', cls: 'event' }, 'incident.close': { ko: '인시던트 종료', cls: 'event' },
 };
 const layerOf = (ep) => (ep === 'factory' ? 0 : ep.startsWith('zone:') ? 1 : 2);
-const zoneOfEp = (ep) => (ep.startsWith('zone:') ? ep.slice(5) : ep.startsWith('cell:') ? 'main' : null);
+// 셀 → 존 (FactoryOS가 셀 OCS를 만들 때 채운다 — 확장 Zone 셀 FLX- · ADP- · QIS-도 자기 존) · 실행 자원 끝점 res:{존} (정비 인력 · AGV · 이동 로봇)
+const CELL_ZONE = new Map();
+export const zoneOfEp = (ep) => (ep.startsWith('zone:') || ep.startsWith('res:') ? ep.slice(ep.indexOf(':') + 1) : ep.startsWith('cell:') ? (CELL_ZONE.get(ep.slice(5)) ?? 'main') : null);
 // 가드레일: 계층 권한표 — 명령은 바로 아래 계층으로만, 같은 계층은 핸드셰이크·알림만
 export function allowed(from, to, type) {
   const a = layerOf(from), b = layerOf(to), C = MSG[type]?.cls;
@@ -55,7 +58,7 @@ export function allowed(from, to, type) {
   if (a === b + 1) return C === 'event';   // 아래 → 바로 위: 결정 요청·상태·증빙
   return false;   // 계층 건너뛰기 금지
 }
-const EP_NAME = (ep) => (ep === 'factory' ? '공장 오케스트레이터 (FacOS)' : ep === 'zone:main' ? 'Manufacturing Agent (정밀조립)' : ep === 'zone:insp' ? '정밀검사 Orchestrator' : ep.startsWith('zone:') ? `${ZONE_LABEL[ep.slice(5)]} Zone 오케스트레이터` : ep === 'cell:*' ? '정밀조립 셀 OCS 전체' : `셀 OCS ${ep.slice(5)}`);
+const EP_NAME = (ep) => (ep === 'factory' ? '공장 오케스트레이터 (FacOS)' : ep === 'zone:main' ? 'Manufacturing Agent (정밀조립)' : ep === 'zone:insp' ? '정밀검사 Orchestrator' : ep.startsWith('zone:') ? `${ZONE_LABEL[ep.slice(5)]} Zone 오케스트레이터` : ep.startsWith('res:') ? `${ZONE_LABEL[ep.slice(4)]} 실행 자원 (정비 · AGV · 로봇)` : ep === 'cell:*' ? '정밀조립 셀 OCS 전체' : `셀 OCS ${ep.slice(5)}`);
 export const epName = EP_NAME;
 
 export class A2ABus {
@@ -306,8 +309,9 @@ export class FactoryOS {
     this.insp = new InspOrch(this); this.flex = new FlexOrch(this); this.adapt = new AdaptOrch(this);
     this.zones = { main: this.main, insp: this.insp, flex: this.flex, adapt: this.adapt };
     this.ocs = new Map();
-    for (const st of sim.processing) this.ocs.set(st.id, new CellOCS(st, this));
-    for (const zc of sim.zoneCells ?? []) this.ocs.set(zc.id, new CellOCS(zc, this));   // 확장 Zone 셀 OCS (FLX-C01 · ADP-HB_MILL · QIS-VIS …)
+    for (const st of sim.processing) { this.ocs.set(st.id, new CellOCS(st, this)); CELL_ZONE.set(st.id, 'main'); }
+    for (const zc of sim.zoneCells ?? []) { this.ocs.set(zc.id, new CellOCS(zc, this)); CELL_ZONE.set(zc.id, zc.zone); }
+    this.changes = [];   // 운영 변경 이력 (KPI 개선안 · AIOS 정책 · 운영자 지시) — 계획 버전마다   // 확장 Zone 셀 OCS (FLX-C01 · ADP-HB_MILL · QIS-VIS …)
     this.judge = { n: 0, fast: 0, sum: 0, seen: new Set() };
     sim.fos = this;
     if (sim.trace) this.issueOrder();
@@ -338,8 +342,8 @@ export class FactoryOS {
     if (m.type !== 'ack') this.bus.ack(m, '공장 오케스트레이터 수신');
   }
   // 결정: 대상 · 권한자 · 버전 · 제약 · 재개 조건 (결정 메시지 필수 필드)
-  decision(req, verdict, text, { constraints = '', resume = '', target = null } = {}) {
-    const d = { t: this.sim.time, kind: req.body.kind, verdict, text, target: target ?? req.subject, authority: '공장 오케스트레이터 (FacOS)', version: this.planVersion, constraints, resume, req: req.msgId };
+  decision(req, verdict, text, { constraints = '', resume = '', target = null, approvedBy = null, change = null } = {}) {
+    const d = { t: this.sim.time, kind: req.body.kind, verdict, text, target: target ?? req.subject, authority: '공장 오케스트레이터 (FacOS)', version: this.planVersion, constraints, resume, req: req.msgId, ...(approvedBy ? { approvedBy } : {}), ...(change ? { change } : {}) };
     this.decisions.unshift(d); if (this.decisions.length > 40) this.decisions.pop();
     const m = this.bus.reply(req, 'decision', { body: d, text: `${verdict} — ${text}` });
     if (m.status !== 'blocked') (this.zones[zoneOfEp(req.from)] ?? null)?.receive(m);
@@ -347,6 +351,7 @@ export class FactoryOS {
   }
   decide(m) {
     const k = m.body.kind;
+    if (m.body.change) return this.decision(m, '사후 확인', `${m.text} — 상위망 단절 중 승인 범위 안 자율 조치 (복구 뒤 공장 확인)`, { change: { ...m.body.change, by: m.body.by ?? null } });   // Outbox로 늦게 온 운영 변경 (되돌림 · 롤백 · 긴급 조달)
     if (k === 'policy') { m.pendingHuman = true; return null; }   // 사람 결정(HITL) — capa.approve/hold 때 결정 메시지
     if (k === 'due-risk') { const o = this.orders.find((x) => x.id === m.subject.order); const add = Math.ceil((m.body.lateBy ?? 0) / 60) + 2; if (o) o.due += add * 60; this.bump(); return this.decision(m, '승인', `${m.subject.order} 납기 ${add}분 조정 · 우선순위 유지 (고객 협의 대상 아님)`, { constraints: `조정 1회 · ${add}분 이내`, resume: '진행률 재평가' }); }
     if (k === 'timeout') return this.decision(m, '확인', `${m.body.what ?? '응답'} 시간 초과 — 대기 연장 · 재요청 1회`, { resume: '응답 수신' });
@@ -419,12 +424,61 @@ export class FactoryOS {
     this.sim.log?.('ok', `오더 ${o.id} 종료`, { obs: `양품 ${R.good} · 폐기 ${R.scrap} · 투입 ${R.input} (정산 오차 0)`, act: `${this.name} 확인` });
   }
 
+  // ── 운영 변경 (KPI 개선안 · AIOS 정책 · 운영자 지시) — 모두 공장 결정을 거친다 ─────────────────
+  // 존(요청 주체)이 결정 요청 → 공장이 결정(사람 승인이면 승인자 기록) → 계획 버전을 올리고 → 적용. 8D 정책 승인과 같은 경로
+  //   c = { kind, title, from, target, before, after, by, human, constraints, resume, plan(계획 버전 올림, 기본 true), autonomous(상위망 단절이어도 적용 — 롤백 같은 안전 쪽 변경) }
+  //   상위망이 끊기면 공장 결정을 받을 수 없어 적용하지 않는다(autonomous 제외 — 그때는 승인 범위 안의 자율 조치로 적용하고 결정 요청은 Outbox에 쌓는다)
+  change(c, apply) {
+    const from = c.from ?? 'zone:main', body = { kind: c.kind, change: { before: c.before ?? null, after: c.after ?? null }, by: c.by ?? null, human: !!c.human };
+    if (!this.online && !c.autonomous) {
+      const r = { ok: false, reason: '상위망 단절 — 공장 결정을 받을 수 없어 적용하지 않음 (복구 뒤 다시 요청)' };
+      this.changes.unshift({ t: this.sim.time, kind: c.kind, title: c.title, by: c.by, verdict: '보류', reason: r.reason, version: this.planVersion }); if (this.changes.length > 60) this.changes.pop();
+      return r;
+    }
+    const req = this.bus.send(from, 'factory', 'decision.request', { subject: c.target ?? {}, body, text: c.title });
+    if (req.status === 'blocked') return { ok: false, reason: req.why };
+    if (c.plan !== false) this.bump();
+    apply?.();
+    const verdict = c.verdict ?? '승인', ch = { before: c.before ?? null, after: c.after ?? null, by: c.by ?? null };
+    let d;
+    if (req.status === 'queued') {   // 자율 조치 — 결정은 망 복구 뒤 공장이 확인
+      d = { t: this.sim.time, kind: c.kind, verdict: `${verdict} (자율 · 상위망 단절)`, text: c.title, target: c.target ?? {}, authority: `${epName(from)} (승인 범위 안 자율 조치)`, version: this.planVersion, constraints: c.constraints ?? '', resume: c.resume ?? '', req: req.msgId, change: ch };
+      this.decisions.unshift(d); if (this.decisions.length > 40) this.decisions.pop();
+    } else d = this.decision(req, verdict, `${c.title}${c.human ? ` — ${c.by ?? '운영자'} 승인` : ''}`, { constraints: c.constraints ?? '', resume: c.resume ?? '', approvedBy: c.human ? (c.by ?? '운영자') : null, change: ch });
+    this.changes.unshift({ t: this.sim.time, kind: c.kind, title: c.title, by: c.by, human: !!c.human, verdict: d.verdict, version: this.planVersion, before: ch.before, after: ch.after, msg: req.msgId }); if (this.changes.length > 60) this.changes.pop();
+    return { ok: true, decision: d, msg: req };
+  }
+
+  // ── 인시던트 (js/orchestrator.js) → A2A 기록 ─────────────────
+  // 존 오케스트레이터가 인시던트를 맡는다: 셀 → 존 보고(이상 이벤트) · 존 → 셀/실행 자원 명령 · 존 → 공장 종료 보고(상태는 아래 → 위)
+  // 안전(P1)·보안(P2)은 열리는 즉시 공장에 보고하고, P1이면 공장이 다른 존 모두에 방송한다 (보고 정책)
+  incidentStep(inc, lane, kind, text) {
+    if (!inc || inc.type === 'command') return;   // 명령 인시던트는 명령 경로(commands.js)가 이미 A2A로 남긴다
+    const z = inc.zone ?? 'main', zep = `zone:${z}`, m = /^(?:fail|rack|cal):(.+)$/.exec(inc.key ?? ''), cell = m && this.ocs.has(m[1]) ? `cell:${m[1]}` : null;
+    const subject = { incident: inc.id, type: inc.type, prio: inc.prio ?? null, ...(m ? { cell: m[1] } : {}) };
+    const S = (inc.fos ??= {});
+    if (!S.opened) {
+      S.opened = true;
+      if (cell) this.bus.send(cell, zep, 'incident.report', { subject, text: `${inc.title} — 셀 OCS → ${epName(zep)} 보고` });
+      if ((inc.prio ?? 9) <= 2) {
+        this.bus.send(zep, 'factory', 'incident.report', { subject, body: { prio: inc.prio }, text: `P${inc.prio} ${inc.title} — 모든 계층 즉시 통보` });
+        if (inc.prio === 1) for (const k of Object.keys(this.zones)) if (k !== z) this.bus.send('factory', `zone:${k}`, 'broadcast', { subject, text: `P1 방송 — ${ZONE_LABEL[z]} ${inc.title} (안전 우선)` });
+      }
+    }
+    if (kind === 'command') {
+      const to = cell && lane !== 'exec' ? cell : `res:${z}`;
+      this.bus.send(zep, to, 'command', { subject, body: { incident: inc.id }, text: String(text ?? '').slice(0, 160) });
+    } else if (kind === 'done') {
+      this.bus.send(zep, 'factory', 'incident.close', { subject, body: { dur: Math.round((this.sim.time - inc.t0) * 10) / 10, cellResolved: !!inc.cellResolved }, text: `${inc.title} 종료 — ${String(text ?? '').slice(0, 100)}` });
+    }
+  }
+
   // ── 1초마다 ─────────────────
   update(dt) {
     this.acc += dt; if (this.acc < 1 - 1e-9) return; this.acc = 0;   // 0.1초 × 10 = 0.9999… (여유 없이 비교하면 1.1초마다)
     const s = this.sim;
     this.bus.update();
-    if (s.xzones && !this.flex.autoIssued && s.time > 600) { this.flex.autoIssued = true; this.flex.changeoverOrder(undefined, '생산·계획 PA Agent'); }   // 유연생산 전환 오더 (앱 화면 흐름이 있을 때 · 10분 뒤 1회 — 더 보내려면 Factory OS 탭 버튼)
+    if (s.xzones && !this.flex.autoIssued && s.time > 600) { this.flex.autoIssued = true; this.flex.changeoverOrder(undefined, '생산·계획 PA Agent'); }   // 유연생산 전환 오더 (앱 화면 흐름이 있을 때 · 10분 뒤 1회 — 더 보내려면 FacOS 계층 탭 버튼)
     if (!s.trace) return;
     // 오더 진행: 양품 목표 도달 → 존 종료 증빙 / 납기 위험 → 공장 결정 요청
     for (const o of this.orders.filter((x) => x.status === 'open')) {

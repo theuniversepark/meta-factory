@@ -1,5 +1,5 @@
 // EPCIS 2.0 이벤트 변환 · 저장소 (GS1 EPCIS 2.0 / CBV 2.0 · JSON-LD)
-//  · 변환: 시리얼 서비스(js/serial.js) 기록 → 표준 이벤트 — 시리얼 발행 이후만 (WIP 단계 계보는 FACOS 제품 추적에 남기고, WIP ID는 발행 이벤트의 mf:wip로 연결)
+//  · 변환: 시리얼 서비스(js/serial.js) 기록 → 표준 이벤트 — 시리얼 발행 이후만 (WIP 단계 계보는 FacOS 제품 추적에 남기고, WIP ID는 발행 이벤트의 mf:wip로 연결)
 //      발행 commissioning → 적재 storing → 팔레트 묶음 packing(AggregationEvent · SSCC) → 출하 shipping(SSCC · 트럭 = bizTransaction bol)
 //      출하 보류 holding · 보류 해제 inspecting · 재작업 repairing · 재검 inspecting · 격리 holding · 폐기 decommissioning(DELETE)
 //      eventID = urn:uuid (재전송해도 같은 이벤트) · 위치 = SGLN(urn:epc:id:sgln:업체코드.00001.FLX-C06) · CBV 값은 짧은 이름 · 확장 필드는 mf: 접두

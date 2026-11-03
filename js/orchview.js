@@ -1,4 +1,4 @@
-// 오케스트레이터 인시던트 흐름 도표 — 인시던트 목록 + 스윔레인 흐름도(현장 감지 · 셀 컨트롤러 · 공장 오케스트레이터 · 실행 자원).
+// 오케스트레이터 인시던트 흐름 도표 — 인시던트 목록 + 스윔레인 흐름도(현장 감지 · 셀 컨트롤러 · 존 오케스트레이터 · 실행 자원).
 // 단계(감지 → 셀 자체 조치 → 상위 보고 → 판단 → 명령 → 조치 → 완료 확인)를 시각과 함께 실시간으로 그린다.
 // 제어 흐름 탭은 공정·운영 흐름 분석용이다: 계층(FAC · 오케스트레이터 · 셀 컨트롤러 · 실행 자원 · 현장) 사이를 오간 제어·이벤트 흐름의
 // 누적 건수·평균 지연, 공정 흐름(투입 → 셀 → 적재)의 실시간 상태, 인시던트 종류별 단계 지연, 제어·이벤트 흐름 기록을 보여 준다.
@@ -19,7 +19,7 @@ const KIND = {
   notify: { label: '결과 통보', color: 'var(--o-notify)' }, done: { label: '완료', color: 'var(--o-done)' },
 };
 // 레인 사이 화살표 이름 (이전 단계 → 이번 단계)
-const TABS = { flow: ['인시던트 흐름', '인시던트 보고 · 판단 · 명령 · 조치 흐름'], ctl: ['제어 흐름', '공정·운영 제어 흐름 · 이벤트 흐름 분석'], cmd: ['명령 콘솔', '상위 계층 → 셀 현장 긴급·제어 명령'], fos: ['Factory OS 계층', '공장 · 존 · 셀 · 엣지 오케스트레이터·에이전트 (1단계 정밀조립Zone)'], a2a: ['존 간 메시지', 'A2A 핸드셰이크 · 품질 알림 · 결정 요청 · Agent Gateway 가드레일'], uns: ['UNS 토픽 트리', 'ISA-95 통합 네임스페이스 — facOS 상태·오더·결정·A2A · 셀 OCS · 명령 3단 (MQTT)'] };
+const TABS = { flow: ['인시던트 흐름', '인시던트 보고 · 판단 · 명령 · 조치 흐름'], ctl: ['제어 흐름', '공정·운영 제어 흐름 · 이벤트 흐름 분석'], cmd: ['명령 콘솔', '상위 계층 → 셀 현장 긴급·제어 명령'], fos: ['FacOS 계층', '공장 · 존 · 셀 · 엣지 오케스트레이터·에이전트 (1단계 정밀조립Zone)'], a2a: ['존 간 메시지', 'A2A 핸드셰이크 · 품질 알림 · 결정 요청 · Agent Gateway 가드레일'], uns: ['UNS 토픽 트리', 'ISA-95 통합 네임스페이스 — FacOS 상태·오더·결정·A2A · 셀 OCS · 명령 3단 (MQTT)'] };
 const FILTERS = { all: '전체', control: '제어', event: '이벤트' };
 const CLS_COLOR = { control: 'var(--o-command)', event: 'var(--o-report)', decision: 'var(--o-decide)' };
 const laneLabel = (k) => (k === 'fac' ? 'FAC' : LANES.find((l) => l.key === k)?.label ?? k);
@@ -81,7 +81,7 @@ export class OrchView {
   build() {
     const o = this.sim.orch;
     this.built = this.builtKey();
-    this.el.classList.toggle('fos-wide', this.tab === 'fos' || this.tab === 'a2a' || this.tab === 'uns');   // Factory OS 계층 · 존 간 메시지는 넓게
+    this.el.classList.toggle('fos-wide', this.tab === 'fos' || this.tab === 'a2a' || this.tab === 'uns');   // FacOS 계층 · 존 간 메시지는 넓게
     const tabs = `<div class="seg small orch-tabs">${Object.entries(TABS).map(([k, [t]]) => `<button type="button" data-tab="${k}" class="${this.tab === k ? 'on' : ''}">${t}</button>`).join('')}</div>`;
     const flts = `<div class="seg small orch-flt" title="제어: 위 계층 → 아래 계층 명령 · 자체 조치 · 조치 / 이벤트: 아래 계층 → 위 계층 감지 · 보고 · 결과 통보">${Object.entries(FILTERS).map(([k, t]) => `<button type="button" data-flt="${k}" class="${this.flt === k ? 'on' : ''}">${t}</button>`).join('')}</div>`;
     const head = `<div class="orch-h"><b>🛰 ${esc(o.name)} <small>· Zone별 (정밀조립 · 유연생산 · 적응가공)</small></b>${tabs}<small>${TABS[this.tab][1]}</small>
@@ -229,8 +229,8 @@ export class OrchView {
     const s = this.sim, o = s.orch, f = this.flt, W = 640, H = 330, NW = 184, NH = 48;
     const fac = s.fac?.on;
     const N = {
-      fac: { x: 320, y: 30, label: 'FAC (FACOS 업무 기록)', sub: '발주·재고·설비보전' },
-      orch: { x: 320, y: 120, label: '공장 오케스트레이터', sub: o.name },
+      fac: { x: 320, y: 30, label: 'FAC (FacOS 업무 기록)', sub: '발주·재고·설비보전' },
+      orch: { x: 320, y: 120, label: '존 오케스트레이터', sub: o.name },
       cell: { x: 104, y: 210, label: '셀 컨트롤러', sub: '셀 자체 조치' },
       exec: { x: 536, y: 210, label: '실행 자원', sub: '정비·AGV·휴머노이드·사족보행' },
       field: { x: 320, y: 296, label: '현장 감지', sub: '로봇·센서·카메라' },

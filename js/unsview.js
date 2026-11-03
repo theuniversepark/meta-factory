@@ -1,10 +1,10 @@
-// UNS 토픽 트리 탭 — 오케스트레이터 창 (orchview.js). facOS가 UNS에 발행한 ISA-95 토픽을 트리로 보고, 토픽을 눌러 마지막 메시지를 본다 (MQTT Explorer와 같은 보기)
+// UNS 토픽 트리 탭 — 오케스트레이터 창 (orchview.js). FacOS가 UNS에 발행한 ISA-95 토픽을 트리로 보고, 토픽을 눌러 마지막 메시지를 본다 (MQTT Explorer와 같은 보기)
 import { UNS_LEVELS, UNS_AREAS } from './uns.js';
 import { fosClock as clk } from './factoryos.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 export const unsState = { flt: 'all', sel: null, pw: {}, br: null, brDraft: null, brMsg: null, brBusy: false, open: new Set(['camtic', 'camtic/metafactory', 'camtic/metafactory/_facos', 'camtic/metafactory/main']) };
-const FLT = { all: '전체', facos: 'facOS (_facos)', state: '상태 (retain)', cmd: '명령 4단', a2a: 'A2A', telemetry: '설비 요약', quality: '품질 표본' };
+const FLT = { all: '전체', facos: 'FacOS (_facos)', state: '상태 (retain)', cmd: '명령 4단', a2a: 'A2A', telemetry: '설비 요약', quality: '품질 표본' };
 const fit = (e, f) => f === 'all' || (f === 'facos' ? e.topic.includes('/_facos/') : f === 'state' ? e.retain : e.kind === f);
 const KIND = { meta: '규칙', state: '상태', order: '오더', decision: '결정', a2a: 'A2A', cmd: '명령', telemetry: '설비', kpi: 'KPI', quality: '품질', event: '이벤트' };
 const tile = (k, v, sub, tone = '') => `<div class="fos-tile ${tone}"><span>${k}</span><b>${v}</b><small>${sub}</small></div>`;
@@ -44,7 +44,7 @@ export function unsHTML(sim) {
   walk(root, 0);
   const sel = st.sel ? U.tree.get(st.sel) : null;
   let json = ''; if (sel) { try { json = JSON.stringify(JSON.parse(sel.payload), null, 2); } catch { json = sel.payload; } }
-  const levels = `<table class="vla-t uns-lv"><thead><tr><th>ISA-95 계층</th><th>레벨</th><th>facOS 계층</th><th>토픽</th></tr></thead><tbody>${UNS_LEVELS.map((l) => `<tr><td><b>${esc(l.level)}</b></td><td>${esc(l.isa)}</td><td>${esc(l.facos)}</td><td><code>${esc(l.topic)}</code></td></tr>`).join('')}</tbody></table>`;
+  const levels = `<table class="vla-t uns-lv"><thead><tr><th>ISA-95 계층</th><th>레벨</th><th>FacOS 계층</th><th>토픽</th></tr></thead><tbody>${UNS_LEVELS.map((l) => `<tr><td><b>${esc(l.level)}</b></td><td>${esc(l.isa)}</td><td>${esc(l.facos)}</td><td><code>${esc(l.topic)}</code></td></tr>`).join('')}</tbody></table>`;
   // Sparkplug B · ACL · 외부 명령 (앱 — 게이트웨이 상태)
   const SP = mq?.sparkplug, A = mq?.acl, CQ = mq?.commands, X = U.ext;
   const spT = SP ? `<table class="vla-t"><thead><tr><th>엣지 노드</th><th>연결</th><th>bdSeq</th><th>seq</th><th>디바이스</th><th>NBIRTH · DBIRTH · DDATA</th><th>재탄생</th></tr></thead><tbody>${SP.edges.map((e) => `<tr><td><b>${esc(e.id)}</b></td><td>${e.connected ? (e.born ? '탄생' : '연결') : '<b class="qt-chip warn">끊김</b>'}</td><td>${e.bdSeq}</td><td>${e.seq}</td><td>${e.devices}</td><td>${e.births} · ${e.dbirths} · ${e.ddata}</td><td>${e.rebirths}</td></tr>`).join('') || '<tr><td colspan="7">설비 요약이 들어오면 존마다 엣지 노드가 탄생합니다</td></tr>'}</tbody></table>
@@ -72,16 +72,16 @@ export function unsHTML(sim) {
   const extra = `<div class="fos-grid"><div><h4>MQTT 5 브로커 연결 <small>외부 브로커 브리지 · 설정은 이 PC에 저장 (비밀번호 암호화)</small></h4>${brForm}</div><div></div></div>
     <div class="fos-grid"><div><h4>Sparkplug B 엣지 <small>spBv1.0/metafactory/… → 주 호스트 → {존}/{셀}/telemetry · edge</small></h4>${spT}</div>
       <div><h4>접근 권한 (ACL) <small>쓰기는 역할·존별 · UNS 상태 토픽은 앱만 발행</small></h4>${aclT}
-      <h4>외부 명령 요청 <small>{존}/{셀|_zone}/cmd/request → facOS 명령 경로 → 명령 4단</small></h4>${cmdT}</div></div>`;
+      <h4>외부 명령 요청 <small>{존}/{셀|_zone}/cmd/request → FacOS 명령 경로 → 명령 4단</small></h4>${cmdT}</div></div>`;
   return `${tiles}
     <div class="a2a-bar"><div class="seg small">${Object.entries(FLT).map(([k, l]) => `<button type="button" data-uns-flt="${k}" class="${st.flt === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <button type="button" data-uns-all>${st.open.size > 6 ? '▸ 모두 접기' : '▾ 모두 펼치기'}</button><button type="button" data-uns-dl>⬇ 현재 트리 (.json)</button>
       <small>${sim.time != null ? `시뮬레이션 ${clk(sim.time)}` : ''}</small></div>
     <div class="a2a-b"><div class="uns-tree">${rows.join('') || '<p class="vla-note">아직 토픽이 없습니다.</p>'}</div>
       <div class="a2a-side"><h4>마지막 메시지 <small>${sel ? `${esc(sel.topic)} · ${sel.retain ? 'retain' : '이벤트'} · ${sel.n}회` : '토픽을 누르세요'}</small></h4><pre>${esc(json)}</pre>
-        <p class="vla-note">facOS는 에이전트끼리 직접 묶지 않고 UNS 하나를 봅니다. 상태(셀 OCS · 존 · 오더 · facOS)는 retain으로 값이 바뀔 때만, 결정 · A2A · 명령은 이벤트로 발행합니다. 명령은 같은 correlationId로 cmd → cmd/ack → cmd/exec → cmd/done을 잇습니다(MQTT 5 브리지에서는 Correlation Data · Response Topic 속성으로도) — 접수 ACK만으로 재개하지 않습니다. 기존 OPC UA PubSub(opcua/json/#) · AAS · 평면 대시보드 토픽(metafactory/…/v1)은 그대로 함께 나갑니다.</p></div></div>
+        <p class="vla-note">FacOS는 에이전트끼리 직접 묶지 않고 UNS 하나를 봅니다. 상태(셀 OCS · 존 · 오더 · FacOS)는 retain으로 값이 바뀔 때만, 결정 · A2A · 명령은 이벤트로 발행합니다. 명령은 같은 correlationId로 cmd → cmd/ack → cmd/exec → cmd/done을 잇습니다(MQTT 5 브리지에서는 Correlation Data · Response Topic 속성으로도) — 접수 ACK만으로 재개하지 않습니다. 기존 OPC UA PubSub(opcua/json/#) · AAS · 평면 대시보드 토픽(metafactory/…/v1)은 그대로 함께 나갑니다.</p></div></div>
     ${extra}
-    <h4>ISA-95 계층 ↔ facOS ↔ 토픽</h4>${levels}`;
+    <h4>ISA-95 계층 ↔ FacOS ↔ 토픽</h4>${levels}`;
 }
 
 function loadBridge() {

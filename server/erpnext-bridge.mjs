@@ -1,4 +1,4 @@
-// ERPNext 연동 (2단계 · 선택 · 앱 전용) — FACOS 업무 기록(FAC)과 공장 오더를 오픈소스 ERP(ERPNext v16, GPL-3.0 · REST로만 호출)에 실제 전표로 남긴다.
+// ERPNext 연동 (2단계 · 선택 · 앱 전용) — FacOS 업무 기록(FAC)과 공장 오더를 오픈소스 ERP(ERPNext v16, GPL-3.0 · REST로만 호출)에 실제 전표로 남긴다.
 // 흐름: 화면 FAC 기록 → 2초마다 /api/fac/push (server/fac-api.mjs) → 이 다리(facListen) → 디스크 대기열 → ERPNext REST /api/resource · /api/method
 //   기준정보(「ERPNext 준비」): 초기 설정(회사 · KRW · 회계연도) · 품목 · 창고 · 공급사 · 고객사 · BOM(원자재 1 + 부품 키트 1 — 설계 가정) · 작업장 ·
 //                              사용자 정의 필드 mf_ref(중복 방지) · 음수 재고 허용(시뮬레이션 전표 순서 차이 흡수) · 초과 생산 100% · 설비 자산 분류·정비팀

@@ -1,4 +1,4 @@
-// FAC API — FACOS 업무 기록(FAC: 발주 · 재고 · 설비보전)을 외부 시스템(MES·BI·사내 시스템)에 REST로 제공한다.
+// FAC API — FacOS 업무 기록(FAC: 발주 · 재고 · 설비보전)을 외부 시스템(MES·BI·사내 시스템)에 REST로 제공한다.
 // 화면(js/fac.js · js/main.js)이 2초마다 쌓인 이벤트와 현황을 POST /api/fac/push로 올리면 서버 메모리에 보관하고,
 // 외부에서는 조회(①)와 이벤트 이력(②)을 읽는다. 쓰기(외부 발주·정비요청 입력)는 아직 없다 — 읽기 전용.
 //  ① 조회   GET /api/fac/status · /po · /moves · /stock · /mr · /equipment · /orderpoints · /master

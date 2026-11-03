@@ -409,15 +409,15 @@ export class DataHub {
   }
 
   // ── OPC UA PubSub (Part 14) JSON NetworkMessage ─────────────────
-  // 패킷 덤프로 보내기: 자산 메시지는 그 자산(이동 로봇은 5G 단말, 설비는 유선 LAN), 이벤트·명령은 FACOS가 발행
-  // 구독: FACOS는 데이터·이벤트·메타데이터·AAS 전부(opcua/json/# · aas/#), 각 자산은 상위 명령 토픽
+  // 패킷 덤프로 보내기: 자산 메시지는 그 자산(이동 로봇은 5G 단말, 설비는 유선 LAN), 이벤트·명령은 FacOS가 발행
+  // 구독: FacOS는 데이터·이벤트·메타데이터·AAS 전부(opcua/json/# · aas/#), 각 자산은 상위 명령 토픽
   tap(a, topic, body, simT, retain = false, ue = null) {
     const caps = [this.pcap, ...this.assetPcaps.values()].filter((P) => P?.on); if (!caps.length) return;
     const cmd = [this.topic('data', 'Commands')], tMs = this.epochMs + simT * 1000;
     const m = a ? { key: a.id, kind: a.mover ? (ue ? '5g' : 'lan') : 'lan', ip: this.ipOf(a), topic, payload: body, tMs, retain, subs: cmd, extraMs: ue && ue.hoUntil >= 0 ? (ue.hoUntil - this.sim.time) * 1000 : 0 }
-      : { key: 'FACOS', kind: 'facos', topic, payload: body, tMs };
+      : { key: 'FacOS', kind: 'facos', topic, payload: body, tMs };
     for (const P of caps) {
-      if (!P.only && !P.clients.has('FACOS')) P.client('FACOS', 'facos', tMs - 50, ['opcua/json/#', 'aas/#']);
+      if (!P.only && !P.clients.has('FacOS')) P.client('FacOS', 'facos', tMs - 50, ['opcua/json/#', 'aas/#']);
       P.publish(m);
     }
   }

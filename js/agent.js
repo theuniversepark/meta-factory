@@ -11,7 +11,7 @@ const fmtMin = (sec) => (sec >= 60 ? `${(sec / 60).toFixed(1)}분` : `${Math.rou
 export class FactoryAgent {
   constructor(sim) {
     this.sim = sim;
-    sim.zoneAgent = this;   // Factory OS 계층 표시 (정밀조립 존 에이전트 등록부)
+    sim.zoneAgent = this;   // FacOS 계층 표시 (정밀조립 존 에이전트 등록부)
     this.m = sim.mode;
     this.t = 0;
     this.cool = new Map();
@@ -32,7 +32,7 @@ export class FactoryAgent {
 
   decide(level, title, body) {
     this.decisions++;
-    // FACOS 자율 에이전트 화면: 분류별 누적 + 최근 판단 근거
+    // FacOS 자율 에이전트 화면: 분류별 누적 + 최근 판단 근거
     const cat = AGENT_CAT.find(([, re]) => re.test(title))?.[0] ?? '기타';
     this.byCat[cat] = (this.byCat[cat] ?? 0) + 1;
     this.history.push({ t: this.sim.time, level, cat, title, ...body }); if (this.history.length > 200) this.history.shift();

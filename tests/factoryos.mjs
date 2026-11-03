@@ -1,4 +1,4 @@
-// Factory OS 계층 검증 (1단계 정밀조립Zone) — 공장 오케스트레이터(FacOS) · Manufacturing Agent · 셀 OCS · A2A 메시지
+// FacOS 계층 검증 (1단계 정밀조립Zone) — 공장 오케스트레이터(FacOS) · Manufacturing Agent · 셀 OCS · A2A 메시지
 // 가드레일(계층 권한표) · 오더·수량 정산 · 셀 OCS 상태머신·명령 검증 · 결정 메시지 필수 필드 · 상위망 단절(Outbox) · 정밀검사 샘플 핸드셰이크 · 이상 판단 10초. 실행: npm test
 import { zoneLine } from '../js/line.js';
 import { Simulation } from '../js/sim.js';

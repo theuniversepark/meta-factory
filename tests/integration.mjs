@@ -20,7 +20,7 @@ s.disruptSupply?.(300); run(400);
 console.log('== 진화 컨셉');
 { const el = { innerHTML: '' }; renderConcept(el, { current: 'dark', res: null, lineName: '정밀조립Zone', busy: false });
   const h = el.innerHTML;
-  check('진화 컨셉에 현장 감시(CCTV) · 통신망(5G) · 업무 기록(FAC) · 입고·창고 · 이동 로봇 에너지 단계 비교', ['현장 감시 (CCTV)', 'CCTV 에이전트', '통신망', 'Private 5G', '업무 기록 (발주·재고·정비)', 'FACOS FAC', '입고·창고', '이동 로봇 에너지', '패킷 덤프'].every((k) => h.includes(k))); }
+  check('진화 컨셉에 현장 감시(CCTV) · 통신망(5G) · 업무 기록(FAC) · 입고·창고 · 이동 로봇 에너지 단계 비교', ['현장 감시 (CCTV)', 'CCTV 에이전트', '통신망', 'Private 5G', '업무 기록 (발주·재고·정비)', 'FacOS FAC', '입고·창고', '이동 로봇 에너지', '패킷 덤프'].every((k) => h.includes(k))); }
 
 console.log('== 오케스트레이터 ↔ FAC');
 { const inc = s.orch.incidents.find((i) => i.key === `fail:${st.id}`);

@@ -23,7 +23,7 @@ const MODE_DESC = {
   dark: ['3단계 · 피지컬AI 자율공장', 'AI가 판단하고 로봇의 몸으로 실행합니다. 휴머노이드가 정비·부품 보충을, 사족보행 로봇이 열화상·진동 순찰 점검을 맡고, 고효율 LED 조명 아래 24시간 무인 가동합니다. 사람은 원격 관제만 합니다.'],
 };
 
-// 공장 운영 로그의 존 구분 (FACOS 관점 필터) — 로그에 zone이 있으면 그 값, 없으면 제목 → 본문 순으로 존 이름·셀 코드를 찾는다 (없으면 정밀조립: 정밀조립 존 에이전트 판단·셀 이벤트)
+// 공장 운영 로그의 존 구분 (FacOS 관점 필터) — 로그에 zone이 있으면 그 값, 없으면 제목 → 본문 순으로 존 이름·셀 코드를 찾는다 (없으면 정밀조립: 정밀조립 존 에이전트 판단·셀 이벤트)
 export const LOG_ZONES = { all: '전체', main: '정밀조립', flex: '유연생산', adapt: '적응가공', insp: '정밀검사', fac: '공장 공용' };
 const LZ_RE = [['flex', /유연생산|FLX-|A-1/], ['adapt', /적응가공|ADP-|A-2/], ['insp', /정밀검사|QIS-|시료|샘플 /], ['fac', /입고|출하|트럭|지게차|창고|도크|AS\/RS|수배전|압축기|화물|야드|센서망|공장 오케스트레이터|FacOS|존 간|Zone 간/]];
 export function logZone(l) {
@@ -56,7 +56,7 @@ export class UI {
       c.addEventListener('pointermove', (e) => { c._hx = e.offsetX / c.clientWidth; });
       c.addEventListener('pointerleave', () => { c._hx = null; });
     }
-    // FACOS 요약 칩 · 로그 필터: 누르면 공장 운영 로그를 그 존으로 거른다 (수동으로 고르면 왼쪽 Zone 연동은 끈다)
+    // FacOS 요약 칩 · 로그 필터: 누르면 공장 운영 로그를 그 존으로 거른다 (수동으로 고르면 왼쪽 Zone 연동은 끈다)
     // 정밀조립 존 에이전트 블록: 접고 펼친 상태 기억 (기본 접힘 — 공장 운영 로그 공간)
     const za = $('zoneAgentBox'); try { za.open = localStorage.getItem('metafactory.zoneAgentOpen') === '1'; } catch { /* 기본 접힘 */ }
     za.addEventListener('toggle', () => { if (za.dataset.tori) { delete za.dataset.tori; return; } try { localStorage.setItem('metafactory.zoneAgentOpen', za.open ? '1' : '0'); } catch { /* 이번 실행만 */ } });
@@ -147,7 +147,7 @@ export class UI {
     for (const l of this.sim?.logs ?? []) { const z = logZone(l); cnt[z] = (cnt[z] ?? 0) + 1; }
     $('logFilter').innerHTML = Object.entries(LOG_ZONES).map(([k, v]) => `<button type="button" data-lf="${k}" class="${k === f ? 'on' : ''}">${v}${k !== 'all' && cnt[k] ? ` <small>${cnt[k]}</small>` : ''}</button>`).join('');
   }
-  // FACOS 요약: 존별 상태 · 결정 대기(사람 결정) · 진행 중 오더 · 최근 공장 오케스트레이터 결정
+  // FacOS 요약: 존별 상태 · 결정 대기(사람 결정) · 진행 중 오더 · 최근 공장 오케스트레이터 결정
   renderFacos() {
     const s = this.sim; if (!s) return;
     const k = s.kpi(), xz = s.xzones, I = s.inspZone, F = s.fos, zc = (key) => (s.zoneCells ?? []).filter((c) => c.zone === key);

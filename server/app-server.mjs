@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
 import { runAgentTurn, MODEL } from './llm-agent.mjs';
 import { designLine, designZone } from './line-designer.mjs';
-import { startMqtt, mqttStatus, mqttPublish, unsTakeCommands, unsAclPassword, unsBridgeConfig, unsBridgeSave } from './mqtt-gateway.mjs';
+import { startMqtt, mqttStatus, mqttPublish, unsTakeCommands, unsAclPassword, unsBridgeConfig, unsBridgeSave, setUnsTap } from './mqtt-gateway.mjs';
+import { makeFacosStore } from './facos-store.mjs';
 import { ffmpegInfo, queueConvert, convertClip, readStoredZip, framesToMp4 } from './video-convert.mjs';
 import { facRoute, facListen } from './fac-api.mjs';
 import { makeRcaApi } from './rca-api.mjs';
@@ -383,6 +384,8 @@ function sendApiError(res, err) {
 export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
   if (!client) setApiKey(null);
   await startMqtt({ aclFile: path.join(DATA_DIR(), 'uns', 'acl.json'), bridgeFile: path.join(DATA_DIR(), 'uns', 'bridge.json') });   // UNS 계정·권한 (server/uns-acl.mjs)
+  const facos = makeFacosStore({ dir: path.join(DATA_DIR(), 'facos') });   // FacOS 기록 (A2A · 결정 · 오더 · 계획 버전) — UNS에서 받아 실행별 JSONL
+  setUnsTap(facos.tap);
   const rca = makeRcaApi({ publish: mqttPublish });   // 분석 결과는 내장 MQTT 브로커로도 발행
   let epcis = null;   // 내장 EPCIS 저장소 — 처음 요청 때 데이터 폴더에서 불러온다
   const epcisApi = () => (epcis ??= makeEpcisApi({ dir: path.join(DATA_DIR(), 'epcis') }));
@@ -430,7 +433,13 @@ export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
     if (url.pathname === '/api/aasx/v1' && req.method === 'POST') return saveAasx(req, res, url);
     if (url.pathname === '/api/aasx/v1') return send(res, 200, aasxList());
     if (url.pathname === '/api/mqtt/status') return send(res, 200, mqttStatus());
-    // UNS 외부 명령 요청 — 화면(facOS)이 2초마다 가져가 명령 경로로 실행 · 계정 비밀번호 보기(이 PC 안 화면에서만)
+    // UNS 외부 명령 요청 — 화면(FacOS)이 2초마다 가져가 명령 경로로 실행 · 계정 비밀번호 보기(이 PC 안 화면에서만)
+    // FacOS 기록 (server/facos-store.mjs) — 조회 · 내려받기 (읽기 전용)
+    if (url.pathname === '/api/facos/v1' || url.pathname.startsWith('/api/facos/v1/')) {
+      const r = facos.route(req.method, url.pathname, url.searchParams);
+      if (r.raw != null) { res.writeHead(200, { 'Content-Type': r.type, 'Content-Disposition': `attachment; filename="${r.name}"` }); return res.end(r.raw); }
+      return send(res, r.code, r.body);
+    }
     // 외부 MQTT 5 브로커 브리지 설정 (UNS 탭) — 비밀번호는 저장 여부만 응답
     if (url.pathname === '/api/uns/bridge' && req.method === 'GET') return send(res, 200, unsBridgeConfig());
     if (url.pathname === '/api/uns/bridge' && req.method === 'POST') {
@@ -444,11 +453,11 @@ export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
     if (url.pathname === '/api/mqtt/publish' && req.method === 'POST') {
       try {
         const body = JSON.parse(await readBody(req, 16 * 1024 * 1024));
-        return send(res, 200, { published: mqttPublish(Array.isArray(body?.messages) ? body.messages : []), status: mqttStatus() });
+        return send(res, 200, { published: mqttPublish(Array.isArray(body?.messages) ? body.messages : []), status: mqttStatus(), facos: facos.status() });
       } catch (e) { return send(res, 400, { error: e.message }); }
     }
 
-    // FAC API (FACOS 업무 기록: 발주·재고·설비보전) — 화면이 /api/fac/push로 올리고, 외부는 조회·이벤트를 GET으로 읽는다
+    // FAC API (FacOS 업무 기록: 발주·재고·설비보전) — 화면이 /api/fac/push로 올리고, 외부는 조회·이벤트를 GET으로 읽는다
     if (url.pathname === '/api/fac' || url.pathname.startsWith('/api/fac/')) {
       try {
         const r = facRoute(req.method, url.pathname, url.searchParams, req.method === 'POST' ? await readBody(req, 8 * 1024 * 1024) : '');
@@ -478,7 +487,7 @@ export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
       try { const r = await erp.route(req.method, url.pathname, url.searchParams, req.method === 'POST' ? await readBody(req, 1024 * 1024) : ''); if (r) return send(res, r.code, r.body); }
       catch (e) { return send(res, 400, { error: e.message }); }
     }
-    // RCA 전담 서버 (더미) — 메인 서버(화면 FACOS 품질 모듈)가 불량 판정 리포트를 올리고 분석 결과·종결을 주고받는다 (server/rca-api.mjs)
+    // RCA 전담 서버 (더미) — 메인 서버(화면 FacOS 품질 모듈)가 불량 판정 리포트를 올리고 분석 결과·종결을 주고받는다 (server/rca-api.mjs)
     if (url.pathname.startsWith('/api/rca/v1')) {
       try {
         const r = rca.route(req.method, url.pathname, url.searchParams, req.method === 'POST' ? await readBody(req, 16 * 1024 * 1024) : '');

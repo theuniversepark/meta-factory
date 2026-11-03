@@ -1,5 +1,5 @@
 // RCA 전담 서버 (더미) 처리 로직 — 앱 서버(server/rca-api.mjs, 실제 HTTP)와 화면 시뮬레이션(js/qcomm.js, 웹·공유 페이지)이 같은 코드를 쓴다.
-// 받는 것: 메인 서버(FACOS 품질 모듈)가 올린 불량 판정 리포트 (POST /api/rca/v1/reports)
+// 받는 것: 메인 서버(FacOS 품질 모듈)가 올린 불량 판정 리포트 (POST /api/rca/v1/reports)
 // 하는 일: ① 접수(티켓 발급 · 스키마 확인) → ② 분석(재발 횟수 · 원인 확정/재검토 · 우선순위 · 기한) → ③ 조치안(봉쇄 · 8D 대책 후보) → ④ 종결(8D 요약 수신)
 // 분석은 현장 엣지의 계보 분석(rca.causes)을 받아 서버 쪽 근거(같은 원인 재발 · 봉쇄 범위 · 유출 여부)로 확정하거나 사람 재검토로 돌린다 — 더미라 학습 모델은 없다.
 export const RCA_SCHEMA = 'metafactory/quality-defect-report/1.0';

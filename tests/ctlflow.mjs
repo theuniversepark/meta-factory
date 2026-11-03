@@ -39,8 +39,8 @@ for (const mode of ['smart', 'dark']) {
 
   const v = new OrchView(stubEl(), {}); v.sim = s;
   const L = v.layerSvg(), P = v.procSvg();
-  check('계층 흐름도: 오케스트레이터·셀·현장 노드와 제어·이벤트 선', /공장 오케스트레이터/.test(L) && /셀 컨트롤러/.test(L) && /현장 감지/.test(L) && /ca-control/.test(L) && /ca-event/.test(L));
-  check(`계층 흐름도: FAC 노드 ${s.fac.on ? '표시' : '없음'}`, /FAC \(FACOS 업무 기록\)/.test(L) === !!s.fac.on);
+  check('계층 흐름도: 오케스트레이터·셀·현장 노드와 제어·이벤트 선', /존 오케스트레이터/.test(L) && /셀 컨트롤러/.test(L) && /현장 감지/.test(L) && /ca-control/.test(L) && /ca-event/.test(L));
+  check(`계층 흐름도: FAC 노드 ${s.fac.on ? '표시' : '없음'}`, /FAC \(FacOS 업무 기록\)/.test(L) === !!s.fac.on);
   v.flt = 'event';
   check('필터(이벤트): 제어 선을 흐리게', /class="ce dim/.test(v.layerSvg()));
   const shown = s.stations.filter((x) => P.includes(x.name.slice(0, 4))).length;

@@ -39,7 +39,7 @@ const prodKo = (p) => PRODUCTS[p]?.label ?? p;
 // FacOS 주제: 공장 오케스트레이터 상태 (js/factoryos.js)
 const fos = (T) => T.h.sim?.()?.fos ?? null;
 const fosOrder = (F) => { const o = F?.orders.find((x) => x.status === 'open' && x.evidenced !== true) ?? F?.orders[0]; return o ? { o, good: F.main.reconcile(o.id)?.good ?? 0 } : null; };
-const DEC_KO = { policy: '정책 승인', 'due-risk': '납기 위험', timeout: '응답 시간 초과', 'first-article': '초품 불합격', 'tool-stock': '공구 재고', 'machine-pm': '주축 예지정비', 'insp-priority': '정밀검사 우선순위' };
+const DEC_KO = { 'kpi-lever': 'KPI 개선안', 'kpi-revert': '개선안 되돌림', 'aios-policy': 'AIOS 배포', 'aios-rollback': 'AIOS 롤백', mix: '혼류 비율', interval: '투입 간격', expedite: '긴급 조달', 'maint-support': '정비 지원', policy: '정책 승인', 'due-risk': '납기 위험', timeout: '응답 시간 초과', 'first-article': '초품 불합격', 'tool-stock': '공구 재고', 'machine-pm': '주축 예지정비', 'insp-priority': '정밀검사 우선순위' };
 // KPI 영향 · 개선 주제: 손실 분석 · 개선 제안 · 트윈 검증 · 결정 (js/impact.js)
 const adv = (T) => T.h.sim?.()?.impact?.advisor ?? null;
 const lossTop = (T) => T.h.sim?.()?.impact?.report(1800)?.rows?.[0] ?? null;
@@ -107,7 +107,7 @@ const TOPICS = {
   facos: { name: 'FacOS — 공장 운영 SW', steps: [
     { mode: 'dark', view: 'all', hl: ['#facos'], fchain: -1,
       voice: 'FacOS는 이 공장의 운영 소프트웨어예요. 원칙은 세 가지예요. 명령은 위에서 아래로, 상태는 아래에서 위로, 같은 계층끼리는 핸드셰이크와 알림만 주고받아요. 결정이 필요한 일은 공장으로 올려요. 그리고 모든 계층은 UNS라는 하나의 정보 공간 위에서 연결돼요.',
-      say: 'FacOS(Factory OS)는 이 공장의 운영 SW예요. 원칙 세 가지 — 명령은 위 → 아래, 상태는 아래 → 위, 같은 계층끼리는 핸드셰이크 · 알림만. 결정이 필요한 일은 공장으로 올려요. 모든 계층은 UNS(통합 네임스페이스) 하나 위에서 연결돼요. 화면 위 FACOS 줄이 지금 상태예요.' },
+      say: 'FacOS(Factory OS)는 이 공장의 운영 SW예요. 원칙 세 가지 — 명령은 위 → 아래, 상태는 아래 → 위, 같은 계층끼리는 핸드셰이크 · 알림만. 결정이 필요한 일은 공장으로 올려요. 모든 계층은 UNS(통합 네임스페이스) 하나 위에서 연결돼요. 화면 위 FacOS 줄이 지금 상태예요.' },
     { panel: { kind: 'orch', tab: 'fos' }, hl: ['#btnOrch'], fchain: 2,
       voice: '계층을 볼게요. 맨 위 공장 오케스트레이터가 오더와 우선순위, Zone 간 자원을 정하고, Zone마다 오케스트레이터가 셀을 맡아요. 셀 OCS는 AI 운영 정책에 따라 명령을 판단하고 검증하며, 맨 아래 엣지 스킬이 실제 동작을 해요.',
       say: '계층 — 공장 오케스트레이터(오더 · 납기 · 우선순위 · Zone 간 자원) → Agent Gateway(A2A 가드레일) → Zone 오케스트레이터 4개(정밀조립 = Manufacturing Agent · 정밀검사 · 유연생산 · 적응가공) → 셀 OCS(AI 운영 정책에 따라 명령 판단 · 검증) → 엣지 스킬(VLA 피킹 · 압입 · 체결 판정 · 인터록). 에이전트는 제안하고, 오케스트레이터가 검증해 확정해요.' },
@@ -204,8 +204,8 @@ const TOPICS = {
       say: (T) => !T.ev?.detected ? '아직 감지되지 않았어요. 조금 더 기다려 볼게요.' : byRobot(T) === 'cctv' ? `${ga(T.ev.detectedBy)} ${took(T)} 감지했어요 (신뢰도 ${Math.round((T.ev.conf ?? 0) * 100)}%). 감지 즉시 셀 자체 조치 — ${T.ev.type === 'intrusion' ? '주변 로봇 협동 감속 · 접근 금지 구역 표시' : '주변 로봇 감속 · 우회 · 구역 표시'}. (설명하는 동안 현장은 잠시 멈춰 둘게요)` : `${ga(T.ev.detectedBy)} ${took(T)} 감지했어요 (신뢰도 ${Math.round((T.ev.conf ?? 0) * 100)}%). 잠시 뒤 열리는 로봇 정보 창에 그 카메라 영상과 AI 검출 상자가 보여요. 감지 즉시 셀 자체 조치 — ${T.ev.type === 'intrusion' ? '주변 로봇 협동 감속 · 접근 금지 구역 표시' : '감지 로봇 감속 · 우회 · 구역 표시'}.${T.held ? ' (설명하는 동안 현장은 잠시 멈춰 둘게요)' : ''}` },
     // ── 2막 오케스트레이터 ──
     { panel: (T) => T.ev?.inc && { kind: 'orchInc', key: `ev:${T.ev.id}` }, hl: ['#orchPanel'], live: true, hold: (T) => !!inc(T, 'command'), ready: (T) => !T.ev?.inc || !!inc(T, 'command') || T.ev.cleared,
-      voice: '이제 오케스트레이터입니다. 셀이 상위로 보고하면, 공장 오케스트레이터가 우선순위를 정해요. 화재와 인명이 먼저, 그다음 시설과 작업 안전, 생산 정지 순이에요.',
-      say: (T) => { const r = inc(T, 'report'), d = inc(T, 'decide'); return `오케스트레이터 — 흐름도에 이 인시던트가 열려 있어요. 감지 → 셀 자체 조치 → ${r ? `상위 보고(${at(T, r)})` : '상위 보고'} → ${d ? `판단(${at(T, d)})` : '판단 중…'}. 우선순위는 P1 화재 · 인명 → P2 시설 · 작업 안전 → P3 생산 정지 순이고, 이번 건은 ${ieyo(`P${prioOf(T.ev ?? {})}`)}.`; } },
+      voice: '이제 오케스트레이터입니다. 셀이 상위로 보고하면, 그 Zone의 오케스트레이터가 우선순위를 정해요. 화재와 인명이 먼저, 그다음 시설과 작업 안전, 생산 정지 순이에요. 안전 사고는 FacOS 공장 오케스트레이터에도 바로 알려요.',
+      say: (T) => { const r = inc(T, 'report'), d = inc(T, 'decide'); return `오케스트레이터 — 흐름도에 이 인시던트가 열려 있어요. 감지 → 셀 자체 조치 → ${r ? `상위 보고(${at(T, r)})` : '상위 보고'} → ${d ? `판단(${at(T, d)})` : '판단 중…'}. 우선순위는 P1 화재 · 인명 → P2 시설 · 작업 안전 → P3 생산 정지 순이고, 이번 건은 ${ieyo(`P${prioOf(T.ev ?? {})}`)}. P1 · P2는 FacOS 공장 오케스트레이터에 즉시 보고(A2A)되고, P1이면 다른 Zone에도 방송돼요.`; } },
     { hl: ['#orchPanel'], live: true, hold: (T) => !!inc(T, 'command'),
       voice: '판단이 끝나면 명령이 내려가요. 하던 일이 덜 급한 로봇을 골라 배정하고, 하던 일은 처리 뒤에 이어서 해요. 주변 셀에는 안전 감속이나 보호 정지 명령이 함께 가요.',
       say: (T) => { const c = inc(T, 'command'); return `명령 · 배정 — ${c ? `${c.text.replace(/^명령:\s*/, '')} (${at(T, c)})` : '명령을 내리는 중이에요…'}${T.ev?.cmdCells?.length ? ` · 셀 ${T.ev.cmdCells.length}곳에 ${T.ev.type === 'intrusion' ? '안전 감속' : '보호 정지'} 명령` : ''}. 덜 급한 일을 하던 로봇을 골라 배정하고, 하던 일은 처리 뒤 이어서 해요.${T.held ? ' (설명하는 동안 현장은 잠시 멈췄어요 — 다음 단계에서 다시 움직여요)' : ''}`; } },
@@ -239,8 +239,8 @@ const TOPICS = {
     { say: '② 엣지 — 셀 엣지가 센서 값을 모아 RMS · 첨도 · FFT 같은 특징을 뽑고 1초씩 묶어요. 엣지 게이트웨이는 프로토콜을 바꾸고, 연결이 끊겨도 잠시 저장했다가 보내요. 셀 제어기는 VLA 파지 · 체결 판정 같은 엣지 스킬을 현장에서 바로 실행해요.', ring: 'loop', at: 1, hl: ['#btnSensors'] },
     { say: '③ 서버 · 연동 — 존 서버를 거쳐 공장 중앙의 MQTT 브로커(UNS)로 모이고, AAS 모델과 OPC UA PubSub 형식으로 다른 시스템과 주고받아요. 센서 DB, 로봇 에피소드, 운영 데이터셋이 서버에 쌓여요.', ring: 'loop', at: 2, hl: ['#btnData'] },
     { say: '④ AI 학습 — 로봇 데이터와 카메라 영상은 AI-ready 에피소드가 되어 VLA 모델을 학습하고, 생산 · 설비 · 물류 · 에너지 · 품질 데이터는 운영 데이터셋이 되어 공장 운영 AI(AIOS)의 정책을 학습해요.', ring: 'loop', at: 3, hl: ['#btnVla', '#btnAios'], mode: 'dark' },
-    { say: '⑤ 모니터링 — Zone 대시보드에서 OEE · 6대 손실 · 관리도를, FACOS 패널에서 공장 · 존 · 셀 상태를 실시간으로 봐요. KPI 영향 분석은 이벤트가 생산량 · OEE · 재공(공정 안에 머문 미완성품, WIP) · 전력에 미친 손실을 나눠 보여 줘요.', ring: 'loop', at: 4,
-      voice: '모니터링. 존 대시보드에서 OEE와 6대 손실, 관리도를, FACOS 패널에서 공장과 존, 셀 상태를 실시간으로 봐요. KPI 영향 분석은 이벤트가 생산량과 OEE, 재공, 즉 공정 안에 머물러 있는 미완성품, 그리고 전력에 미친 손실을 나눠 보여 줘요.', hl: ['#btnZoneDash', '#btnImpact'] },
+    { say: '⑤ 모니터링 — Zone 대시보드에서 OEE · 6대 손실 · 관리도를, FacOS 패널에서 공장 · 존 · 셀 상태를 실시간으로 봐요. KPI 영향 분석은 이벤트가 생산량 · OEE · 재공(공정 안에 머문 미완성품, WIP) · 전력에 미친 손실을 나눠 보여 줘요.', ring: 'loop', at: 4,
+      voice: '모니터링. 존 대시보드에서 OEE와 6대 손실, 관리도를, FacOS 패널에서 공장과 존, 셀 상태를 실시간으로 봐요. KPI 영향 분석은 이벤트가 생산량과 OEE, 재공, 즉 공정 안에 머물러 있는 미완성품, 그리고 전력에 미친 손실을 나눠 보여 줘요.', hl: ['#btnZoneDash', '#btnImpact'] },
     { say: '⑥ 현장 제어 — 검증된 모델은 로봇과 오케스트레이터에 배포되고, 오케스트레이터는 판단을 셀 현장 명령(정지 · 속도 · 정비 · 투입)으로 내려보내요. 그 결과가 다시 ① 수집으로 돌아오면서 고리가 닫혀요.', ring: 'loop', at: 5, hl: ['#btnOrch'] },
     { say: '정리하면 수집 → 엣지 → 서버 → AI 학습 · 모니터링 → 현장 제어 → 다시 수집이에요. 이 고리가 돌 때마다 공장이 조금씩 더 똑똑해지는데, 그 이야기가 데이터 플라이휠이에요.', ring: 'loop', at: 6, end: true, next: 'fly' },
   ] },
@@ -258,7 +258,7 @@ const TOPICS = {
     { chain: -1, cam: { view: 'precision' }, panel: null,
       say: '제품 하나의 일생은 ID로 이어져요. 생산에 들어갈 때 생산 ID, 품질검사에 합격하면 제품 고유 ID, 출하할 때는 팔레트 ID가 붙어요. 오더부터 출하 이후까지 그 흐름을 현장과 화면으로 따라가 볼게요.' },
     { chain: 0, cam: { view: 'all' }, panel: { kind: 'orch', tab: 'fos' }, hl: ['#orchPanel'],
-      voice: '첫째, 오더. 공장 오케스트레이터가 오더를 받아 각 Zone에 배정해요. 양품 목표와 혼류 비율, 납기가 함께 내려가고, 앱에서는 ERPNext 작업지시와도 연동돼요. 오케스트레이터 창의 Factory OS 탭에서 오더 진행을 볼 수 있어요.',
+      voice: '첫째, 오더. 공장 오케스트레이터가 오더를 받아 각 Zone에 배정해요. 양품 목표와 혼류 비율, 납기가 함께 내려가고, 앱에서는 ERPNext 작업지시와도 연동돼요. 오케스트레이터 창의 FacOS 계층 탭에서 오더 진행을 볼 수 있어요.',
       say: (T) => { const o = ex.order(T.h.sim?.()); return `① 오더 — 공장 오케스트레이터가 오더를 받아 Zone에 배정해요.${o ? ` 지금 오더는 ${o.o.id}: 양품 목표 ${o.o.target}개 중 ${o.good}개 완료, 납기 ${clock(o.o.due)}.` : ''} 양품 목표 · 혼류 비율 · 납기가 함께 내려가고, 앱에서는 ERPNext 작업지시와도 연동돼요.`; }, live: true },
     { chain: 1, cam: { x: -46, z: 33, d: 22 }, panel: { kind: 'fac', tab: 'po' }, hl: ['#btnFac'],
       voice: '둘째, 자재 준비. 창고 재고가 재주문점 아래로 내려가면 구매오더가 확정되고, 입고 트럭이 이 도크로 들어와요. 들어온 자재에는 원자재 로트가 붙고, AGV가 투입구까지 날라요. FAC 창에서 구매오더와 입고 전표, 재고를 볼 수 있어요.',
@@ -411,7 +411,7 @@ const SPACE = [[/메타팩토리/g, '메타 팩토리'], [/성과활용/g, '성�
   [/부품분류/g, '부품 분류'], [/외관검사/g, '외관 검사'], [/([가-힣])셀(?![가-힣])/g, '$1 셀'], [/([가-힣])셀(?=[이은을에의과로도마])/g, '$1 셀']];
 const ro = (w) => { const c = w.charCodeAt(w.length - 1) - 0xac00, j = c % 28; return c < 0 || c > 11171 || j === 0 || j === 8 ? '로' : '으로'; };   // 받침 없거나 ㄹ이면 「로」
 // 영어 읽을 글: 기호만 쉼으로 · 이름은 철자대로 읽게 띄운다
-const PRON_EN = [[/Fac\s?OS|FACOS/g, 'Fac O S'], [/(?<![A-Za-z])UNS(?![A-Za-z])/g, 'U N S'], [/ISA-95/g, 'I S A 95'], [/AIOS/g, 'A I O S'], [/AMMRs?/g, (w) => `A M M R${w.endsWith('s') ? 's' : ''}`], [/(?<![A-Za-z])FAC(?![A-Za-z])/g, 'F A C'], [/Cpk/g, 'C P K'], [/PubSub/g, 'Pub Sub'],
+const PRON_EN = [[/Fac\s?OS|FacOS/g, 'Fac O S'], [/(?<![A-Za-z])UNS(?![A-Za-z])/g, 'U N S'], [/ISA-95/g, 'I S A 95'], [/AIOS/g, 'A I O S'], [/AMMRs?/g, (w) => `A M M R${w.endsWith('s') ? 's' : ''}`], [/(?<![A-Za-z])FAC(?![A-Za-z])/g, 'F A C'], [/Cpk/g, 'C P K'], [/PubSub/g, 'Pub Sub'],
   [/Meta-Factory\.exe/g, 'Meta Factory dot exe'], [/Meta-Factory/g, 'Meta Factory'], [/e-Um 5G/g, 'e-Um five G'], [/(?<![A-Za-z])NG(?![A-Za-z])/g, 'N G'], [/(?<![A-Za-z])P([123])(?![0-9])/g, 'P $1'], [/\bvs\b/g, 'versus'], [/(\d)×/g, '$1 times'], [/×/g, ' by ']];
 const speakEn = (t) => {
   let s = String(t).replace(/[①②③④⑤⑥⑦]/g, '').replace(/[\u{1F300}-\u{1FAFF}\u{2190}-\u{21FF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu, (c) => (c === '→' ? c : ''))
@@ -506,7 +506,7 @@ export class Tori {
     this.btnEl.innerHTML = ['tour', 'facos', 'incident', 'trace', 'quality', 'kpi', 'data', 'link', 'docs', 'outcome'].map((k) => `<button type="button" data-t="topic" data-k="${k}">${this.tname(k)}</button>`).join('');
     this.btnEl.classList.add('menu');
   }
-  play(topic) { this.unhold(); this.restoreSpeed(); clearTimeout(this.panelT); this.h.closePanels?.(); this.panelOpen = false;   // 새 주제는 깨끗한 화면에서 — 앞 주제가 띄운 창(오케스트레이터 · FACOS · KPI · 로봇 정보 · 5G 지도 …)을 닫고 시작
+  play(topic) { this.unhold(); this.restoreSpeed(); clearTimeout(this.panelT); this.h.closePanels?.(); this.panelOpen = false;   // 새 주제는 깨끗한 화면에서 — 앞 주제가 띄운 창(오케스트레이터 · FacOS · KPI · 로봇 정보 · 5G 지도 …)을 닫고 시작
     this.topic = topic; this.list = null; this.ev = undefined; this.qInj = undefined; this.guard = undefined; this.netOff = undefined; this.flushed = undefined; this.prop = undefined; this.applied = undefined; this.bot = undefined; this.go(0); }
   unhold() { clearInterval(this.holdT); if (this.held) { this.held = false; if (this.heldByMe) this.h.pause?.(false); this.heldByMe = false; } }   // 토리가 직접 멈춘 경우에만 다시 재생 (사용자가 멈춰 둔 공장은 그대로)
   restoreSpeed() { if (this.ev?.quiet) this.ev.quiet = false;   // 인시던트 예시를 「AI 감지」 전에 벗어나면 감지를 막아 둔 이벤트를 풀어 준다
@@ -554,7 +554,7 @@ export class Tori {
   say(text, voice) { this.sayEl.textContent = text; this.talkT = Math.min(6, 1.2 + text.length * (this.lang === 'en' ? 0.02 : 0.045)); this.spokenText = voice ?? text; this.speak(this.spokenText); }   // 말하는 입 모양 (글자 수만큼)
   close() { this.unhold(); this.restoreSpeed(); clearInterval(this.liveT); clearInterval(this.followT); clearTimeout(this.panelT); if (this.panelOpen) { this.h.closePanels?.(); this.panelOpen = false; } this.cancelAuto(); this.clearHl(); this.reveal([]); this.open = false; this.step = -1; this.el.classList.add('mini'); this.stopVoice(); this.talkT = 0; }
   clearHl() { document.querySelectorAll('.tori-hl').forEach((e) => e.classList.remove('tori-hl')); }
-  // 가리킬 곳이 접힌 메뉴 안이면 먼저 펼친다 — 숨긴 왼쪽 · 오른쪽 패널, 접힌 FACOS 머리, 닫힌 존 에이전트 설정
+  // 가리킬 곳이 접힌 메뉴 안이면 먼저 펼친다 — 숨긴 왼쪽 · 오른쪽 패널, 접힌 FacOS 머리, 닫힌 존 에이전트 설정
   // 이 단계가 더는 가리키지 않으면 사용자가 둔 대로 다시 접는다 (연달아 가리키는 동안은 그대로 — 깜빡이지 않게)
   reveal(els) {
     const need = new Map(), b = document.body, ap = document.getElementById('agentPanel');   // 키 → [펼치기, 되접기]

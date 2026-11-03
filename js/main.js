@@ -146,9 +146,9 @@ async function epcisPump() {
 }
 setInterval(() => { epcisPump(); }, 5000);
 // 설비 상태 요약 · 이벤트 (UNS 평면 토픽) → 서버 MQTT 브로커 — 2초(실제 시간)마다 · 설비 대시보드(Telegraf → InfluxDB → Grafana)가 구독 (js/datahub.js unsTelemetry)
-// + ISA-95 UNS 트리 (js/uns.js): facOS 상태·오더·결정·A2A · 셀 OCS · 명령 3단 · 설비 요약 — 웹 버전은 브로커 발행 없이 트리만 (오케스트레이터 창 「UNS 토픽 트리」)
+// + ISA-95 UNS 트리 (js/uns.js): FacOS 상태·오더·결정·A2A · 셀 OCS · 명령 3단 · 설비 요약 — 웹 버전은 브로커 발행 없이 트리만 (오케스트레이터 창 「UNS 토픽 트리」)
 let unsSince = 0, unsBusy = false, unsSim = null;
-const uns = new UnsNamespace(null, { iso: (t) => hub.iso(t) });
+const uns = new UnsNamespace(null, { iso: (t) => hub.iso(t), run: () => hub.runId });
 setInterval(async () => {
   if (unsBusy || !sim) return;
   if (unsSim !== sim) { unsSim = sim; unsSince = 0; uns.reset(sim); }   // 새 실행은 로그 번호가 1부터 다시 — 이전 실행의 커서를 쓰면 첫 경보 묶음이 빠진다
@@ -161,11 +161,11 @@ setInterval(async () => {
   const messages = [...tele, ...E.messages, ...kpi, ...treeOut]; if (!messages.length) return;   // + Zone OEE · 품질 표본 (js/zonekpi.js)
   unsBusy = true;
   try {
-    // 외부 명령 요청 (camtic/metafactory/{존}/{셀}/cmd/request) → facOS 명령 경로 — 결과는 다음 주기 UNS 명령 4단으로
+    // 외부 명령 요청 (camtic/metafactory/{존}/{셀}/cmd/request) → FacOS 명령 경로 — 결과는 다음 주기 UNS 명령 4단으로
     const q = await fetch('/api/uns/commands/take', { method: 'POST' }).then((r) => r.json()).catch(() => null);
     for (const c of q?.commands ?? []) uns.applyCommand(c);
     const r = await fetch('/api/mqtt/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages }) });
-    const j = await r.json(); uns.broker.on = !!j.status?.listening; uns.broker.published += treeOut.length; uns.broker.error = null; uns.broker.status = j.status;
+    const j = await r.json(); uns.broker.on = !!j.status?.listening; uns.broker.published += treeOut.length; uns.broker.error = null; uns.broker.status = j.status; uns.broker.facos = j.facos ?? null;
     if (j.status?.uns?.rebirth) uns.rebirth();   // 게이트웨이가 죽음 처리했거나 새로 시작 — 다음 주기에 모든 retain 상태를 다시 발행
   } catch (e) { uns.broker.error = e.message; uns.rebirth(); /* 서버가 잠시 안 되면 다음 주기에 (상태도 다시) */ } finally { unsBusy = false; }
 }, 2000);
@@ -734,7 +734,7 @@ document.getElementById('engineSeg').addEventListener('click', (e) => {
   });
 });
 document.getElementById('pauseThink').addEventListener('change', (e) => { llm.pauseWhileThinking = e.target.checked; });
-// 오른쪽 FACOS · 공장 운영 머리를 누르면 존 요약 칩 · 존 에이전트 설정을 접고 펼친다 (이 브라우저에 기억 — 로그·입력창은 그대로)
+// 오른쪽 FacOS · 공장 운영 머리를 누르면 존 요약 칩 · 존 에이전트 설정을 접고 펼친다 (이 브라우저에 기억 — 로그·입력창은 그대로)
 {
   const head = document.getElementById('facosHead'), panel = document.getElementById('agentPanel'), KEY = 'metafactory.facosFolded';
   const set = (f) => { panel.classList.toggle('facos-folded', f); head.setAttribute('aria-expanded', String(!f)); try { localStorage.setItem(KEY, f ? '1' : '0'); } catch { /* 저장소 없음 */ } };
@@ -776,7 +776,7 @@ const FORMATS = [
   ['csv', 'CSV', '시계열·이벤트 긴 형식 (타임스탬프·자산·항목·값·단위)'],
   ['aml', 'AutomationML', 'CAEX 3.0 공장 계층 + AAS id + 최신 값, CSV 시계열 참조'],
 ];
-// ── FAC 창 (FACOS 업무 기록): 발주 · 재고 · 설비보전 + FAC API ─────────────────
+// ── FAC 창 (FacOS 업무 기록): 발주 · 재고 · 설비보전 + FAC API ─────────────────
 const facModal = document.getElementById('facModal'), facBody = document.getElementById('facBody');
 let facTab = 'po', facTimer = null, facSrv = null, facNote = '', facPushT = 0, facBusy = false;
 const won = (v) => `${Math.round(v).toLocaleString('ko-KR')}원`;
@@ -847,7 +847,7 @@ function renderFac() {
       <div class="od-kpi"><span>물류 선반 재고</span><b>${n(Q.rackRaw.raw)} · ${n(Q.rackParts.parts)}</b><small>RM-BOX · PT-KIT (확정 기준)</small></div>
       <div class="od-kpi"><span>정비요청</span><b>${n(S.mr)}건</b><small>긴급 ${S.corrective} · 예방 ${S.preventive} · 진행 ${S.mrOpen}</small></div></div>
     <div class="od-tabs">${Object.entries(tabs).map(([k, v]) => `<button data-factab="${k}" class="${facTab === k ? 'on' : ''}">${v}</button>`).join('')}</div>${body}
-    <div class="cmp-note">FACOS 업무 기록 — 구매오더(fac.po) · 재고 전표(fac.move) · 현재고(fac.stock) · 정비요청(fac.mr)${hub.noServer ? '' : ' · FAC API 게시'} · 내부 이동·생산 입고는 10분(공장 시계)마다 한 전표</div>`);
+    <div class="cmp-note">FacOS 업무 기록 — 구매오더(fac.po) · 재고 전표(fac.move) · 현재고(fac.stock) · 정비요청(fac.mr)${hub.noServer ? '' : ' · FAC API 게시'} · 내부 이동·생산 입고는 10분(공장 시계)마다 한 전표</div>`);
 }
 document.getElementById('btnFac').addEventListener('click', () => {
   facModal.classList.remove('hidden'); facStatus().then(renderFac); renderFac();
@@ -894,7 +894,7 @@ function pcapHtml() {
     <span>MQTT</span><b>PUBLISH 발행 ${n(S.publishUp)} · 구독자 전달 ${n(S.publishDown)} · PUBACK ${n(S.puback)} · CONNECT ${n(S.connect)} · SUBSCRIBE ${n(S.subscribe)} · PING ${n(S.ping)}</b>
     <span>영상</span><b>${P.video === false ? '끔' : `프레임 ${n(S.video)}개`} — CCTV·로봇 카메라 JPEG를 OPC UA ua-data ByteString(base64)으로 1초마다 (<code>…/Video_&lt;카메라&gt;</code>)</b>
     <span>가공기 감시</span><b>${n(S.machmon ?? 0)}건 — 적응가공 가공기 측정(5초)·예지보전 판단 (<code>metafactory/machmon/v1/adapt/&lt;셀&gt;</code> · <code>…/event</code>)</b>
-    <span>호스트</span><b>FACOS 10.20.0.20 · 설비·셀 LAN 10.20.1.x ${H.lan} · 5G 이동 로봇 10.45.x.x ${H['5g']} · CCTV 10.20.2.x ${H.cam}</b></div>
+    <span>호스트</span><b>FacOS 10.20.0.20 · 설비·셀 LAN 10.20.1.x ${H.lan} · 5G 이동 로봇 10.45.x.x ${H['5g']} · CCTV 10.20.2.x ${H.cam}</b></div>
     <div class="dh-save">
       ${P.on ? '<button data-pcap="stop"><b>⏹ 캡처 중지</b><small>지금까지 기록 유지</small></button>' : '<button data-pcap="start"><b>⏺ 캡처 시작</b><small>새로 기록 (이전 기록 지움)</small></button>'}
       <button data-pcap="save"><b>💾 .pcap 저장</b><small>Wireshark · tcpdump로 열기</small></button>
@@ -1161,10 +1161,10 @@ document.addEventListener('pointerdown', (e) => {
   if (t.closest('.modal')) return;   // 가운데 창(모달)은 아래 바탕 클릭 규칙
   // 누른 곳이 들어 있는 창, 또는 그 창을 여닫는 버튼이면 그 창은 남긴다 (버튼이 직접 토글)
   const keep = Object.entries(POPUPS).filter(([id, btn]) => document.getElementById(id)?.contains(t) || (btn && document.getElementById(btn)?.contains(t))).map(([id]) => id);
-  // FACOS 칩·5G 카드 등에서 다른 창을 여는 경우: 정보 창 안의 버튼은 그 창을 남긴다
+  // FacOS 칩·5G 카드 등에서 다른 창을 여는 경우: 정보 창 안의 버튼은 그 창을 남긴다
   closePopups(keep);
 }, true);
-// 가운데 창(진화 컨셉 · 3단계 비교 · 데이터 연동 · FAC · VLA · AIOS · FACOS 상세 · 지시 게이트 · 설정): 창 바깥 어두운 바탕을 누르면 닫는다
+// 가운데 창(진화 컨셉 · 3단계 비교 · 데이터 연동 · FAC · VLA · AIOS · FacOS 상세 · 지시 게이트 · 설정): 창 바깥 어두운 바탕을 누르면 닫는다
 // 바탕에서 누르고 뗐을 때만 (창 안에서 끌다가 바탕에서 놓은 경우는 닫지 않음) — 각 창의 ✕ 버튼을 눌러 정리 동작(갱신 타이머 해제 등)을 그대로 쓴다
 let modalDown = null;
 document.addEventListener('pointerdown', (e) => { modalDown = e.target instanceof Element && e.target.classList.contains('modal') ? e.target : null; }, true);
@@ -1710,7 +1710,7 @@ function toriCam(c) {
   if (c.station) { const sv = view.stationViews.find((v) => v.st.id === c.station); if (!sv) return; const w = sv.group.getWorldPosition(new THREE.Vector3()); x = w.x; z = w.z; }
   tweenCam([x + d * 0.12, d, z + d * 0.9], [x, 0, z], c.ms);
 }
-// 토리 안내용 창: 오케스트레이터(Factory OS 오더) · FAC(구매오더) · 품질 추적(탭 · 선택 제품 · EPCIS 조회)
+// 토리 안내용 창: 오케스트레이터(FacOS 오더) · FAC(구매오더) · 품질 추적(탭 · 선택 제품 · EPCIS 조회)
 function toriPanel(p) {
   document.body.classList.add('tori-tour');
   if (p.kind === 'orch') { orchView.show(); orchView.tab = p.tab; orchView.render(true); }
@@ -1725,7 +1725,7 @@ function toriPanel(p) {
     const at = () => (p.focus === 'loss' ? impactBody.querySelector('h3') : p.focus === 'log' ? [...impactBody.querySelectorAll('h3')].find((h) => h.textContent.startsWith('의사결정 이력')) ?? [...impactBody.querySelectorAll('h3')].find((h) => h.textContent.startsWith('개선 방법')) : p.focus != null ? impactBody.querySelector(`[data-imp-id="${p.focus}"]`) : null);
     requestAnimationFrame(() => at()?.scrollIntoView({ block: p.focus === 'loss' || p.focus === 'log' ? 'start' : 'center', behavior: 'smooth' }));
   }
-  else if (p.kind === 'facos') { if (modeKey === 'dark') openFacosView(p.view); }   // FACOS 상세 창 (셀 게이트 · 현장 감지 · 보안)
+  else if (p.kind === 'facos') { if (modeKey === 'dark') openFacosView(p.view); }   // FacOS 상세 창 (셀 게이트 · 현장 감지 · 보안)
   else if (p.kind === 'zd') { zdState.tab = p.tab ?? 'live'; openZoneDash(p.zone ?? 'main'); }
   else if (p.kind === 'trace') {
     traceState.tab = p.tab ?? 'trace'; traceState.q = '';
@@ -2272,7 +2272,7 @@ document.getElementById('btnFleet').addEventListener('click', () => {
 });
 document.getElementById('closeFleet').addEventListener('click', () => { fleetModal.classList.add('hidden'); clearInterval(fleetTimer); });
 
-// ── FACOS 공장 운영 SW 통합 표시 (피지컬AI) ─────────────────
+// ── FacOS 공장 운영 SW 통합 표시 (피지컬AI) ─────────────────
 // 운영자 지시 → AIOS → 오케스트레이터 → 자율 에이전트 → 명령 센터 → 셀·게이트 → VLA → 현장 감지 → DataHub 를 한 줄로, 계층마다 실시간 상태와 해당 창 바로가기
 const facosEl = document.getElementById('facos');
 try { if (localStorage.getItem('metafactory.facos.min') === '1') facosEl.classList.add('min'); } catch { /* 저장소 없음 */ }
@@ -2304,14 +2304,14 @@ function renderFacos() {
     ['👁', '현장 감지', evs ? `이벤트 ${evs}건` : `CCTV ${s.cctv.cams.length} · 드론 ${s.drones.length} · 사족 ${s.quads.length}`, evs ? 'warn' : 'ok', 'facos:sense', '사각지대 없는 CCTV AI 영상 분석 · 로봇 비전 AI 이벤트 감지 · 순찰 드론 · 사족보행 열화상·진동 점검 (js/cctv.js · js/robotcam.js · js/drone.js)'],
     ['🗄', 'DataHub', mq.available ? `MQTT ${mq.sent.toLocaleString('ko-KR')}건` : `AAS · 수집 ${hub.samples.length}`, mq.available && mq.failed ? 'warn' : 'ok', 'btnData', '기준 시계(UTC) · AAS · OPC UA PubSub over MQTT · AASX 저장 · 패킷 덤프(pcap) (js/datahub.js · js/pcap.js)'],
     ...(s.net?.on ? [(() => { const Q = s.net.summary(); return ['📶', '5G', `gNB ${s.net.plan.cells.length} · 단말 ${Q.ues} · 유실 ${Q.lost}`, Q.lost || Q.rlf ? 'bad' : 'ok', 'btnNet5g', 'Private 5G 특화망 — 음영 없는 기지국(PCI) · 이동 로봇 5G 모뎀 · A3 핸드오버 · PDCP 포워딩 무손실 업링크 (js/net5g.js)']; })()] : []),
-    ...(s.fac?.on ? [(() => { const E = s.fac.stats(); return ['🏢', 'FAC', `구매 ${E.poOpen}/${E.po} · 정비 ${E.mrOpen}`, E.mrOpen ? 'act' : 'ok', 'btnFac', `FAC — FACOS 업무 기록: 발주·재고·설비보전${hub.noServer ? '' : ' · FAC API 게시'} (js/fac.js)`]; })()] : []),
+    ...(s.fac?.on ? [(() => { const E = s.fac.stats(); return ['🏢', 'FAC', `구매 ${E.poOpen}/${E.po} · 정비 ${E.mrOpen}`, E.mrOpen ? 'act' : 'ok', 'btnFac', `FAC — FacOS 업무 기록: 발주·재고·설비보전${hub.noServer ? '' : ' · FAC API 게시'} (js/fac.js)`]; })()] : []),
   ];
-  const html = `<button type="button" class="fc-brand" title="FACOS — 피지컬AI 공장 운영 SW (누르면 접기/펴기)"><b>FACOS</b><small>공장 운영 SW</small></button>` + L.map(([ic, nm, val, cls, open, tip], i) =>
+  const html = `<button type="button" class="fc-brand" title="FacOS — 피지컬AI 공장 운영 SW (누르면 접기/펴기)"><b>FacOS</b><small>공장 운영 SW</small></button>` + L.map(([ic, nm, val, cls, open, tip], i) =>
     `${i ? '<i class="fc-arw">›</i>' : ''}<button type="button" class="fc-l ${cls}" ${open ? `data-open="${open}"` : 'disabled'} title="${escV(tip)}"><span class="fc-n"><i class="fc-ic">${ic}</i>${nm}</span><span class="fc-v">${escV(val)}</span></button>`).join('');
   if (html !== facosEl.dataset.h) { facosEl.dataset.h = html; facosEl.innerHTML = html; }
 }
 
-// ── FACOS 계층 상세: 자율 에이전트 · 셀·게이트 · 현장 감지 (데이터 기반 진행 결과) ─────────────────
+// ── FacOS 계층 상세: 자율 에이전트 · 셀·게이트 · 현장 감지 (데이터 기반 진행 결과) ─────────────────
 const fcModal = document.getElementById('facosModal'), fcBody = document.getElementById('facosBody'), fcTitle = document.getElementById('facosTitle');
 let fcView = null;
 const fclock = (t) => { const x = Math.floor(t) + 8 * 3600; return `${String(Math.floor(x / 3600) % 24).padStart(2, '0')}:${String(Math.floor(x / 60) % 60).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`; };
@@ -2359,7 +2359,7 @@ function viewCells() {
     ${cells.map((st) => `<tr><td><b class="uidc">${escV(st.uid ?? st.id)}</b></td><td>${escV(st.name)}</td><td>${escV(ST_LABEL[st.state] ?? st.state)}</td><td>${pct(st.ema)}</td><td>${st.c.processed}</td><td>${st.c.defects}</td><td>${st.c.fails}</td><td style="color:${st.health > 60 ? '#8ff0b8' : st.health > 40 ? '#ffc65a' : '#ff7b7b'}">${st.health.toFixed(0)}%</td><td>${pct(st.c.starved / T)}</td><td>${pct(st.c.blocked / T)}</td><td>${pct((st.c.down + st.c.maint) / T)}</td><td>${(st.def.cycle * s.mode.cycleMul * st.speedMul * (s.vla?.cycleFactor(st) ?? 1)).toFixed(1)}초</td></tr>`).join('')}</tbody></table>
     ${gates.length ? `<div class="fc-cards">${gates.map(gateCard).join('')}</div>` : '<p class="vla-note">이 라인에는 분류·포장 게이트 셀이 없습니다.</p>'}`;
 }
-// 보안 인시던트 처리 흐름도 — 레인(위협 출처 · 탐지 모듈 · 보안 분석 AI · FACOS 오케스트레이터 · 대응 실행) × 단계, 상자마다 담당 주체·에이전트
+// 보안 인시던트 처리 흐름도 — 레인(위협 출처 · 탐지 모듈 · 보안 분석 AI · FacOS 오케스트레이터 · 대응 실행) × 단계, 상자마다 담당 주체·에이전트
 let secFlowSel = null;
 const SEC_KIND = { occur: '#ff6b6b', detect: '#ff9a3d', block: '#f5b82e', analyze: '#5aa9ff', decide: '#b89bff', respond: '#3ddc84', verify: '#2bd4c6', feedback: '#a9b4c0', close: '#7dffb0' };
 function secFlowView(f) {
@@ -2449,7 +2449,7 @@ function renderFacosView(force) {
   if (!force && fcBody.querySelector(':hover')) return;   // 마우스를 올려 둔 동안은 고정 (툴팁 유지)
   if (modeKey !== 'dark') { fcModal.classList.add('hidden'); return; }
   const [t, sub, fn] = FC_VIEWS[fcView];
-  fcTitle.innerHTML = `${t} <small>FACOS · ${sub}</small>`;
+  fcTitle.innerHTML = `${t} <small>FacOS · ${sub}</small>`;
   setHTML(fcBody, fn());
 }
 document.getElementById('closeFacos').addEventListener('click', () => { fcModal.classList.add('hidden'); fcView = null; });

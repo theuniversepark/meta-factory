@@ -1,5 +1,5 @@
 // 피지컬AI 다중 계층 보안 (총괄4 — 라온시큐어 사업단 「협업지능 시스템을 위한 피지컬AI 기반 다중 계층 보안기술 개발」 착수보고 2026.9 기준)
-// FACOS 운영 흐름에 4개 보안 계층을 끼워 시뮬레이션으로 재현한다 — 실제 암호 연산·보안 모듈이 아니라, 어떤 주체·데이터·명령이
+// FacOS 운영 흐름에 4개 보안 계층을 끼워 시뮬레이션으로 재현한다 — 실제 암호 연산·보안 모듈이 아니라, 어떤 주체·데이터·명령이
 // 어느 계층에서 어떤 검증을 거치는지와 그 결과(통과·차단)를 기록한다. 렌더링과 분리되어 헤드리스에서도 같은 동작.
 //  ① 피지컬AI 에이전트 보안: DID/VC 디지털 신원 · 최소 권한(PoLP) — ONE Access · TrustCore
 //  ② 데이터·IP 보안: 동형암호 연합학습 · ZKML 무결성 검증 · eVDI 격리 워크스페이스 · 반출 통제(DLP)
@@ -37,7 +37,7 @@ export const SEC_LANES = [
   { key: 'src', label: '위협 출처', sub: '공격·오작동 주체' },
   { key: 'detect', label: '탐지 모듈', sub: 'OT 엔드포인트 · ONE Access · ZKML · eVDI' },
   { key: 'ai', label: '보안 분석 AI', sub: 'Internal AI 분석 시스템' },
-  { key: 'orch', label: 'FACOS 오케스트레이터', sub: '보안 인시던트 판단·지시' },
+  { key: 'orch', label: 'FacOS 오케스트레이터', sub: '보안 인시던트 판단·지시' },
   { key: 'resp', label: '대응 실행', sub: 'TrustCore · eVDI · 명령 센터 · 모델 검증' },
 ];
 export const SEC_STAGES = [
@@ -55,8 +55,8 @@ export const SEC_ACTORS = {
   evdi: { name: 'eVDI 보안 워크스페이스', org: '틸론 · 반출 통제(DLP)' },
   intai: { name: 'Internal AI 분석 시스템', org: '틸론 · 보안 분석 에이전트' },
   mr: { name: 'AI 모델 안전성 검증', org: '전북대 · 메타모픽·차등 테스팅' },
-  orch: { name: '공장 오케스트레이터', org: 'FACOS' },
-  cmd: { name: '명령 센터', org: 'FACOS' },
+  orch: { name: '공장 오케스트레이터', org: 'FacOS' },
+  cmd: { name: '명령 센터', org: 'FacOS' },
 };
 const A = (k) => SEC_ACTORS[k].name;
 export const SEC_FLOW = {

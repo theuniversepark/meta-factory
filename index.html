@@ -26,7 +26,7 @@
     <div id="cctvDet"></div>
     <div id="cctvHist"></div>
   </section>
-  <div id="facos" class="dark-only-flex" aria-label="FACOS 공장 운영 SW 계층 상태"></div>
+  <div id="facos" class="dark-only-flex" aria-label="FacOS 공장 운영 SW 계층 상태"></div>
   <div id="glNote" hidden>3D 화면 복구 중… (그래픽 컨텍스트 재연결)</div>
 
   <header class="topbar">
@@ -85,7 +85,7 @@
     <div class="agent-h" id="facosHead" role="button" tabindex="0" aria-expanded="true" aria-controls="facosSum zoneAgentBox" title="누르면 존 요약·존 에이전트 설정을 접고 펼칩니다">
       <div class="agent-avatar facos">OS</div>
       <div>
-        <div class="agent-name">FACOS · 공장 운영 <i class="fold" aria-hidden="true">▾</i></div>
+        <div class="agent-name">FacOS · 공장 운영 <i class="fold" aria-hidden="true">▾</i></div>
         <div class="agent-sub" id="facosSub">공장 오케스트레이터 (FacOS)</div>
       </div>
     </div>
@@ -164,7 +164,7 @@
     <button id="btnCctv" title="사각지대 없는 CCTV 배치 — 커버리지 지도(빨강 사각지대 · 연두 1대 · 초록 2대 이상)와 감시 반경">📹 CCTV</button>
     <button id="btnSensors" title="환경·설비 상태 센서망 — 센서 → 셀 엣지 → 엣지 게이트웨이 → 존 서버 → 공장 중앙 → 센서 서버(별도) · 센서 DB(별도) · PTP 시간 동기">🌡 센서</button>
     <button id="btnData" title="AAS · OPC UA PubSub over MQTT 데이터 연동과 파일 저장">📡 데이터 연동</button>
-    <button id="btnFac" title="FAC — FACOS 업무 기록: 발주(구매오더·입고) · 재고(로케이션·이동) · 설비보전(정비요청) · FAC API">🏢 FAC</button>
+    <button id="btnFac" title="FAC — FacOS 업무 기록: 발주(구매오더·입고) · 재고(로케이션·이동) · 설비보전(정비요청) · FAC API">🏢 FAC</button>
     <button id="btnFleet" title="AMR·AGV — 공통 설정·상태, 상황별 속도 변화, 전체 속도 조절·정지·시작, 설정 변경 효과 예측">🚚 AMR·AGV</button>
     <button id="btnConcept">🧭 진화 컨셉</button>
     <button id="btnCompare" class="primary">📊 3단계 8시간 비교</button>
@@ -200,7 +200,7 @@
   </div>
   <div class="modal hidden" id="facModal">
     <div class="modal-card wide">
-      <div class="modal-h"><h2>🏢 FAC 업무 기록 <small>FACOS 계층 — 발주 · 재고 · 설비보전 · 오케스트레이터가 판단·실행한 결과를 FAC이 같은 자리에서 전표로 기록 · FAC API로 외부 조회</small></h2><button id="closeFac">✕</button></div>
+      <div class="modal-h"><h2>🏢 FAC 업무 기록 <small>FacOS 계층 — 발주 · 재고 · 설비보전 · 오케스트레이터가 판단·실행한 결과를 FAC이 같은 자리에서 전표로 기록 · FAC API로 외부 조회</small></h2><button id="closeFac">✕</button></div>
       <div id="facBody"></div>
     </div>
   </div>
@@ -213,7 +213,7 @@
   </div>
   <div class="modal hidden" id="aiosModal">
     <div class="modal-card wide">
-      <div class="modal-h"><h2>AIOS · 공장 운영 AI <small>FACOS 관점 · 현장 생산·운영 데이터 → AI-ready 운영 데이터셋 → 서버 저장 → 운영 정책 학습 → 디지털트윈 검증 → 오케스트레이터 배포</small></h2><button id="closeAios">✕</button></div>
+      <div class="modal-h"><h2>AIOS · 공장 운영 AI <small>FacOS 관점 · 현장 생산·운영 데이터 → AI-ready 운영 데이터셋 → 서버 저장 → 운영 정책 학습 → 디지털트윈 검증 → 오케스트레이터 배포</small></h2><button id="closeAios">✕</button></div>
       <div id="aiosBody"></div>
     </div>
   </div>
@@ -249,7 +249,7 @@
   </div>
   <div class="modal hidden" id="facosModal">
     <div class="modal-card wide">
-      <div class="modal-h"><h2 id="facosTitle">FACOS</h2><button id="closeFacos">✕</button></div>
+      <div class="modal-h"><h2 id="facosTitle">FacOS</h2><button id="closeFacos">✕</button></div>
       <div id="facosBody"></div>
     </div>
   </div>

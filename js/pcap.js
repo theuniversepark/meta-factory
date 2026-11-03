@@ -3,7 +3,7 @@
 // 캡처 지점: MQTT 브로커 NIC (10.20.0.10:1883) — 브로커가 보고 받는 양방향 패킷 전부
 //  · 클라이언트 → 브로커: TCP 3-way 핸드셰이크, CONNECT, SUBSCRIBE, PUBLISH(QoS 1, 1460B MSS로 분할), PINGREQ
 //  · 브로커 → 클라이언트: SYN/ACK, CONNACK, SUBACK, PUBACK, 구독자에게 PUBLISH 전달(QoS 1), PINGRESP, TCP ACK
-// 주소 계획: 브로커 10.20.0.10 · FACOS(오케스트레이터·DataHub 구독) 10.20.0.20 · 설비·셀(유선 LAN) 10.20.1.x
+// 주소 계획: 브로커 10.20.0.10 · FacOS(오케스트레이터·DataHub 구독) 10.20.0.20 · 설비·셀(유선 LAN) 10.20.1.x
 //  · CCTV 10.20.2.x · 이동 로봇(Private 5G, UPF가 준 UE 주소) 10.45.x.x — 5G 단말 패킷은 UPF(N6)를 거쳐 오므로 출발 MAC이 UPF
 // 시각: 공장 기준 시계(시뮬레이션 시각) 마이크로초. 5G 단말은 무선 지연(약 8ms, 핸드오버 중이면 버퍼 대기만큼 더)을 더한다.
 // HTTP/1.1 (TCP 8080 등): 불량 판정 리포트처럼 큰 문서를 서버에 올리는 REST 요청 — 요청마다 새 TCP 연결(3-way → 요청 → 응답 → FIN)

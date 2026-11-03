@@ -2,7 +2,7 @@
 // 원칙: 읽기(구독)는 모두 허용 — UNS는 공장 전체가 같은 상태를 보는 공용 공간. 쓰기(발행)는 역할·존마다 정해진 토픽만.
 //   observer  (익명 기본)  발행 없음
 //   operator  사람 운전자·MES      camtic/metafactory/+/+/cmd/request  (모든 존의 셀·존 명령 요청)
-//   zone      외부 존 에이전트     camtic/metafactory/{자기 존}/+/cmd/request  — 다른 존 명령 금지 (facOS 가드레일 「같은 계층 명령 금지」를 브로커에서도)
+//   zone      외부 존 에이전트     camtic/metafactory/{자기 존}/+/cmd/request  — 다른 존 명령 금지 (FacOS 가드레일 「같은 계층 명령 금지」를 브로커에서도)
 //   edge      Sparkplug 엣지 노드  spBv1.0/{group}/(NBIRTH|NDATA|NDEATH)/{자기 id} · (DBIRTH|DDATA|DDEATH)/{자기 id}/+
 //   host      Sparkplug 주 호스트  spBv1.0/{group}/NCMD/+ · DCMD/+/+ · spBv1.0/STATE/{자기 id}
 //   admin     유지보수               # (기본 계정 없음)

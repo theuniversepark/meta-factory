@@ -1,11 +1,11 @@
 // UNS (ISA-95 통합 네임스페이스) 검증 — js/uns.js · server/mqtt-gateway.mjs
-// ① 트리: 토픽 규칙(_meta) · facOS 상태 · 오더(OperationsRequest) · 결정 · A2A · 존 · 셀 OCS · 설비 요약이 ISA-95 경로에 있는지
+// ① 트리: 토픽 규칙(_meta) · FacOS 상태 · 오더(OperationsRequest) · 결정 · A2A · 존 · 셀 OCS · 설비 요약이 ISA-95 경로에 있는지
 // ② Report by Exception: 상태가 같으면 다시 보내지 않음 · rebirth면 모든 retain 상태를 다시 보냄
 // ③ 명령 3단: 같은 correlationId로 cmd → cmd/ack → cmd/exec → cmd/done
 // ④ 게이트웨이: retain 상태를 새 구독자가 받음 · 발행이 끊기면 _facos/state online:false(죽음 처리) · rebirth 요청
 // ⑤ Sparkplug B: 인코딩(손으로 계산한 바이트) · 엣지 NBIRTH → DBIRTH → DDATA(바뀐 것만) · 주 호스트가 ISA-95 트리로 · seq 누락 → 재탄생 · LWT NDEATH
 // ⑥ ACL: 익명 읽기 전용 · 존 계정은 자기 존만 · 비밀번호 오류 거부 · UNS 상태 위조 불가
-// ⑦ 외부 명령 요청: cmd/request → facOS 명령 4단(같은 correlationId · 응답 토픽) · 잘못된 요청 거부 · 만료
+// ⑦ 외부 명령 요청: cmd/request → FacOS 명령 4단(같은 correlationId · 응답 토픽) · 잘못된 요청 거부 · 만료
 // ⑧ MQTT 5 브리지: Mosquitto(있으면)로 Correlation Data · Response Topic · Message Expiry 속성 확인 · MQTT 5 요청 수신. 실행: npm test
 import { zoneLine } from '../js/line.js';
 import { Simulation } from '../js/sim.js';
@@ -29,7 +29,7 @@ const U = new UnsNamespace(s);
 run(s, ag, 3600);
 const first = U.collect({ telemetry: unsTelemetry(s) }), T = U.tree, has = (p) => T.has(R(p)), json = (p) => JSON.parse(T.get(R(p)).payload);
 check('탄생 메시지 _meta/namespace (retain · ISA-95 계층 4단)', has('_meta/namespace') && T.get(R('_meta/namespace')).retain && json('_meta/namespace').levels.length === 4);
-check('facOS 상태 _facos/state (retain · online · 계획 버전)', has('_facos/state') && json('_facos/state').online === true && /^P-\d+$/.test(json('_facos/state').planVersion));
+check('FacOS 상태 _facos/state (retain · online · 계획 버전)', has('_facos/state') && json('_facos/state').online === true && /^P-\d+$/.test(json('_facos/state').planVersion));
 const ords = [...T.keys()].filter((k) => k.startsWith(R('_facos/order/')));
 check('오더 _facos/order/{id} = ISA-95 OperationsRequest · 정밀조립 Area 배정', ords.length >= 1 && ords.every((k) => { const p = JSON.parse(T.get(k).payload); return p.isa95 === 'OperationsRequest' && p.assignedTo === R('main') && T.get(k).retain; }), ords.map((k) => k.split('/').at(-1)).join(' · '));
 const a2a = [...T.keys()].filter((k) => k.startsWith(R('_facos/a2a/')));
@@ -49,7 +49,7 @@ const again = U.collect({ telemetry: [] });
 check('바로 다시 모으면 retain 상태는 보내지 않음 (변화 없음)', again.filter((m) => m.retain).length === 0 && U.stats.suppressed > 0, `건너뜀 ${U.stats.suppressed}`);
 U.rebirth();
 const re = U.collect({ telemetry: [] });
-check('rebirth → _meta · facOS · 오더 · 존 · 셀 상태 전부 다시 (retain)', re[0].topic === R('_meta/namespace') && re.filter((m) => m.retain).length === [...T.values()].filter((e) => e.retain).length, `${re.length}건`);
+check('rebirth → _meta · FacOS · 오더 · 존 · 셀 상태 전부 다시 (retain)', re[0].topic === R('_meta/namespace') && re.filter((m) => m.retain).length === [...T.values()].filter((e) => e.retain).length, `${re.length}건`);
 
 console.log('== 명령 3단 (correlationId)');
 const st = cells.find((x) => x.state !== 'DOWN'), c = s.cmd.issue('SPEED', st.id, 75, { by: '시험', why: 'UNS 명령 흐름' });
@@ -107,7 +107,7 @@ const ret = new Map(), clr = await sub();
 clr.on('message', (t, p) => { if (!t.startsWith('spBv1.0/') || t.includes('/STATE/')) { try { ret.set(t, JSON.parse(p.toString())); } catch { /* */ } } });
 await new Promise((r) => clr.subscribe(['camtic/metafactory/#', 'spBv1.0/STATE/#'], r));
 await wait(400);
-check('나중에 붙은 구독자(익명 = 관찰)가 retain 상태를 바로 받음 (_meta · facOS · 셀 OCS)', ret.has(R('_meta/namespace')) && ret.get(R('_facos/state'))?.online === true && cells.every((x) => ret.has(R(`main/${x.uid ?? x.id}/state`))), `${ret.size}개 토픽`);
+check('나중에 붙은 구독자(익명 = 관찰)가 retain 상태를 바로 받음 (_meta · FacOS · 셀 OCS)', ret.has(R('_meta/namespace')) && ret.get(R('_facos/state'))?.online === true && cells.every((x) => ret.has(R(`main/${x.uid ?? x.id}/state`))), `${ret.size}개 토픽`);
 
 console.log('== Sparkplug B 엣지 → 주 호스트 → ISA-95');
 const beat = () => mqttPublish([...unsTelemetry(s), ...U.collect({ telemetry: [] })]);
@@ -135,7 +135,7 @@ console.log('== 접근 권한 (ACL)');
 { const st0 = JSON.stringify(got.get(R('_facos/state')));
   const anon = await sub(); const closed = new Promise((r) => anon.once('close', r));
   anon.publish(R('_facos/state'), JSON.stringify({ online: true, spoof: 1 }), { retain: true }); await Promise.race([closed, wait(1000)]);
-  check('익명(관찰)은 발행 거부 · 연결 끊김 · facOS 상태 위조 안 됨', mqttStatus().acl.denied >= 1 && !anon.connected && JSON.stringify(got.get(R('_facos/state'))) === st0, mqttStatus().acl.lastDenied?.why);
+  check('익명(관찰)은 발행 거부 · 연결 끊김 · FacOS 상태 위조 안 됨', mqttStatus().acl.denied >= 1 && !anon.connected && JSON.stringify(got.get(R('_facos/state'))) === st0, mqttStatus().acl.lastDenied?.why);
   let badErr = null; await sub({ username: 'operator', password: 'wrong' }).catch((e) => { badErr = e; });
   check('비밀번호가 틀리면 접속 거부', !!badErr && mqttStatus().acl.authFail >= 1, badErr?.message);
   const zm = await sub({ username: 'zone-main', password: unsAclPassword('zone-main') }); const zc = new Promise((r) => zm.once('close', r));
@@ -146,7 +146,7 @@ console.log('== 접근 권한 (ACL)');
   const users = mqttStatus().acl.users.map((u) => u.name);
   check('계정 파일: operator · zone-{존} 4개 · 0600 · 비밀번호 평문 노출 없음(상태 API)', ['operator', 'zone-main', 'zone-flex', 'zone-adapt', 'zone-insp'].every((n) => users.includes(n)) && (fs.statSync(path.join(tmp, 'acl.json')).mode & 0o777) === 0o600 && !JSON.stringify(mqttStatus()).includes(unsAclPassword('operator'))); }
 
-console.log('== 외부 명령 요청 → facOS 명령 4단');
+console.log('== 외부 명령 요청 → FacOS 명령 4단');
 { const op = await sub({ username: 'operator', password: unsAclPassword('operator') }), cst = cells.find((x) => x.state !== 'DOWN'), cid = String(cst.uid ?? cst.id).replace(/[^\w.-]/g, '_');
   op.publish(R(`main/${cid}/cmd/request`), JSON.stringify({ code: 'SPEED', arg: 75, reason: '운전자 시험', correlationId: 'OP-1', responseTopic: 'operator/replies' }));
   op.publish(R('flex/_zone/cmd/request'), JSON.stringify({ code: 'CYCLE_STOP', correlationId: 'OP-2' }));

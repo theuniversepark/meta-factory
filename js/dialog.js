@@ -134,6 +134,10 @@ const QTY = /^\d+(?:\.\d+)?\s*(초|%|퍼센트|프로|퍼)?\s*(으로|로)?\s*(�
 export const splitClauses = (text) => text.split(/\s*(?:,|\.(?=\s|$)|;|\n|그리고|그 ?다음(?:에)?|이후에?|및)\s*/).map((s) => s.trim()).filter(Boolean);
 
 // 조치 실행 — 결과 한 줄씩 돌려준다 (실행 못 하면 이유)
+// 운영 계획을 바꾸는 지시(혼류 비율 · 투입 간격)는 FacOS 공장 결정을 거친다 — 지시한 사람이 승인자 · 계획 버전 증가 (js/factoryos.js change)
+//   셀 명령(속도 · 정지 · 정비 …)은 명령 경로(commands.js)가 이미 Manufacturing Agent → 셀 OCS A2A로 남긴다
+const fosChange = (sim, c, apply) => (sim.fos ? sim.fos.change({ human: true, ...c }, apply) : (apply?.(), { ok: true }));
+const ver = (sim) => (sim.fos ? ` · FacOS 계획 ${sim.fos.planVersion}` : '');
 export function applyAction(a, sim, { by = '운영자 대화 지시', onMix, agent } = {}) {
   const K = sim.cmd;
   const name = (t) => K.targetName(t);
@@ -149,16 +153,19 @@ export function applyAction(a, sim, { by = '운영자 대화 지시', onMix, age
     case 'mix': {
       if (!sim.zone) return { ok: false, text: '혼류 비율은 정밀조립Zone 라인에서만 바꿀 수 있습니다' };
       if (sim.line.mix === a.mix) return { ok: true, text: `혼류 비율은 이미 ${ZONE_MIXES[a.mix].label}입니다` };
-      sim.setMix(a.mix); onMix?.(a.mix);
-      return { ok: true, text: `혼류 비율 → 도어트림 : e-axle = ${ZONE_MIXES[a.mix].label}${a.note ? ` (${a.note})` : ''} · 다음 투입부터 적용` };
+      const r = fosChange(sim, { kind: 'mix', title: `혼류 비율 변경 — 도어트림 : e-axle = ${ZONE_MIXES[a.mix].label}`, before: ZONE_MIXES[sim.line.mix]?.label, after: ZONE_MIXES[a.mix].label, by, constraints: '다음 투입부터 · 진행 중 오더 수량 유지', resume: '' }, () => { sim.setMix(a.mix); onMix?.(a.mix); });
+      if (!r.ok) return { ok: false, text: `혼류 비율 변경 보류 — ${r.reason}` };
+      return { ok: true, text: `혼류 비율 → 도어트림 : e-axle = ${ZONE_MIXES[a.mix].label}${a.note ? ` (${a.note})` : ''} · 다음 투입부터 적용${ver(sim)}` };
     }
     case 'interval': {
       const s = Math.min(20, Math.max(5, a.seconds));
-      sim.releaseInterval = s;
-      return { ok: true, text: `투입 간격 ${s.toFixed(1)}초${s !== a.seconds ? ` (허용 범위 5~20초로 조정)` : ''}` };
+      const r = fosChange(sim, { kind: 'interval', title: `투입 간격 변경 — ${s.toFixed(1)}초`, before: sim.releaseInterval != null ? `${(+sim.releaseInterval).toFixed(1)}초` : '자동', after: `${s.toFixed(1)}초`, by, constraints: '허용 범위 5~20초', resume: '' }, () => { sim.releaseInterval = s; });
+      if (!r.ok) return { ok: false, text: `투입 간격 변경 보류 — ${r.reason}` };
+      return { ok: true, text: `투입 간격 ${s.toFixed(1)}초${s !== a.seconds ? ` (허용 범위 5~20초로 조정)` : ''}${ver(sim)}` };
     }
     case 'expedite': {
       const act = agent?.expedite?.();
+      if (act) fosChange(sim, { kind: 'expedite', title: `긴급 조달 — ${act}`, by, plan: false, autonomous: true, constraints: '자재 공급 차질 대응', resume: '공급 재개' });
       return act ? { ok: true, text: act } : { ok: false, text: '지금은 자재 공급 차질이 없어 긴급 조달하지 않았습니다' };
     }
     case 'status': return { ok: true, text: statusText(sim, a.target), reply: true };

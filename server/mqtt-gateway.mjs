@@ -7,7 +7,7 @@
 //     (내장 aedes 1.2는 MQTT 3.1.1만 받는다 — 같은 정보가 본문 필드 correlationId · responseTopic · expirySec 로도 들어 있다)
 // UNS 계층별 접근 권한(ACL): server/uns-acl.mjs — 읽기는 모두, 쓰기는 역할·존별 · UNS_ACL=off로 끔 · UNS_ACL_ANON=observer|none
 // Sparkplug B: server/sparkplug-edge.mjs — 설비 요약을 존별 엣지 노드가 Sparkplug로 내보내고 주 호스트가 ISA-95 트리로 옮긴다 · UNS_SPARKPLUG=off로 끔
-// 외부 명령 요청: camtic/metafactory/{존}/{셀|_zone}/cmd/request (operator · zone 계정) → 대기열 → 화면이 /api/uns/commands/take로 가져가 facOS 명령 경로로 실행
+// 외부 명령 요청: camtic/metafactory/{존}/{셀|_zone}/cmd/request (operator · zone 계정) → 대기열 → 화면이 /api/uns/commands/take로 가져가 FacOS 명령 경로로 실행
 import net from 'node:net';
 import { Aedes } from 'aedes';
 import { makeAcl } from './uns-acl.mjs';
@@ -26,6 +26,10 @@ const uns = { root: UNS_ROOT, alive: false, lastAt: 0, deaths: 0, rebirth: true,
 const CMD_REQ = /^camtic\/metafactory\/([\w.-]+)\/([\w.-]+)\/cmd\/request$/;
 const RESERVED = ['camtic/metafactory/', 'spBv1.0/', 'metafactory/', 'opcua/', 'aas/', '$'];
 const cmdq = { queue: [], received: 0, rejected: 0, taken: 0, expired: 0, last: null };
+// UNS 메시지를 받아 볼 곳 (server/facos-store.mjs — FacOS 기록 서버 저장)
+let unsTap = null;
+export function setUnsTap(fn) { unsTap = fn; }
+const tapUns = (m) => { if (unsTap && m.topic.startsWith(`${UNS_ROOT}/`)) { try { unsTap(m.topic, m.payload); } catch { /* 저장 실패가 발행을 막지 않게 */ } } };
 const CMD_MAX = 100;
 
 export async function startMqtt({ host = process.env.MQTT_HOST || '127.0.0.1', port = Number(process.env.MQTT_PORT) || 1885, bridgeUrl = process.env.MQTT_BRIDGE_URL, aclFile = null, bridgeFile = null, sparkplug = process.env.UNS_SPARKPLUG !== 'off' } = {}) {
@@ -113,7 +117,8 @@ function unsWatch() {
   pruneExpired();
   if (!uns.alive || Date.now() - uns.lastAt < UNS_DEAD_S * 1000) return;
   uns.alive = false; uns.deaths++; uns.rebirth = true;
-  publishOne({ topic: `${UNS_ROOT}/_facos/state`, payload: JSON.stringify({ online: false, reason: `UNS 발행 ${UNS_DEAD_S}초 없음 (게이트웨이 죽음 처리)`, ts: new Date().toISOString() }), retain: true });
+  const death = { topic: `${UNS_ROOT}/_facos/state`, payload: JSON.stringify({ online: false, reason: `UNS 발행 ${UNS_DEAD_S}초 없음 (게이트웨이 죽음 처리)`, ts: new Date().toISOString() }), retain: true };
+  publishOne(death); tapUns(death);
   sp?.pause();   // 원천이 끊겼으니 Sparkplug 엣지도 NDEATH 후 종료 — 데이터가 다시 오면 새 bdSeq로 탄생
 }
 
@@ -132,7 +137,7 @@ export function mqttPublish(messages) {
     }
     // 설비 요약(평면 토픽) → Sparkplug 엣지 노드 (존 = 엣지 · 셀 = 디바이스)
     if (sp) { const x = /^metafactory\/telemetry\/v1\/([\w.-]+)\/([\w.-]+)$/.exec(m.topic); if (x) { try { sp.ingest(x[1], x[2], JSON.parse(m.payload)); } catch { /* 형식 오류 무시 */ } } }
-    publishOne(m); n++;
+    publishOne(m); tapUns(m); n++;
   }
   return n;
 }
@@ -183,11 +188,11 @@ function enqueueCmd(topic, payload, { from, role = null, via, props = null }) {
 function pruneExpired() {
   const now = Date.now(), keep = [];
   for (const q of cmdq.queue) {
-    if (now - q.receivedAt > q.expirySec * 1000) { cmdq.expired++; rejectCmd(`${UNS_ROOT}/${q.zone}/${q.cell}`, q.correlationId, `만료 (${q.expirySec}초 안에 facOS가 받지 못함 — 시뮬레이션이 실행 중인지 확인)`, q.responseTopic); }
+    if (now - q.receivedAt > q.expirySec * 1000) { cmdq.expired++; rejectCmd(`${UNS_ROOT}/${q.zone}/${q.cell}`, q.correlationId, `만료 (${q.expirySec}초 안에 FacOS가 받지 못함 — 시뮬레이션이 실행 중인지 확인)`, q.responseTopic); }
     else keep.push(q);
   }
   cmdq.queue = keep;
 }
-// 화면이 가져간다 (2초마다) — 가져간 뒤의 실행·거부는 화면(facOS)이 UNS 명령 4단으로 발행
+// 화면이 가져간다 (2초마다) — 가져간 뒤의 실행·거부는 화면(FacOS)이 UNS 명령 4단으로 발행
 export function unsTakeCommands() { pruneExpired(); const q = cmdq.queue.splice(0); cmdq.taken += q.length; return q; }
 export const _sparkplug = () => sp;   // 시험용
