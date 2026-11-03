@@ -69,7 +69,16 @@ export function makeAcl({ file = null, anonymous = process.env.UNS_ACL_ANON || '
     status: () => ({ ...st, users: users.map((u) => ({ name: u.name, role: u.role, zone: u.zone ?? null, ko: ROLES[u.role].ko })), internal: internal.size }),
     password: (name) => (users.some((u) => u.name === name) ? String(store?.cfg[`pw:${name}`] ?? '') : null),
     // 앱 안 클라이언트 계정 발급
-    mint(role, id, extra = {}) { const name = `_${role}-${id}`, pw = randPw(); internal.set(name, { name, role, id, pw, ...extra }); return { username: name, password: pw }; },
+    mint(role, id, extra = {}) { const name = `_${role}-${id}`; let u = internal.get(name); if (!u) { u = { name, role, id, pw: randPw(), ...extra }; internal.set(name, u); } return { username: name, password: u.pw }; },   // 같은 역할·ID는 같은 계정 (Mosquitto 계정 파일에 미리 써 둠)
+    // Mosquitto 계정·ACL 파일용 — 파일 계정 + 앱 내부 계정, 역할별 쓰기 패턴
+    brokerUsers() {
+      const out = [];
+      for (const u of users) { const pw = String(store?.cfg[`pw:${u.name}`] ?? ''); if (pw) out.push({ name: u.name, password: pw, write: ROLES[u.role].pub(u) }); }
+      for (const u of internal.values()) out.push({ name: u.name, password: u.pw, write: ROLES[u.role]?.pub(u) ?? [] });
+      return out;
+    },
+    get anonymous() { return st.enabled ? st.anonymous : 'observer'; },
+    get enabled() { return st.enabled; },
     canPublish,
     hooks() {
       return {

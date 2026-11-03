@@ -1,4 +1,6 @@
-// MQTT 게이트웨이 — 내장 MQTT 브로커(aedes)로 OPC UA PubSub(JSON) · UNS 메시지를 발행한다.
+// MQTT 게이트웨이 — 내장 MQTT 브로커로 OPC UA PubSub(JSON) · UNS 메시지를 발행한다.
+//   엔진(MQTT_ENGINE=auto|mosquitto|aedes, 기본 auto): ① Mosquitto 2.x (MQTT 5 · server/mosquitto.mjs가 자식 프로세스로 띄움 — 앱 서버는 MQTT 5 클라이언트로 발행,
+//     접속이 끊기면 LWT로 _facos/state online:false) ② 실행 파일이 없거나 시작에 실패하면 aedes 1.2 (MQTT 3.1.1 · 앱 안 JS 브로커)
 // 브라우저(시뮬레이션)가 만든 메시지를 /api/mqtt/publish로 받아 브로커에 그대로 싣는다.
 //   MQTT_HOST (기본 127.0.0.1) · MQTT_PORT (기본 1885 — 3d 원본의 1883과 겹치지 않게) — 외부 PC에서 받으려면 MQTT_HOST=0.0.0.0
 //   외부 브로커 브리지 — 앱 UNS 탭 「MQTT 5 브로커 연결」(데이터 폴더 uns/bridge.json · 비밀번호는 키체인·DPAPI 암호화)에서 켜고 끈다.
@@ -13,9 +15,14 @@ import { Aedes } from 'aedes';
 import { makeAcl } from './uns-acl.mjs';
 import { makeSparkplug } from './sparkplug-edge.mjs';
 import { configFile } from './secrets.mjs';
+import { findMosquitto, startMosquitto, cleanupStale } from './mosquitto.mjs';
+import { ZONES } from './uns-acl.mjs';
+import { SP_HOST } from './sparkplug-edge.mjs';
+import path from 'node:path';
+import os from 'node:os';
 
-let broker = null, tcp = null, bridge = null, unsTimer = null, acl = null, sp = null, bridgeConf = null;
-const state = { listening: false, host: null, port: null, error: null, clients: 0, published: 0, bytes: 0, bridgeUrl: null, bridgeConnected: false, bridgeError: null, bridgeVersion: null, bridgeSource: null, bridgePublished: 0, bridgeReceived: 0, bridgeSince: null, startedAt: null };
+let broker = null, tcp = null, bridge = null, unsTimer = null, acl = null, sp = null, bridgeConf = null, mosq = null, pub = null;
+const state = { listening: false, host: null, port: null, error: null, engine: null, mqtt5: false, brokerVersion: null, brokerBin: null, engineError: null, clients: 0, published: 0, bytes: 0, bridgeUrl: null, bridgeConnected: false, bridgeError: null, bridgeVersion: null, bridgeSource: null, bridgePublished: 0, bridgeReceived: 0, bridgeSince: null, startedAt: null };
 // UNS (js/uns.js) 생존 관리 — 화면(시뮬레이션)은 MQTT 클라이언트가 아니라 HTTP로 발행하므로 LWT를 걸 수 없다.
 // 게이트웨이가 대신 마지막 발행 시각을 보고, UNS_DEAD_S초 동안 UNS 발행이 없으면 _facos/state를 online:false(retain)로 바꾼다 (Sparkplug NDEATH · MQTT LWT와 같은 뜻).
 // 다시 발행이 오면 rebirth 요청을 응답 상태에 실어, 화면이 모든 retain 상태(_meta · state · order)를 다시 발행하게 한다.
@@ -32,9 +39,68 @@ export function setUnsTap(fn) { unsTap = fn; }
 const tapUns = (m) => { if (unsTap && m.topic.startsWith(`${UNS_ROOT}/`)) { try { unsTap(m.topic, m.payload); } catch { /* 저장 실패가 발행을 막지 않게 */ } } };
 const CMD_MAX = 100;
 
-export async function startMqtt({ host = process.env.MQTT_HOST || '127.0.0.1', port = Number(process.env.MQTT_PORT) || 1885, bridgeUrl = process.env.MQTT_BRIDGE_URL, aclFile = null, bridgeFile = null, sparkplug = process.env.UNS_SPARKPLUG !== 'off' } = {}) {
-  if (broker) return state;
+export async function startMqtt({ host = process.env.MQTT_HOST || '127.0.0.1', port = Number(process.env.MQTT_PORT) || 1885, bridgeUrl = process.env.MQTT_BRIDGE_URL, aclFile = null, bridgeFile = null, sparkplug = process.env.UNS_SPARKPLUG !== 'off', engine = process.env.MQTT_ENGINE || 'auto' } = {}) {
+  if (broker || mosq) return state;
   acl = makeAcl({ file: aclFile });
+  Object.assign(state, { engine: null, mqtt5: false, brokerVersion: null, brokerBin: null, engineError: null, error: null });
+  let ok = false;
+  if (engine !== 'aedes') {
+    const found = findMosquitto();
+    if (!found) state.engineError = 'Mosquitto 실행 파일 없음 — 내장 aedes(MQTT 3.1.1)로 동작';
+    else {
+      try { await startMosq(found, { host, port, aclFile, sparkplug }); ok = true; }
+      catch (e) { state.engineError = `Mosquitto 시작 실패 — ${e.message} · 내장 aedes(MQTT 3.1.1)로 동작`; await stopMosq(); }
+    }
+  }
+  if (!ok) await startAedes(host, port);
+  if (bridgeUrl) { state.bridgeSource = 'env'; await connectBridge({ url: bridgeUrl, version: Number(process.env.MQTT_BRIDGE_VERSION) || 5, username: process.env.MQTT_BRIDGE_USER ?? '', password: process.env.MQTT_BRIDGE_PASSWORD ?? '' }); }
+  else if (bridgeFile) {
+    bridgeConf = configFile(bridgeFile, { url: '', username: '', password: '', version: 5, enabled: false }, ['password']);
+    state.bridgeSource = 'app';
+    if (bridgeConf.cfg.enabled && bridgeConf.cfg.url) await connectBridge(bridgeConf.cfg);
+  }
+  if (sparkplug && state.listening) {
+    sp = makeSparkplug({ url: () => `mqtt://127.0.0.1:${state.port}`, creds: (role, id) => acl.mint(role, id, { group: 'metafactory' }), uns: (msgs) => { for (const m of msgs) publishOne(m); } });
+  }
+  if (!unsTimer) { unsTimer = setInterval(unsWatch, 2000); unsTimer.unref?.(); }
+  return state;
+}
+// ── 엔진 ① Mosquitto (MQTT 5) ─────────────────
+const portFree = (host, port) => new Promise((r) => { const t = net.createServer(); t.once('error', () => r(false)); t.listen(port, host, () => t.close(() => r(true))); });
+const freePort = () => new Promise((r) => { const t = net.createServer(); t.listen(0, '127.0.0.1', () => { const p = t.address().port; t.close(() => r(p)); }); });
+async function startMosq(found, { host, port, aclFile, sparkplug }) {
+  let h = host, p = port;
+  const dir = aclFile ? path.join(path.dirname(aclFile), 'mosquitto') : path.join(os.tmpdir(), `metafactory-mosquitto-${process.pid}`);
+  if (cleanupStale(dir)) for (let i = 0; i < 40 && !(await portFree(host, port)); i++) await new Promise((r) => setTimeout(r, 50));   // 지난 실행(강제 종료)이 남긴 브로커를 먼저 끝내고 포트가 풀리기를 기다린다
+  if (!(await portFree(host, port))) {   // 포트가 막혀도 앱 안의 구독자(센서 서버)는 붙어야 한다 — 127.0.0.1의 빈 포트로
+    h = '127.0.0.1'; p = await freePort(); state.fallback = true;
+    state.error = `포트 ${port}이(가) 이미 사용 중입니다 (다른 피지컬AI 실증 메타팩토리 앱이나 브로커가 실행 중일 수 있음) — 빈 포트 ${p}로 대신 열었습니다`;
+  }
+  // 앱 안 클라이언트 계정을 미리 만든다 (Mosquitto 계정 파일은 시작할 때 한 번 읽음): 앱 서버 발행자 · Sparkplug 엣지(존마다) · 주 호스트
+  const app = acl.mint('admin', 'app');
+  if (sparkplug) { for (const z of ZONES) acl.mint('edge', `edge-${z}`, { group: 'metafactory' }); acl.mint('host', SP_HOST, { group: 'metafactory' }); }
+  mosq = await startMosquitto({ bin: found.bin, host: h, port: p, dir, anonymous: acl.enabled ? acl.anonymous : 'all', users: acl.brokerUsers() });
+  const { connect } = await import('mqtt');
+  pub = connect(`mqtt://127.0.0.1:${p}`, { protocolVersion: 5, clientId: `metafactory-app-${process.pid}`, reconnectPeriod: 1000, connectTimeout: 5000, ...app,
+    will: { topic: `${UNS_ROOT}/_facos/state`, payload: Buffer.from(JSON.stringify({ online: false, reason: '앱 서버 MQTT 연결 끊김 (LWT)' })), qos: 1, retain: true, properties: { contentType: 'application/json' } } });
+  await new Promise((resolve, reject) => { const to = setTimeout(() => reject(new Error('앱 서버 MQTT 5 접속 시간 초과')), 5000); pub.once('connect', () => { clearTimeout(to); resolve(); }); pub.once('error', (e) => { clearTimeout(to); reject(e); }); });
+  pub.subscribe([`${UNS_ROOT}/+/+/cmd/request`, '$SYS/broker/clients/connected']);
+  // 내장 브로커로 들어온 명령 요청 — 권한은 Mosquitto ACL이 이미 확인(operator · zone-{존}) · 보낸 사람은 MQTT 5 User Property 「from」(스스로 밝힌 값)
+  pub.on('message', (topic, payload, packet) => {
+    if (topic === '$SYS/broker/clients/connected') { state.clients = Number(payload.toString()) || 0; return; }
+    const up = packet?.properties?.userProperties ?? {};
+    enqueueCmd(topic, payload, { from: String(up.from ?? 'MQTT 클라이언트'), via: 'embedded', props: packet?.properties ?? null });
+  });
+  pub.on('error', (e) => { state.error = `앱 서버 MQTT 클라이언트: ${e.message}`; });
+  mosq.proc.on('exit', (code) => { state.listening = false; state.engineError = `Mosquitto가 종료됨 (코드 ${code}) — 앱을 다시 시작하세요`; });
+  Object.assign(state, { listening: true, host: h, port: p, engine: 'mosquitto', mqtt5: true, brokerVersion: mosq.version, brokerBin: found.bundled ? '앱 내장' : found.bin, startedAt: new Date().toISOString() });
+}
+async function stopMosq() {
+  if (pub) { const c = pub; pub = null; await new Promise((r) => c.end(false, {}, () => r())); }
+  if (mosq) { const m = mosq; mosq = null; await m.stop(); }
+}
+// ── 엔진 ② aedes (MQTT 3.1.1 · 대비) ─────────────────
+async function startAedes(host, port) {
   broker = await Aedes.createBroker(acl.hooks());
   const authPub = broker.authorizePublish;
   broker.authorizePublish = (client, packet, cb) => authPub(client, packet, (err) => { if (!err && client) onClientPublish(client, packet); cb(err); });
@@ -52,17 +118,7 @@ export async function startMqtt({ host = process.env.MQTT_HOST || '127.0.0.1', p
     });
     tcp.listen(port, host, () => { Object.assign(state, { listening: true, host, port, startedAt: new Date().toISOString() }); resolve(); });
   });
-  if (bridgeUrl) { state.bridgeSource = 'env'; await connectBridge({ url: bridgeUrl, version: Number(process.env.MQTT_BRIDGE_VERSION) || 5, username: process.env.MQTT_BRIDGE_USER ?? '', password: process.env.MQTT_BRIDGE_PASSWORD ?? '' }); }
-  else if (bridgeFile) {
-    bridgeConf = configFile(bridgeFile, { url: '', username: '', password: '', version: 5, enabled: false }, ['password']);
-    state.bridgeSource = 'app';
-    if (bridgeConf.cfg.enabled && bridgeConf.cfg.url) await connectBridge(bridgeConf.cfg);
-  }
-  if (sparkplug && state.listening) {
-    sp = makeSparkplug({ url: () => `mqtt://127.0.0.1:${state.port}`, creds: (role, id) => acl.mint(role, id, { group: 'metafactory' }), uns: (msgs) => { for (const m of msgs) publishOne(m); } });
-  }
-  if (!unsTimer) { unsTimer = setInterval(unsWatch, 2000); unsTimer.unref?.(); }
-  return state;
+  Object.assign(state, { engine: 'aedes', mqtt5: false, brokerVersion: 'aedes 1.2' });
 }
 // ── 외부 브로커 브리지 (MQTT 5 기본) ─────────────────
 async function connectBridge({ url, version = 5, username = '', password = '' }) {
@@ -109,6 +165,7 @@ export async function unsBridgeSave(b = {}) {
 export async function stopMqtt() {
   sp?.stop(); sp = null; clearInterval(unsTimer); unsTimer = null;
   bridge?.end(true); bridge = null;
+  await stopMosq();
   await new Promise((r) => (broker ? broker.close(() => r()) : r())); broker = null;
   await new Promise((r) => (tcp ? tcp.close(() => r()) : r())); tcp = null;
   Object.assign(state, { listening: false });
@@ -127,7 +184,7 @@ export const unsAclPassword = (name) => acl?.password(name) ?? null;
 
 // messages: [{ topic, payload(문자열), retain, props? }]
 export function mqttPublish(messages) {
-  if (!broker) return 0;
+  if (!broker && !pub) return 0;
   let n = 0;
   for (const m of messages) {
     if (typeof m?.topic !== 'string' || typeof m?.payload !== 'string' || !m.topic || m.topic.length > 512) continue;
@@ -153,6 +210,11 @@ function v5props(m) {
 }
 function publishOne(m) {
   const payload = Buffer.isBuffer(m.payload) ? m.payload : Buffer.from(m.payload, 'utf8');
+  if (pub) {   // Mosquitto: MQTT 5 클라이언트로 발행 — props가 실제 MQTT 5 속성으로 (retain도 브로커가 정상 처리)
+    pub.publish(m.topic, payload, { qos: 0, retain: !!m.retain, properties: v5props(m) });
+    if (bridge?.connected) { bridge.publish(m.topic, payload, { qos: 0, retain: !!m.retain, ...(state.bridgeVersion === 5 ? { properties: v5props(m) } : {}) }); state.bridgePublished++; }
+    state.published++; state.bytes += payload.length; return;
+  }
   // aedes 1.2는 retain 발행을 저장만 하고 이미 구독 중인 클라이언트에는 보내지 않는다 (MQTT 3.1.1 §3.3.1.3 위반).
   // retain 메시지는 저장소에 직접 넣고(새 구독자용), 같은 내용을 일반 메시지로 발행한다(기존 구독자용).
   if (m.retain) broker.persistence.storeRetained({ cmd: 'publish', topic: m.topic, payload, qos: 0, retain: true, dup: false, brokerId: broker.id, brokerCounter: 0 }).catch(() => {});
@@ -196,3 +258,4 @@ function pruneExpired() {
 // 화면이 가져간다 (2초마다) — 가져간 뒤의 실행·거부는 화면(FacOS)이 UNS 명령 4단으로 발행
 export function unsTakeCommands() { pruneExpired(); const q = cmdq.queue.splice(0); cmdq.taken += q.length; return q; }
 export const _sparkplug = () => sp;   // 시험용
+export const _pubClient = () => pub;   // 시험용 (LWT)

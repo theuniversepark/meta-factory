@@ -19,7 +19,7 @@ export function unsHTML(sim) {
     ${tile('보존 상태 (retain)', S.retained, '새 구독자가 바로 받는 현재 상태')}
     ${tile('발행 메시지', S.msgs, `${kb(S.bytes)} · 2초 주기 ${S.collects}회`)}
     ${tile('변화 없음 건너뜀', S.suppressed, 'Report by Exception — 상태가 같으면 보내지 않음')}
-    ${tile('브로커', B.on ? '발행 중' : B.on === false ? '없음' : '-', esc(brokerTxt), B.error ? 'bad' : '')}
+    ${tile('브로커', mq?.engine === 'mosquitto' ? `Mosquitto ${esc(mq.brokerVersion ?? '')}` : mq?.engine === 'aedes' ? 'aedes' : B.on === false ? '없음' : '-', mq?.engine ? `${mq.mqtt5 ? 'MQTT 5' : 'MQTT 3.1.1'} · ${esc(brokerTxt)}${mq.engineError ? ` · ${esc(mq.engineError)}` : ''}` : esc(brokerTxt), B.error || (mq?.engineError && mq.engine !== 'mosquitto') ? 'warn' : '')}
     ${tile('생존 관리', mq?.uns ? (mq.uns.alive ? '살아 있음' : '죽음 처리') : '-', mq?.uns ? `죽음 ${mq.uns.deaths} · 탄생 ${mq.uns.births} · rebirth ${S.births}` : '게이트웨이 상태 없음 (웹)', mq?.uns && !mq.uns.alive ? 'warn' : '')}</div>`;
   // 트리: 토픽을 / 로 나눠 접고 펼친다
   const E = [...U.tree.values()].filter((e) => fit(e, st.flt)).sort((a, b) => a.topic.localeCompare(b.topic));
@@ -51,9 +51,9 @@ export function unsHTML(sim) {
       <p class="qt-ins">주 호스트 <b>${esc(SP.host.id)}</b> ${SP.host.connected ? '연결' : '끊김'} · 탄생 ${SP.host.births}/${SP.host.dbirths} · DDATA ${SP.host.ddata} · seq 누락 ${SP.host.gaps} → 재탄생 요청 ${SP.host.rebirthReq} · NDEATH ${SP.host.ndeaths}${SP.error ? ` · <b class="dn">${esc(SP.error)}</b>` : ''}</p>` : '<p class="vla-note">Sparkplug 엣지 — 앱(맥·윈도우·npm start)에서 동작합니다.</p>';
   const aclT = A ? `<table class="vla-t"><thead><tr><th>계정</th><th>역할</th><th>발행 가능 토픽</th><th>비밀번호</th></tr></thead><tbody>${A.users.map((u) => `<tr><td><b>${esc(u.name)}</b></td><td>${esc(u.ko)}</td><td><code>camtic/metafactory/${u.role === 'zone' ? esc(u.zone) : '+'}/+/cmd/request</code></td><td>${st.pw[u.name] ? `<code>${esc(st.pw[u.name])}</code>` : `<button type="button" data-uns-pw="${esc(u.name)}">보기</button>`}</td></tr>`).join('')}
       <tr><td><b>(익명)</b></td><td>${A.anonymous === 'none' ? '접속 금지' : '관찰 (읽기 전용)'}</td><td>-</td><td>-</td></tr></tbody></table>
-      <p class="qt-ins">ACL ${A.enabled ? '켜짐' : '<b class="dn">꺼짐 (UNS_ACL=off)</b>'} · 읽기(구독)는 모두 허용 · 거부 ${A.denied}건${A.lastDenied ? ` (최근 ${esc(A.lastDenied.user)} → ${esc(A.lastDenied.topic)})` : ''} · 인증 실패 ${A.authFail} · 앱 내부 계정 ${A.internal}</p>` : '<p class="vla-note">접근 권한 — 앱에서 동작합니다 (웹 버전은 브로커 없음).</p>';
+      <p class="qt-ins">ACL ${A.enabled ? '켜짐' : '<b class="dn">꺼짐 (UNS_ACL=off)</b>'}${mq.engine === 'mosquitto' ? ' · Mosquitto가 집행(권한 밖 발행은 버리고 MQTT 5면 사유 0x87로 응답 — 거부 건수는 aedes에서만 셈)' : ''} · 읽기(구독)는 모두 허용 · 거부 ${A.denied}건${A.lastDenied ? ` (최근 ${esc(A.lastDenied.user)} → ${esc(A.lastDenied.topic)})` : ''} · 인증 실패 ${A.authFail} · 앱 내부 계정 ${A.internal}</p>` : '<p class="vla-note">접근 권한 — 앱에서 동작합니다 (웹 버전은 브로커 없음).</p>';
   const cmdT = `<p class="qt-ins">받음 ${CQ?.received ?? 0} · 실행 ${X.applied} · 거부 ${X.rejected + (CQ?.rejected ?? 0)} · 만료 ${CQ?.expired ?? 0} · 대기 ${CQ?.pending ?? 0}${X.last ? ` · 최근 ${esc(X.last.correlationId)} ${X.last.result === 'issued' ? `→ 명령 #${X.last.id}` : `거부 — ${esc(X.last.why)}`}` : ''}</p>
-    <pre class="uns-ex">mosquitto_pub -h ${esc(mq?.host ?? '127.0.0.1')} -p ${mq?.port ?? 1885} -u operator -P &lt;비밀번호&gt; \\
+    <pre class="uns-ex">mosquitto_pub -h ${esc(mq?.host ?? '127.0.0.1')} -p ${mq?.port ?? 1885}${mq?.mqtt5 ? ' -V 5 -D publish correlation-data OP-1 -D publish user-property from MES-01' : ''} -u operator -P &lt;비밀번호&gt; \\
   -t '${esc(U.root)}/main/_zone/cmd/request' \\
   -m '{"code":"SPEED","arg":75,"reason":"시험","correlationId":"OP-1"}'</pre>`;
   // 외부 MQTT 5 브로커 연결 (브리지) — 설정은 앱 데이터 폴더 uns/bridge.json
@@ -68,7 +68,7 @@ export function unsHTML(sim) {
       <div class="uns-bridge-row"><label class="chk"><input type="checkbox" data-br="enabled" ${D.enabled ? 'checked' : ''}/> 연결 켜기</label>
         <button type="button" data-br-save ${st.brBusy ? 'disabled' : ''}>💾 저장 · 연결</button>${BR.password ? '<button type="button" data-br-clear>비밀번호 지우기</button>' : ''}</div>
       <p class="qt-ins">${brState}${st.brMsg ? ` · <b class="${st.brMsg.ok ? '' : 'dn'}">${esc(st.brMsg.text)}</b>` : ''}</p>
-      <p class="vla-note">내장 브로커(포트 ${mq.port})는 MQTT 3.1.1입니다. 여기서 MQTT 5 브로커에 연결하면 UNS 메시지가 Correlation Data · Response Topic · Message Expiry · User Property 속성을 달고 함께 나가고, 그 브로커로 들어온 MQTT 5 명령 요청(…/cmd/request)도 받습니다. 맥에서 시험하려면 <code>brew install mosquitto</code> → <code>brew services start mosquitto</code> → 주소 <code>mqtt://127.0.0.1:1883</code>.</p></div>`;
+      <p class="vla-note">내장 브로커(포트 ${mq.port})는 ${mq.engine === 'mosquitto' ? `Mosquitto ${esc(mq.brokerVersion ?? '')} · MQTT 5입니다. 공장 밖 MQTT 5 브로커(사내 · 클라우드)에도 같은 메시지를 내보내려면 여기서 연결하세요 —` : 'aedes · MQTT 3.1.1입니다. 여기서 MQTT 5 브로커에 연결하면'} UNS 메시지가 Correlation Data · Response Topic · Message Expiry · User Property 속성을 달고 함께 나가고, 그 브로커로 들어온 MQTT 5 명령 요청(…/cmd/request)도 받습니다. 맥에서 시험하려면 <code>brew install mosquitto</code> → <code>brew services start mosquitto</code> → 주소 <code>mqtt://127.0.0.1:1883</code>.</p></div>`;
   const extra = `<div class="fos-grid"><div><h4>MQTT 5 브로커 연결 <small>외부 브로커 브리지 · 설정은 이 PC에 저장 (비밀번호 암호화)</small></h4>${brForm}</div><div></div></div>
     <div class="fos-grid"><div><h4>Sparkplug B 엣지 <small>spBv1.0/metafactory/… → 주 호스트 → {존}/{셀}/telemetry · edge</small></h4>${spT}</div>
       <div><h4>접근 권한 (ACL) <small>쓰기는 역할·존별 · UNS 상태 토픽은 앱만 발행</small></h4>${aclT}

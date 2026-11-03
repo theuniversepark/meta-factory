@@ -101,7 +101,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mf-facos-'));
 { process.env.UNS_DEAD_S = '1';
   const net = await import('node:net'), port = await new Promise((r) => { const v = net.createServer().listen(0, '127.0.0.1', () => { const p = v.address().port; v.close(() => r(p)); }); });
   const G = await import('../server/mqtt-gateway.mjs'), dir = path.join(tmp, 'gw'), S = makeFacosStore({ dir });
-  await G.startMqtt({ host: '127.0.0.1', port, aclFile: path.join(tmp, 'acl.json'), sparkplug: false }); G.setUnsTap(S.tap);
+  await G.startMqtt({ host: '127.0.0.1', port, aclFile: path.join(tmp, 'acl.json'), sparkplug: false, engine: 'aedes' }); G.setUnsTap(S.tap);
   const U = new UnsNamespace(s, { run: () => 'run-GW' }); G.mqttPublish(U.collect());
   check('게이트웨이 → 저장소: 탄생 메시지로 실행 파일 · 결정 · A2A 기록', S.status().run === 'run-GW' && S.status().counts.decision > 0 && S.status().counts.a2a > 0, JSON.stringify(S.status().counts));
   await new Promise((r) => setTimeout(r, 3500));

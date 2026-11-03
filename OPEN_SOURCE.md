@@ -14,7 +14,12 @@
 | @electron/packager | 20.3.0 | BSD-2-Clause | https://github.com/electron/packager | Mac 앱 패키징 (`npm run package`) |
 | @anthropic-ai/sdk | 0.131.0 | MIT | https://github.com/anthropics/anthropic-sdk-typescript | Agent(Claude API) 호출 서버 |
 | aedes | 1.2.0 | MIT | https://github.com/moscajs/aedes | 내장 MQTT 브로커 |
-| MQTT.js (mqtt) | 5.16.0 | MIT | https://github.com/mqttjs/MQTT.js | 외부 MQTT 브로커 연계(브리지) |
+| MQTT.js (mqtt) | 5.16.0 | MIT | https://github.com/mqttjs/MQTT.js | 외부 MQTT 브로커 연계(브리지) · 앱 서버의 MQTT 5 발행 클라이언트 · Sparkplug B 엣지·주 호스트 |
+| Eclipse Mosquitto | 2.1.2 | EPL-2.0 OR EDL-1.0 (BSD-3-Clause) | https://mosquitto.org · https://github.com/eclipse-mosquitto/mosquitto | 내장 MQTT 5 브로커 (`vendor/mosquitto/` — 맥: Homebrew 빌드, 라이브러리 경로만 앱 안으로 바꿈 · 윈도우: 공식 설치본 mosquitto-2.1.2-install-windows-x64.exe에서 필요한 파일만) |
+| OpenSSL | 3.x | Apache-2.0 | https://www.openssl.org | Mosquitto가 쓰는 암호 라이브러리 (`vendor/mosquitto/*/libssl · libcrypto`) |
+| cJSON | 1.7.x | MIT | https://github.com/DaveGamble/cJSON | Mosquitto가 쓰는 JSON 라이브러리 (`vendor/mosquitto/*/libcjson · cjson.dll`) |
+| GNU libmicrohttpd | (Mosquitto 윈도우 배포본 포함) | LGPL-2.1-or-later (동적 연결 DLL, 수정 없음) | https://www.gnu.org/software/libmicrohttpd/ | 윈도우 Mosquitto가 함께 쓰는 DLL (`vendor/mosquitto/win32-x64/libmicrohttpd-dll.dll`) |
+| Microsoft Visual C++ 런타임 (vcruntime140.dll) | 14.x | Microsoft 재배포 가능 파일 (Visual C++ 재배포 패키지 라이선스) | https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files | 윈도우 Mosquitto 실행에 필요 — Mosquitto 설치본에 들어 있는 vc_redist.x64.exe에서 꺼냄 (앱 폴더 배포) |
 | mammoth | 1.13.0 | BSD-2-Clause | https://github.com/mwilliamson/mammoth.js | 공정 설계 첨부 워드(.docx) 본문 추출 (`vendor/mammoth`) |
 | SheetJS Community Edition (xlsx) | 0.20.3 | Apache-2.0 | https://git.sheetjs.com/SheetJS/sheetjs (배포: https://cdn.sheetjs.com) | 공정 설계 첨부 엑셀 → CSV (`vendor/xlsx`) |
 

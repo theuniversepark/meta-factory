@@ -92,7 +92,7 @@ if (MOSQ) {
 }
 const { startMqtt, mqttPublish, mqttStatus, unsTakeCommands, unsAclPassword, unsBridgeConfig, unsBridgeSave, _sparkplug } = await import('../server/mqtt-gateway.mjs');
 const port = await freePort();
-await startMqtt({ host: '127.0.0.1', port, aclFile: path.join(tmp, 'acl.json'), bridgeFile: path.join(tmp, 'bridge.json') });
+await startMqtt({ host: '127.0.0.1', port, aclFile: path.join(tmp, 'acl.json'), bridgeFile: path.join(tmp, 'bridge.json'), engine: 'aedes' });   // aedes 동작(거부 시 연결 끊김 · 거부 건수) 시험 — Mosquitto는 tests/mosquitto.mjs
 const sub = (opts = {}) => new Promise((res, rej) => { const c = connect(`mqtt://127.0.0.1:${port}`, { reconnectPeriod: 0, ...opts }); c.once('connect', () => res(c)); c.once('error', rej); });
 check('시작 직후 rebirth 요청 (retain 저장소 비어 있음)', mqttStatus().uns.rebirth === true);
 // 처음부터 지켜보는 구독자(라이브) — Sparkplug 탄생 메시지는 retain이 아니다
