@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
 import { runAgentTurn, MODEL } from './llm-agent.mjs';
 import { designLine, designZone } from './line-designer.mjs';
-import { startMqtt, mqttStatus, mqttPublish } from './mqtt-gateway.mjs';
+import { startMqtt, mqttStatus, mqttPublish, unsTakeCommands, unsAclPassword, unsBridgeConfig, unsBridgeSave } from './mqtt-gateway.mjs';
 import { ffmpegInfo, queueConvert, convertClip, readStoredZip, framesToMp4 } from './video-convert.mjs';
 import { facRoute, facListen } from './fac-api.mjs';
 import { makeRcaApi } from './rca-api.mjs';
@@ -382,7 +382,7 @@ function sendApiError(res, err) {
 
 export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
   if (!client) setApiKey(null);
-  await startMqtt();
+  await startMqtt({ aclFile: path.join(DATA_DIR(), 'uns', 'acl.json'), bridgeFile: path.join(DATA_DIR(), 'uns', 'bridge.json') });   // UNS 계정·권한 (server/uns-acl.mjs)
   const rca = makeRcaApi({ publish: mqttPublish });   // 분석 결과는 내장 MQTT 브로커로도 발행
   let epcis = null;   // 내장 EPCIS 저장소 — 처음 요청 때 데이터 폴더에서 불러온다
   const epcisApi = () => (epcis ??= makeEpcisApi({ dir: path.join(DATA_DIR(), 'epcis') }));
@@ -430,6 +430,17 @@ export async function startServer({ port = 8780, host = '127.0.0.1' } = {}) {
     if (url.pathname === '/api/aasx/v1' && req.method === 'POST') return saveAasx(req, res, url);
     if (url.pathname === '/api/aasx/v1') return send(res, 200, aasxList());
     if (url.pathname === '/api/mqtt/status') return send(res, 200, mqttStatus());
+    // UNS 외부 명령 요청 — 화면(facOS)이 2초마다 가져가 명령 경로로 실행 · 계정 비밀번호 보기(이 PC 안 화면에서만)
+    // 외부 MQTT 5 브로커 브리지 설정 (UNS 탭) — 비밀번호는 저장 여부만 응답
+    if (url.pathname === '/api/uns/bridge' && req.method === 'GET') return send(res, 200, unsBridgeConfig());
+    if (url.pathname === '/api/uns/bridge' && req.method === 'POST') {
+      try { const r = await unsBridgeSave(JSON.parse(await readBody(req, 8192))); return send(res, r.code, r.body); } catch (e) { return send(res, 400, { error: e.message }); }
+    }
+    if (url.pathname === '/api/uns/commands/take' && req.method === 'POST') return send(res, 200, { commands: unsTakeCommands() });
+    if (url.pathname === '/api/uns/acl/password' && req.method === 'POST') {
+      try { const body = JSON.parse(await readBody(req, 4096)); const pw = unsAclPassword(String(body?.name ?? '')); return pw == null ? send(res, 404, { error: '없는 계정' }) : send(res, 200, { name: body.name, password: pw }); }
+      catch (e) { return send(res, 400, { error: e.message }); }
+    }
     if (url.pathname === '/api/mqtt/publish' && req.method === 'POST') {
       try {
         const body = JSON.parse(await readBody(req, 16 * 1024 * 1024));

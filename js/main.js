@@ -19,6 +19,7 @@ import { LLMController, serverless } from './llm.js';
 import { LineDesigner } from './designer.js';
 import { renderConcept } from './concept.js';
 import { DataHub, unsTelemetry, unsEvents, unsZoneKpi, PUBLISHER_ID, WRITER_GROUP } from './datahub.js';
+import { UnsNamespace } from './uns.js';
 import { PacketCapture } from './pcap.js';
 import { RENDER, loadBlenderAssets, applyRenderEnv, resetRenderEnv, primKey, blenderize } from './blender.js';
 import { FAC_PRODUCTS, FAC_LOCS } from './fac.js';
@@ -145,13 +146,28 @@ async function epcisPump() {
 }
 setInterval(() => { epcisPump(); }, 5000);
 // 설비 상태 요약 · 이벤트 (UNS 평면 토픽) → 서버 MQTT 브로커 — 2초(실제 시간)마다 · 설비 대시보드(Telegraf → InfluxDB → Grafana)가 구독 (js/datahub.js unsTelemetry)
+// + ISA-95 UNS 트리 (js/uns.js): facOS 상태·오더·결정·A2A · 셀 OCS · 명령 3단 · 설비 요약 — 웹 버전은 브로커 발행 없이 트리만 (오케스트레이터 창 「UNS 토픽 트리」)
 let unsSince = 0, unsBusy = false, unsSim = null;
+const uns = new UnsNamespace(null, { iso: (t) => hub.iso(t) });
 setInterval(async () => {
-  if (hub.noServer || unsBusy || !sim) return;
-  if (unsSim !== sim) { unsSim = sim; unsSince = 0; }   // 새 실행은 로그 번호가 1부터 다시 — 이전 실행의 커서를 쓰면 첫 경보 묶음이 빠진다
+  if (unsBusy || !sim) return;
+  if (unsSim !== sim) { unsSim = sim; unsSince = 0; uns.reset(sim); }   // 새 실행은 로그 번호가 1부터 다시 — 이전 실행의 커서를 쓰면 첫 경보 묶음이 빠진다
+  const tele = unsTelemetry(sim);
+  if (hub.noServer) { uns.collect({ telemetry: tele }); uns.broker.on = false; return; }
   const E = unsEvents(sim, unsSince); unsSince = E.next;
-  const messages = [...unsTelemetry(sim), ...E.messages, ...unsZoneKpi(sim)]; if (!messages.length) return;   // + Zone OEE · 품질 표본 (js/zonekpi.js)
-  unsBusy = true; try { await fetch('/api/mqtt/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages }) }); } catch { /* 서버가 잠시 안 되면 다음 주기에 */ } finally { unsBusy = false; }
+  const kpi = unsZoneKpi(sim), tree = uns.collect({ telemetry: tele, kpi });
+  // Sparkplug가 켜져 있으면 {존}/{셀}/telemetry는 게이트웨이의 주 호스트가 Sparkplug에서 옮겨 싣는다 — 화면은 평면 토픽만 보낸다(엣지 노드의 원천)
+  const viaSp = !!uns.broker.status?.sparkplug?.on, treeOut = viaSp ? tree.filter((m) => !m.topic.endsWith('/telemetry')) : tree;
+  const messages = [...tele, ...E.messages, ...kpi, ...treeOut]; if (!messages.length) return;   // + Zone OEE · 품질 표본 (js/zonekpi.js)
+  unsBusy = true;
+  try {
+    // 외부 명령 요청 (camtic/metafactory/{존}/{셀}/cmd/request) → facOS 명령 경로 — 결과는 다음 주기 UNS 명령 4단으로
+    const q = await fetch('/api/uns/commands/take', { method: 'POST' }).then((r) => r.json()).catch(() => null);
+    for (const c of q?.commands ?? []) uns.applyCommand(c);
+    const r = await fetch('/api/mqtt/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages }) });
+    const j = await r.json(); uns.broker.on = !!j.status?.listening; uns.broker.published += treeOut.length; uns.broker.error = null; uns.broker.status = j.status;
+    if (j.status?.uns?.rebirth) uns.rebirth();   // 게이트웨이가 죽음 처리했거나 새로 시작 — 다음 주기에 모든 retain 상태를 다시 발행
+  } catch (e) { uns.broker.error = e.message; uns.rebirth(); /* 서버가 잠시 안 되면 다음 주기에 (상태도 다시) */ } finally { unsBusy = false; }
 }, 2000);
 function epcisAttach() {
   const H = sim?.serials; if (!H) return;
