@@ -1,4 +1,4 @@
-// 패킷 덤프 (pcap) — AAS → OPC UA PubSub JSON → MQTT 3.1.1 → TCP/IPv4 로 나가는 메시지를 실제 패킷 모양으로 만들어
+// 패킷 덤프 (pcap) — AAS → OPC UA PubSub JSON → MQTT 5 → TCP/IPv4 로 나가는 메시지를 실제 패킷 모양으로 만들어
 // libpcap(.pcap, Ethernet) 파일로 저장한다. Wireshark에서 그대로 열면 MQTT(1883)로 디코딩된다.
 // 캡처 지점: MQTT 브로커 NIC (10.20.0.10:1883) — 브로커가 보고 받는 양방향 패킷 전부
 //  · 클라이언트 → 브로커: TCP 3-way 핸드셰이크, CONNECT, SUBSCRIBE, PUBLISH(QoS 1, 1460B MSS로 분할), PINGREQ
@@ -28,17 +28,43 @@ function varLen(n) { const out = []; do { let b = n % 128; n = Math.floor(n / 12
 const mstr = (s) => { const b = enc.encode(s); return [...u16(b.length), ...b]; };
 function concat(parts) { let n = 0; for (const p of parts) n += p.length; const out = new Uint8Array(n); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; } return out; }
 
-// ── MQTT 3.1.1 제어 패킷 ─────────────────
+// ── MQTT 5 제어 패킷 (OASIS MQTT 5.0) ─────────────────
+// 3.1.1과 다른 점: CONNECT 프로토콜 레벨 5 · 가변 헤더마다 속성 영역(Properties: 길이 + 식별자·값) ·
+// CONNACK/PUBACK/SUBACK에 사유 코드(Reason Code) · SUBSCRIBE는 구독 옵션 바이트
+// 속성 식별자: 0x01 Payload Format Indicator · 0x02 Message Expiry Interval · 0x03 Content Type · 0x08 Response Topic ·
+//             0x09 Correlation Data · 0x11 Session Expiry Interval · 0x21 Receive Maximum · 0x22 Topic Alias Maximum · 0x26 User Property
+export function mqttProps(p = {}) {
+  const b = [];
+  if (p.format != null) b.push(0x01, p.format);
+  if (p.expiry != null) b.push(0x02, ...u32(p.expiry));
+  if (p.contentType) b.push(0x03, ...mstr(p.contentType));
+  if (p.responseTopic) b.push(0x08, ...mstr(p.responseTopic));
+  if (p.correlation != null) { const c = typeof p.correlation === 'string' ? enc.encode(p.correlation) : p.correlation; b.push(0x09, ...u16(c.length), ...c); }
+  if (p.sessionExpiry != null) b.push(0x11, ...u32(p.sessionExpiry));
+  if (p.receiveMax != null) b.push(0x21, ...u16(p.receiveMax));
+  if (p.topicAliasMax != null) b.push(0x22, ...u16(p.topicAliasMax));
+  for (const [k, v] of p.user ?? []) b.push(0x26, ...mstr(k), ...mstr(String(v)));
+  return [...varLen(b.length), ...b];
+}
+// 발행 속성 기본값: JSON 문자열이면 UTF-8 표시 + Content Type, 상위 명령(…/Commands)은 만료 30초 (늦게 닿은 명령은 브로커가 버림)
+export function publishProps(topic, payload, p = null) {
+  if (p) return p;
+  const out = typeof payload === 'string' ? { format: 1, contentType: 'application/json' } : {};
+  if (topic.endsWith('/Commands')) out.expiry = 30;
+  return out;
+}
 export const MQTT = {
-  connect: (clientId, keepAlive = 60) => { const vh = [...mstr('MQTT'), 4, 0x02, ...u16(keepAlive)], pl = mstr(clientId); return Uint8Array.from([0x10, ...varLen(vh.length + pl.length), ...vh, ...pl]); },
-  connack: () => Uint8Array.from([0x20, 0x02, 0x00, 0x00]),
-  publish: (topic, payload, id, retain = false, qos = 1) => {
-    const t = mstr(topic), head = [...t, ...(qos ? u16(id) : [])], body = typeof payload === 'string' ? enc.encode(payload) : payload;
+  version: 5,
+  connect: (clientId, keepAlive = 60) => { const vh = [...mstr('MQTT'), 5, 0x02, ...u16(keepAlive), ...mqttProps()], pl = mstr(clientId); return Uint8Array.from([0x10, ...varLen(vh.length + pl.length), ...vh, ...pl]); },
+  // 브로커 응답: 세션 없음 · 사유 0x00(성공) · Topic Alias Maximum 10 (Mosquitto 기본값)
+  connack: () => { const pr = mqttProps({ topicAliasMax: 10 }); return Uint8Array.from([0x20, ...varLen(2 + pr.length), 0x00, 0x00, ...pr]); },
+  publish: (topic, payload, id, retain = false, qos = 1, props = {}) => {
+    const t = mstr(topic), head = [...t, ...(qos ? u16(id) : []), ...mqttProps(props)], body = typeof payload === 'string' ? enc.encode(payload) : payload;
     return concat([Uint8Array.from([0x30 | (qos << 1) | (retain ? 1 : 0), ...varLen(head.length + body.length), ...head]), body]);
   },
-  puback: (id) => Uint8Array.from([0x40, 0x02, ...u16(id)]),
-  subscribe: (id, filters) => { const vh = u16(id), pl = filters.flatMap((f) => [...mstr(f), 1]); return Uint8Array.from([0x82, ...varLen(vh.length + pl.length), ...vh, ...pl]); },
-  suback: (id, n) => Uint8Array.from([0x90, ...varLen(2 + n), ...u16(id), ...Array(n).fill(1)]),
+  puback: (id, reason = 0x00) => Uint8Array.from([0x40, 0x03, ...u16(id), reason]),
+  subscribe: (id, filters) => { const vh = [...u16(id), ...mqttProps()], pl = filters.flatMap((f) => [...mstr(f), 0x01]); return Uint8Array.from([0x82, ...varLen(vh.length + pl.length), ...vh, ...pl]); },   // 구독 옵션 0x01 = 최대 QoS 1
+  suback: (id, n) => Uint8Array.from([0x90, ...varLen(3 + n), ...u16(id), 0x00, ...Array(n).fill(0x01)]),   // 속성 길이 0 · 사유 0x01(QoS 1 허가)
   pingreq: () => Uint8Array.from([0xc0, 0x00]),
   pingresp: () => Uint8Array.from([0xd0, 0x00]),
 };
@@ -89,14 +115,15 @@ export class PacketCapture {
   }
   lat(c) { return c.kind === '5g' ? 8 + (c.extra ?? 0) : 0.3; }   // 브로커까지 편도 지연 (ms)
   // 메시지 한 건 발행: 클라이언트 → 브로커 PUBLISH(+분할) → 브로커 PUBACK → 구독자에게 PUBLISH → 구독자 PUBACK
-  publish({ key, kind, topic, payload, tMs, retain = false, subs = [], extraMs = 0, video = false, ip = null }) {
+  // props: MQTT 5 발행 속성 ({ format, expiry, contentType, responseTopic, correlation, user }) — 없으면 publishProps 기본값
+  publish({ key, kind, topic, payload, tMs, retain = false, subs = [], extraMs = 0, video = false, ip = null, props = null }) {
     if (!this.on || this.full) return;
     if (this.only && key !== this.only.key) {   // 개별 캡처: 다른 클라이언트가 보낸 메시지는 이 자산이 구독한 것만(브로커 → 이 자산 전달)
       const s = this.clients.get(this.only.key);
       if (s && s.subs.some((f) => topicMatch(f, topic))) {
         this.keepalive(s, tMs);
         const sid = (s.spid = (s.spid % 65535) + 1), t = tMs + 0.4;
-        this.data(s, 'down', MQTT.publish(topic, payload, sid, false), t); this.stats.publishDown++; this.stats.msgs++;
+        this.data(s, 'down', MQTT.publish(topic, payload, sid, false, 1, publishProps(topic, payload, props)), t); this.stats.publishDown++; this.stats.msgs++;
         this.seg(s, 'up', 0x18, MQTT.puback(sid), t + this.lat(s) * 2 + 0.1); this.stats.puback++; s.last = t;
       }
       if (this.bytes > this.limit) { this.full = true; this.on = false; }
@@ -105,14 +132,14 @@ export class PacketCapture {
     const c = this.client(key, kind, tMs, subs, ip);
     c.extra = extraMs;
     this.keepalive(c, tMs);
-    const id = (c.pid = (c.pid % 65535) + 1), pkt = MQTT.publish(topic, payload, id, retain);
+    const id = (c.pid = (c.pid % 65535) + 1), pr = publishProps(topic, payload, props), pkt = MQTT.publish(topic, payload, id, retain, 1, pr);
     let t = tMs + this.lat(c);
     this.data(c, 'up', pkt, t); this.stats.publishUp++; this.stats.msgs++; if (video) this.stats.video++;
     this.seg(c, 'down', 0x18, MQTT.puback(id), t += 0.15); this.stats.puback++;
     // 구독자에게 전달 (보낸 클라이언트 자신은 제외)
     for (const s of this.clients.values()) {
       if (s === c || !s.subs.some((f) => topicMatch(f, topic))) continue;
-      const sid = (s.spid = (s.spid % 65535) + 1), fwd = MQTT.publish(topic, payload, sid, false);
+      const sid = (s.spid = (s.spid % 65535) + 1), fwd = MQTT.publish(topic, payload, sid, false, 1, pr);   // 브로커는 속성을 그대로 실어 전달
       const ts = t + 0.05;
       this.data(s, 'down', fwd, ts); this.stats.publishDown++;
       this.seg(s, 'up', 0x18, MQTT.puback(sid), ts + this.lat(s) * 2 + 0.1); this.stats.puback++;

@@ -149,7 +149,7 @@ function commTab(sim) {
   const cm = Q.cases.get(st.caseId) ?? list[0];
   const live = Q.live ? `<b class="qt-chip good">실서버 연결</b> 앱 서버 <code>/api/rca/v1</code>에 같은 리포트 전송 · 성공 ${S.liveOk} · 실패 ${S.liveFail}` : '<b class="qt-chip muted">시뮬레이션</b> 서버가 없는 화면(웹·공유 페이지)이라 RCA 서버 처리를 화면 안에서 같은 코드(js/rcacore.js)로 재현';
   const arch = `<div class="qt-arch">
-    <span><b>① 검사셀 엣지</b><small>10.20.1.41 · .42 (체결셀) · .60 (정밀검사)</small></span><i>MQTT 3.1.1 QoS 1<br>CloudEvents JSON</i>
+    <span><b>① 검사셀 엣지</b><small>10.20.1.41 · .42 (체결셀) · .60 (정밀검사)</small></span><i>MQTT 5 QoS 1<br>CloudEvents JSON</i>
     <span><b>MQTT 브로커</b><small>${ipS(QHOST.broker.ip)}:${QHOST.broker.port}</small></span><i>구독 전달</i>
     <span><b>② 메인 서버</b><small>FacOS 품질 모듈 ${ipS(QHOST.main.ip)}</small></span><i>HTTP/1.1 REST<br>POST /api/rca/v1/reports</i>
     <span><b>③ RCA 서버 (더미)</b><small>${ipS(QHOST.rca.ip)}:${QHOST.rca.port}</small></span></div>

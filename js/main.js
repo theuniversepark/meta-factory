@@ -889,7 +889,7 @@ function pcapHtml() {
   const state = P.full ? '<b class="bad">용량 한도(200MB) 도달 — 자동 중지</b>' : P.on ? `<b class="ok">⏺ 캡처 중</b> · ${P.duration.toFixed(0)}초 (공장 시계)` : S.packets ? '중지됨' : '대기';
   return `<div class="grid2">
     <span>상태</span><b>${state}</b>
-    <span>캡처 지점</span><b>MQTT 브로커 NIC <code>10.20.0.10:1883</code> — 양방향(클라이언트 → 브로커 · 브로커 → 구독자), Ethernet · IPv4 · TCP · MQTT 3.1.1</b>
+    <span>캡처 지점</span><b>MQTT 브로커 NIC <code>10.20.0.10:1883</code> — 양방향(클라이언트 → 브로커 · 브로커 → 구독자), Ethernet · IPv4 · TCP · MQTT 5 (속성: Payload Format · Content Type · 명령 Message Expiry)</b>
     <span>패킷</span><b>${n(S.packets)}개 (→ 브로커 ${n(S.up)} · 브로커 → ${n(S.down)}) · ${kb(P.bytes)}</b>
     <span>MQTT</span><b>PUBLISH 발행 ${n(S.publishUp)} · 구독자 전달 ${n(S.publishDown)} · PUBACK ${n(S.puback)} · CONNECT ${n(S.connect)} · SUBSCRIBE ${n(S.subscribe)} · PING ${n(S.ping)}</b>
     <span>영상</span><b>${P.video === false ? '끔' : `프레임 ${n(S.video)}개`} — CCTV·로봇 카메라 JPEG를 OPC UA ua-data ByteString(base64)으로 1초마다 (<code>…/Video_&lt;카메라&gt;</code>)</b>
@@ -1195,7 +1195,7 @@ function renderPcapBox() {
   const ip = P?.clients.get(t.key)?.ip?.join('.') ?? (t.kind === '5g' ? '10.45.x.x (5G 단말)' : '10.20.1.x (유선 LAN)');
   const state = !P ? '대기' : P.full ? '<span class="rec">용량 한도 — 자동 중지</span>' : P.on ? `<span class="rec">⏺ 캡처 중</span> ${P.duration.toFixed(0)}초` : `중지됨 · ${P.duration.toFixed(0)}초`;
   setHTML(box, `<div class="ph">📦 패킷 캡처 (이 자산만) · ${state}</div>
-    <div>클라이언트 <b>${escH(t.key)}</b> · ${escH(ip)} ↔ 브로커 10.20.0.10:1883 · MQTT 3.1.1 (AAS → OPC UA PubSub JSON)</div>
+    <div>클라이언트 <b>${escH(t.key)}</b> · ${escH(ip)} ↔ 브로커 10.20.0.10:1883 · MQTT 5 (AAS → OPC UA PubSub JSON)</div>
     ${S ? `<div>패킷 ${n(S.packets)} (→ 브로커 ${n(S.up)} · 브로커 → ${n(S.down)}) · 발행 PUBLISH ${n(S.publishUp)} · 받은 명령 ${n(S.publishDown)} · PUBACK ${n(S.puback)} · 영상 ${n(S.video)}프레임${S.machmon ? ` · 가공기 감시 ${n(S.machmon)}건` : ''} · PING ${n(S.ping)} · ${kb(P.bytes)}</div>` : ''}
     <div class="prow">${P?.on ? '<button type="button" data-act="pcapStop">⏹ 캡처 중지</button>' : '<button type="button" data-act="pcapStart">⏺ 캡처 시작</button>'}
       <button type="button" data-act="pcapSave">💾 pcap 저장</button>

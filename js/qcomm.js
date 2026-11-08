@@ -1,5 +1,5 @@
 // 불량 판정 리포트 전송 · RCA 서버 연동 (품질 통신) — 사례마다 메시지 흐름을 시뮬레이션하고 실제 패킷(pcap)으로 남긴다
-//  ① 검사셀 엣지 → MQTT 브로커 → 메인 서버: 불량 판정 리포트 (MQTT 3.1.1 QoS 1 · CloudEvents 1.0 JSON)
+//  ① 검사셀 엣지 → MQTT 브로커 → 메인 서버: 불량 판정 리포트 (MQTT 5 QoS 1 · Content Type application/cloudevents+json · CloudEvents 1.0 JSON)
 //       토픽 metafactory/quality/v1/defect/{zone}/{검사셀}
 //  ② 메인 서버(FacOS 품질 모듈) → RCA 서버: 같은 리포트 + 메인 서버 메타 (HTTP/1.1 POST /api/rca/v1/reports → 202 Accepted · 티켓)
 //  ③ RCA 서버 분석 → 메인 서버: 원인 확정/재검토 · 우선순위 · 봉쇄 · 대책 (MQTT metafactory/quality/v1/rca/{사례}/result)
@@ -62,7 +62,7 @@ export class QualityComm {
       // 구독자 먼저 접속 (메인 서버 · 검사셀 엣지가 품질 토픽을 구독)
       P.client('MES-QMS', 'facos', tMs, [`${T}/defect/#`, `${T}/rca/+/result`, `${T}/ack/#`], QHOST.main.ip);
       for (const [k, sip, subs] of subsOf ?? []) P.client(k, 'lan', tMs, subs, sip);
-      P.publish({ key, kind: 'lan', ip, topic, payload, tMs, subs: [] });
+      P.publish({ key, kind: 'lan', ip, topic, payload, tMs, subs: [], props: { format: 1, contentType: 'application/cloudevents+json' } });
       P.tag = null;
     }
     return new TextEncoder().encode(payload).length;

@@ -64,7 +64,7 @@ const FAC_KIT = [['air', '압축기실'], ['dewpoint', '압축기실'], ['pq', '
 // ── 계층 · 네트워크 · 오픈소스 ─────────────────
 export const LAYERS = [
   { key: 'sensor', label: '센서', what: '측정 · 현장 연결', proto: 'IO-Link(IEC 61131-9) · Modbus RTU/TCP · 4–20mA · LoRaWAN · I²S/DAQ', oss: 'IODD(IO-Link 기기 기술) · libmodbus · ChirpStack(LoRaWAN 네트워크 서버)' },
-  { key: 'edge', label: '셀 엣지', what: '수집 · 특징 추출(RMS·첨도·FFT) · 1초 묶음 · 버퍼 · PTP Ordinary Clock', proto: '필드버스 → MQTT 3.1.1 (셀 내부 LAN)', oss: 'Node-RED · Telegraf(입력 플러그인) · linuxptp(ptp4l)' },
+  { key: 'edge', label: '셀 엣지', what: '수집 · 특징 추출(RMS·첨도·FFT) · 1초 묶음 · 버퍼 · PTP Ordinary Clock', proto: '필드버스 → MQTT 5 (셀 내부 LAN)', oss: 'Node-RED · Telegraf(입력 플러그인) · linuxptp(ptp4l)' },
   { key: 'gateway', label: '엣지 게이트웨이', what: '프로토콜 변환 · 저장 후 전달(store-and-forward) · 보안 경계 · PTP Boundary Clock', proto: 'MQTT(Sparkplug B 토픽·BIRTH 개념) · OPC UA PubSub', oss: 'Eclipse Mosquitto(브리지) · Eclipse Tahu(Sparkplug) · open62541 · linuxptp' },
   { key: 'zone', label: '존 서버', what: '존 UNS · 존 규칙(경보 1차) · 존 대시보드 · 공장 중앙으로 묶어 발행', proto: 'MQTT 브리지 → 공장 UNS', oss: 'Eclipse Mosquitto · Node-RED' },
   { key: 'central', label: '공장 중앙', what: 'MQTT 브로커(UNS) · PTP Grandmaster(기준 시계) · DataHub(AAS · OPC UA)', proto: 'MQTT · OPC UA · PTP(IEEE 1588-2019)', oss: 'aedes(앱 내장 브로커) · Eclipse Mosquitto · linuxptp · chrony' },

@@ -525,10 +525,11 @@ AMR이 구분 적재장 입구(경로 끝)에서 **가운데 정지 구간까지
 - 검증: `npm test`(tests/fac.mjs, 22개 항목) — 피지컬AI 2시간: 구매오더 = WMS 발주(확정 + 진행 중), 입고 수량 = 트럭 하차 수량, 물류 선반·구분 적재장 재고 = 시뮬레이션 재고(확정 전 수량 반영), 출고 = 상차, 재고 보존, 내부 이동·생산 10분 전표, 고장 → 긴급 정비요청 완료·소요 시간, 정비 지시 → 예방 정비요청, 설비 등록, 전표 번호 형식, 레거시 기록 없음 / FAC API: 업로드 두 번(마스터 중복 무시), ① 조회 값 = FAC 기록(구매오더·전표·현재고·정비요청·설비·재주문 규칙), ② 이벤트 순서·빠짐없음·`next` 이어 받기·유형 필터, 읽기 전용(405), 새 운전 시 초기화.
 
 ## 패킷 덤프 (pcap · Wireshark) — AAS → OPC UA → MQTT → TCP/IP
-**📡 데이터 연동 → 📦 패킷 덤프**에서 캡처를 시작하면, 로봇·설비·CCTV가 보내는 데이터(영상 포함)를 **AAS → OPC UA PubSub JSON → MQTT 3.1.1 → TCP → IPv4 → Ethernet** 패킷으로 만들어 기록하고 **`.pcap`(libpcap) 파일**로 저장합니다 (`js/pcap.js`). Wireshark·tcpdump에서 그대로 열리고 포트 1883이 MQTT로 디코딩됩니다.
+**📡 데이터 연동 → 📦 패킷 덤프**에서 캡처를 시작하면, 로봇·설비·CCTV가 보내는 데이터(영상 포함)를 **AAS → OPC UA PubSub JSON → MQTT 5 → TCP → IPv4 → Ethernet** 패킷으로 만들어 기록하고 **`.pcap`(libpcap) 파일**로 저장합니다 (`js/pcap.js`). Wireshark·tcpdump에서 그대로 열리고 포트 1883이 MQTT로 디코딩됩니다.
 - **캡처 지점**: MQTT 브로커 NIC `10.20.0.10:1883` — **양방향** 전부.
   - 클라이언트 → 브로커: TCP 3-way 핸드셰이크(SYN, MSS 1460 옵션), CONNECT(클라이언트 ID `metafactory-<자산>`), SUBSCRIBE, PUBLISH(QoS 1), PINGREQ.
   - 브로커 → 클라이언트: SYN/ACK, CONNACK, SUBACK, PUBACK, **구독자에게 PUBLISH 전달**(QoS 1, 구독자 PUBACK), PINGRESP.
+- **MQTT 5 형식**(1.0.89, 내장 브로커 Mosquitto MQTT 5와 맞춤): CONNECT 프로토콜 레벨 5 · 모든 가변 헤더에 속성 영역 · CONNACK(사유 0x00 · Topic Alias Maximum 10) · PUBACK 사유 코드 · SUBSCRIBE 구독 옵션 · SUBACK 사유 0x01. PUBLISH 속성 = Payload Format Indicator 1(UTF-8) + Content Type `application/json`(품질 리포트는 `application/cloudevents+json`), 상위 명령(`…/Commands`)은 Message Expiry 30초. 브로커는 속성을 그대로 실어 구독자에게 전달. Wireshark는 같은 연결의 CONNECT를 보고 MQTT v5로 해석합니다.
 - **흐름**: 각 자산이 자기 데이터(`opcua/json/data/metafactory/MetaFactory/<자산>`)를 발행 → 브로커 PUBACK → FacOS(구독 `opcua/json/#` · `aas/#`)에게 전달 → FacOS PUBACK. FacOS가 이벤트(`…/Events`)·**상위 명령**(`…/Commands`)을 발행하면 명령 토픽을 구독한 셀·로봇들에게 **다운링크** 전달. 60초 넘게 조용하면 keep-alive.
 - **영상**: 캡처 중 1초마다 CCTV 한 대(320×180, AI 오버레이 포함)와 로봇 카메라 한 대(160×120)를 JPEG로 찍어 **OPC UA ua-data의 ByteString(base64)** 으로 발행(`…/Video_CCTV_CC-nn` · `…/Video_Robot_<자산>`, 필드 CameraId · Encoding · Width · Height · Place · Detections · Image). 큰 메시지는 **MSS 1460B로 TCP 분할**되고 받는 쪽이 두 세그먼트마다 ACK. 끌 수 있습니다(영상 포함 체크).
 - **주소 계획**: 브로커 10.20.0.10 · FacOS 10.20.0.20 · 설비·셀(유선 LAN) 10.20.1.x · CCTV 10.20.2.x · **이동 로봇(Private 5G) 10.45.x.x**(UPF가 준 UE 주소, 출발 MAC은 UPF). 5G 로봇 패킷 시각에는 무선 지연(약 8ms, 핸드오버 중이면 버퍼 대기만큼 더)이 반영됩니다. 시각은 공장 기준 시계(마이크로초).
@@ -543,7 +544,7 @@ AMR이 구분 적재장 입구(경로 끝)에서 **가운데 정지 구간까지
 - **PCI**: 기지국마다 고유한 물리 셀 ID — **PCI = 3 × SSS + PSS**(0~1007, 예: gNB-01 PCI 120). 서비스 영역이 맞닿은 이웃 셀끼리는 PSS(PCI mod 3)가 같으면 동기 신호가 간섭하므로, 같은 mod 3 경계 길이가 가장 짧아지게 되추적 탐색으로 배정합니다(정밀조립Zone: 같은 mod 3 경계 4.0% — 네 셀이 모이는 모서리 접촉뿐, 이것이 가능한 최솟값). 기지국 아래에 "5G gNB-nn · PCI nnn" 표지(5G 지도를 켰을 때).
 - **이동 로봇 5G 모뎀(UE)**: 운반 AMR · AGV · 자율 지게차 · 휴머노이드(물류·정비) · 사족보행 · 순찰 드론 · AMMR 모두 5G 모뎀(IMSI 450…)으로 통신합니다(피지컬AI 35대, 자동화는 AMR·AGV 19대). 100ms마다 모든 셀의 RSRP를 재고 L3 필터(k=4)를 거쳐 서빙 셀 RSRP·SINR을 구합니다(바닥 로봇은 셀별 1m RSRP 지도, 드론은 3D 거리 LOS).
 - **핸드오버**: 3GPP **A3 이벤트**(인접 셀 > 서빙 셀 + 3dB)가 **TTT 160ms** 이어지면 Xn **DAPS 핸드오버**(Dual Active Protocol Stack, 3GPP Rel-16)를 합니다. 실행(RACH·경로 전환) 30~45ms 동안에도 소스 셀로 계속 보내다가 타깃 셀로 넘어가므로 **끊김 0ms** — 핸드오버 중에도 지연 10ms 요구를 지킵니다(이전 방식은 그동안 PDCP 버퍼에 담아 30~45ms 지연). 타깃 셀이 너무 약하면 실패로 셉니다. 핸드오버 직후 연결선이 흰색으로 깜빡이고, 카드에 최근 핸드오버(시각 · 로봇 · PCI 이전 → 이후 · RSRP · 중단 시간 · 포워딩 건수)가 나옵니다.
-- **데이터 전달 과정**: 데이터는 **AAS(IDTA) 서브모델 → OPC UA PubSub JSON(ua-data) 메시지 → MQTT 3.1.1 QoS 1 PUBLISH → 5G NR 업링크 → 5GC UPF → MQTT 브로커**로 갑니다. 데이터 연동(DataHub)이 만드는 이동 로봇의 AAS·OPC UA 메시지는 그 로봇의 5G 모뎀으로 나가고, 모뎀은 10Hz 상태(위치·작업·배터리) 델타 프레임도 올립니다. 송신·브로커 도착·전송 중·유실을 로봇마다, 전체로 셉니다.
+- **데이터 전달 과정**: 데이터는 **AAS(IDTA) 서브모델 → OPC UA PubSub JSON(ua-data) 메시지 → MQTT 5 QoS 1 PUBLISH → 5G NR 업링크 → 5GC UPF → MQTT 브로커**로 갑니다. 데이터 연동(DataHub)이 만드는 이동 로봇의 AAS·OPC UA 메시지는 그 로봇의 5G 모뎀으로 나가고, 모뎀은 10Hz 상태(위치·작업·배터리) 델타 프레임도 올립니다. 송신·브로커 도착·전송 중·유실을 로봇마다, 전체로 셉니다.
 - **결과(피지컬AI 1시간)**: 핸드오버 5,900회 · **성공 100%** · 평균 실행 37ms(DAPS 끊김 0ms) · 핑퐁 7회 · **무선 링크 실패 0** · 업링크 MQTT 126만 건 **유실 0건**. 처리량은 그대로입니다(5G는 시뮬레이션 난수를 쓰지 않음).
 - **화면**: 📶 5G 지도 — 바닥 RSRP 색(−70 이상 진초록 · −80 이상 연두 · −90 이상 노랑 · −100 이상 주황 · 그 아래 빨강 = 음영), 기지국 PCI 표지, 로봇 ↔ 서빙 셀 연결선. 요약 카드 — 기지국 수·음영지역·RSRP/SINR·PCI 목록, 5G 모뎀 수(종류별)·핸드오버(성공률·평균 중단·핑퐁·링크 실패)·업링크(송신·도착·유실·포워딩)·전송 경로·최근 핸드오버. **로봇 상세 정보**(이동 로봇·AMMR) — 상태 줄 "5G: PCI · RSRP · 핸드오버 n회"와 **5G 통신** 칸(서빙 셀 PCI, RSRP/SINR, 최강 인접 셀, 핸드오버 횟수·최근 이력, 업링크 송신·도착·버퍼·유실, 단말 IMSI, 전송 경로·MQTT 토픽).
 - **기지국 정보(클릭)**: 천장의 5G 기지국(gNB)을 누르면 그 기지국 창이 열리고(1초마다 갱신), 바닥에 선택 링·설계 반경(18m) 원과 기지국까지 보라색 기둥이 표시됩니다.
@@ -821,7 +822,7 @@ AGV·지게차, 운반 AMR, 정비 인력·휴머노이드, 사족보행 로봇,
 | `tests/ui-scroll.cjs` | UI 스크롤 검증(Electron): 모든 팝업 · 실제 휠 · 갱신 후 위치 유지 (`npm run test:ui`) |
 | `js/blender.js` | 렌더 옵션 3D / Blender: Blender glTF 자산 불러오기(GLTFLoader)·복제(대수별 상태등 재질)·실내 환경광 |
 | `blender/build_assets.py` | Blender 모델링 스크립트(bpy): AMR·AGV·지게차·드론 → assets/blender/*.glb + 미리보기 렌더 |
-| `js/pcap.js` | 패킷 덤프: MQTT 3.1.1 제어 패킷 · TCP 핸드셰이크·분할·ACK · IPv4/TCP 체크섬 → libpcap(.pcap) 파일 (Wireshark) |
+| `js/pcap.js` | 패킷 덤프: MQTT 5 제어 패킷(속성 영역 · 사유 코드) · TCP 핸드셰이크·분할·ACK · IPv4/TCP 체크섬 → libpcap(.pcap) 파일 (Wireshark) |
 | `js/net5g.js` | Private 5G: 음영지역 없는 기지국 배치(3GPP InF 경로손실·탐욕적 덮개)·PCI 배정, 이동 로봇 5G 모뎀(UE)·A3·DAPS 핸드오버·지연 10ms 모델(임계 대수)·부하 분산·수락 제어·업링크 집계 |
 | `js/cctvview.js` | CCTV 전광판(12×4m, CCTV 전체 분할 실시간 영상)·CCTV 영상 창, AI 오버레이(탐지 박스·분할·추적 ID·경보) |
 | `js/receiving.js` | 입고: WMS 발주, 입고 트럭 야드(입차·대기·후진 접안·하차 후 출차), 입고 지게차 하차·창고 랙 보관 |
