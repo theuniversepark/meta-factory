@@ -22,7 +22,7 @@ const store = { get: (k) => { try { return localStorage.getItem(k); } catch { re
 const CHAIN = [['오더', ''], ['자재', '원자재 로트'], ['투입', '생산 ID'], ['공정', '셀별 이력'], ['판정', '제품 ID'], ['출하', '팔레트 SSCC'], ['이후', '조회 · 리콜']];
 const FCHAIN = [['공장', 'FacOS'], ['게이트', 'A2A'], ['Zone', '오케스트레이터'], ['셀', 'OCS'], ['엣지', '스킬'], ['UNS', 'ISA-95'], ['기록', 'FAC']];   // FacOS 계층 + 정보 바탕(UNS)
 const KCHAIN = [['손실', '원인 11종'], ['제안', '운영값'], ['트윈', '30분×3'], ['결정', '적용·보류'], ['실측', '10분'], ['학습', '이력']];   // KPI 개선 6단계
-const LCHAIN = [['현장', '셀 엣지'], ['AAS', '시계열'], ['OPC UA', 'PubSub'], ['TSN', '유선'], ['이음5G', '이동 로봇'], ['서버', 'MQTT · DB']];   // 데이터 & 제어명령 파이프라인 6단계
+const LCHAIN = [['현장', '셀 엣지'], ['AAS', '시계열'], ['OPC UA', 'PubSub'], ['TSN', '유선'], ['이음5G', '이동 로봇'], ['UNS', 'MQTT 5'], ['FacOS', '구독·판단'], ['명령', 'cmd 4단']];   // 데이터 & 제어명령 파이프라인 6단계
 const OCHAIN = [['활용', '실증 · 데이터 · 교육'], ['기대', '생산 · 안전 · 확산'], ['맺음말', '']];   // 활용 및 기대
 const QCHAIN = [['예방', '건강·보정'], ['전수', '토크·각도'], ['샘플', '정밀검사'], ['대응', '봉쇄·경보'], ['원인', 'AI 분석'], ['개선', '8D·정책'], ['감시', '관리도']];   // 품질 관리 7단계
 const textW = (t) => [...t].reduce((a, c) => a + (/[가-힣]/.test(c) ? 11.5 : 6.4), 0);   // 글자 폭 (한글 · 영문)
@@ -67,6 +67,19 @@ const incUns = (T, s = T.h.sim?.(), part = 'report') => {
   const short = (t) => t.slice(U.root.length + 1);
   return { a2a, cmds, cells, topics, short, sel: ct.at(-1) ?? a2a[0]?.topic ?? null,
     note: `인시던트 #${I.id} ${I.title} — ${part === 'cmd' ? '명령이 UNS에 남긴 토픽 (A2A 명령 · 셀 명령 4단 · 셀 상태)' : '보고가 UNS에 남긴 토픽 (A2A 보고 · 방송)'}` };
+};
+// UNS 트리에서 조건에 맞는 토픽을 골라 강조 (최근 것 먼저) — 제품 ID 추적 · 파이프라인 안내가 씀
+const unsSel = (s, f, note, prefer = null, max = 10) => {
+  const U = s?.uns; if (!U) return null;
+  const E = [...U.tree.values()].filter(f).sort((a, b) => (b.t ?? 0) - (a.t ?? 0)).slice(0, max);
+  const pick = (prefer && E.find((e) => e.topic.endsWith(`/${prefer}`))) || E[0];
+  return { E, topics: E.map((e) => e.topic), sel: pick?.topic ?? null, note, short: (t) => String(t ?? '').slice(U.root.length + 1) };
+};
+const qSample = (s, z = 'main') => { const U = s?.uns, e = U?.tree.get(U.t(z, '_zone', 'quality')); try { return e ? JSON.parse(e.payload) : null; } catch { return null; } };   // 최근 품질 표본 (앱 — 웹 버전은 없음)
+const LINK_UNS = {
+  tele: (s) => unsSel(s, (e) => e.kind === 'telemetry' && e.topic.includes('/main/'), '셀 설비 값이 ISA-95 공장 트리에 정리된 자리 ({존}/{셀}/telemetry)', null, 8),
+  facos: (s) => unsSel(s, (e) => e.topic.includes('/_facos/') && ['state', 'order', 'decision'].includes(e.kind), 'FacOS가 판단 결과를 다시 UNS로 — 공장 상태 · 오더 · 결정', 'state', 8),
+  cmd: (s) => unsSel(s, (e) => e.kind === 'cmd', '명령 4단 — cmd → cmd/ack → cmd/exec → cmd/done (같은 상관 ID)', null, 8),
 };
 const A2A_KO = { 'incident.report': '인시던트 보고', broadcast: 'P1 방송', command: '명령' };
 const at = (T, x) => `+${sec(x.t - T.ev.t0)}`;
@@ -288,31 +301,32 @@ const TOPICS = {
   trace: { name: '제품 ID 추적 — 오더부터 출하 이후까지', tour: true, steps: [
     { chain: -1, cam: { view: 'precision' }, panel: null,
       say: '제품 하나의 일생은 ID로 이어져요. 생산에 들어갈 때 생산 ID, 품질검사에 합격하면 제품 고유 ID, 출하할 때는 팔레트 ID가 붙어요. 오더부터 출하 이후까지 그 흐름을 현장과 화면으로 따라가 볼게요.' },
-    { chain: 0, cam: { view: 'all' }, panel: { kind: 'orch', tab: 'fos' }, hl: ['#orchPanel'],
-      voice: '첫째, 오더. 공장 오케스트레이터가 오더를 받아 각 Zone에 배정해요. 양품 목표와 혼류 비율, 납기가 함께 내려가고, 앱에서는 ERPNext 작업지시와도 연동돼요. 오케스트레이터 창의 FacOS 계층 탭에서 오더 진행을 볼 수 있어요.',
-      say: (T) => { const o = ex.order(T.h.sim?.()); return `① 오더 — 공장 오케스트레이터가 오더를 받아 Zone에 배정해요.${o ? ` 지금 오더는 ${o.o.id}: 양품 목표 ${o.o.target}개 중 ${o.good}개 완료, 납기 ${clock(o.o.due)}.` : ''} 양품 목표 · 혼류 비율 · 납기가 함께 내려가고, 앱에서는 ERPNext 작업지시와도 연동돼요.`; }, live: true },
+    { chain: 0, cam: { view: 'all' }, hl: ['#orchPanel'],
+      panel: (T) => ({ kind: 'orch', tab: 'uns', uns: (s) => unsSel(s, (e) => e.kind === 'order', '오더 — FacOS가 UNS에 올린 작업 요청 (ISA-95 OperationsRequest · retain)', ex.order(s)?.o.id) }),   // 오더 토픽 강조 · 마지막 메시지 = 지금 오더
+      voice: '첫째, 오더. 공장 오케스트레이터가 오더를 받아 각 Zone에 배정해요. 양품 목표와 혼류 비율, 납기가 함께 내려가요. 이 오더는 UNS의 FacOS 오더 토픽에 ISA-95 작업 요청 형식으로 올라가요. MES나 ERP는 FacOS에 따로 묻지 않고 이 토픽을 구독해서 진행을 봐요. 앱에서는 ERPNext 작업지시와도 연동돼요.',
+      say: (T) => { const o = ex.order(T.h.sim?.()); return `① 오더 — 공장 오케스트레이터가 오더를 받아 Zone에 배정해요.${o ? ` 지금 오더는 ${o.o.id}: 양품 목표 ${o.o.target}개 중 ${o.good}개 완료, 납기 ${clock(o.o.due)}.` : ''} 이 오더는 UNS ${o ? `_facos/order/${o.o.id}` : '_facos/order/{오더}'}에 ISA-95 작업 요청(OperationsRequest) 형식 · retain으로 올라가요. MES · ERP는 FacOS에 따로 묻지 않고 이 토픽을 구독해 진행을 봐요 — 노랗게 강조된 줄. 앱에서는 ERPNext 작업지시와도 연동돼요.`; }, live: true },
     { chain: 1, cam: { x: -46, z: 33, d: 22 }, panel: { kind: 'fac', tab: 'po' }, hl: ['#btnFac'],
       voice: '둘째, 자재 준비. 창고 재고가 재주문점 아래로 내려가면 구매오더가 확정되고, 입고 트럭이 이 도크로 들어와요. 들어온 자재에는 원자재 로트가 붙고, AGV가 투입구까지 날라요. FAC 창에서 구매오더와 입고 전표, 재고를 볼 수 있어요.',
-      say: '② 자재 준비 — 창고 재고가 재주문점 아래로 내려가면 구매오더가 확정되고, 입고 트럭이 이 도크(왼쪽 벽)로 들어와요. 들어온 자재에는 원자재 로트가 붙고, AGV가 투입구까지 날라요. FAC 창에서 구매오더 · 입고 전표 · 재고를 볼 수 있어요.' },
+      say: '② 자재 준비 — 창고 재고가 재주문점 아래로 내려가면 구매오더가 확정되고, 입고 트럭이 이 도크(왼쪽 벽)로 들어와요. 들어온 자재에는 원자재 로트가 붙고, AGV가 투입구까지 날라요. FAC 창에서 구매오더 · 입고 전표 · 재고를 볼 수 있어요. 이런 업무 기록은 FacOS의 FAC 전표에 남고 UNS에는 싣지 않아요 — UNS는 지금 공장 상태를 나누는 곳이에요.' },
     { chain: 2, cam: { station: 'SRC', d: 11 }, panel: null,
       voice: '셋째, 생산 투입. 자재가 투입구에서 AMR 지그에 오르는 순간 생산 ID가 붙어요. 이후 공정 기록은 모두 이 생산 ID에 쌓여요.',
-      say: (T) => { const r = ex.wip(T.h.sim?.()); return `③ 생산 투입 — 자재가 투입구에서 AMR 지그에 오르는 순간 생산 ID가 붙어요.${r ? ` 방금 투입된 ${eun(prodKo(r.product))} ${r.wip} · 원자재 로트 ${r.lot}${r.amr ? ` · 운반 ${r.amr}` : ''}이에요.` : ''} 이후 공정 기록은 모두 이 ID에 쌓여요.`; }, live: true },
+      say: (T) => { const r = ex.wip(T.h.sim?.()); return `③ 생산 투입 — 자재가 투입구에서 AMR 지그에 오르는 순간 생산 ID가 붙어요.${r ? ` 방금 투입된 ${eun(prodKo(r.product))} ${r.wip} · 원자재 로트 ${r.lot}${r.amr ? ` · 운반 ${r.amr}` : ''}이에요.` : ''} 이후 공정 기록은 모두 이 ID에 쌓여요. UNS에서는 투입된 셀의 상태 토픽(main/{셀}/state)이 값이 바뀔 때만 발행돼요.`; }, live: true },
     { chain: 3, act: (T) => { T.exWip = ex.wip(T.h.sim?.(), 2) ?? ex.wip(T.h.sim?.()); },
       cam: (T) => ({ station: T.exWip?.steps.at(-1)?.id ?? 'DT_ASSY', d: 12 }), panel: (T) => ({ kind: 'trace', tab: 'trace', id: T.exWip?.wip }), hl: ['#btnTrace'],
       voice: '넷째, 생산 중 추적. 셀을 지날 때마다 그 셀의 로봇과 VLA 모델 버전, 운반 AMR, 설비 건강도, 체결 토크 같은 공정 측정값, 그 자리 환경값이 이 제품의 이력으로 기록돼요. 품질 추적 창에서 셀별 이력을 볼 수 있어요.',
-      say: (T) => { const r = T.exWip, s = T.h.sim?.(); return `④ 생산 중 추적 — 셀을 지날 때마다 로봇 · VLA 모델 버전 · 운반 AMR · 설비 건강도 · 공정 측정값(체결 토크 · 각도 · 압입 하중) · 그 자리 환경값이 기록돼요.${r ? ` 지금 ${eun(r.wip)} ${cellName(s, r.steps.at(-1)?.id)}에 있고, 지금까지 셀 ${r.steps.length}곳의 기록이 쌓였어요.` : ''}`; }, live: true },
+      say: (T) => { const r = T.exWip, s = T.h.sim?.(); return `④ 생산 중 추적 — 셀을 지날 때마다 로봇 · VLA 모델 버전 · 운반 AMR · 설비 건강도 · 공정 측정값(체결 토크 · 각도 · 압입 하중) · 그 자리 환경값이 기록돼요.${r ? ` 지금 ${eun(r.wip)} ${cellName(s, r.steps.at(-1)?.id)}에 있고, 지금까지 셀 ${r.steps.length}곳의 기록이 쌓였어요.` : ''} UNS에는 셀 설비 요약({셀}/telemetry)과 명령이 실리고, 제품별 이력은 품질 추적이 이 값을 생산 ID에 묶어 만든 거예요.`; }, live: true },
     { chain: 4, act: (T) => { T.exSer = ex.serial(T.h.sim?.()); }, cam: { station: 'PACK', d: 11 }, panel: (T) => ({ kind: 'trace', tab: 'serial', id: T.exSer?.serial }), hl: ['#btnTrace'],
-      voice: '다섯째, 품질 판정. 체결셀에서 토크와 각도를 전수 검사하고, 검사 포장셀에서 합격하면 중앙 발행기가 제품 고유 ID를 발행해요. QR 라벨이나 금속 각인으로 표시하고 바로 판독해 검증해요. 불합격이면 불량 사례가 열리고 AI가 원인 셀을 찾아요.',
-      say: (T) => { const u = T.exSer; return `⑤ 품질 판정 — 체결셀에서 토크 · 각도를 전수 검사하고, 검사·포장셀에서 합격하면 중앙 발행기가 제품 고유 ID를 발행해요(품목별 순차 · 재사용 없음).${u ? ` 최근 합격한 ${prodKo(u.product)}: 제품 ID ${u.serial} ← 생산 ID ${u.wip}, ${u.mark?.symbol === 'DM' ? '금속 각인 DataMatrix' : 'QR 라벨(GS1 Digital Link)'} 판독 등급 ${u.mark?.grade ?? '-'}.` : ''} 불합격이면 불량 사례가 열리고 AI가 원인 셀을 찾아요.`; } },
+      voice: '다섯째, 품질 판정. 체결셀에서 토크와 각도를 전수 검사하고, 검사 포장셀에서 합격하면 중앙 발행기가 제품 고유 ID를 발행해요. QR 라벨이나 금속 각인으로 표시하고 바로 판독해 검증해요. 판정 결과는 제품 ID와 공정 값, 품질 값을 묶은 품질 표본으로 UNS에 발행되고, 품질 분석과 KPI, AI 원인 분석이 이 표본을 구독해요. 제품 ID가 UNS에 실리는 곳이 바로 여기예요. 불합격이면 불량 사례가 열리고 AI가 원인 셀을 찾아요.',
+      say: (T) => { const u = T.exSer; return `⑤ 품질 판정 — 체결셀에서 토크 · 각도를 전수 검사하고, 검사·포장셀에서 합격하면 중앙 발행기가 제품 고유 ID를 발행해요(품목별 순차 · 재사용 없음).${u ? ` 최근 합격한 ${prodKo(u.product)}: 제품 ID ${u.serial} ← 생산 ID ${u.wip}, ${u.mark?.symbol === 'DM' ? '금속 각인 DataMatrix' : 'QR 라벨(GS1 Digital Link)'} 판독 등급 ${u.mark?.grade ?? '-'}.` : ''} 판정마다 UNS main/_zone/quality에 { id: 제품 ID, 공정 변수, 품질 특성 } 품질 표본이 발행되고 품질 · KPI · AI 원인 분석이 구독해요 — 제품 ID가 UNS에 실리는 유일한 곳이에요${(() => { const q = qSample(T.h.sim?.()); return q?.id ? ` (최근 표본 id ${q.id}${q.ng ? ' · 불합격' : ''})` : ''; })()}. 불합격이면 불량 사례가 열리고 AI가 원인 셀을 찾아요.`; }, live: true },
     { chain: 5, act: (T) => { T.exPal = ex.pallet(T.h.sim?.()); }, cam: { x: 47, z: -25, d: 26 }, panel: (T) => ({ kind: 'trace', tab: 'serial', id: T.exPal?.units?.[0] }), hl: ['#btnTrace'],
       voice: '여섯째, 포장과 출하. 합격품은 팔레트에 실리고, 팔레트마다 SSCC가 붙어 팔레트와 제품 ID가 묶여요. 트럭과 출하 시각도 함께 기록돼요. 정밀검사 샘플 결과에 따라 로트 출하를 보류하거나 풀어요.',
-      say: (T) => { const p = T.exPal; return `⑥ 포장 · 출하 — 합격품은 팔레트에 실리고, 팔레트마다 SSCC가 붙어 팔레트와 제품 ID가 묶여요(EPCIS 묶음 이벤트). 트럭 · 출하 시각도 기록돼요.${p ? ` 최근 팔레트 ${p.sscc}에 ${prodKo(p.product)} ${p.units.length}개${p.truck ? ` · ${p.truck}로 출하` : ' · 출하 대기'}.` : ' 아직 만들어진 팔레트가 없어요.'} 정밀검사 샘플 결과에 따라 로트 출하를 보류하거나 풀어요.`; } },
+      say: (T) => { const p = T.exPal; return `⑥ 포장 · 출하 — 합격품은 팔레트에 실리고, 팔레트마다 SSCC가 붙어 팔레트와 제품 ID가 묶여요(EPCIS 묶음 이벤트). 트럭 · 출하 시각도 기록돼요.${p ? ` 최근 팔레트 ${p.sscc}에 ${prodKo(p.product)} ${p.units.length}개${p.truck ? ` · ${p.truck}로 출하` : ' · 출하 대기'}.` : ' 아직 만들어진 팔레트가 없어요.'} 정밀검사 샘플 결과에 따라 로트 출하를 보류하거나 풀어요. 팔레트 · 출하 기록은 EPCIS 저장소에 이벤트로 남고, 같은 값을 UNS에 두 번 싣지는 않아요.`; } },
     { chain: 6, act: (T) => { T.exShip = ex.shipped(T.h.sim?.()); }, cam: { x: 56, z: -25, d: 34 },
       panel: (T) => (T.exShip ? { kind: 'trace', tab: T.exShip.zone === 'main' ? 'trace' : 'serial', id: T.exShip.serial, epcis: true } : { kind: 'trace', tab: 'serial' }), hl: ['#btnTrace'],
       voice: '일곱째, 출하 이후. 제품 라벨의 QR 코드로 제품 ID를 조회하면 생산 이력까지 이어져요. 문제가 생기면 트럭에서 팔레트, 제품 ID로 리콜 범위를 찾고, 거꾸로 원인 셀과 로트, 시간대로 영향 범위를 좁혀요. 모든 기록은 GS1 EPCIS 표준 이벤트라 고객사와 협력사 시스템과 공유할 수 있어요. 이 시뮬레이터는 출하까지 기록하고, 판매 이후 A/S와 반품 데이터도 같은 ID로 이어 붙일 수 있는 구조예요.',
       say: (T) => { const u = T.exShip; return `⑦ 출하 이후 — 제품 라벨의 QR(GS1 Digital Link)로 제품 ID를 조회하면 생산 이력까지 이어져요. 문제가 생기면 트럭 → 팔레트 → 제품 ID로 리콜 범위를, 거꾸로 원인 셀 · 로트 · 시간대로 영향 범위를 찾아요.${u ? ` 예: ${eun(u.serial)} ${u.ship?.truck ?? '트럭'}에 실려 출하됐고, EPCIS 저장소에 발행 → 적재 → 팔레트 → 출하 이벤트가 남아 있어요.` : ' (아직 출하된 제품이 없어 조회 예시는 생략해요.)'} 시뮬레이터는 출하까지 기록하고, 판매 이후 A/S · 반품 데이터도 같은 ID로 이어 붙일 수 있는 구조예요.`; } },
     { chain: 7, cam: { view: 'all' }, panel: null, end: true, next: 'quality',
-      say: '제품 ID 하나로 오더 · 자재 · 공정 · 품질 · 출하가 이어지면, 문제가 생겨도 원인과 범위를 바로 찾을 수 있어요. 이 데이터는 품질 원인 분석과 AI 학습, 고객 신뢰의 바탕이 돼요.' },
+      say: '정리하면, 공장의 지금은 UNS에, 제품의 일생은 EPCIS에 남아요. FacOS는 둘을 같은 제품 ID와 같은 기준 시각으로 맞춰 둬요. 그래서 리콜 범위를 찾을 때 그 시각 그 셀에서 무슨 일이 있었는지 기록을 맞춰 볼 수 있어요. 이 데이터는 품질 원인 분석과 AI 학습, 고객 신뢰의 바탕이 돼요.' },
   ] },
   // 품질 관리: 예방 → 공정 내 전수 검사 → 정밀검사 샘플링 → 불량 대응 → AI 원인 분석 → 재발 방지(8D) → 모니터링
   //  · 2단계에서 조립셀 하나에 공정 편차를 일으켜(main.js toriQualityDrift) 실제 불량 사례가 생기게 하고, 4~6단계는 그 사례를 따라간다
@@ -353,8 +367,8 @@ const TOPICS = {
   // TSN 스케줄(802.1Qbv) 자체는 시뮬레이션하지 않는다 — 기준 시계 동기 · 명령 전달 지연까지만 모사하므로 말풍선에 그렇게 밝힌다
   link: { name: '데이터 & 제어명령 파이프라인', steps: [
     { mode: 'dark', view: 'all', lchain: -1,
-      voice: '현장 데이터가 서버까지 어떻게 가는지 따라가 볼게요. 설비와 로봇, 센서 값은 AAS 표준 시계열로 만들어지고, OPC UA 메시지로 바뀌어, 고정 설비는 TSN 유선망으로, 이동 로봇은 이음5G 특화망으로 공장 중앙 서버에 모여요. 거꾸로 오케스트레이터의 제어 명령은 같은 길을 따라 셀과 로봇으로 정해진 지연 안에 내려가요.',
-      say: '현장 데이터가 서버까지 어떻게 가는지 따라가 볼게요. 설비 · 로봇 · 센서 값은 AAS 표준 시계열로 만들어지고 → OPC UA PubSub 메시지가 되어 → 고정 설비는 TSN 유선망, 이동 로봇은 이음5G 특화망을 타고 → 공장 중앙 서버에 같은 기준 시각으로 모여요. 거꾸로 오케스트레이터의 제어 명령은 같은 OPC UA PubSub · TSN · 이음5G 길을 따라 셀과 로봇으로 정해진 지연 안에 내려가요. 실시간성과 정주기성을 지키는 것이 핵심이에요.' },
+      voice: '현장 데이터가 서버까지 어떻게 가는지 따라가 볼게요. 설비와 로봇, 센서 값은 AAS 표준 시계열로 만들어지고, OPC UA 메시지로 바뀌어, 고정 설비는 TSN 유선망으로, 이동 로봇은 이음5G 특화망으로 공장 중앙 서버에 모여요. 거꾸로 오케스트레이터의 제어 명령은 UNS의 명령 토픽에서 출발해 같은 길을 따라 셀과 로봇으로 정해진 지연 안에 내려가요.',
+      say: '현장 데이터가 서버까지 어떻게 가는지 따라가 볼게요. 설비 · 로봇 · 센서 값은 AAS 표준 시계열로 만들어지고 → OPC UA PubSub 메시지가 되어 → 고정 설비는 TSN 유선망, 이동 로봇은 이음5G 특화망을 타고 → 공장 중앙 서버에 같은 기준 시각으로 모여요. 거꾸로 오케스트레이터의 제어 명령은 UNS의 cmd 토픽에서 출발해 같은 OPC UA PubSub · TSN · 이음5G 길을 따라 셀과 로봇으로 정해진 지연 안에 내려가요. 실시간성과 정주기성을 지키는 것이 핵심이에요.' },
     { view: 'precision', hl: ['#btnSensors'], lchain: 0,
       voice: '먼저 현장입니다. 셀 설비의 상태와 사이클, 로봇의 관절과 손끝, 진동과 온도 같은 센서 값이 끊임없이 나와요. 셀 엣지가 이 값을 모으면서, 공장 기준 시계와 맞춘 시각을 하나하나 붙여요.',
       say: '① 현장 — 셀 설비의 상태 · 사이클 · 전력, 로봇의 관절 · 손끝 · 그리퍼, 진동 · 온도 같은 센서 값이 끊임없이 나와요. 셀 엣지가 이 값을 모으면서 공장 기준 시계(PTP)와 맞춘 시각을 하나하나 붙여요.' },
@@ -370,9 +384,18 @@ const TOPICS = {
     { panel: { kind: 'net5g' }, view: 'all', hl: ['#btnNet5g'], lchain: 4,
       voice: '움직이는 로봇은 선을 꽂을 수 없어서 이음5G 특화망으로 보내요. 정해진 슬롯마다 보내 주기를 지키고, 지연은 10밀리초 안이에요. 기지국을 옮겨 가도 끊김과 유실이 없어요. 5G와 TSN을 연동하면 유선망과 같은 시계, 같은 주기로 이어져요. 바닥의 색은 신호 세기 지도예요.',
       say: '⑤ 이음5G 특화망 — AMR · 휴머노이드 · 사족보행 · 드론처럼 움직이는 로봇은 선을 꽂을 수 없어서 이음5G(n79 4.7GHz · 100MHz)로 보내요. 설정 그랜트로 정해진 슬롯마다 보내 주기를 지키고, 지연은 p99 10ms 안, 기지국을 옮겨 갈 때도 DAPS 핸드오버로 끊김 · 유실 없이 이어져요. 5G-TSN 연동(3GPP Rel-16)을 쓰면 유선 TSN과 같은 시계 · 같은 주기로 이어져요. 바닥의 색은 신호 세기(RSRP) 지도예요.' },
-    { panel: { kind: 'data' }, hl: ['#btnData'], lchain: 5, end: true, next: 'docs',
-      voice: '유선과 5G로 온 메시지는 공장 중앙의 MQTT 브로커로 모이고, AAS 저장소와 센서 DB, 운영 데이터셋에 쌓여요. 모두 같은 기준 시각을 가지고 있어서, 로봇 영상과 설비 값, 센서 값을 한 줄로 맞춰 AI 학습과 모니터링, 디지털 트윈에 바로 쓸 수 있어요.',
-      say: '⑥ 서버 — 유선과 5G로 온 메시지는 공장 중앙의 MQTT 브로커(UNS)로 모이고, AAS 저장소 · 센서 DB · 운영 데이터셋에 쌓여요. 모두 같은 기준 시각을 가지고 있어서 로봇 영상 · 설비 값 · 센서 값을 한 줄로 맞춰 AI 학습 · 모니터링 · 디지털 트윈에 바로 쓸 수 있어요.' },
+    // ⑥ UNS 브로커 — 한 브로커 안의 세 영역(설비 원천 OPC UA · Sparkplug B · ISA-95 공장 트리), 셀 설비 값이 공장 트리에 정리된 자리를 강조
+    { panel: { kind: 'orch', tab: 'uns', uns: LINK_UNS.tele }, hl: ['#btnOrch'], lchain: 5, live: true,
+      voice: '유선과 5G로 온 메시지는 공장 중앙의 MQTT 5 브로커, 바로 UNS로 모여요. 한 브로커 안에 영역이 나뉘어 있어요. 설비가 보낸 OPC UA 원천 메시지, 엣지 게이트웨이의 Sparkplug B 메시지, 그리고 이 값을 ISA-95 주소로 정리한 공장 트리예요. 한 토픽에 두 형식을 섞지 않아요. 노랗게 강조된 줄이 셀 설비 값이 공장 트리에 정리된 자리예요. 모든 값은 같은 기준 시각을 가지고 AAS 저장소와 센서 DB에도 쌓여요.',
+      say: (T) => { const R = LINK_UNS.tele(T.h.sim?.()); return `⑥ UNS 브로커 — 유선 · 5G로 온 메시지는 공장 중앙의 MQTT 5 브로커(Mosquitto) = UNS로 모여요. 영역은 셋: opcua/json/… (설비 원천 OPC UA PubSub) · spBv1.0/… (엣지 게이트웨이 Sparkplug B, 앱) · camtic/metafactory/… (ISA-95 주소로 정리한 공장 트리). 한 토픽에 두 형식을 섞지 않아요.${R?.sel ? ` 강조된 줄: 셀 설비 요약 ${R.topics.length}개 — 예 ${R.short(R.sel)}.` : ''} 모두 같은 기준 시각(PTP)으로 AAS 저장소 · 센서 DB · 운영 데이터셋에도 쌓여 AI 학습 · 모니터링 · 디지털 트윈에 바로 쓰여요.`; } },
+    // ⑦ FacOS — 설비에 직접 붙지 않고 UNS를 구독해 판단, 결과(상태 · 오더 · 결정)를 다시 UNS로
+    { panel: { kind: 'orch', tab: 'uns', uns: LINK_UNS.facos }, hl: ['#btnOrch', '#facos'], lchain: 6, live: true,
+      voice: 'FacOS는 설비에 직접 접속하지 않아요. UNS를 구독해서 공장 상태를 보고 판단하고, 그 결과인 공장 상태와 오더, 결정을 다시 UNS에 발행해요. 데이터는 설비가 만들고 브로커가 나르고, FacOS는 그 흐름의 규칙을 정하는 데이터 코디네이터예요.',
+      say: (T) => { const R = LINK_UNS.facos(T.h.sim?.()); return `⑦ FacOS — 설비에 직접 접속하지 않고 UNS를 구독해 판단해요(opcua/json/# · aas/# · 공장 트리). 판단 결과는 다시 UNS로: _facos/state(공장 상태) · _facos/order(오더) · _facos/decision(결정)${R?.topics.length ? ` — 지금 강조 ${R.topics.length}개` : ''}. 데이터는 설비가 만들고 브로커가 나르고, FacOS는 주소 · 방향 · 권한 · 순서 · 기록을 정하는 데이터 코디네이터예요.`; } },
+    // ⑧ 명령 하향 — {존}/{셀}/cmd → 엣지 게이트웨이 → TSN · 이음5G → 셀 · 로봇, 같은 상관 ID로 ack · exec · done (게이트웨이 → OPC UA Method는 계획안)
+    { panel: { kind: 'orch', tab: 'uns', uns: LINK_UNS.cmd }, hl: ['#btnOrch'], lchain: 7, live: true, end: true, next: 'docs',
+      voice: '마지막은 거꾸로 가는 길, 제어 명령이에요. FacOS나 존 오케스트레이터가 셀 주소의 명령 토픽에 발행하면, 엣지 게이트웨이가 받아 TSN이나 이음5G로 셀과 로봇에 전달해요. 셀은 접수, 실행, 완료를 같은 상관 ID로 다시 발행하고, 명령에는 만료 시간과 응답 토픽이 붙어요. 실제 장비에서는 게이트웨이가 이 명령을 OPC UA 메서드 호출로 바꿔 주는 구성을 계획하고 있어요.',
+      say: (T) => { const R = LINK_UNS.cmd(T.h.sim?.()); return `⑧ 명령 하향 — FacOS · 존 오케스트레이터가 {존}/{셀}/cmd에 발행 → 엣지 게이트웨이 → TSN · 이음5G → 셀 · 로봇. 셀은 cmd/ack → cmd/exec → cmd/done을 같은 상관 ID로 다시 발행하고, 접수(ack)만으로 끝으로 보지 않아요. MQTT 5 속성으로 만료(Message Expiry) · 응답 토픽(Response Topic)이 붙어요.${R?.E.length ? ` 최근 명령 토픽: ${R.E.slice(0, 3).map((e) => R.short(e.topic)).join(' · ')}.` : ' 이번 실행에는 아직 명령이 없어요 — 오케스트레이터 명령 콘솔에서 보내면 여기에 4단이 생겨요.'} (게이트웨이에서 OPC UA Method 호출로 바꾸는 부분은 실제 장비용 계획(안)이에요.)`; } },
   ] },
   docs: { name: '매뉴얼 · 앱 내려받기', next: 'outcome', steps: [
     // 매뉴얼 전에: Claude API 키를 넣으면 달라지는 것 (js/llm.js · js/agentcore.js · js/designer.js) — 키가 없어도 정책 기반 에이전트 · 내장 해석기로 공장은 그대로 돈다
@@ -467,7 +490,7 @@ const VOICE_DIR = new URL('../assets/tori/voice/', import.meta.url).href, voiceD
 const AUTO_MS = 1000, READY_MAX_MS = 90000, PANEL_MS = 3000;   // 현장을 보여 준 뒤 창을 열기까지
 const readMs = (t, lang) => 1500 + speakText(t, lang).length * (lang === 'en' ? 65 : 150);   // 소리 없이 읽는 시간 (한글 초당 약 7자 · 영문 약 15자)
 
-const H = { incUns, UNS_CMD, fos, fosOrder, clock, adv, lossTop, inc, arrived, byRobot, ex, qx, prioOf, RADIUS };   // 영어 안내(js/tori-en.js)가 쓰는 공장 상태 도우미
+const H = { incUns, UNS_CMD, unsSel, qSample, LINK_UNS, fos, fosOrder, clock, adv, lossTop, inc, arrived, byRobot, ex, qx, prioOf, RADIUS };   // 영어 안내(js/tori-en.js)가 쓰는 공장 상태 도우미
 const KO_UI = { bubble: '토리 안내', name: '토리', voice: '음성으로 읽기', close: '접기', avatar: '토리 — 눌러서 안내 주제 고르기', gpu: '토리를 그리는 방식',
   prev: '◀ 이전', next: '다음 ▶', topics: '주제', finish: '마치기', later: '다음에', start: '둘러보기 시작 ▶', lang: 'English guide', langBtn: 'EN' };
 const CHAINS = { chain: CHAIN, qchain: QCHAIN, fchain: FCHAIN, kchain: KCHAIN, lchain: LCHAIN, ochain: OCHAIN }, CHAIN_EN = { chain: 'CHAIN', qchain: 'QCHAIN', fchain: 'FCHAIN', kchain: 'KCHAIN', lchain: 'LCHAIN', ochain: 'OCHAIN' };
