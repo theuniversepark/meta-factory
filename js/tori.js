@@ -140,6 +140,10 @@ const TOPICS = {
     { panel: { kind: 'orch', tab: 'uns' }, hl: ['#btnOrch'], fchain: 5, live: true,
       voice: 'FacOS가 정보를 주고받는 바탕은 UNS, 통합 네임스페이스예요. 공장과 Zone, 셀의 상태와 오더, 결정, 명령이 모두 ISA-95 계층 주소를 달고 MQTT 브로커 한 곳에 모여요. 에이전트끼리 직접 잇지 않고 UNS 하나만 보기 때문에, 새 시스템을 붙여도 FacOS는 바꿀 게 없어요. 상태는 바뀔 때만 보내고, 명령은 요청부터 완료까지 같은 번호로 이어져요.',
       say: (T) => { const S = T.h.sim?.()?.uns?.summary(); return `UNS(통합 네임스페이스) — FacOS가 정보를 주고받는 바탕이에요. 공장 · Zone · 셀의 상태 · 오더 · 결정 · A2A · 명령이 ISA-95 계층 주소(camtic/metafactory/존/셀/…)를 달고 MQTT 브로커 한 곳에 모여요. 에이전트끼리 직접 잇지 않고 UNS만 보니, 시스템을 더해도 FacOS는 그대로예요. 상태는 바뀔 때만(retain), 명령은 요청 → 접수 → 실행 → 완료를 같은 상관 ID로 이어요.${S?.topics ? ` 지금 토픽 ${S.topics}개 · 보존 상태 ${S.retained}개 · 변화 없어 건너뜀 ${S.suppressed}건.` : ''} 앱에서는 설비 데이터가 Sparkplug B로 들어와요.`; } },
+    // 데이터 코디네이터 — FacOS는 데이터를 갖지 않고, UNS 위에서 데이터가 오가는 주소 · 방향 · 권한 · 순서 · 기록을 정한다
+    { panel: { kind: 'orch', tab: 'uns' }, hl: ['#btnOrch', '#facos'], fchain: 5, live: true,
+      voice: '그래서 FacOS를 데이터 코디네이터라고 불러요. FacOS는 데이터를 직접 만들거나 쌓아 두지 않아요. 데이터는 설비와 셀이 만들고, 브로커가 날라요. FacOS는 그 데이터가 어떤 주소로, 어느 방향으로, 누구의 권한으로, 어떤 순서로 오가는지를 정하고, 무엇을 왜 결정했는지 기록해요. 그래서 시스템이 늘어나도 모두 같은 규칙으로 움직여요.',
+      say: (T) => { const S = T.h.sim?.()?.uns?.summary(), K = fos(T)?.kpi(); return `데이터 코디네이터 — FacOS는 데이터를 만들거나 쌓아 두는 곳이 아니에요. 데이터는 설비(OPC UA) · 셀이 만들고, 브로커(MQTT 5)가 날라요. FacOS는 그 흐름의 규칙을 정해요: ① 주소(ISA-95 토픽) ② 방향(명령 ↓ · 상태 ↑ · 같은 계층은 알림만) ③ 권한(계층별 ACL · 상태 위조 불가) ④ 순서(명령 요청 → 접수 → 실행 → 완료, 같은 상관 ID · 결정은 승인 뒤 계획 버전 증가) ⑤ 기록(A2A · 결정 · 오더 · 계획 버전).${S?.topics ? ` 지금 토픽 ${S.topics}개` : ''}${K ? ` · A2A ${K.msgs}건(차단 ${K.blocked}) · 명령 검증 승인 ${K.ocsOk} / 거부 ${K.ocsRej}` : ''}${S?.topics || K ? '.' : ''} 데이터를 처리하는 중심이 아니라 흐름의 질서를 맞추는 조정자라서, 시스템을 더해도 같은 규칙으로 움직여요.`; } },
     { panel: { kind: 'fac', tab: 'po' }, hl: ['#btnFac'], fchain: 6,
       voice: '마지막은 FAC 업무 기록이에요. FacOS가 한 발주, 입고, 재고 이동, 정비요청, 오더 배정과 종료가 전표로 남아요. 앱에서는 ERPNext와도 연동돼요.',
       say: 'FAC 업무 기록 — FacOS가 한 일이 전표로 남아요: 구매오더(P0000n) · 입고(WH/IN) · 내부 이동 · 출고(WH/OUT, 10분마다 한 전표로 묶음) · 정비요청(MR/) · 오더 배정 · 종료. 앱에서는 ERPNext와도 연동돼요.' },
