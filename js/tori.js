@@ -50,6 +50,25 @@ const signed = (v, d = 1) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(d)}`;
 // 인시던트 예시: 그 인시던트 흐름도의 단계 · 시각 · 출동 로봇 도착
 const RADIUS = { leak: 1.3, debris: 1.0, intrusion: 2.2, smoke: 1.8 };
 const inc = (T, kind) => T.ev?.inc?.steps?.find((x) => x.kind === kind);
+// 이 인시던트가 UNS에 남긴 토픽 (js/uns.js가 이미 발행한 것만) — part 'report': 보고 · 방송 A2A / 'cmd': 존의 명령 A2A + 셀 명령 4단 + 바뀐 셀 상태
+//   오케스트레이터 창 UNS 탭이 다시 그릴 때마다 불러 강조한다 (main.js toriPanel → unsview.js unsFocus)
+const UNS_CMD = { sent: 'cmd', ack: 'cmd/ack', exec: 'cmd/exec', done: 'cmd/done', rejected: 'cmd/done' };
+const incUns = (T, s = T.h.sim?.(), part = 'report') => {
+  const U = s?.uns, I = T.ev?.inc; if (!U || !I) return null;
+  const a2a = (s.fos?.bus?.log ?? []).filter((m) => m.subject?.incident === I.id && m.seq <= U.a2aSeq && (part === 'cmd' ? m.type === 'command' : m.type === 'incident.report' || m.type === 'broadcast'))
+    .map((m) => ({ topic: U.t('_facos', 'a2a', U.epSeg(m.from), U.epSeg(m.to)), m })).reverse();
+  const cmds = part === 'cmd' ? (s.cmd?.list ?? []).filter((c) => c.inc === I).map((c) => {
+    const base = c.target === 'all' ? U.t('main', '_zone') : U.t('main', U.cellUid(c.target));
+    return { c, base, hs: c.history.slice(0, U.cmdSeen.get(c.id) ?? 0) };
+  }) : [];
+  const cells = cmds.filter((x) => x.c.target !== 'all').map((x) => U.t('main', U.cellUid(x.c.target), 'state')).filter((t) => U.tree.has(t));
+  const ct = cmds.flatMap((x) => x.hs.map((h) => `${x.base}/${UNS_CMD[h.state] ?? 'cmd'}`));
+  const topics = [...new Set([...a2a.map((x) => x.topic), ...ct, ...cells])];
+  const short = (t) => t.slice(U.root.length + 1);
+  return { a2a, cmds, cells, topics, short, sel: ct.at(-1) ?? a2a[0]?.topic ?? null,
+    note: `인시던트 #${I.id} ${I.title} — ${part === 'cmd' ? '명령이 UNS에 남긴 토픽 (A2A 명령 · 셀 명령 4단 · 셀 상태)' : '보고가 UNS에 남긴 토픽 (A2A 보고 · 방송)'}` };
+};
+const A2A_KO = { 'incident.report': '인시던트 보고', broadcast: 'P1 방송', command: '명령' };
 const at = (T, x) => `+${sec(x.t - T.ev.t0)}`;
 const arrived = (T) => !!T.ev?.responder && !!T.ev.inc?.steps?.some((x) => x.kind === 'act' && x.text.startsWith(`${T.ev.responder} 현장 도착`));   // 따라가는 로봇이 도착했을 때만 (소화기 들고 「현장 대기」하는 휴머노이드는 아님)
 const resp = (T) => (T.ev?.type === 'smoke' ? 'inspect' : T.ev?.type === 'intrusion' ? 'safety' : 'clean');   // 이벤트 종류별 대응 — 음성 문장 고르기
@@ -210,9 +229,17 @@ const TOPICS = {
     { panel: (T) => T.ev?.inc && { kind: 'orchInc', key: `ev:${T.ev.id}` }, hl: ['#orchPanel'], live: true, hold: (T) => !!inc(T, 'command'), ready: (T) => !T.ev?.inc || !!inc(T, 'command') || T.ev.cleared,
       voice: '이제 오케스트레이터입니다. 셀이 상위로 보고하면, 그 Zone의 오케스트레이터가 우선순위를 정해요. 화재와 인명이 먼저, 그다음 시설과 작업 안전, 생산 정지 순이에요. 안전 사고는 FacOS 공장 오케스트레이터에도 바로 알려요.',
       say: (T) => { const r = inc(T, 'report'), d = inc(T, 'decide'); return `오케스트레이터 — 흐름도에 이 인시던트가 열려 있어요. 감지 → 셀 자체 조치 → ${r ? `상위 보고(${at(T, r)})` : '상위 보고'} → ${d ? `판단(${at(T, d)})` : '판단 중…'}. 우선순위는 P1 화재 · 인명 → P2 시설 · 작업 안전 → P3 생산 정지 순이고, 이번 건은 ${ieyo(`P${prioOf(T.ev ?? {})}`)}. P1 · P2는 FacOS 공장 오케스트레이터에 즉시 보고(A2A)되고, P1이면 다른 Zone에도 방송돼요.`; } },
+    // UNS로 다시 보기 ① 보고 — 존 오케스트레이터는 공장에 직접 잇지 않고 UNS A2A 토픽에 발행, FacOS가 구독 (강조 = 이번 사건 토픽)
+    { panel: (T) => T.ev?.inc && { kind: 'orch', tab: 'uns', uns: (s) => incUns(T, s, 'report') }, hl: ['#orchPanel'], live: true, hold: (T) => !!inc(T, 'command'),
+      voice: '같은 보고를 UNS에서 다시 볼게요. 존 오케스트레이터는 공장에 직접 연결하지 않아요. 인시던트 보고를 정해진 주소의 UNS 토픽에 발행하면, FacOS 공장 오케스트레이터가 그 토픽을 구독해서 받아요. 안전 사고면 다른 Zone에도 같은 방식으로 방송돼요. 노랗게 강조된 줄이 이번 사건으로 생긴 토픽이에요.',
+      say: (T) => { const R = incUns(T, undefined, 'report'); return `UNS로 보면 ① 보고 — 존 오케스트레이터는 공장에 직접 잇지 않고 UNS 토픽에 발행하고, FacOS가 그 토픽을 구독해 받아요.${!R ? '' : R.a2a.length ? ` 이번 사건: ${R.a2a.slice(0, 3).map((x) => `${A2A_KO[x.m.type] ?? x.m.type} → ${R.short(x.topic)}`).join(' · ')}${R.a2a.length > 3 ? ` 외 ${R.a2a.length - 3}건` : ''}.` : ' 보고 토픽이 발행되기를 기다리는 중이에요 (2초마다 수집)…'} 노랗게 강조된 줄이 그 토픽이에요 — 이벤트라 retain 없이 한 번만 나가요.`; } },
     { hl: ['#orchPanel'], live: true, hold: (T) => !!inc(T, 'command'),
       voice: '판단이 끝나면 명령이 내려가요. 하던 일이 덜 급한 로봇을 골라 배정하고, 하던 일은 처리 뒤에 이어서 해요. 주변 셀에는 안전 감속이나 보호 정지 명령이 함께 가요.',
       say: (T) => { const c = inc(T, 'command'); return `명령 · 배정 — ${c ? `${c.text.replace(/^명령:\s*/, '')} (${at(T, c)})` : '명령을 내리는 중이에요…'}${T.ev?.cmdCells?.length ? ` · 셀 ${T.ev.cmdCells.length}곳에 ${T.ev.type === 'intrusion' ? '안전 감속' : '보호 정지'} 명령` : ''}. 덜 급한 일을 하던 로봇을 골라 배정하고, 하던 일은 처리 뒤 이어서 해요.${T.held ? ' (설명하는 동안 현장은 잠시 멈췄어요 — 다음 단계에서 다시 움직여요)' : ''}`; } },
+    // UNS로 다시 보기 ② 명령 — A2A 명령 + 셀 cmd 4단(같은 상관 ID) + 셀 상태(retain)
+    { panel: (T) => T.ev?.inc && { kind: 'orch', tab: 'uns', uns: (s) => incUns(T, s, 'cmd') }, hl: ['#orchPanel'], live: true, hold: (T) => !!inc(T, 'command'),
+      voice: '명령도 UNS를 거쳐요. 존 오케스트레이터의 명령은 A2A 토픽으로, 셀에 보내는 명령은 셀 주소의 cmd 토픽으로 발행돼요. 셀은 접수, 실행, 완료를 같은 상관 ID로 다시 발행하고, 접수만으로는 끝난 것으로 보지 않아요. 바뀐 셀 상태도 상태 토픽에 남아요.',
+      say: (T) => { const R = incUns(T, undefined, 'cmd'); if (!R) return 'UNS로 보면 ② 명령 — 명령은 A2A 토픽과 셀의 cmd 토픽으로 나가요.'; const cm = R.cmds.map((x) => `${x.c.unsCorr ?? `CMD-${x.c.id}`} ${R.short(x.base)}: ${x.hs.map((h) => UNS_CMD[h.state] ?? h.state).join(' → ') || '발행 대기'}`); return `UNS로 보면 ② 명령 — ${R.a2a.length ? `존의 명령 A2A ${R.a2a.length}건(${R.short(R.a2a[0].topic)})` : '존의 명령 A2A 발행 대기'}${cm.length ? ` · 셀 명령 ${cm.slice(0, 2).join(' · ')}${cm.length > 2 ? ` 외 ${cm.length - 2}건` : ''}` : ' · 이번 건은 셀 명령 없이 대응 로봇 배정만'}. 상관 ID 하나로 cmd → ack → exec → done을 잇고, 접수(ack)만으로는 끝으로 보지 않아요${R.cells.length ? ` · 바뀐 셀 상태 ${R.cells.length}곳(retain)` : ''}. 지금은 현장이 멈춰 있어 다음 장면에서 완료(done)까지 이어져요.`; } },
     // ── 3막 해결된 현장 ──
     { panel: null, follow: (T) => T.ev?.responder, cam: (T) => T.ev && !T.ev.responder && { x: T.ev.x, z: T.ev.z, d: 10 }, live: true,
       hold: arrived, ready: (T) => !T.ev || T.ev.cleared || resp(T) === 'safety' || arrived(T),   // 따라가는 로봇이 도착하면 멈추고 다음 단계에서 처리를 보여 준다
@@ -440,7 +467,7 @@ const VOICE_DIR = new URL('../assets/tori/voice/', import.meta.url).href, voiceD
 const AUTO_MS = 1000, READY_MAX_MS = 90000, PANEL_MS = 3000;   // 현장을 보여 준 뒤 창을 열기까지
 const readMs = (t, lang) => 1500 + speakText(t, lang).length * (lang === 'en' ? 65 : 150);   // 소리 없이 읽는 시간 (한글 초당 약 7자 · 영문 약 15자)
 
-const H = { fos, fosOrder, clock, adv, lossTop, inc, arrived, byRobot, ex, qx, prioOf, RADIUS };   // 영어 안내(js/tori-en.js)가 쓰는 공장 상태 도우미
+const H = { incUns, UNS_CMD, fos, fosOrder, clock, adv, lossTop, inc, arrived, byRobot, ex, qx, prioOf, RADIUS };   // 영어 안내(js/tori-en.js)가 쓰는 공장 상태 도우미
 const KO_UI = { bubble: '토리 안내', name: '토리', voice: '음성으로 읽기', close: '접기', avatar: '토리 — 눌러서 안내 주제 고르기', gpu: '토리를 그리는 방식',
   prev: '◀ 이전', next: '다음 ▶', topics: '주제', finish: '마치기', later: '다음에', start: '둘러보기 시작 ▶', lang: 'English guide', langBtn: 'EN' };
 const CHAINS = { chain: CHAIN, qchain: QCHAIN, fchain: FCHAIN, kchain: KCHAIN, lchain: LCHAIN, ochain: OCHAIN }, CHAIN_EN = { chain: 'CHAIN', qchain: 'QCHAIN', fchain: 'FCHAIN', kchain: 'KCHAIN', lchain: 'LCHAIN', ochain: 'OCHAIN' };

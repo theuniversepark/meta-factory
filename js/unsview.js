@@ -3,11 +3,13 @@ import { UNS_LEVELS, UNS_AREAS } from './uns.js';
 import { fosClock as clk } from './factoryos.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-export const unsState = { flt: 'all', sel: null, pw: {}, br: null, brDraft: null, brMsg: null, brBusy: false, open: new Set(['camtic', 'camtic/metafactory', 'camtic/metafactory/_facos', 'camtic/metafactory/main']) };
+export const unsState = { flt: 'all', sel: null, focus: null, pw: {}, br: null, brDraft: null, brMsg: null, brBusy: false, open: new Set(['camtic', 'camtic/metafactory', 'camtic/metafactory/_facos', 'camtic/metafactory/main']) };
 const FLT = { all: '전체', facos: 'FacOS (_facos)', state: '상태 (retain)', cmd: '명령 4단', a2a: 'A2A', telemetry: '설비 요약', quality: '품질 표본' };
 const fit = (e, f) => f === 'all' || (f === 'facos' ? e.topic.includes('/_facos/') : f === 'state' ? e.retain : e.kind === f);
 const KIND = { meta: '규칙', state: '상태', order: '오더', decision: '결정', a2a: 'A2A', cmd: '명령', telemetry: '설비', kpi: 'KPI', quality: '품질', event: '이벤트' };
 const tile = (k, v, sub, tone = '') => `<div class="fos-tile ${tone}"><span>${k}</span><b>${v}</b><small>${sub}</small></div>`;
+// 토리 안내 등에서 「이 사건이 남긴 토픽」을 강조 — focus(sim) → { topics, sel, note } (창을 다시 그릴 때마다 불러 실시간으로 늘어남) · null이면 끔
+export function unsFocus(fn) { unsState.focus = typeof fn === 'function' ? fn : null; unsState.sel = null; if (fn) unsState.flt = 'all'; }
 const kb = (n) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${(n / 1e3).toFixed(1)} kB`);
 
 export function unsHTML(sim) {
@@ -23,6 +25,9 @@ export function unsHTML(sim) {
     ${tile('생존 관리', mq?.uns ? (mq.uns.alive ? '살아 있음' : '죽음 처리') : '-', mq?.uns ? `죽음 ${mq.uns.deaths} · 탄생 ${mq.uns.births} · rebirth ${S.births}` : '게이트웨이 상태 없음 (웹)', mq?.uns && !mq.uns.alive ? 'warn' : '')}</div>`;
   // 트리: 토픽을 / 로 나눠 접고 펼친다
   const E = [...U.tree.values()].filter((e) => fit(e, st.flt)).sort((a, b) => a.topic.localeCompare(b.topic));
+  let FX = null; try { FX = st.focus?.(sim) ?? null; } catch { FX = null; }
+  const mark = new Set((FX?.topics ?? []).filter((t) => U.tree.has(t))), anc = new Set();
+  for (const t of mark) { const p = t.split('/'); for (let i = 1; i < p.length; i++) anc.add(p.slice(0, i).join('/')); }   // 강조 토픽까지 가는 가지는 펼쳐 둔다
   const root = { name: '', path: '', kids: new Map(), e: null, n: 0 };
   for (const e of E) {
     let node = root; const parts = e.topic.split('/');
@@ -33,16 +38,16 @@ export function unsHTML(sim) {
   const rows = [];
   const walk = (node, depth) => {
     for (const k of [...node.kids.values()]) {
-      const has = k.kids.size > 0, open = st.open.has(k.path) || st.flt !== 'all';
+      const has = k.kids.size > 0, open = st.open.has(k.path) || st.flt !== 'all' || anc.has(k.path);
       const e = k.e, age = e ? Math.max(0, Math.round(sim.time - e.t)) : null;
-      rows.push(`<div class="uns-row ${st.sel === k.path ? 'sel' : ''}" style="padding-left:${6 + depth * 14}px" data-uns-node="${esc(k.path)}" ${has ? 'data-uns-fold="1"' : ''}>
+      rows.push(`<div class="uns-row ${(st.sel ?? FX?.sel) === k.path ? 'sel' : ''}${mark.has(k.path) ? ' mark' : anc.has(k.path) ? ' mark-p' : ''}" style="padding-left:${6 + depth * 14}px" data-uns-node="${esc(k.path)}" ${has ? 'data-uns-fold="1"' : ''}>
         <i>${has ? (open ? '▾' : '▸') : '·'}</i><b>${esc(k.name)}</b>${label(k.path)}
         ${e ? `<em class="k-${e.kind}">${KIND[e.kind] ?? e.kind}</em>${e.retain ? '<em class="ret">retain</em>' : ''}<small>${e.n}회 · ${age}초 전</small><code>${esc(e.payload.slice(0, 90))}</code>` : `<small>${k.n}개</small>`}</div>`);
       if (has && open) walk(k, depth + 1);
     }
   };
   walk(root, 0);
-  const sel = st.sel ? U.tree.get(st.sel) : null;
+  const sel = U.tree.get(st.sel ?? (mark.has(FX?.sel) ? FX.sel : '')) ?? null;
   let json = ''; if (sel) { try { json = JSON.stringify(JSON.parse(sel.payload), null, 2); } catch { json = sel.payload; } }
   const levels = `<table class="vla-t uns-lv"><thead><tr><th>ISA-95 계층</th><th>레벨</th><th>FacOS 계층</th><th>토픽</th></tr></thead><tbody>${UNS_LEVELS.map((l) => `<tr><td><b>${esc(l.level)}</b></td><td>${esc(l.isa)}</td><td>${esc(l.facos)}</td><td><code>${esc(l.topic)}</code></td></tr>`).join('')}</tbody></table>`;
   // Sparkplug B · ACL · 외부 명령 (앱 — 게이트웨이 상태)
@@ -77,6 +82,7 @@ export function unsHTML(sim) {
     <div class="a2a-bar"><div class="seg small">${Object.entries(FLT).map(([k, l]) => `<button type="button" data-uns-flt="${k}" class="${st.flt === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <button type="button" data-uns-all>${st.open.size > 6 ? '▸ 모두 접기' : '▾ 모두 펼치기'}</button><button type="button" data-uns-dl>⬇ 현재 트리 (.json)</button>
       <small>${sim.time != null ? `시뮬레이션 ${clk(sim.time)}` : ''}</small></div>
+    ${FX?.note ? `<p class="uns-focus">🔦 ${esc(FX.note)} · 강조 ${mark.size}개</p>` : ''}
     <div class="a2a-b"><div class="uns-tree">${rows.join('') || '<p class="vla-note">아직 토픽이 없습니다.</p>'}</div>
       <div class="a2a-side"><h4>마지막 메시지 <small>${sel ? `${esc(sel.topic)} · ${sel.retain ? 'retain' : '이벤트'} · ${sel.n}회` : '토픽을 누르세요'}</small></h4><pre>${esc(json)}</pre>
         <p class="vla-note">FacOS는 에이전트끼리 직접 묶지 않고 UNS 하나를 봅니다. 상태(셀 OCS · 존 · 오더 · FacOS)는 retain으로 값이 바뀔 때만, 결정 · A2A · 명령은 이벤트로 발행합니다. 명령은 같은 correlationId로 cmd → cmd/ack → cmd/exec → cmd/done을 잇습니다(MQTT 5 브리지에서는 Correlation Data · Response Topic 속성으로도) — 접수 ACK만으로 재개하지 않습니다. 기존 OPC UA PubSub(opcua/json/#) · AAS · 평면 대시보드 토픽(metafactory/…/v1)은 그대로 함께 나갑니다.</p></div></div>

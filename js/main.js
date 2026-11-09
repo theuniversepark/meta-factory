@@ -43,6 +43,7 @@ import { AI_MODELS } from './cctv.js';
 import { NR, STACK, LAT, UE_LOAD, maxRobots } from './net5g.js';
 import { setAasVersion, AAS_VERSIONS, toXML, toTurtle } from './aas.js';
 import { OrchView } from './orchview.js';
+import { unsFocus } from './unsview.js';
 import { EpcisStore, epcisEvent, epcisDocument } from './epcis.js';
 import { FLEET_RANGE, FLEET_NAMES, SHARED_SPACE_LIMIT, fleetAdvice, predictFleet, predictFleetCounts, ZONE_FLEETS, isAmrFleet } from './fleet.js';
 import { SEC_LAYERS, SEC_KPI, SEC_THREATS, SEC_LANES, SEC_STAGES, SEC_ACTORS } from './security.js';
@@ -1713,7 +1714,7 @@ function toriCam(c) {
 // 토리 안내용 창: 오케스트레이터(FacOS 오더) · FAC(구매오더) · 품질 추적(탭 · 선택 제품 · EPCIS 조회)
 function toriPanel(p) {
   document.body.classList.add('tori-tour');
-  if (p.kind === 'orch') { orchView.show(); orchView.tab = p.tab; orchView.render(true); }
+  if (p.kind === 'orch') { unsFocus(p.uns ?? null); orchView.show(); orchView.tab = p.tab; orchView.render(true); }   // p.uns: UNS 탭에서 강조할 토픽 (토리 인시던트 예시)
   else if (p.kind === 'data') { if (dataModal.classList.contains('hidden')) document.getElementById('btnData').click(); }   // 데이터 연동 창 (AAS · OPC UA PubSub · pcap)
   else if (p.kind === 'sensors') { if (document.getElementById('sensorModal').classList.contains('hidden')) document.getElementById('btnSensors').click(); }   // 센서망 창 (계층 · PTP 기준 시계)
   else if (p.kind === 'net5g') { if (!netBtn.classList.contains('on')) { netBtn.click(); toriNet = true; } }   // 이음5G 신호 지도 · 요약 카드 (토리가 켠 것만 닫을 때 끈다)
@@ -1744,7 +1745,7 @@ function toriQualityDrift() {
 }
 let toriNet = false;   // 토리가 이음5G 지도를 켰는지 (사용자가 켠 지도는 끄지 않는다)
 function toriClosePanels() {
-  document.body.classList.remove('tori-tour'); orchView.hide(); zdModal.classList.add('hidden');
+  document.body.classList.remove('tori-tour'); unsFocus(null); orchView.hide(); zdModal.classList.add('hidden');
   if (ui.robotMode) { view.selectRobot(null); ui.hideDetail(); }
   facModal.classList.add('hidden'); clearInterval(facTimer); traceModal.classList.add('hidden');
   fcModal.classList.add('hidden'); fcView = null; impactModal.classList.add('hidden');
