@@ -254,14 +254,16 @@ const TOPICS = {
       voice: '명령도 UNS를 거쳐요. 존 오케스트레이터의 명령은 A2A 토픽으로, 셀에 보내는 명령은 셀 주소의 cmd 토픽으로 발행돼요. 셀은 접수, 실행, 완료를 같은 상관 ID로 다시 발행하고, 접수만으로는 끝난 것으로 보지 않아요. 바뀐 셀 상태도 상태 토픽에 남아요.',
       say: (T) => { const R = incUns(T, undefined, 'cmd'); if (!R) return 'UNS로 보면 ② 명령 — 명령은 A2A 토픽과 셀의 cmd 토픽으로 나가요.'; const cm = R.cmds.map((x) => `${x.c.unsCorr ?? `CMD-${x.c.id}`} ${R.short(x.base)}: ${x.hs.map((h) => UNS_CMD[h.state] ?? h.state).join(' → ') || '발행 대기'}`); return `UNS로 보면 ② 명령 — ${R.a2a.length ? `존의 명령 A2A ${R.a2a.length}건(${R.short(R.a2a[0].topic)})` : '존의 명령 A2A 발행 대기'}${cm.length ? ` · 셀 명령 ${cm.slice(0, 2).join(' · ')}${cm.length > 2 ? ` 외 ${cm.length - 2}건` : ''}` : ' · 이번 건은 셀 명령 없이 대응 로봇 배정만'}. 상관 ID 하나로 cmd → ack → exec → done을 잇고, 접수(ack)만으로는 끝으로 보지 않아요${R.cells.length ? ` · 바뀐 셀 상태 ${R.cells.length}곳(retain)` : ''}. 지금은 현장이 멈춰 있어 다음 장면에서 완료(done)까지 이어져요.`; } },
     // ── 3막 해결된 현장 ──
-    { panel: null, follow: (T) => T.ev?.responder, cam: (T) => T.ev && !T.ev.responder && { x: T.ev.x, z: T.ev.z, d: 10 }, live: true,
+    { act: (T) => { if (T.ev?.responder && resp(T) !== 'safety' && !arrived(T)) { T.fast = true; T.h.speed?.(3); } },   // 현장까지 가는 길은 3배속 (도착하면 멈춰 1배속으로 — 다음 단계)
+      panel: null, follow: (T) => T.ev?.responder, cam: (T) => T.ev && !T.ev.responder && { x: T.ev.x, z: T.ev.z, d: 10 }, live: true,
       hold: arrived, ready: (T) => !T.ev || T.ev.cleared || resp(T) === 'safety' || arrived(T),   // 따라가는 로봇이 도착하면 멈추고 다음 단계에서 처리를 보여 준다
       vk: resp, voice: {
-        clean: '다시 현장입니다. 배정된 로봇을 따라가 볼게요. 정비 휴머노이드가 정비실에서 도구를 챙겨 현장으로 가요.',
-        inspect: '다시 현장입니다. 배정된 로봇을 따라가 볼게요. 사족보행 로봇은 열화상과 가스 센서로 점검하러 가고, 정비 휴머노이드는 소화기를 챙겨 옆에서 대기해요.',
+        clean: '다시 현장입니다. 배정된 로봇을 따라가 볼게요. 현장까지 가는 동안은 3배속으로 빠르게 보여 드릴게요. 정비 휴머노이드가 정비실에서 도구를 챙겨 현장으로 가요.',
+        inspect: '다시 현장입니다. 배정된 로봇을 따라가 볼게요. 현장까지 가는 동안은 3배속으로 빠르게 보여 드릴게요. 사족보행 로봇은 열화상과 가스 센서로 점검하러 가고, 정비 휴머노이드는 소화기를 챙겨 옆에서 대기해요.',
         safety: '다시 현장입니다. 사람이 들어온 경우에는 로봇이 다가가지 않아요. 주변 셀은 안전 속도로 기다리고, 원격 관제 요원을 불러요.' },
-      say: (T) => !T.ev ? '' : T.ev.type === 'intrusion' ? '출동 — 사람 진입은 로봇이 다가가지 않아요. 주변 셀이 안전 속도로 기다리고, 원격 관제 요원을 불러요. 사람이 구역을 나가면 정상 속도로 돌아가요.' : `출동 — ${T.ev.responder ? `화면이 ${T.ev.responder} 로봇을 따라가고 있어요. ${arrived(T) ? '현장에 도착했어요!' : T.h.sim?.()?.movers?.find((m) => m.id === T.ev.responder)?.task ?? '이동 중이에요…'}` : '대응 로봇을 기다리는 중이에요…'}` },
-    { cam: (T) => T.ev && { x: T.ev.x, z: T.ev.z, d: 8 }, live: true, ready: (T) => !T.ev || T.ev.cleared, hold: (T) => !!T.ev?.cleared,   // 처리가 끝나면 멈춰 해결 장면을 보여 준다
+      say: (T) => !T.ev ? '' : T.ev.type === 'intrusion' ? '출동 — 사람 진입은 로봇이 다가가지 않아요. 주변 셀이 안전 속도로 기다리고, 원격 관제 요원을 불러요. 사람이 구역을 나가면 정상 속도로 돌아가요.' : `출동 — ${T.ev.responder ? `화면이 ${T.ev.responder} 로봇을 따라가고 있어요${T.fast && !arrived(T) ? ' (이동 구간 3배속 ⏩)' : ''}. ${arrived(T) ? '현장에 도착했어요!' : T.h.sim?.()?.movers?.find((m) => m.id === T.ev.responder)?.task ?? '이동 중이에요…'}` : '대응 로봇을 기다리는 중이에요…'}` },
+    { act: (T) => { if (T.fast) { T.fast = false; T.h.speed?.(1); } },   // 현장 처리는 다시 1배속으로
+      cam: (T) => T.ev && { x: T.ev.x, z: T.ev.z, d: 8 }, live: true, ready: (T) => !T.ev || T.ev.cleared, hold: (T) => !!T.ev?.cleared,   // 처리가 끝나면 멈춰 해결 장면을 보여 준다
       vk: resp, voice: {
         clean: '로봇이 현장에서 처리하고 있어요. 이동 중인 다른 로봇들은 위험 반경을 피해 돌아가요.',
         inspect: '사족보행 로봇이 열화상과 가스 센서로 점검하고 있어요. 이동 중인 다른 로봇들은 위험 반경을 피해 돌아가요.',
@@ -564,7 +566,7 @@ export class Tori {
     this.topic = topic; this.list = null; this.ev = undefined; this.qInj = undefined; this.guard = undefined; this.netOff = undefined; this.flushed = undefined; this.prop = undefined; this.applied = undefined; this.bot = undefined; this.go(0); }
   unhold() { clearInterval(this.holdT); if (this.held) { this.held = false; if (this.heldByMe) this.h.pause?.(false); this.heldByMe = false; } }   // 토리가 직접 멈춘 경우에만 다시 재생 (사용자가 멈춰 둔 공장은 그대로)
   restoreSpeed() { if (this.ev?.quiet) this.ev.quiet = false;   // 인시던트 예시를 「AI 감지」 전에 벗어나면 감지를 막아 둔 이벤트를 풀어 준다
-    if (this.spd0 != null) this.h.speed?.(this.spd0); this.spd0 = undefined; if (this.netOff) { fos(this)?.setOnline(true); this.netOff = false; } if (this.applied === true && this.prop?.status === 'applied') { adv(this)?.revert(this.prop.id); this.applied = 'reverted'; } }   // KPI 주제에서 시연 적용 중 벗어나면 되돌림   // 인시던트 예시 배속 · FacOS 상위망 단절 시험 되돌림   // 인시던트 예시가 1배속으로 늦춘 것을 되돌림   // 시나리오(현장 이벤트 · 공정 편차)는 한 번 재생에 한 번만
+    this.fast = false; if (this.spd0 != null) this.h.speed?.(this.spd0); this.spd0 = undefined; if (this.netOff) { fos(this)?.setOnline(true); this.netOff = false; } if (this.applied === true && this.prop?.status === 'applied') { adv(this)?.revert(this.prop.id); this.applied = 'reverted'; } }   // KPI 주제에서 시연 적용 중 벗어나면 되돌림   // 인시던트 예시 배속 · FacOS 상위망 단절 시험 되돌림   // 인시던트 예시가 1배속으로 늦춘 것을 되돌림   // 시나리오(현장 이벤트 · 공정 편차)는 한 번 재생에 한 번만
 
   go(i) {
     const S = this.steps();

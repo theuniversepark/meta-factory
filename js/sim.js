@@ -379,7 +379,17 @@ export class Mover {
     return true;
   }
   get idle() { return this.steps.length === 0; }
-  setTask(name, steps) { this.task = name; this.steps = steps; this.path = null; this.detourPts = 0; }   // 이동 중 재지시되면 새 경로로
+  setTask(name, steps) { if (this.kind === 'quadruped') this.rebase(); this.task = name; this.steps = steps; this.path = null; this.detourPts = 0; }   // 이동 중 재지시되면 새 경로로
+  // 사족보행이 이동 중에 새 일을 받으면(순찰 중 인시던트 출동 등) 마지막 도착지(loc)는 한참 뒤 — 그대로 두면 route()가 그 자리(대개 충전 스테이션)로
+  // 곧게 되돌아가 셀 · 충전 도크를 가로지른다. 지금 통로 차로(가로) 또는 좌우 세로 통로 위에 있으면 지금 자리를 출발점으로 바꾼다 (차로 밖이면 그대로 — 온 길로 되돌아감)
+  rebase() {
+    if (!this.path || !this.loc || Math.hypot(this.x - this.loc.x, this.z - this.loc.z) < 1) return;
+    const near = Object.entries(AISLE).filter(([k]) => k !== 'T').map(([k, z]) => ({ k, d: Math.min(Math.abs(this.z - (z - LANE)), Math.abs(this.z - (z + LANE)), Math.abs(this.z - z)), dz: Math.abs(this.z - z) }));
+    const onLane = near.filter((a) => a.d < 0.35).sort((a, b) => a.d - b.d)[0];
+    const onCol = [LEFT, RIGHT].some((x) => Math.abs(this.x - (x - LANE)) < 0.35 || Math.abs(this.x - (x + LANE)) < 0.35 || Math.abs(this.x - x) < 0.35);
+    const a = onLane ?? (onCol ? near.sort((p, q) => p.dz - q.dz)[0] : null);
+    if (a) this.loc = { x: this.x, z: this.z, aisle: a.k, name: `${this.task ?? '이동'} 중` };
+  }
   update(dt) {
     this.moving = false; this.charging = false;
     if (this.passT > 0 && !this.instant) this.passT -= dt;
