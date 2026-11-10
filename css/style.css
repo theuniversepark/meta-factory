@@ -1295,7 +1295,7 @@ body.tori-tour .tori { z-index: 30; }
 .fos-srv { border: 1px solid rgba(90, 169, 255, 0.45); border-radius: 7px; padding: 3px 8px; color: var(--ink); text-decoration: none; font-size: 11px; }
 
 /* 현장 대응 팝업 (js/fieldpop.js) — 감지 로봇 · 대응 로봇 · 추적 사족보행: 실시간 영상 · 상태 · 서버 전송(UNS _field) */
-.fieldpops { position: fixed; left: var(--lx); right: calc(var(--rx) + 400px); bottom: 64px; z-index: 10; display: flex; flex-wrap: wrap-reverse; align-items: flex-end; gap: 8px; pointer-events: none; }
+.fieldpops { position: fixed; left: var(--lx); right: calc(var(--rx) + 400px); bottom: 64px; z-index: 4;   /* 설명용 창(로봇 정보 · 오케스트레이터 · CCTV · 5G · Zone 대시보드 · 토리 · 모달)보다 아래 — 현장 창은 바탕, 설명 창이 위에 올라온다 */ display: flex; flex-wrap: wrap-reverse; align-items: flex-end; gap: 8px; pointer-events: none; }
 .fieldpops[hidden] { display: none; }
 .fp-card { pointer-events: auto; flex: 0 1 300px; min-width: 230px; max-height: calc(100vh - 150px); overflow-y: auto; overscroll-behavior: contain; padding: 8px 9px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); border-top: 3px solid #37a0ff; backdrop-filter: blur(10px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); font-size: 11.5px; }
 .fp-card.fp-detect { border-top-color: #f5b82e; } .fp-card.fp-respond { border-top-color: #3ddc84; } .fp-card.fp-escort { border-top-color: #37e8ff; }
