@@ -579,6 +579,12 @@ export class RobotCamWall {
         this.evGroup.add(fx); m.userData.fxRoot = fx;
       }
       m.userData.tick?.(rdt, this.t);
+      if (ev.walk) {   // 사람 진입: 진입자가 통로를 따라 걸어 나간다 (sim.updateIntruder) — 경보 표시도 함께 따라간다
+        m.position.set(ev.x, 0, ev.z); m.userData.fxRoot.position.set(ev.x, 0, ev.z);
+        const walking = ev.walk.phase === 'walk' && !ev.walk.done, sw = walking ? Math.sin(this.t * 7.5) * 0.45 : 0;
+        m.rotation.y = (ev.heading ?? 0) + (walking ? 0 : Math.sin(this.t * 0.6) * 0.8);   // 걸을 때는 가는 쪽, 서 있을 때는 두리번
+        m.userData.legs?.forEach((l, k) => { l.rotation.x = k ? -sw : sw; });
+      }
       blinkAlarmFx(m.userData.alarm, true, m.userData.color, this.t);
       m.userData.fx.userData.tick(this.t);
     }
@@ -646,7 +652,8 @@ function makeEventMesh(type) {
     });
   } else if (type === 'intrusion') {
     const vest = new THREE.MeshStandardMaterial({ color: 0xff3b30, emissive: 0x330000 }), pants = new THREE.MeshStandardMaterial({ color: 0x2b2f36 }), skin = new THREE.MeshStandardMaterial({ color: 0xe0b48c });
-    for (const x of [-0.11, 0.11]) { const l = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.7, 4, 8), pants); l.position.set(x, 0.45, 0); g.add(l); }
+    const legs = [-0.11, 0.11].map((x) => { const hip = new THREE.Group(); hip.position.set(x, 0.85, 0); const l = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.7, 4, 8), pants); l.position.y = -0.4; hip.add(l); g.add(hip); return hip; });   // 엉덩이를 축으로 다리를 흔든다 (걷기)
+    g.userData.legs = legs;
     const b = new THREE.Mesh(new THREE.CapsuleGeometry(0.25, 0.55, 4, 10), vest); b.position.y = 1.25; g.add(b);
     const h = new THREE.Mesh(new THREE.SphereGeometry(0.17, 14, 10), skin); h.position.y = 1.78; g.add(h);
     g.traverse((o) => { if (o.isMesh) o.castShadow = true; });

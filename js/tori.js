@@ -254,27 +254,27 @@ const TOPICS = {
       voice: '명령도 UNS를 거쳐요. 존 오케스트레이터의 명령은 A2A 토픽으로, 셀에 보내는 명령은 셀 주소의 cmd 토픽으로 발행돼요. 셀은 접수, 실행, 완료를 같은 Correlation ID로 다시 발행하고, 접수만으로는 끝난 것으로 보지 않아요. 바뀐 셀 상태도 상태 토픽에 남아요.',
       say: (T) => { const R = incUns(T, undefined, 'cmd'); if (!R) return 'UNS로 보면 ② 명령 — 명령은 A2A 토픽과 셀의 cmd 토픽으로 나가요.'; const cm = R.cmds.map((x) => `${x.c.unsCorr ?? `CMD-${x.c.id}`} ${R.short(x.base)}: ${x.hs.map((h) => UNS_CMD[h.state] ?? h.state).join(' → ') || '발행 대기'}`); return `UNS로 보면 ② 명령 — ${R.a2a.length ? `존의 명령 A2A ${R.a2a.length}건(${R.short(R.a2a[0].topic)})` : '존의 명령 A2A 발행 대기'}${cm.length ? ` · 셀 명령 ${cm.slice(0, 2).join(' · ')}${cm.length > 2 ? ` 외 ${cm.length - 2}건` : ''}` : ' · 이번 건은 셀 명령 없이 대응 로봇 배정만'}. Correlation ID 하나로 cmd → ack → exec → done을 잇고, 접수(ack)만으로는 끝으로 보지 않아요${R.cells.length ? ` · 바뀐 셀 상태 ${R.cells.length}곳(retain)` : ''}. 지금은 현장이 멈춰 있어 다음 장면에서 완료(done)까지 이어져요.`; } },
     // ── 3막 해결된 현장 ──
-    { act: (T) => { if (T.ev?.responder && resp(T) !== 'safety' && !arrived(T)) { T.fast = true; T.h.speed?.(3); } },   // 현장까지 가는 길은 3배속 (도착하면 멈춰 1배속으로 — 다음 단계)
+    { act: (T) => { if (T.ev?.responder && !arrived(T)) { T.fast = true; T.h.speed?.(3); } },   // 현장까지 가는 길은 3배속 (도착하면 멈춰 1배속으로 — 다음 단계)
       panel: null, follow: (T) => T.ev?.responder, cam: (T) => T.ev && !T.ev.responder && { x: T.ev.x, z: T.ev.z, d: 10 }, live: true,
-      hold: arrived, ready: (T) => !T.ev || T.ev.cleared || resp(T) === 'safety' || arrived(T),   // 따라가는 로봇이 도착하면 멈추고 다음 단계에서 처리를 보여 준다
+      hold: arrived, ready: (T) => !T.ev || T.ev.cleared || (resp(T) === 'safety' && !T.ev.responder) || arrived(T),   // 따라가는 로봇이 도착하면 멈추고 다음 단계에서 처리를 보여 준다
       vk: resp, voice: {
         clean: '다시 현장입니다. 배정된 로봇을 따라가 볼게요. 현장까지 가는 동안은 3배속으로 빠르게 보여 드릴게요. 정비 휴머노이드가 정비실에서 도구를 챙겨 현장으로 가요.',
         inspect: '다시 현장입니다. 배정된 로봇을 따라가 볼게요. 현장까지 가는 동안은 3배속으로 빠르게 보여 드릴게요. 사족보행 로봇은 열화상과 가스 센서로 점검하러 가고, 정비 휴머노이드는 소화기를 챙겨 옆에서 대기해요.',
-        safety: '다시 현장입니다. 사람이 들어온 경우에는 로봇이 다가가지 않아요. 주변 셀은 안전 속도로 기다리고, 원격 관제 요원을 불러요.' },
-      say: (T) => !T.ev ? '' : T.ev.type === 'intrusion' ? '출동 — 사람 진입은 로봇이 다가가지 않아요. 주변 셀이 안전 속도로 기다리고, 원격 관제 요원을 불러요. 사람이 구역을 나가면 정상 속도로 돌아가요.' : `출동 — ${T.ev.responder ? `화면이 ${T.ev.responder} 로봇을 따라가고 있어요${T.fast && !arrived(T) ? ' (이동 구간 3배속 ⏩)' : ''}. ${arrived(T) ? '현장에 도착했어요!' : T.h.sim?.()?.movers?.find((m) => m.id === T.ev.responder)?.task ?? '이동 중이에요…'}` : '대응 로봇을 기다리는 중이에요…'}` },
+        safety: '다시 현장입니다. 사람이 들어온 경우에는 로봇이 사람에게 다가가지 않아요. 대신 가장 가까운 사족보행 로봇이 진입자 뒤쪽으로 돌아와 4미터 거리를 두고 따라가며, 행동과 동선을 오케스트레이터에 보고해요. 합류하러 가는 동안은 3배속으로 보여 드릴게요. 주변 셀은 안전 속도로 기다려요.' },
+      say: (T) => !T.ev ? '' : T.ev.type === 'intrusion' ? `출동 — 사람에게는 다가가지 않아요. ${T.ev.responder ? `${ga(T.ev.responder)} 진입자 뒤쪽으로 돌아와 4m 거리를 두고 합류${arrived(T) ? '했어요! 이제 따라가며 행동 · 동선을 보고해요.' : `하는 중이에요${T.fast ? ' (이동 구간 3배속 ⏩)' : ''}.`}` : 'CCTV로 진입자를 추적해요.'} 주변 셀은 안전 속도로 기다리고, 원격 관제 요원을 불러요.` : `출동 — ${T.ev.responder ? `화면이 ${T.ev.responder} 로봇을 따라가고 있어요${T.fast && !arrived(T) ? ' (이동 구간 3배속 ⏩)' : ''}. ${arrived(T) ? '현장에 도착했어요!' : T.h.sim?.()?.movers?.find((m) => m.id === T.ev.responder)?.task ?? '이동 중이에요…'}` : '대응 로봇을 기다리는 중이에요…'}` },
     { act: (T) => { if (T.fast) { T.fast = false; T.h.speed?.(1); } },   // 현장 처리는 다시 1배속으로
-      cam: (T) => T.ev && { x: T.ev.x, z: T.ev.z, d: 8 }, live: true, ready: (T) => !T.ev || T.ev.cleared, hold: (T) => !!T.ev?.cleared,   // 처리가 끝나면 멈춰 해결 장면을 보여 준다
+      cam: (T) => T.ev && { x: T.ev.x, z: T.ev.z, d: 8 }, follow: (T) => (resp(T) === 'safety' ? T.ev?.responder : null), live: true, ready: (T) => !T.ev || T.ev.cleared, hold: (T) => !!T.ev?.cleared,   // 처리가 끝나면 멈춰 해결 장면을 보여 준다 · 사람 진입은 추적 로봇을 따라간다
       vk: resp, voice: {
         clean: '로봇이 현장에서 처리하고 있어요. 이동 중인 다른 로봇들은 위험 반경을 피해 돌아가요.',
         inspect: '사족보행 로봇이 열화상과 가스 센서로 점검하고 있어요. 이동 중인 다른 로봇들은 위험 반경을 피해 돌아가요.',
-        safety: '진입한 사람이 구역을 나가기를 기다리고 있어요. 이동 중인 다른 로봇들은 위험 반경을 피해 돌아가요.' },
-      say: (T) => `처리 중 — ${!T.ev ? '' : T.ev.cleared ? '처리가 끝났어요!' : `${T.ev.responder ? `${ga(T.ev.responder)} ` : ''}${T.ev.type === 'smoke' ? '열화상 · 가스 센서로 점검' : T.ev.type === 'intrusion' ? '진입자가 나가기를 기다리는' : '흡착 · 수거'} 중이에요. 다른 로봇들은 위험 반경을 피해 돌아가요.`}` },
+        safety: '사족보행 로봇이 4미터 거리를 두고 진입자를 따라가요. 진입자가 멈추거나 다시 걸으면 그때마다, 걷는 동안은 10초마다 위치와 방향을 보고해요. 진입자가 다가오면 로봇이 물러서고, 다른 로봇들은 진입자 주변을 피해 돌아가요.' },
+      say: (T) => `처리 중 — ${!T.ev ? '' : T.ev.cleared ? '처리가 끝났어요!' : `${T.ev.responder ? `${ga(T.ev.responder)} ` : ''}${T.ev.type === 'smoke' ? '열화상 · 가스 센서로 점검' : T.ev.type === 'intrusion' ? '4m 거리를 두고 진입자를 따라가며 행동 · 동선을 보고하는' : '흡착 · 수거'} 중이에요.${T.ev.type === 'intrusion' && T.ev.acts?.length ? ` 최근 보고: 진입자 ${T.ev.acts.at(-1).what}.` : ''} 다른 로봇들은 위험 반경을 피해 돌아가요.`}` },
     { cam: (T) => T.ev && { x: T.ev.x, z: T.ev.z, d: 10 },
       vk: resp, voice: {
         clean: '해결됐어요. 빨간 표지가 사라지고, 멈췄던 셀과 로봇은 정상 속도로 돌아갔어요. 도구는 정비실에 반납해요.',
         inspect: '해결됐어요. 점검 결과 이상이 없어 알람을 해제했어요. 멈췄던 셀은 다시 돌아가고, 소화기는 정비실에 반납해요.',
-        safety: '해결됐어요. 진입자가 구역을 나가서, 감속했던 셀과 로봇은 정상 속도로 돌아갔어요.' },
-      say: (T) => !T.ev ? '' : `해결 — 표지가 사라지고 셀 · 로봇이 정상 속도로 돌아갔어요. 감지부터 해결까지 ${sec((T.ev.tClear ?? T.ev.t0) - (T.ev.tDetect ?? T.ev.t0))} (감지 ${sec((T.ev.tDetect ?? T.ev.t0) - (T.ev.tq ?? T.ev.t0))} · 대응 ${sec((T.ev.tClear ?? T.ev.t0) - (T.ev.tDetect ?? T.ev.t0))}).${T.ev.type === 'smoke' ? ' 점검 결과 발열 · 연소 흔적이 없어 알람을 해제했어요.' : ''}` },
+        safety: '해결됐어요. 진입자가 구역을 나간 것을 사족보행 로봇이 확인하고, 이동 거리와 시간, 멈춘 곳을 담은 추적 결과를 보고했어요. 감속했던 셀과 로봇은 정상 속도로 돌아갔어요.' },
+      say: (T) => !T.ev ? '' : `해결 — 표지가 사라지고 셀 · 로봇이 정상 속도로 돌아갔어요. 감지부터 해결까지 ${sec((T.ev.tClear ?? T.ev.t0) - (T.ev.tDetect ?? T.ev.t0))} (감지 ${sec((T.ev.tDetect ?? T.ev.t0) - (T.ev.tq ?? T.ev.t0))} · 대응 ${sec((T.ev.tClear ?? T.ev.t0) - (T.ev.tDetect ?? T.ev.t0))}).${T.ev.type === 'smoke' ? ' 점검 결과 발열 · 연소 흔적이 없어 알람을 해제했어요.' : ''}${T.ev.type === 'intrusion' && T.ev.walk ? ` 추적 결과: 동선 ${T.ev.walk.dist.toFixed(0)}m · 멈춤 ${T.ev.walk.stopped ? `1회 (${T.ev.walk.stopName ?? '셀'} 앞)` : '없음'} · 행동 보고 ${T.ev.acts?.length ?? 0}건 · 동선 기록 ${T.ev.trail?.length ?? 0}점${T.ev.escort?.minGap != null ? ` · 최소 거리 ${T.ev.escort.minGap.toFixed(1)}m` : ''}.` : ''}` },
     { panel: (T) => T.ev?.inc && { kind: 'orchInc', key: `ev:${T.ev.id}` }, hl: ['#btnOrch', '#btnImpact'], end: true, next: 'trace',
       voice: '흐름도에 감지부터 완료 확인까지 모든 시각이 남았어요. 이 기록은 KPI 영향 분석과 운영 AI 학습 데이터가 돼요. 이렇게 AI는 보고 판단하고, 피지컬AI 로봇은 직접 가서 해결해요.',
       say: (T) => `기록 — 흐름도에 감지 → 자체 조치 → 보고 → 판단 → 명령 → 조치 → 완료 확인 ${T.ev?.inc?.steps?.length ?? ''}단계 시각이 남았어요. 이 기록은 KPI 영향 분석과 운영 AI(AIOS) 학습 데이터가 돼요. AI는 보고 판단하고, 피지컬AI 로봇은 직접 가서 해결해요. ⚡ 설비 고장 · ⚠ 현장 이벤트 버튼으로 다른 상황도 시험해 보세요!` },
