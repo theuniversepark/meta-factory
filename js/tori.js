@@ -88,6 +88,10 @@ const resp = (T) => (T.ev?.type === 'smoke' ? 'inspect' : T.ev?.type === 'intrus
 const took = (T) => { const d = T.ev.tDetect - (T.ev.tq ?? T.ev.t0); return d < 0.5 ? '곧바로' : `${sec(d)} 만에`; };   // 감지를 풀자마자 본 경우
 const pickBot = (T) => { const ms = T.h.sim?.()?.movers ?? [], busy = (m) => m.task && !m.idle && !m.charging && !m.chgNow; return (ms.find((m) => m.kind === 'humanoid' && busy(m)) ?? ms.find(busy) ?? ms.find((m) => m.kind === 'humanoid') ?? ms[0])?.id ?? null; };   // 둘러보기 예시 로봇 — 일하며 움직이는 로봇 (휴머노이드 우선)
 const byRobot = (T) => (T.h.moverPos?.(T.ev?.detectedBy) ? 'robot' : 'cctv');   // 로봇 카메라가 감지했는지, CCTV가 먼저 봤는지
+// 현장 표지 · 빛기둥 색 (js/factory.js ALARM_COLOR · robotcam.js syncEvents): 경보(누유 · 연기 · 사람 진입) 빨강, 주의(이물질) 노랑 — 말과 화면 색을 맞춘다
+const sevK = (T) => (T.ev?.severity === 'alarm' ? 'alarm' : 'warn');
+const evColor = (T) => (sevK(T) === 'alarm' ? '빨간' : '노란');
+const clearK = (T) => (resp(T) === 'clean' ? (sevK(T) === 'alarm' ? 'clean' : 'cleanWarn') : resp(T));   // 해결 문장: 청소 대응은 표지 색까지
 // 사람 진입: 추적 사족보행과 진입자 사이 거리 · 둘을 한 화면에 담는 카메라 (가까우면 9m, 멀면 거리 + 8m까지 물러남)
 const escortGap = (T) => { const ev = T.ev, q = ev?.escort?.q; return q && !ev.cleared ? Math.hypot(ev.x - q.x, ev.z - q.z) : null; };
 const escortCam = (T) => { const ev = T.ev, q = ev?.escort?.q; if (!q || ev.cleared || resp(T) !== 'safety') return null; const g = Math.hypot(ev.x - q.x, ev.z - q.z); return { x: (ev.x + q.x) / 2, z: (ev.z + q.z) / 2, d: Math.min(34, Math.max(9, g + 8)) }; };
@@ -230,8 +234,10 @@ const TOPICS = {
     // ── 1막 현장 ──
     // 말과 현장을 맞춘다: 이벤트를 만든 뒤 「AI 감지」 단계까지 현장을 멈추고 감지도 막는다 (ev.quiet) → 감지되면 감지 로봇 설명이 끝날 때까지 다시 멈춤
     { act: (T) => { if (T.ev === undefined) T.ev = T.h.quietEvent?.() ?? null; }, hold: (T) => !!T.ev, cam: (T) => T.ev && { x: T.ev.x, z: T.ev.z, d: 9 }, hl: ['#btnEvent'],
-      voice: '현장입니다. 방금 로봇 카메라 앞에 문제가 생겼어요. 빨간 표지와 빛기둥이 보이죠? 아직 아무도 모르는 상태예요.',
-      say: (T) => T.ev ? `현장 — 방금 「${T.ev.label}」 상황이 생겼어요 (우선순위 P${prioOf(T.ev)} · 위험 반경 ${RADIUS[T.ev.type] ?? 1.2}m). 빨간 표지와 빛기둥이 보이죠? 아직 아무도 모르는 상태예요.` : '지금은 현장 이벤트를 만들 수 없어요. 피지컬AI 단계에서 ⚠ 현장 이벤트 버튼으로 다시 해 보세요.' },
+      vk: sevK, voice: {
+        alarm: '현장입니다. 방금 로봇 카메라 앞에 문제가 생겼어요. 빨간 표지와 빛기둥이 보이죠? 경보 단계라 빨간색이에요. 아직 아무도 모르는 상태예요.',
+        warn: '현장입니다. 방금 로봇 카메라 앞에 문제가 생겼어요. 노란 표지와 빛기둥이 보이죠? 주의 단계라 노란색이에요. 아직 아무도 모르는 상태예요.' },
+      say: (T) => T.ev ? `현장 — 방금 「${T.ev.label}」 상황이 생겼어요 (우선순위 P${prioOf(T.ev)} · 위험 반경 ${RADIUS[T.ev.type] ?? 1.2}m). ${evColor(T)} 표지와 빛기둥이 보이죠? ${sevK(T) === 'alarm' ? '경보(빨강)' : '주의(노랑)'} 단계예요. 아직 아무도 모르는 상태예요.` : '지금은 현장 이벤트를 만들 수 없어요. 피지컬AI 단계에서 ⚠ 현장 이벤트 버튼으로 다시 해 보세요.' },
     { act: (T) => { if (T.ev?.quiet) { T.ev.quiet = false; T.ev.tq = T.h.sim?.()?.time; } }, hold: (T) => !!T.ev?.detected, live: true, ready: (T) => !T.ev || T.ev.detected || T.ev.cleared,
       voice: '주변을 지나는 로봇의 카메라 영상을 AI가 계속 추론하고 있어요. 이상한 물체나 사람이 보이면 바로 감지해요.',
       say: (T) => `AI 감지 — 주변을 지나는 로봇 카메라 영상을 AI가 계속 추론하고 있어요. ${!T.ev ? '' : T.ev.detected ? `${ga(T.ev.detectedBy)} 감지했어요!` : `지금 찾는 중이에요… (${sec((T.h.sim?.()?.time ?? T.ev.t0) - T.ev.t0)} 경과)`}` },
@@ -273,8 +279,9 @@ const TOPICS = {
         safety: '사족보행 로봇이 4미터 거리를 두고 진입자를 따라가요. 진입자가 멈추거나 다시 걸으면 그때마다, 걷는 동안은 10초마다 위치와 방향을 보고해요. 진입자가 다가오면 로봇이 물러서고, 다른 로봇들은 진입자 주변을 피해 돌아가요.' },
       say: (T) => `처리 중 — ${!T.ev ? '' : T.ev.cleared ? `처리가 끝났어요! ${T.ev.type === 'intrusion' ? '진입자가 구역을 나갔어요.' : ''}(설명이 끝나면 해결 장면으로 넘어가요)` : `${T.ev.responder ? `${ga(T.ev.responder)} ` : ''}${T.ev.type === 'smoke' ? '열화상 · 가스 센서로 점검' : T.ev.type === 'intrusion' ? '4m 거리를 두고 진입자를 따라가며 행동 · 동선을 보고하는' : '흡착 · 수거'} 중이에요.${T.ev.type === 'intrusion' && T.ev.acts?.length ? ` 최근 보고: 진입자 ${T.ev.acts.at(-1).what}.` : ''} 다른 로봇들은 위험 반경을 피해 돌아가요.`}` },
     { cam: (T) => T.ev && { x: T.ev.x, z: T.ev.z, d: 10 },
-      vk: resp, voice: {
+      vk: clearK, voice: {
         clean: '해결됐어요. 빨간 표지가 사라지고, 멈췄던 셀과 로봇은 정상 속도로 돌아갔어요. 도구는 정비실에 반납해요.',
+        cleanWarn: '해결됐어요. 노란 표지가 사라지고, 멈췄던 셀과 로봇은 정상 속도로 돌아갔어요. 도구는 정비실에 반납해요.',
         inspect: '해결됐어요. 점검 결과 이상이 없어 알람을 해제했어요. 멈췄던 셀은 다시 돌아가고, 소화기는 정비실에 반납해요.',
         safety: '해결됐어요. 진입자가 구역을 나간 것을 사족보행 로봇이 확인하고, 이동 거리와 시간, 멈춘 곳을 담은 추적 결과를 보고했어요. 감속했던 셀과 로봇은 정상 속도로 돌아갔어요.' },
       say: (T) => !T.ev ? '' : `해결 — 표지가 사라지고 셀 · 로봇이 정상 속도로 돌아갔어요. 감지부터 해결까지 ${sec((T.ev.tClear ?? T.ev.t0) - (T.ev.tDetect ?? T.ev.t0))} (감지 ${sec((T.ev.tDetect ?? T.ev.t0) - (T.ev.tq ?? T.ev.t0))} · 대응 ${sec((T.ev.tClear ?? T.ev.t0) - (T.ev.tDetect ?? T.ev.t0))}).${T.ev.type === 'smoke' ? ' 점검 결과 발열 · 연소 흔적이 없어 알람을 해제했어요.' : ''}${T.ev.type === 'intrusion' && T.ev.walk ? ` 추적 결과: 동선 ${T.ev.walk.dist.toFixed(0)}m · 멈춤 ${T.ev.walk.stopped ? `1회 (${T.ev.walk.stopName ?? '셀'} 앞)` : '없음'} · 행동 보고 ${T.ev.acts?.length ?? 0}건 · 동선 기록 ${T.ev.trail?.length ?? 0}점${T.ev.escort?.minGap != null ? ` · 최소 거리 ${T.ev.escort.minGap.toFixed(1)}m` : ''}.` : ''}` },
@@ -495,7 +502,7 @@ const VOICE_DIR = new URL('../assets/tori/voice/', import.meta.url).href, voiceD
 const AUTO_MS = 1000, READY_MAX_MS = 90000, PANEL_MS = 3000;   // 현장을 보여 준 뒤 창을 열기까지
 const readMs = (t, lang) => 1500 + speakText(t, lang).length * (lang === 'en' ? 65 : 150);   // 소리 없이 읽는 시간 (한글 초당 약 7자 · 영문 약 15자)
 
-const H = { incUns, UNS_CMD, unsSel, qSample, LINK_UNS, fos, fosOrder, clock, adv, lossTop, inc, arrived, escortGap, byRobot, ex, qx, prioOf, RADIUS };   // 영어 안내(js/tori-en.js)가 쓰는 공장 상태 도우미
+const H = { incUns, UNS_CMD, unsSel, qSample, LINK_UNS, fos, fosOrder, clock, adv, lossTop, inc, arrived, escortGap, byRobot, sevK, ex, qx, prioOf, RADIUS };   // 영어 안내(js/tori-en.js)가 쓰는 공장 상태 도우미
 const KO_UI = { bubble: '토리 안내', name: '토리', voice: '음성으로 읽기', close: '접기', avatar: '토리 — 눌러서 안내 주제 고르기', gpu: '토리를 그리는 방식',
   prev: '◀ 이전', next: '다음 ▶', topics: '주제', finish: '마치기', later: '다음에', start: '둘러보기 시작 ▶', lang: 'English guide', langBtn: 'EN' };
 const CHAINS = { chain: CHAIN, qchain: QCHAIN, fchain: FCHAIN, kchain: KCHAIN, lchain: LCHAIN, ochain: OCHAIN }, CHAIN_EN = { chain: 'CHAIN', qchain: 'QCHAIN', fchain: 'FCHAIN', kchain: 'KCHAIN', lchain: 'LCHAIN', ochain: 'OCHAIN' };
