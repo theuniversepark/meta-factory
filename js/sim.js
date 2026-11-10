@@ -1048,7 +1048,7 @@ export class Simulation {
     (ev.affected ??= new Map());
     if (ev.affected.get(who) === mode) return;
     const first = !ev.affected.size; ev.affected.set(who, mode);
-    if (!ev.detected) this.detectFieldEvent(ev, who, 0.88);   // 진로 센서·카메라로 처음 발견 → 인시던트 열림
+    if (!ev.detected) this.detectFieldEvent(ev, who, 0.88, this.movers.some((m) => m.id === who) ? { type: 'mover', id: who } : null);   // 진로 센서·카메라로 처음 발견 → 인시던트 열림
     const inc = ev.inc ?? this.orch.find(`ev:${ev.id}`), L = FIELD_EVENTS[ev.type]?.label ?? '현장 이벤트';
     const text = `${who} 진로에 ${L} — ${mode === 'detour' ? '우회 경로로 돌아감' : '해결될 때까지 정지 대기'}`;
     if (inc?.status === 'open') ev.reported = (ev.reported ?? 0) + 1;
@@ -1912,12 +1912,16 @@ export class Simulation {
     return ev;
   }
   // 로봇 카메라 영상에서 처음 인식했을 때 (by: 이동체·로봇 이름, conf: 추론 신뢰도)
-  detectFieldEvent(ev, by, conf) {
+  detectFieldEvent(ev, by, conf, ref = null) {
     if (ev.detected || ev.cleared || ev.quiet) return;   // quiet: 토리 인시던트 예시가 「AI 감지」 단계 전까지 감지를 막아 둔 이벤트
-    ev.detected = true; ev.detectedBy = by; ev.conf = conf; ev.tDetect = this.time;
+    ev.detected = true; ev.detectedBy = by; ev.conf = conf; ev.tDetect = this.time; ev.detRef = ref;   // ref: 감지한 카메라 (로봇 카메라 · CCTV) — 현장 대응 팝업이 그 영상을 띄운다
     const o = this.orch, inc = o.open('field', `ev:${ev.id}`, `현장 이벤트 · ${FIELD_EVENTS[ev.type].label}`, by, { where: { x: ev.x, z: ev.z }, prio: FIELD_EVENTS[ev.type].prio ?? 2 });
     inc.ev = ev;
     ev.inc = inc;
+    // 감지 로봇 → 서버: 감지 이벤트(추론 결과 · 위치) 바로 · 앞뒤 10초 영상 클립은 10초 뒤
+    const det = ref?.type === 'cctv' ? `cctv.${ref.id}` : by;
+    this.fieldTx(ev, 'detect', det, 'detect', { incident: inc.id, type: ev.type, label: FIELD_EVENTS[ev.type].label, cls: FIELD_EVENTS[ev.type].cls, conf: Math.round(conf * 100) / 100, x: Math.round(ev.x * 100) / 100, z: Math.round(ev.z * 100) / 100, severity: ev.severity });
+    o.later(10, () => this.fieldTx(ev, 'detect', det, 'clip', { incident: inc.id, codec: 'H.264', resolution: ref?.type === 'cctv' ? '1920x1080' : '1280x720', seconds: 20, from: Math.round((ev.tDetect - 10) * 10) / 10, to: Math.round((ev.tDetect + 10) * 10) / 10, bytes: ref?.type === 'cctv' ? 10_400_000 : 6_100_000 }));
     o.step(inc, 'field', 'detect', `${by} 카메라 AI 추론 — ${FIELD_EVENTS[ev.type].cls} 신뢰도 ${conf.toFixed(2)}`);
     o.step(inc, 'cell', 'self', ev.type === 'intrusion' ? '자체 조치: 주변 로봇 협동 감속 · 접근 금지 구역 표시' : '자체 조치: 감지 로봇 감속·우회 · 해당 구역 표시');
     o.later(0.5, () => o.step(inc, 'cell', 'report', `상위 보고: ${FIELD_EVENTS[ev.type].label} · 위치 x ${ev.x.toFixed(1)}, z ${ev.z.toFixed(1)}`));
@@ -2024,9 +2028,36 @@ export class Simulation {
   }
   // CCTV 배치 (사각지대 없는 배치 — 라인 배치가 같으면 캐시)
   get cctv() { return (this._cctv ??= planCCTV(this)); }
+  // 현장 로봇 → 서버 업링크 기록 — UNS {존}/_field/{로봇}/detect · clip · ack · status · track · done (uns.js가 발행 · 현장 대응 팝업 「서버 전송」이 같은 기록을 보여 준다)
+  fieldTx(ev, role, robot, kind, body) {
+    this.fieldTxSeq = (this.fieldTxSeq ?? 0) + 1;
+    const mv = this.movers.find((x) => x.id === robot || x.uid === robot);   // 토픽은 자산 ID(uid · 영문) — 이름(id)은 본문에
+    const m = { seq: this.fieldTxSeq, t: this.time, ev: ev.id, zone: zoneAt(ev.x, ev.z, 0) ?? 'main', role, robot: mv?.id ?? String(robot), uid: mv?.uid ?? String(robot), kind, body };
+    m.bytes = JSON.stringify(body).length + 80;   // MQTT 고정 헤더 · 토픽 · 속성 몫 대략
+    (this.fieldTxLog ??= []).push(m); if (this.fieldTxLog.length > 400) this.fieldTxLog.shift();
+    (ev.tx ??= []).push(m); if (ev.tx.length > 80) ev.tx.shift();
+    return m;
+  }
+  // 대응 · 추적 로봇 상태를 2초마다 서버로 (위치 · 속도 · 배터리 · 현장까지 거리 — 추적 중이면 진입자 거리 · 행동 · 동선)
+  fieldStatus(ev) {
+    const m = this.movers.find((x) => x.id === ev.responder); if (!m) return;
+    const E = ev.escort?.q === m ? ev.escort : null, role = E ? 'escort' : 'respond', r2 = (v) => Math.round(v * 100) / 100;
+    if (!ev.txAck) { ev.txAck = true; this.fieldTx(ev, role, m.id, 'ack', { incident: ev.inc?.id, accepted: true, task: m.task ?? null }); }
+    const d = Math.hypot(m.x - ev.x, m.z - ev.z);
+    const body = { incident: ev.inc?.id, kind: m.kind, task: m.task ?? null, x: r2(m.x), z: r2(m.z), heading: Math.round(((m.heading ?? 0) * 180 / Math.PI + 360) % 360), speed: m.moving ? r2(m.speed ?? 0) : 0, battery: Math.round(m.battery ?? 100), distToEvent: r2(d) };
+    if (E) {
+      const W = ev.walk;
+      Object.assign(body, { phase: E.phase, gap: r2(d), minGap: E.minGap != null && E.minGap < 99 ? r2(E.minGap) : null, keepGap: ESCORT_GAP, person: { x: r2(ev.x), z: r2(ev.z), state: W?.done ? 'left' : W?.phase ?? null, walked: r2(W?.dist ?? 0), trail: ev.trail?.length ?? 0, exit: W ? (W.exitX === RIGHT ? 'right' : 'left') : null }, reports: ev.acts?.length ?? 0 });
+    }
+    this.fieldTx(ev, role, m.id, 'status', body);
+  }
   updateFieldEvents(dt = 0, mdt = dt) {
     if (!this.fieldEvents?.length) return;
     for (const ev of this.fieldEvents) if (!ev.cleared && ev.walk) { this.updateIntruder(ev, dt); this.updateEscort(ev, mdt); }
+    for (const ev of this.fieldEvents) {
+      if (ev.detected && ev.responder && !ev.cleared && this.time - (ev.txT ?? -9) >= 2) { ev.txT = this.time; this.fieldStatus(ev); }
+      if (ev.cleared && ev.responder && !ev.txDone) { ev.txDone = true; this.fieldTx(ev, ev.escort ? 'escort' : 'respond', ev.responder, 'done', { incident: ev.inc?.id, result: 'cleared', duration: Math.round(this.time - (ev.tDetect ?? ev.t0)), ...(ev.escort ? { walked: Math.round(ev.walk?.dist ?? 0), trail: ev.trail?.length ?? 0, reports: ev.acts?.length ?? 0, minGap: ev.escort.minGap != null && ev.escort.minGap < 99 ? Math.round(ev.escort.minGap * 100) / 100 : null, joined: ev.escort.phase === 'follow' } : {}) }); }
+    }
     for (const ev of this.fieldEvents) {
       if (!ev.cleared && ev.until && this.time >= ev.until) {
         ev.cleared = true; ev.tClear = this.time; this.log('ok', `${ev.label} 해소`, { obs: '진입자 구역 이탈 확인', act: '로봇 정상 속도 복귀' });
@@ -2066,6 +2097,7 @@ export class Simulation {
   intruderAct(ev, what) {
     (ev.acts ??= []).push({ t: this.time, what, x: ev.x, z: ev.z });
     const E = ev.escort, by = E?.phase === 'follow' ? `${E.q.id} 보고` : 'CCTV 추적';
+    if (E?.phase === 'follow') this.fieldTx(ev, 'escort', E.q.id, 'track', { incident: ev.inc?.id, action: what, person: { x: Math.round(ev.x * 100) / 100, z: Math.round(ev.z * 100) / 100 }, gap: Math.round(Math.hypot(ev.x - E.q.x, ev.z - E.q.z) * 100) / 100, n: ev.acts.length });   // 추적 로봇의 행동 · 동선 보고
     this.orch.step(ev.inc, 'exec', 'act', `${by}: 진입자 ${what}`);
     this.log('info', `진입자 행동 · ${what}`, { obs: `${by} (${ev.x.toFixed(1)}, ${ev.z.toFixed(1)})`, act: E ? `${E.q.id} ${ESCORT_GAP}m 거리 유지 추적` : '관제 요원 확인' });
   }

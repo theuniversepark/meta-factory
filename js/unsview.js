@@ -4,9 +4,9 @@ import { fosClock as clk } from './factoryos.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 export const unsState = { flt: 'all', sel: null, focus: null, pw: {}, br: null, brDraft: null, brMsg: null, brBusy: false, open: new Set(['camtic', 'camtic/metafactory', 'camtic/metafactory/_facos', 'camtic/metafactory/main']) };
-const FLT = { all: '전체', facos: 'FacOS (_facos)', state: '상태 (retain)', cmd: '명령 4단', a2a: 'A2A', telemetry: '설비 요약', quality: '품질 표본' };
+const FLT = { all: '전체', facos: 'FacOS (_facos)', state: '상태 (retain)', cmd: '명령 4단', a2a: 'A2A', telemetry: '설비 요약', quality: '품질 표본', field: '현장 로봇 (_field)' };
 const fit = (e, f) => f === 'all' || (f === 'facos' ? e.topic.includes('/_facos/') : f === 'state' ? e.retain : e.kind === f);
-const KIND = { meta: '규칙', state: '상태', order: '오더', decision: '결정', a2a: 'A2A', cmd: '명령', telemetry: '설비', kpi: 'KPI', quality: '품질', event: '이벤트' };
+const KIND = { meta: '규칙', state: '상태', order: '오더', decision: '결정', a2a: 'A2A', cmd: '명령', telemetry: '설비', kpi: 'KPI', quality: '품질', field: '현장', event: '이벤트' };
 const tile = (k, v, sub, tone = '') => `<div class="fos-tile ${tone}"><span>${k}</span><b>${v}</b><small>${sub}</small></div>`;
 // 토리 안내 등에서 「이 사건이 남긴 토픽」을 강조 — focus(sim) → { topics, sel, note } (창을 다시 그릴 때마다 불러 실시간으로 늘어남) · null이면 끔
 export function unsFocus(fn) { unsState.focus = typeof fn === 'function' ? fn : null; unsState.sel = null; if (fn) unsState.flt = 'all'; }

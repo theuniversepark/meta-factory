@@ -262,10 +262,11 @@ export class RobotCamWall {
     if (this.lost) return null;   // GPU 컨텍스트 복구 중
     const f = this.cameraFor(ref); if (!f) return null;
     const w = canvas.width, h = canvas.height, r = this.renderer;
-    if (!this.panelRT || this.panelRT.width !== w || this.panelRT.height !== h) {
-      this.panelRT?.dispose(); this.panelRT = new THREE.WebGLRenderTarget(w, h); this.panelRT.texture.colorSpace = THREE.SRGBColorSpace;
-      this.panelBuf = new Uint8Array(w * h * 4); this.panelImg = new ImageData(w, h);
-    }
+    // 크기별 렌더 타깃 (로봇 정보 창 480×270 · 현장 대응 팝업 320×180을 함께 띄워도 매번 다시 만들지 않음) — 렌더러가 바뀌면(panelRT = null) 모두 새로
+    if (!this.panelRT) { for (const P of this.panelRTs?.values() ?? []) P.rt.dispose(); this.panelRTs = new Map(); }
+    let P = this.panelRTs.get(`${w}x${h}`);
+    if (!P) { P = { rt: new THREE.WebGLRenderTarget(w, h), buf: new Uint8Array(w * h * 4), img: new ImageData(w, h) }; P.rt.texture.colorSpace = THREE.SRGBColorSpace; this.panelRTs.set(`${w}x${h}`, P); }
+    this.panelRT = P.rt; this.panelBuf = P.buf; this.panelImg = P.img;
     this.panelCam ??= new THREE.PerspectiveCamera(70, w / h, 0.12, 60);
     this.panelCam.aspect = w / h; this.setCam(this.panelCam, f);
     const vis = [this.group.visible, this.view.selRing?.visible];
@@ -511,7 +512,7 @@ export class RobotCamWall {
           g.fillStyle = '#05080c'; g.fillText(lab, b.x + 4, ly + 13);
         }
         // 현장 이벤트를 처음 본 카메라가 감지 처리한다
-        if (t.ev && !t.ev.detected && d < 14) sim.detectFieldEvent(t.ev, f.robot, conf);
+        if (t.ev && !t.ev.detected && d < 14) sim.detectFieldEvent(t.ev, f.robot, conf, f.ref);
       }
       // 칸 머리: 녹화 표시·로봇·카메라·추론 정보
       g.fillStyle = 'rgba(5,8,12,0.72)'; g.fillRect(x0, y0, TW, 22);

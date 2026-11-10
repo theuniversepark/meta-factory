@@ -222,7 +222,7 @@ export class CCTVAgent {
       const conf = Math.round((0.86 + ((ev.id * 7) % 10) / 100) * 100) / 100;
       if (!ev.detected && !ev.quiet && s.time - (ev.tq ?? ev.t0) >= 2) {   // tq: 토리 예시가 감지를 풀어 준 시각
         ev.cctv = cam.id;
-        s.detectFieldEvent(ev, `CCTV 에이전트 (${cam.id})`, conf);
+        s.detectFieldEvent(ev, `CCTV 에이전트 (${cam.id})`, conf, { type: 'cctv', id: cam.id });
         ev.cctvLogged = true;
         this.add({ kind: 'report', cam: cam.id, cams: cams.map((c) => c.id), model, cls: ev.cls, label: ev.label, conf, x: ev.x, z: ev.z, inc: ev.inc, note: `${AI_MODELS[model].name} → 메인 오케스트레이터 보고` });
         s.orch.step(ev.inc, 'field', 'report', `CCTV 에이전트 보고: ${cam.id} 영상 · ${AI_MODELS[model].name} · ${ev.cls} ${conf.toFixed(2)} · 이력 등록`);

@@ -1293,3 +1293,36 @@ body.tori-tour .tori { z-index: 30; }
 .uns-bridge label.chk { flex-direction: row; align-items: center; gap: 5px; color: var(--ink); } .uns-bridge select { padding: 3px 4px; }
 .uns-bridge-row, .uns-bridge .qt-ins, .uns-bridge .vla-note { grid-column: 1 / -1; } .uns-bridge-row { display: flex; align-items: center; gap: 8px; }
 .fos-srv { border: 1px solid rgba(90, 169, 255, 0.45); border-radius: 7px; padding: 3px 8px; color: var(--ink); text-decoration: none; font-size: 11px; }
+
+/* 현장 대응 팝업 (js/fieldpop.js) — 감지 로봇 · 대응 로봇 · 추적 사족보행: 실시간 영상 · 상태 · 서버 전송(UNS _field) */
+.fieldpops { position: fixed; left: var(--lx); right: calc(var(--rx) + 400px); bottom: 64px; z-index: 10; display: flex; flex-wrap: wrap-reverse; align-items: flex-end; gap: 8px; pointer-events: none; }
+.fieldpops[hidden] { display: none; }
+.fp-card { pointer-events: auto; flex: 0 1 300px; min-width: 230px; max-height: calc(100vh - 150px); overflow-y: auto; overscroll-behavior: contain; padding: 8px 9px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); border-top: 3px solid #37a0ff; backdrop-filter: blur(10px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); font-size: 11.5px; }
+.fp-card.fp-detect { border-top-color: #f5b82e; } .fp-card.fp-respond { border-top-color: #3ddc84; } .fp-card.fp-escort { border-top-color: #37e8ff; }
+.fp-h { display: flex; align-items: center; gap: 6px; }
+.fp-h .fp-badge { font-weight: 700; font-size: 12px; white-space: nowrap; }
+.fp-h .fp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9fd0ff; }
+.fp-h button { background: none; border: 1px solid var(--line); color: inherit; border-radius: 6px; width: 22px; height: 22px; padding: 0; cursor: pointer; line-height: 1; }
+.fp-sub { color: var(--muted); font-size: 10.5px; margin: 1px 0 5px; }
+.fp-card.min .fp-body, .fp-card.min .fp-sub { display: none; }
+.fp-cam { position: relative; }
+.fp-cam canvas { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 8px; background: #05080c; }
+.fp-nocam { aspect-ratio: 16 / 9; display: grid; place-items: center; border-radius: 8px; background: rgba(5, 8, 12, 0.6); color: var(--muted); }
+.fp-nocam[hidden] { display: none; }
+.fp-grid { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 6px 0; }
+.fp-grid span { color: var(--muted); white-space: nowrap; }
+.fp-grid b { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.fp-grid b.warn { color: #f5b82e; } .fp-grid b.ok { color: #3ddc84; }
+.fp-map { display: block; width: 100%; height: auto; border-radius: 6px; margin-bottom: 6px; }
+.fp-tx { border-top: 1px solid var(--line); padding-top: 5px; }
+.fp-tx-h { font-weight: 700; margin-bottom: 3px; } .fp-tx-h small { display: block; font-weight: 400; color: var(--muted); }
+.fp-tx ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.fp-tx li { display: grid; grid-template-columns: auto auto 1fr; gap: 0 6px; padding: 2px 4px; border-radius: 5px; background: rgba(255, 255, 255, 0.03); transition: background 1.2s; }
+.fp-tx li.new { background: rgba(55, 160, 255, 0.28); }
+.fp-tx li time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.fp-tx li b { color: #7fd1ff; white-space: nowrap; }
+.fp-tx li code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c9d6e2; font-size: 10.5px; }
+.fp-tx li small { grid-column: 1 / -1; color: var(--muted); overflow-wrap: anywhere; }
+.fp-vid { color: var(--muted); font-size: 10.5px; margin-top: 4px; }
+.uns-row em.k-field { border-color: rgba(55, 232, 255, 0.5); color: #7fefff; }
+@media (max-width: 900px) { .fieldpops { left: 8px; right: 8px; } .fp-card { flex-basis: 100%; } }

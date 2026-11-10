@@ -20,6 +20,7 @@ import { LineDesigner } from './designer.js';
 import { renderConcept } from './concept.js';
 import { DataHub, unsTelemetry, unsEvents, unsZoneKpi, PUBLISHER_ID, WRITER_GROUP } from './datahub.js';
 import { UnsNamespace } from './uns.js';
+import { FieldPops } from './fieldpop.js';
 import { PacketCapture } from './pcap.js';
 import { RENDER, loadBlenderAssets, applyRenderEnv, resetRenderEnv, primKey, blenderize } from './blender.js';
 import { FAC_PRODUCTS, FAC_LOCS } from './fac.js';
@@ -1427,6 +1428,12 @@ function refreshVideoSrv() {
 }
 const gb = (b) => (b >= 1073741824 ? `${(b / 1073741824).toFixed(2)}GB` : `${(b / 1048576).toFixed(0)}MB`);
 const videoSrvText = (k) => { const v = videoSrv[k]; return v ? `서버 보관 ${v.count}구간 · ${gb(v.bytes)} / 한도 ${gb(v.maxBytes)} (원본 ${gb(v.webmBytes)} · MP4 ${v.mp4Count}구간 ${gb(v.mp4Bytes + v.camBytes)}) · 원본 최근 ${v.keep}구간 · MP4 최근 ${v.mp4Keep}구간` : '서버 보관 확인 중…'; };
+const simClock = (t) => { const x = Math.floor(t) + 8 * 3600; return [x / 3600 % 24, x / 60 % 60, x % 60].map((v) => String(Math.floor(v)).padStart(2, '0')).join(':'); };
+const fieldPops = new FieldPops({
+  el: document.getElementById('fieldPops'), sim: () => sim, camWall, cctvView, clock: simClock, dark: () => modeKey === 'dark' && !glLost,
+  dest: () => (hub.noServer ? 'UNS 토픽 트리에 기록 (이 버전은 MQTT 브로커 없음)' : uns.broker.on ? 'MQTT 브로커로 발행 (UNS)' : uns.broker.error ? '브로커 연결 끊김 — 다시 연결되면 발행' : 'UNS 발행 대기'),
+  video: (c) => (c.cctv ? (cctvRec.on ? `🎥 CCTV 자동 녹화 · ${cctvRec.server ? '서버 data/cctv 보관' : '브라우저 보관'}` : '') : robotRec.on ? `🎥 카메라 영상 자동 녹화 · ${robotRec.server ? '서버 data/robotcam 보관' : '브라우저 보관 (이 버전은 영상 서버 없음)'}` : ''),
+});
 function openCctv(id) { cctvSel = id; cctvPanel.hidden = false; cctvT = 1; renderCctvPanel(true); }
 window.__openCctv = openCctv;   // 개발 확인용
 document.getElementById('cctvClose').addEventListener('click', () => { cctvClip.stop(); cctvPanel.hidden = true; cctvSel = null; });
@@ -1649,6 +1656,8 @@ function frame() {
   if (view.telemetry && robotTimer > 0.12) { robotTimer = 0; ui.renderRobot(view.telemetry.snapshot(), hub.robotCounts(view.telemetry)); }
   pcapBoxT += rdt; if (pcapBoxT > 0.5 && ui.robotMode && !document.getElementById('detail').classList.contains('hidden') && !document.getElementById('pcapBox')?.contains(document.activeElement)) { pcapBoxT = 0; renderPcapBox(); }
   });
+  // 현장 대응 팝업 (js/fieldpop.js): 감지 로봇 · 대응 로봇 · 추적 사족보행 영상과 서버 전송(UNS _field 토픽)
+  perf.run('fpop', () => fieldPops.tick(rdt));
   // 피지컬AI: 로봇 정보 창에 그 로봇 카메라의 실시간 영상 (약 10fps)
   camTimer += rdt;
   if (view.telemetry && ui.robotMode && camTimer > 0.1) perf.run('rbcam', () => {

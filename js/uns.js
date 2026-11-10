@@ -9,6 +9,7 @@
 //     {존}/_zone/quality                           존 품질 표본 (제품 1개 판정마다 · 이벤트)
 //     {존}/{셀}/state | telemetry | edge | cmd · cmd/ack · cmd/exec · cmd/done    Work Unit — 셀 OCS (retain) · 설비 요약 · Sparkplug 엣지 상태 · 명령 4단
 //     {존}/{셀|_zone}/cmd/request                  외부 명령 요청 (operator · zone 계정 · 게이트웨이 대기열 → applyCommand)
+//     {존}/_field/{로봇}/detect | clip | ack | status | track | done   현장 이벤트 — 감지 로봇 · 대응 로봇 · 추적 사족보행 업링크 (status만 retain)
 // 원칙: 상태는 값이 바뀔 때만 발행(Report by Exception) + retain, 이벤트는 retain 없이 그때그때. 명령은 Correlation ID(correlationId)로 요청 → 접수 → 실행 → 완료를 묶는다.
 // 렌더링과 분리 — 헤드리스에서도 같은 트리. 시뮬레이션 상태를 바꾸지 않는다(읽기만).
 import { ZONE_ORCH_KEYS, ocsState, zoneOfEp } from './factoryos.js';
@@ -26,6 +27,8 @@ const ISA95 = [
   { level: 'Equipment', isa: 'L1–L0', facos: '엣지 스킬 · 설비', topic: `${UNS_ROOT}/{존}/{셀}/telemetry` },
 ];
 export const UNS_LEVELS = ISA95;
+// 현장 로봇 업링크 토픽 — {존}/_field/{로봇}/{detect · clip · ack · status · track · done}
+export const fieldTopic = (m, root = UNS_ROOT) => `${root}/${m.zone}/_field/${seg(m.uid ?? m.robot)}/${m.kind}`;
 
 export class UnsNamespace {
   constructor(sim, { iso = null, root = UNS_ROOT, run = null } = {}) { this.root = root; this.iso = iso; this.runOf = run; this.reset(sim); }   // run: 실행 ID (데이터 허브 runId) — 서버 FacOS 기록이 실행별 파일로 나눈다
@@ -33,7 +36,7 @@ export class UnsNamespace {
     this.sim = sim; if (sim) sim.uns = this;
     this.tree = new Map();      // 토픽 → { topic, payload, retain, n, t, bytes, kind }
     this.prev = new Map();      // retain 토픽의 직전 본문 (Report by Exception 비교용 · ts 제외)
-    this.a2aSeq = 0; this.cmdSeen = new Map(); this.decSeen = new WeakSet();
+    this.a2aSeq = 0; this.fieldSeq = 0; this.cmdSeen = new Map(); this.decSeen = new WeakSet();
     this.pending = [];          // 외부 명령 거부 응답 (다음 collect에 함께 나감)
     this.ext = { applied: 0, rejected: 0, last: null };
     this.born = false;
@@ -106,6 +109,11 @@ export class UnsNamespace {
         if (c.unsResp && (h.state === 'ack' || end)) this.put(out, c.unsResp, body, { kind: 'cmd', t: h.t, props: { correlationData: corr } });   // 요청자가 정한 응답 토픽에도 (접수 · 완료)
       }
       this.cmdSeen.set(c.id, c.history.length);
+    }
+    // 현장 로봇 업링크 (sim.fieldTx): 감지 · 영상 클립 · 배정 응답 · 상태(retain) · 추적 보고 · 종료 — 감지한 로봇 · 대응 로봇 · 추적 사족보행이 보낸 것
+    for (const m of s.fieldTxLog ?? []) {
+      if (m.seq <= this.fieldSeq) continue; this.fieldSeq = m.seq;
+      this.put(out, fieldTopic(m, this.root), { event: m.ev, role: m.role, robot: m.robot, assetId: m.uid, ...m.body }, { kind: 'field', t: m.t, retain: m.kind === 'status' });
     }
     for (const m of telemetry) { const x = /^metafactory\/telemetry\/v1\/([^/]+)\/([^/]+)$/.exec(m.topic); if (x) this.put(out, this.t(x[1], x[2], 'telemetry'), null, { raw: m.payload, kind: 'telemetry' }); }
     for (const m of kpi) { const x = /^metafactory\/oee\/v1\/([^/]+)$/.exec(m.topic); if (x) this.put(out, this.t(x[1], '_zone', 'kpi'), null, { raw: m.payload, kind: 'kpi' }); }

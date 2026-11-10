@@ -220,7 +220,11 @@ export class CCTVView {
     if (!this.sim || this.lost) return null;
     const c = this.plan().cams.find((x) => x.id === camId); if (!c) return null;
     const w = canvas.width, h = canvas.height;
-    if (!this.pRT || this.pRT.width !== w || this.pRT.height !== h) { this.pRT?.dispose(); this.pRT = new THREE.WebGLRenderTarget(w, h); this.pRT.texture.colorSpace = THREE.SRGBColorSpace; this.pBuf = new Uint8Array(w * h * 4); this.pImg = new ImageData(w, h); }
+    // 크기별 렌더 타깃 (CCTV 영상 창 · 현장 대응 팝업을 함께 띄워도 다시 만들지 않음)
+    if (!this.pRTs || this.pRTs.r !== this.getRenderer()) { for (const P of this.pRTs?.m.values() ?? []) P.rt.dispose(); this.pRTs = { r: this.getRenderer(), m: new Map() }; }
+    let P = this.pRTs.m.get(`${w}x${h}`);
+    if (!P) { P = { rt: new THREE.WebGLRenderTarget(w, h), buf: new Uint8Array(w * h * 4), img: new ImageData(w, h) }; P.rt.texture.colorSpace = THREE.SRGBColorSpace; this.pRTs.m.set(`${w}x${h}`, P); }
+    this.pRT = P.rt; this.pBuf = P.buf; this.pImg = P.img;
     this.pCam ??= new THREE.PerspectiveCamera(78, w / h, 0.3, 90); this.pCam.aspect = w / h; this.setCam(this.pCam, c);
     this.render(this.pCam, this.pRT, null);
     const r = this.getRenderer(); r.readRenderTargetPixels(this.pRT, 0, 0, w, h, this.pBuf);
