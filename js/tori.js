@@ -79,7 +79,7 @@ const qSample = (s, z = 'main') => { const U = s?.uns, e = U?.tree.get(U.t(z, '_
 const LINK_UNS = {
   tele: (s) => unsSel(s, (e) => e.kind === 'telemetry' && e.topic.includes('/main/'), '셀 설비 값이 ISA-95 공장 트리에 정리된 자리 ({존}/{셀}/telemetry)', null, 8),
   facos: (s) => unsSel(s, (e) => e.topic.includes('/_facos/') && ['state', 'order', 'decision'].includes(e.kind), 'FacOS가 판단 결과를 다시 UNS로 — 공장 상태 · 오더 · 결정', 'state', 8),
-  cmd: (s) => unsSel(s, (e) => e.kind === 'cmd', '명령 4단 — cmd → cmd/ack → cmd/exec → cmd/done (같은 상관 ID)', null, 8),
+  cmd: (s) => unsSel(s, (e) => e.kind === 'cmd', '명령 4단 — cmd → cmd/ack → cmd/exec → cmd/done (같은 Correlation ID)', null, 8),
 };
 const A2A_KO = { 'incident.report': '인시던트 보고', broadcast: 'P1 방송', command: '명령' };
 const at = (T, x) => `+${sec(x.t - T.ev.t0)}`;
@@ -171,11 +171,11 @@ const TOPICS = {
       say: '보안 — 로봇 · 에이전트마다 분산 신원(DID)을 두고, 명령에는 서명과 권한 증명(VC) · 일회용 인증(OTAC)을 붙여 검증해요. 위조되거나 권한 밖의 명령은 차단하고 보안 인시던트(P2)로 올려요.' },
     { panel: { kind: 'orch', tab: 'uns' }, hl: ['#btnOrch'], fchain: 5, live: true,
       voice: 'FacOS가 정보를 주고받는 바탕은 UNS, 통합 네임스페이스예요. 공장과 Zone, 셀의 상태와 오더, 결정, 명령이 모두 ISA-95 계층 주소를 달고 MQTT 브로커 한 곳에 모여요. 에이전트끼리 직접 잇지 않고 UNS 하나만 보기 때문에, 새 시스템을 붙여도 FacOS는 바꿀 게 없어요. 상태는 바뀔 때만 보내고, 명령은 요청부터 완료까지 같은 번호로 이어져요.',
-      say: (T) => { const S = T.h.sim?.()?.uns?.summary(); return `UNS(통합 네임스페이스) — FacOS가 정보를 주고받는 바탕이에요. 공장 · Zone · 셀의 상태 · 오더 · 결정 · A2A · 명령이 ISA-95 계층 주소(camtic/metafactory/존/셀/…)를 달고 MQTT 브로커 한 곳에 모여요. 에이전트끼리 직접 잇지 않고 UNS만 보니, 시스템을 더해도 FacOS는 그대로예요. 상태는 바뀔 때만(retain), 명령은 요청 → 접수 → 실행 → 완료를 같은 상관 ID로 이어요.${S?.topics ? ` 지금 토픽 ${S.topics}개 · 보존 상태 ${S.retained}개 · 변화 없어 건너뜀 ${S.suppressed}건.` : ''} 앱에서는 설비 데이터가 Sparkplug B로 들어와요.`; } },
+      say: (T) => { const S = T.h.sim?.()?.uns?.summary(); return `UNS(통합 네임스페이스) — FacOS가 정보를 주고받는 바탕이에요. 공장 · Zone · 셀의 상태 · 오더 · 결정 · A2A · 명령이 ISA-95 계층 주소(camtic/metafactory/존/셀/…)를 달고 MQTT 브로커 한 곳에 모여요. 에이전트끼리 직접 잇지 않고 UNS만 보니, 시스템을 더해도 FacOS는 그대로예요. 상태는 바뀔 때만(retain), 명령은 요청 → 접수 → 실행 → 완료를 같은 Correlation ID로 이어요.${S?.topics ? ` 지금 토픽 ${S.topics}개 · 보존 상태 ${S.retained}개 · 변화 없어 건너뜀 ${S.suppressed}건.` : ''} 앱에서는 설비 데이터가 Sparkplug B로 들어와요.`; } },
     // 데이터 코디네이터 — FacOS는 데이터를 갖지 않고, UNS 위에서 데이터가 오가는 주소 · 방향 · 권한 · 순서 · 기록을 정한다
     { panel: { kind: 'orch', tab: 'uns' }, hl: ['#btnOrch', '#facos'], fchain: 5, live: true,
       voice: '그래서 FacOS를 데이터 코디네이터라고 불러요. FacOS는 데이터를 직접 만들거나 쌓아 두지 않아요. 데이터는 설비와 셀이 만들고, 브로커가 날라요. FacOS는 그 데이터가 어떤 주소로, 어느 방향으로, 누구의 권한으로, 어떤 순서로 오가는지를 정하고, 무엇을 왜 결정했는지 기록해요. 그래서 시스템이 늘어나도 모두 같은 규칙으로 움직여요.',
-      say: (T) => { const S = T.h.sim?.()?.uns?.summary(), K = fos(T)?.kpi(); return `데이터 코디네이터 — FacOS는 데이터를 만들거나 쌓아 두는 곳이 아니에요. 데이터는 설비(OPC UA) · 셀이 만들고, 브로커(MQTT 5)가 날라요. FacOS는 그 흐름의 규칙을 정해요: ① 주소(ISA-95 토픽) ② 방향(명령 ↓ · 상태 ↑ · 같은 계층은 알림만) ③ 권한(계층별 ACL · 상태 위조 불가) ④ 순서(명령 요청 → 접수 → 실행 → 완료, 같은 상관 ID · 결정은 승인 뒤 계획 버전 증가) ⑤ 기록(A2A · 결정 · 오더 · 계획 버전).${S?.topics ? ` 지금 토픽 ${S.topics}개` : ''}${K ? ` · A2A ${K.msgs}건(차단 ${K.blocked}) · 명령 검증 승인 ${K.ocsOk} / 거부 ${K.ocsRej}` : ''}${S?.topics || K ? '.' : ''} 데이터를 처리하는 중심이 아니라 흐름의 질서를 맞추는 조정자라서, 시스템을 더해도 같은 규칙으로 움직여요.`; } },
+      say: (T) => { const S = T.h.sim?.()?.uns?.summary(), K = fos(T)?.kpi(); return `데이터 코디네이터 — FacOS는 데이터를 만들거나 쌓아 두는 곳이 아니에요. 데이터는 설비(OPC UA) · 셀이 만들고, 브로커(MQTT 5)가 날라요. FacOS는 그 흐름의 규칙을 정해요: ① 주소(ISA-95 토픽) ② 방향(명령 ↓ · 상태 ↑ · 같은 계층은 알림만) ③ 권한(계층별 ACL · 상태 위조 불가) ④ 순서(명령 요청 → 접수 → 실행 → 완료, 같은 Correlation ID · 결정은 승인 뒤 계획 버전 증가) ⑤ 기록(A2A · 결정 · 오더 · 계획 버전).${S?.topics ? ` 지금 토픽 ${S.topics}개` : ''}${K ? ` · A2A ${K.msgs}건(차단 ${K.blocked}) · 명령 검증 승인 ${K.ocsOk} / 거부 ${K.ocsRej}` : ''}${S?.topics || K ? '.' : ''} 데이터를 처리하는 중심이 아니라 흐름의 질서를 맞추는 조정자라서, 시스템을 더해도 같은 규칙으로 움직여요.`; } },
     { panel: { kind: 'fac', tab: 'po' }, hl: ['#btnFac'], fchain: 6,
       voice: '마지막은 FAC 업무 기록이에요. FacOS가 한 발주, 입고, 재고 이동, 정비요청, 오더 배정과 종료가 전표로 남아요. 앱에서는 ERPNext와도 연동돼요.',
       say: 'FAC 업무 기록 — FacOS가 한 일이 전표로 남아요: 구매오더(P0000n) · 입고(WH/IN) · 내부 이동 · 출고(WH/OUT, 10분마다 한 전표로 묶음) · 정비요청(MR/) · 오더 배정 · 종료. 앱에서는 ERPNext와도 연동돼요.' },
@@ -249,10 +249,10 @@ const TOPICS = {
     { hl: ['#orchPanel'], live: true, hold: (T) => !!inc(T, 'command'),
       voice: '판단이 끝나면 명령이 내려가요. 하던 일이 덜 급한 로봇을 골라 배정하고, 하던 일은 처리 뒤에 이어서 해요. 주변 셀에는 안전 감속이나 보호 정지 명령이 함께 가요.',
       say: (T) => { const c = inc(T, 'command'); return `명령 · 배정 — ${c ? `${c.text.replace(/^명령:\s*/, '')} (${at(T, c)})` : '명령을 내리는 중이에요…'}${T.ev?.cmdCells?.length ? ` · 셀 ${T.ev.cmdCells.length}곳에 ${T.ev.type === 'intrusion' ? '안전 감속' : '보호 정지'} 명령` : ''}. 덜 급한 일을 하던 로봇을 골라 배정하고, 하던 일은 처리 뒤 이어서 해요.${T.held ? ' (설명하는 동안 현장은 잠시 멈췄어요 — 다음 단계에서 다시 움직여요)' : ''}`; } },
-    // UNS로 다시 보기 ② 명령 — A2A 명령 + 셀 cmd 4단(같은 상관 ID) + 셀 상태(retain)
+    // UNS로 다시 보기 ② 명령 — A2A 명령 + 셀 cmd 4단(같은 Correlation ID) + 셀 상태(retain)
     { panel: (T) => T.ev?.inc && { kind: 'orch', tab: 'uns', uns: (s) => incUns(T, s, 'cmd') }, hl: ['#orchPanel'], live: true, hold: (T) => !!inc(T, 'command'),
-      voice: '명령도 UNS를 거쳐요. 존 오케스트레이터의 명령은 A2A 토픽으로, 셀에 보내는 명령은 셀 주소의 cmd 토픽으로 발행돼요. 셀은 접수, 실행, 완료를 같은 상관 ID로 다시 발행하고, 접수만으로는 끝난 것으로 보지 않아요. 바뀐 셀 상태도 상태 토픽에 남아요.',
-      say: (T) => { const R = incUns(T, undefined, 'cmd'); if (!R) return 'UNS로 보면 ② 명령 — 명령은 A2A 토픽과 셀의 cmd 토픽으로 나가요.'; const cm = R.cmds.map((x) => `${x.c.unsCorr ?? `CMD-${x.c.id}`} ${R.short(x.base)}: ${x.hs.map((h) => UNS_CMD[h.state] ?? h.state).join(' → ') || '발행 대기'}`); return `UNS로 보면 ② 명령 — ${R.a2a.length ? `존의 명령 A2A ${R.a2a.length}건(${R.short(R.a2a[0].topic)})` : '존의 명령 A2A 발행 대기'}${cm.length ? ` · 셀 명령 ${cm.slice(0, 2).join(' · ')}${cm.length > 2 ? ` 외 ${cm.length - 2}건` : ''}` : ' · 이번 건은 셀 명령 없이 대응 로봇 배정만'}. 상관 ID 하나로 cmd → ack → exec → done을 잇고, 접수(ack)만으로는 끝으로 보지 않아요${R.cells.length ? ` · 바뀐 셀 상태 ${R.cells.length}곳(retain)` : ''}. 지금은 현장이 멈춰 있어 다음 장면에서 완료(done)까지 이어져요.`; } },
+      voice: '명령도 UNS를 거쳐요. 존 오케스트레이터의 명령은 A2A 토픽으로, 셀에 보내는 명령은 셀 주소의 cmd 토픽으로 발행돼요. 셀은 접수, 실행, 완료를 같은 Correlation ID로 다시 발행하고, 접수만으로는 끝난 것으로 보지 않아요. 바뀐 셀 상태도 상태 토픽에 남아요.',
+      say: (T) => { const R = incUns(T, undefined, 'cmd'); if (!R) return 'UNS로 보면 ② 명령 — 명령은 A2A 토픽과 셀의 cmd 토픽으로 나가요.'; const cm = R.cmds.map((x) => `${x.c.unsCorr ?? `CMD-${x.c.id}`} ${R.short(x.base)}: ${x.hs.map((h) => UNS_CMD[h.state] ?? h.state).join(' → ') || '발행 대기'}`); return `UNS로 보면 ② 명령 — ${R.a2a.length ? `존의 명령 A2A ${R.a2a.length}건(${R.short(R.a2a[0].topic)})` : '존의 명령 A2A 발행 대기'}${cm.length ? ` · 셀 명령 ${cm.slice(0, 2).join(' · ')}${cm.length > 2 ? ` 외 ${cm.length - 2}건` : ''}` : ' · 이번 건은 셀 명령 없이 대응 로봇 배정만'}. Correlation ID 하나로 cmd → ack → exec → done을 잇고, 접수(ack)만으로는 끝으로 보지 않아요${R.cells.length ? ` · 바뀐 셀 상태 ${R.cells.length}곳(retain)` : ''}. 지금은 현장이 멈춰 있어 다음 장면에서 완료(done)까지 이어져요.`; } },
     // ── 3막 해결된 현장 ──
     { act: (T) => { if (T.ev?.responder && resp(T) !== 'safety' && !arrived(T)) { T.fast = true; T.h.speed?.(3); } },   // 현장까지 가는 길은 3배속 (도착하면 멈춰 1배속으로 — 다음 단계)
       panel: null, follow: (T) => T.ev?.responder, cam: (T) => T.ev && !T.ev.responder && { x: T.ev.x, z: T.ev.z, d: 10 }, live: true,
@@ -394,10 +394,10 @@ const TOPICS = {
     { panel: { kind: 'orch', tab: 'uns', uns: LINK_UNS.facos }, hl: ['#btnOrch', '#facos'], lchain: 6, live: true,
       voice: 'FacOS는 설비에 직접 접속하지 않아요. UNS를 구독해서 공장 상태를 보고 판단하고, 그 결과인 공장 상태와 오더, 결정을 다시 UNS에 발행해요. 데이터는 설비가 만들고 브로커가 나르고, FacOS는 그 흐름의 규칙을 정하는 데이터 코디네이터예요.',
       say: (T) => { const R = LINK_UNS.facos(T.h.sim?.()); return `⑦ FacOS — 설비에 직접 접속하지 않고 UNS를 구독해 판단해요(opcua/json/# · aas/# · 공장 트리). 판단 결과는 다시 UNS로: _facos/state(공장 상태) · _facos/order(오더) · _facos/decision(결정)${R?.topics.length ? ` — 지금 강조 ${R.topics.length}개` : ''}. 데이터는 설비가 만들고 브로커가 나르고, FacOS는 주소 · 방향 · 권한 · 순서 · 기록을 정하는 데이터 코디네이터예요.`; } },
-    // ⑧ 명령 하향 — {존}/{셀}/cmd → 엣지 게이트웨이 → TSN · 이음5G → 셀 · 로봇, 같은 상관 ID로 ack · exec · done (게이트웨이 → OPC UA Method는 계획안)
+    // ⑧ 명령 하향 — {존}/{셀}/cmd → 엣지 게이트웨이 → TSN · 이음5G → 셀 · 로봇, 같은 Correlation ID로 ack · exec · done (게이트웨이 → OPC UA Method는 계획안)
     { panel: { kind: 'orch', tab: 'uns', uns: LINK_UNS.cmd }, hl: ['#btnOrch'], lchain: 7, live: true, end: true, next: 'docs',
-      voice: '마지막은 거꾸로 가는 길, 제어 명령이에요. FacOS나 존 오케스트레이터가 셀 주소의 명령 토픽에 발행하면, 엣지 게이트웨이가 받아 TSN이나 이음5G로 셀과 로봇에 전달해요. 셀은 접수, 실행, 완료를 같은 상관 ID로 다시 발행하고, 명령에는 만료 시간과 응답 토픽이 붙어요. 실제 장비에서는 게이트웨이가 이 명령을 OPC UA 메서드 호출로 바꿔 주는 구성을 계획하고 있어요.',
-      say: (T) => { const R = LINK_UNS.cmd(T.h.sim?.()); return `⑧ 명령 하향 — FacOS · 존 오케스트레이터가 {존}/{셀}/cmd에 발행 → 엣지 게이트웨이 → TSN · 이음5G → 셀 · 로봇. 셀은 cmd/ack → cmd/exec → cmd/done을 같은 상관 ID로 다시 발행하고, 접수(ack)만으로 끝으로 보지 않아요. MQTT 5 속성으로 만료(Message Expiry) · 응답 토픽(Response Topic)이 붙어요.${R?.E.length ? ` 최근 명령 토픽: ${R.E.slice(0, 3).map((e) => R.short(e.topic)).join(' · ')}.` : ' 이번 실행에는 아직 명령이 없어요 — 오케스트레이터 명령 콘솔에서 보내면 여기에 4단이 생겨요.'} (게이트웨이에서 OPC UA Method 호출로 바꾸는 부분은 실제 장비용 계획(안)이에요.)`; } },
+      voice: '마지막은 거꾸로 가는 길, 제어 명령이에요. FacOS나 존 오케스트레이터가 셀 주소의 명령 토픽에 발행하면, 엣지 게이트웨이가 받아 TSN이나 이음5G로 셀과 로봇에 전달해요. 셀은 접수, 실행, 완료를 같은 Correlation ID로 다시 발행하고, 명령에는 만료 시간과 응답 토픽이 붙어요. 실제 장비에서는 게이트웨이가 이 명령을 OPC UA 메서드 호출로 바꿔 주는 구성을 계획하고 있어요.',
+      say: (T) => { const R = LINK_UNS.cmd(T.h.sim?.()); return `⑧ 명령 하향 — FacOS · 존 오케스트레이터가 {존}/{셀}/cmd에 발행 → 엣지 게이트웨이 → TSN · 이음5G → 셀 · 로봇. 셀은 cmd/ack → cmd/exec → cmd/done을 같은 Correlation ID로 다시 발행하고, 접수(ack)만으로 끝으로 보지 않아요. MQTT 5 속성으로 만료(Message Expiry) · 응답 토픽(Response Topic)이 붙어요.${R?.E.length ? ` 최근 명령 토픽: ${R.E.slice(0, 3).map((e) => R.short(e.topic)).join(' · ')}.` : ' 이번 실행에는 아직 명령이 없어요 — 오케스트레이터 명령 콘솔에서 보내면 여기에 4단이 생겨요.'} (게이트웨이에서 OPC UA Method 호출로 바꾸는 부분은 실제 장비용 계획(안)이에요.)`; } },
   ] },
   docs: { name: '매뉴얼 · 앱 내려받기', next: 'outcome', steps: [
     // 매뉴얼 전에: Claude API 키를 넣으면 달라지는 것 (js/llm.js · js/agentcore.js · js/designer.js) — 키가 없어도 정책 기반 에이전트 · 내장 해석기로 공장은 그대로 돈다
@@ -457,7 +457,7 @@ function ringSvg(key, at, en) {
 // 문장(읽을 글)마다 해시로 파일을 찾는다 — 문장을 고치면 해시가 바뀌어 새로 만들어야 함(없으면 OS 음성)
 export const MENU_SAY = '모두의 AI 팩토리 공장장 토리입니다. 무엇을 안내해 드릴까요?';
 // 읽을 글: 말풍선 글자는 그대로 두고 소리만 고친다 — 약어 발음 · 붙은 낱말 띄우기 · 쉼(—는 마침표, 괄호 속 약어는 읽지 않음)
-const PRON = [[/피지컬\s*AI/g, '피지컬 에이아이'], [/Fac\s?OS/gi, '팩오에스'], [/AIOS/g, '에이아이오에스'], [/AI-ready/g, '에이아이 레디'], [/(?<![A-Za-z])AI(?![A-Za-z])/g, '에이아이'],
+const PRON = [[/Correlation\s*ID/gi, '코릴레이션 아이디'], [/피지컬\s*AI/g, '피지컬 에이아이'], [/Fac\s?OS/gi, '팩오에스'], [/AIOS/g, '에이아이오에스'], [/AI-ready/g, '에이아이 레디'], [/(?<![A-Za-z])AI(?![A-Za-z])/g, '에이아이'],
   [/VLA/g, '브이엘에이'], [/Outbox/gi, '아웃박스'], [/(?<![A-Za-z])FAC(?![A-Za-z])/g, '팩'], [/AMMR/g, '에이엠엠알'], [/(?<![A-Za-z])AMR(?![A-Za-z])/g, '에이엠알'], [/(?<![A-Za-z])SW(?![A-Za-z])/g, '소프트웨어'],
   [/ERPNext/g, '이알피넥스트'], [/SSCC/g, '에스에스씨씨'], [/EPCIS/g, '이피씨아이에스'], [/FMEA/g, '에프엠이에이'], [/(?<![A-Za-z])UPH(?![A-Za-z])/g, '유피에이치'], [/(?<![A-Za-z])AAS(?![A-Za-z])/g, '에이에이에스'],
   [/(?<![A-Za-z])3D(?![A-Za-z])/g, '쓰리디'], [/(?<![A-Za-z])8D(?![A-Za-z])/g, '에잇디'], [/이음5G/g, '이음 파이브지'], [/(?<![A-Za-z])5G(?![A-Za-z])/g, '파이브지'], [/A\/S/g, '에이에스'], [/e-axle/g, '이액슬'], [/Zone/g, '존'], [/R&D/g, '알앤디'], [/\s*&\s*/g, '와 '], [/토리(예요|입니다|였습니다)/g, (_, e) => `토리 ${e === '예요' ? '이에요' : e}`], [/제어명령/g, '제어 명령'],
@@ -539,7 +539,9 @@ export class Tori {
     const u = this.ui, q = (sel) => this.el.querySelector(sel);
     q('[data-t="lang"]').textContent = u.langBtn; q('[data-t="lang"]').title = u.lang; q('[data-t="voice"]').title = u.voice; q('[data-t="close"]').title = u.close;
     q('.tori-h b').textContent = u.name; q('.tori-bubble').setAttribute('aria-label', u.bubble); this.cv.title = u.avatar; q('.tori-gpu').title = u.gpu; this.el.lang = this.lang;
+    this.skin();   // 아바타 그림도 언어에 맞춘다 (한국어 manager.png · 영어 manager-en.png)
   }
+  skin() { const t = this.texs?.[this.lang]; if (t && this.fig && this.fig.material.map !== t) { this.fig.material.map = t; this.fig.material.needsUpdate = true; } }
   setLang(L) {   // 지금 보던 단계(또는 메뉴)를 새 언어로 다시 말한다 — 단계 동작 · 카메라는 그대로
     this.lang = L; store.set(LANG, L); this.syncLang();
     if (!this.open) return;
@@ -686,8 +688,10 @@ export class Tori {
     r.outputColorSpace = THREE.SRGBColorSpace;
     this.r = r; this.el.querySelector('.tori-gpu').textContent = kind;
     const scene = this.scene = new THREE.Scene(), cam = this.cam = new THREE.OrthographicCamera(-1.06, 1.06, 1.06, -1.06, 0.1, 10); cam.position.z = 5;
-    const tex = await new THREE.TextureLoader().loadAsync(new URL('../assets/tori/manager.png', import.meta.url).href);
-    tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+    // 아바타 그림: 한국어 manager.png · 영어 manager-en.png (같은 자세 · 같은 구도 — 목 · 손 위치가 같아 움직임 그대로) — 언어를 바꾸면 그림도 바꾼다 (skin)
+    const load = async (f) => { const t = await new THREE.TextureLoader().loadAsync(new URL(`../assets/tori/${f}`, import.meta.url).href); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; };
+    const [ko, en] = await Promise.all([load('manager.png'), load('manager-en.png').catch(() => null)]);
+    this.texs = { ko, en: en ?? ko }; const tex = this.texs[this.lang];
     const geo = new THREE.PlaneGeometry(2, 2, 28, 28), pos = geo.attributes.position;
     this.base = Float32Array.from(pos.array); this.geo = geo;
     this.fig = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.02, depthWrite: false }));

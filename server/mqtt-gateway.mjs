@@ -131,7 +131,7 @@ async function connectBridge({ url, version = 5, username = '', password = '' })
     b.on('connect', () => { if (bridge !== b) return; Object.assign(state, { bridgeConnected: true, bridgeError: null, bridgeSince: new Date().toISOString() }); b.subscribe(`${UNS_ROOT}/+/+/cmd/request`); });
     b.on('close', () => { if (bridge === b) state.bridgeConnected = false; });
     b.on('error', (e) => { if (bridge === b) state.bridgeError = e.code === 'ECONNREFUSED' ? `연결 거부 — ${state.bridgeUrl}에 브로커가 떠 있는지 확인` : /Bad username|Not authorized/i.test(e.message) ? '계정 또는 비밀번호 오류' : /Unsupported protocol|protocol version/i.test(e.message) ? 'MQTT 5를 받지 않는 브로커 — 버전을 3.1.1로' : e.message; });
-    // 외부 브로커로 들어온 명령 요청 — 외부 브로커가 권한을 확인했다고 본다(그쪽 ACL) · MQTT 5 속성에서 상관 ID · 응답 토픽 · 만료를 읽는다
+    // 외부 브로커로 들어온 명령 요청 — 외부 브로커가 권한을 확인했다고 본다(그쪽 ACL) · MQTT 5 속성에서 Correlation ID · 응답 토픽 · 만료를 읽는다
     b.on('message', (topic, payload, packet) => { state.bridgeReceived++; enqueueCmd(topic, payload, { from: 'bridge', via: 'bridge', props: packet?.properties ?? null }); });
   } catch (e) { state.bridgeError = e.message; }
 }

@@ -9,7 +9,7 @@
 //     {존}/_zone/quality                           존 품질 표본 (제품 1개 판정마다 · 이벤트)
 //     {존}/{셀}/state | telemetry | edge | cmd · cmd/ack · cmd/exec · cmd/done    Work Unit — 셀 OCS (retain) · 설비 요약 · Sparkplug 엣지 상태 · 명령 4단
 //     {존}/{셀|_zone}/cmd/request                  외부 명령 요청 (operator · zone 계정 · 게이트웨이 대기열 → applyCommand)
-// 원칙: 상태는 값이 바뀔 때만 발행(Report by Exception) + retain, 이벤트는 retain 없이 그때그때. 명령은 상관 ID(correlationId)로 요청 → 접수 → 실행 → 완료를 묶는다.
+// 원칙: 상태는 값이 바뀔 때만 발행(Report by Exception) + retain, 이벤트는 retain 없이 그때그때. 명령은 Correlation ID(correlationId)로 요청 → 접수 → 실행 → 완료를 묶는다.
 // 렌더링과 분리 — 헤드리스에서도 같은 트리. 시뮬레이션 상태를 바꾸지 않는다(읽기만).
 import { ZONE_ORCH_KEYS, ocsState, zoneOfEp } from './factoryos.js';
 import { COMMANDS } from './commands.js';
@@ -93,7 +93,7 @@ export class UnsNamespace {
         }
       }
     }
-    // 명령: 요청 → 접수 → 실행 → 완료/거부 (상관 ID = CMD-n 또는 외부 요청의 correlationId) — 접수 ACK만으로 재개하지 않는다
+    // 명령: 요청 → 접수 → 실행 → 완료/거부 (Correlation ID = CMD-n 또는 외부 요청의 correlationId) — 접수 ACK만으로 재개하지 않는다
     //   MQTT 5 브리지: props → Correlation Data · Response Topic · Message Expiry(요청 단계) · User Property
     for (const c of s.cmd?.list ?? []) {
       const seen = this.cmdSeen.get(c.id) ?? 0; if (seen >= c.history.length) continue;
@@ -143,7 +143,7 @@ export class UnsNamespace {
   meta() {
     return { version: UNS_VERSION, root: this.root, run: this.runOf?.() ?? null, standard: 'ISA-95 Part 1 장비 계층 (Enterprise/Site → Area → Work Unit → Equipment)', levels: ISA95, areas: UNS_AREAS,
       namespaces: { _meta: '토픽 규칙', _facos: '공장 오케스트레이터 · Agent Gateway (상태·오더·결정·A2A)', _zone: '존 오케스트레이터 (상태·KPI·품질 표본·존 전체 명령)' },
-      commandRequest: { topic: `${this.root}/{존}/{셀|_zone}/cmd/request`, body: { code: 'COMMANDS 코드 (SPEED · CYCLE_STOP · RESUME …)', arg: '인자 (SPEED는 50·75·100·110)', reason: '사유', correlationId: '상관 ID (MQTT 5는 Correlation Data)', responseTopic: '응답 토픽 (선택 · MQTT 5는 Response Topic)', expirySec: '만료 초 (기본 30 · 최대 300 · MQTT 5는 Message Expiry)' }, accounts: 'operator(모든 존) · zone-{존}(자기 존만) — 익명은 읽기 전용' },
+      commandRequest: { topic: `${this.root}/{존}/{셀|_zone}/cmd/request`, body: { code: 'COMMANDS 코드 (SPEED · CYCLE_STOP · RESUME …)', arg: '인자 (SPEED는 50·75·100·110)', reason: '사유', correlationId: 'Correlation ID (MQTT 5는 Correlation Data)', responseTopic: '응답 토픽 (선택 · MQTT 5는 Response Topic)', expirySec: '만료 초 (기본 30 · 최대 300 · MQTT 5는 Message Expiry)' }, accounts: 'operator(모든 존) · zone-{존}(자기 존만) — 익명은 읽기 전용' },
       sparkplug: { group: 'metafactory', edges: 'edge-{존}', devices: '셀', host: 'metafactory-uns-bridge', bridgeTo: `${this.root}/{존}/{셀}/telemetry · edge` },
       rules: ['상태(state · order)는 retain + 값이 바뀔 때만 발행 (Report by Exception)', '이벤트(decision · a2a · cmd)는 retain 없음', '명령은 correlationId로 cmd → cmd/ack → cmd/exec → cmd/done을 묶음 — 접수 ACK만으로 재개하지 않음', '읽기(구독)는 모두 허용 · 쓰기(발행)는 역할·존별 ACL — UNS 상태 토픽은 앱만 발행', '발행이 끊기면 게이트웨이가 _facos/state를 online:false로 바꾸고 다시 붙으면 rebirth로 모든 상태를 다시 발행'],
       legacy: ['opcua/json/# (OPC UA PubSub Part 14)', 'aas/metafactory/# (AAS)', 'metafactory/{telemetry|events|oee|quality|sensors|machmon|washer}/v1/# (평면 · 대시보드용) — 그대로 병행 발행'] };
