@@ -287,7 +287,7 @@ function laneAisle(x, z) {
   const onCol = [LEFT, RIGHT].some((cx) => Math.abs(x - (cx - LANE)) < 0.35 || Math.abs(x - (cx + LANE)) < 0.35 || Math.abs(x - cx) < 0.35);
   return (onLane ?? (onCol ? near.sort((p, q) => p.dz - q.dz)[0] : null))?.k ?? null;
 }
-const ESCORT_GAP = 4.0, WALK_V = 0.9;   // 진입자 추적: 사족보행은 사람과 4m 이상 떨어져 따라간다 · 진입자 걸음 0.9m/s
+const ESCORT_GAP = 4.0, WALK_V = 0.8, ESCORT_V = 2.5;   // 진입자 추적: 사족보행은 사람과 4m 이상 떨어져 따라간다 · 진입자 걸음 0.8m/s(두리번거리며) · 사족보행 접근 · 따라잡기 2.5m/s
 
 // 이동체 크기(반지름, m) — 충돌 판정용
 const RADIUS = { dock: 0.5, agv: 0.8, forklift: 1.0, carrier: 0.8, zoneamr: 0.8, robot: 0.6, quadruped: 0.55, humanoid: 0.35, human: 0.35, worker: 0.35 };
@@ -1915,6 +1915,7 @@ export class Simulation {
   detectFieldEvent(ev, by, conf, ref = null) {
     if (ev.detected || ev.cleared || ev.quiet) return;   // quiet: 토리 인시던트 예시가 「AI 감지」 단계 전까지 감지를 막아 둔 이벤트
     ev.detected = true; ev.detectedBy = by; ev.conf = conf; ev.tDetect = this.time; ev.detRef = ref;   // ref: 감지한 카메라 (로봇 카메라 · CCTV) — 현장 대응 팝업이 그 영상을 띄운다
+    { const dm = ref?.type === 'mover' ? this.movers.find((m) => m.id === ref.id) : ref?.type === 'cctv' ? this.cctv?.cams.find((c) => c.id === ref.id) : null; ev.detDist = dm ? Math.round(Math.hypot(dm.x - ev.x, dm.z - ev.z) * 10) / 10 : null; }   // 감지 당시 카메라까지 거리 (팝업 「감지 거리」)
     const o = this.orch, inc = o.open('field', `ev:${ev.id}`, `현장 이벤트 · ${FIELD_EVENTS[ev.type].label}`, by, { where: { x: ev.x, z: ev.z }, prio: FIELD_EVENTS[ev.type].prio ?? 2 });
     inc.ev = ev;
     ev.inc = inc;
@@ -2071,9 +2072,9 @@ export class Simulation {
   }
 
   // ── 사람 진입: 진입자 이동 · 사족보행 추적 보고 ─────────────────
-  // 진입자: 그 자리에서 7초 두리번거린 뒤 통로(F · B)로 나와, 통로를 따라 좌우 세로 통로(x −35.5 · 30) 끝으로 가서 정밀조립Zone 밖(|z| 19.5)으로 나간다.
+  // 진입자: 그 자리에서 9초 두리번거린 뒤 통로(F · B)로 나와, 통로를 따라 좌우 세로 통로(x −35.5 · 30) 끝으로 가서 정밀조립Zone 밖(|z| 19.5)으로 나간다.
   //   나가는 길 4가지(왼쪽 · 오른쪽 × 앞 · 뒤 통로) 중 추적 로봇과 가장 멀리 떨어진 길 — 로봇과 마주치지 않는다 (로봇은 뒤에서 따라온다)
-  //   통로까지 곧게 나가는 길이 셀을 가로지르면 셀 사이 빈 곳으로 먼저 비켜선다 · 가는 길 35~55% 지점에서 셀 앞에 6초 멈춰 선다 · 나가면 이벤트가 닫힌다(until)
+  //   통로까지 곧게 나가는 길이 셀을 가로지르면 셀 사이 빈 곳으로 먼저 비켜선다 · 가는 길 35~55% 지점에서 셀 앞에 8초 멈춰 선다 · 나가면 이벤트가 닫힌다(until) · 사족보행은 뒤로 돌아와(2.5m/s) 합류 지점에 닿은 뒤 동선을 따라 따라잡아 4m 안팎에서 합류(포착)
   startIntruder(ev, q = null) {
     const hit = (a, b) => this.stations.some((st) => { for (let t = 0; t <= 1; t += 0.05) { const x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t; if (Math.abs(x - st.x) < 2.6 && Math.abs(z - (st.z ?? 0)) < 2.6) return true; } return false; });
     const plan = (az, ex, dx) => { const s0 = { x: ev.x + dx, z: ev.z }; return [{ x: ev.x, z: ev.z }, ...(dx ? [s0] : []), ...route({ ...s0, aisle: az }, { x: ex, z: az === 'F' ? 19.5 : -19.5, aisle: az })]; };
@@ -2089,7 +2090,7 @@ export class Simulation {
     }
     best ??= { P: plan('F', RIGHT, 0), li: 1, az: 'F', ex: RIGHT };
     const pts = best.P, L = len(pts);
-    ev.walk = { pts, k: 1, laneIdx: best.li, az: best.az, exitX: best.ex, phase: 'look', until: this.time + 7, stopAt: L * (0.35 + this.rand() * 0.2), stopped: false, dist: 0, len: L, t0: this.time, blockT: 0 };
+    ev.walk = { pts, k: 1, laneIdx: best.li, az: best.az, exitX: best.ex, phase: 'look', until: this.time + 9, stopAt: L * (0.35 + this.rand() * 0.2), stopped: false, dist: 0, len: L, t0: this.time, blockT: 0 };
     ev.trail = [{ t: this.time, x: ev.x, z: ev.z }]; ev.heading = Math.atan2(pts[1].x - ev.x, pts[1].z - ev.z) || 0; ev.acts = [];
     this.intruderAct(ev, '진입 지점에서 멈춰 주변을 두리번거림');
   }
@@ -2116,7 +2117,7 @@ export class Simulation {
         const st = Math.min(rem, d); ev.x += (dx / d) * st; ev.z += (dz / d) * st; rem -= st; W.dist += st;
         if (st >= d) W.k++;
         if (!W.stopped && W.dist >= W.stopAt) {
-          W.stopped = true; W.phase = 'stop'; W.until = this.time + 6;
+          W.stopped = true; W.phase = 'stop'; W.until = this.time + 8;
           const c = [...this.processing].sort((a, b) => Math.hypot(a.x - ev.x, a.z - ev.z) - Math.hypot(b.x - ev.x, b.z - ev.z))[0];
           ev.heading = c ? Math.atan2(c.x - ev.x, c.z - ev.z) : ev.heading; W.stopName = c?.name;
           this.intruderAct(ev, `${c?.name ?? '셀'} 앞에서 멈춰 설비 쪽을 바라봄 (6초)`);
@@ -2148,15 +2149,16 @@ export class Simulation {
       if (qa === az && onLane) steps.push({ go: { x: backX, z: AISLE[other], aisle: other, name: '진입자 뒤로 돌아가는 길' } });
       if (onLane) steps.push({ go: { x: backX, z: AISLE[az], aisle: az, name: '진입자 추적 합류 (세로 통로)' } });
     }
-    steps.push({ go: J }, { do: () => this.escortJoin(ev) }, { until: () => ev.cleared, task: `진입자 추적 · ${ESCORT_GAP}m 거리 유지 · 행동 · 동선 보고` }, { do: () => this.escortEnd(ev) });
-    q.steps = steps; q.speed0 ??= q.speed; q.speed = 2.0;
+    // 합류 지점에 닿으면 「따라잡기」(chase) — 진입자가 그새 걸어갔으면 2m/s로 동선을 따라가 4m 안팎까지 좁힌 뒤에야 합류(포착)로 본다 (멀리서 「현장 도착」이라 하지 않게)
+    steps.push({ go: J }, { do: () => { if (ev.escort && ev.escort.phase === 'approach') ev.escort.phase = 'chase'; } }, { until: () => ev.cleared, task: `진입자 추적 · ${ESCORT_GAP}m 거리 유지 · 행동 · 동선 보고` }, { do: () => this.escortEnd(ev) });
+    q.steps = steps; q.speed0 ??= q.speed; q.speed = ESCORT_V;
     ev.responder = q.id; ev.escort = { q, phase: 'approach', j: W.laneIdx, pre, lastRep: 0, t0: this.time };
     return q;
   }
   escortJoin(ev) {
     const E = ev.escort; if (!E || E.phase === 'follow') return;
-    E.phase = 'follow'; E.tJoin = this.time; E.q.speed = E.q.speed0 ?? 1.2;
-    this.orch.step(ev.inc, 'exec', 'act', `${E.q.id} 현장 도착 · 진입자 포착 — ${ESCORT_GAP}m 거리를 두고 추적 · 행동 · 동선 보고 시작`);
+    E.phase = 'follow'; E.tJoin = this.time; E.lastRep = this.time; E.q.speed = E.q.speed0 ?? 1.2; E.joinGap = Math.round(Math.hypot(ev.x - E.q.x, ev.z - E.q.z) * 10) / 10;
+    this.orch.step(ev.inc, 'exec', 'act', `${E.q.id} 현장 도착 · 진입자 포착 (거리 ${E.joinGap}m) — ${ESCORT_GAP}m 거리를 두고 추적 · 행동 · 동선 보고 시작`);
   }
   updateEscort(ev, dt) {
     const E = ev.escort; if (!E || ev.cleared) return;
@@ -2166,7 +2168,7 @@ export class Simulation {
       return;
     }
     if (dt <= 0) return;
-    let rem = (gap() > 8 ? 2.0 : 1.2) * dt, moved = false, fwd = false;
+    let rem = (E.phase === 'chase' || gap() > 8 ? ESCORT_V : 1.2) * dt, moved = false, fwd = false;   // 따라잡는 동안은 2.5m/s
     while (rem > 1e-4 && gap() > ESCORT_GAP) {
       const tgt = E.pre?.length ? E.pre[0] : E.j < W.k ? W.pts[E.j] : { x: ev.x, z: ev.z };
       const dx = tgt.x - q.x, dz = tgt.z - q.z, d = Math.hypot(dx, dz);
@@ -2187,6 +2189,7 @@ export class Simulation {
     }
     q.moving = moved;
     if (!fwd) q.heading = Math.atan2(ev.x - q.x, ev.z - q.z);   // 서 있거나 물러설 때는 진입자 쪽을 본다
+    if (E.phase === 'chase') { if (gap() <= ESCORT_GAP + 1.0) this.escortJoin(ev); else return; }   // 4m 안팎까지 좁혀야 합류 — 그 전에는 보고하지 않는다 (CCTV 추적)
     E.minGap = Math.min(E.minGap ?? 99, gap());
     if (W.phase === 'walk' && this.time - E.lastRep >= 10) {   // 10초마다 위치 · 이동 방향 보고
       E.lastRep = this.time;

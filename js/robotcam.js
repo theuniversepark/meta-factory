@@ -293,7 +293,32 @@ export class RobotCamWall {
     g.beginPath(); g.moveTo(cx - 14, cy); g.lineTo(cx - 5, cy); g.moveTo(cx + 5, cy); g.lineTo(cx + 14, cy); g.moveTo(cx, cy - 14); g.lineTo(cx, cy - 5); g.moveTo(cx, cy + 5); g.lineTo(cx, cy + 14); g.stroke();
     for (const [x0, y0, dx, dy] of [[8, 32, 1, 1], [w - 8, 32, -1, 1], [8, h - 8, 1, -1], [w - 8, h - 8, -1, -1]]) { g.beginPath(); g.moveTo(x0, y0 + dy * 16); g.lineTo(x0, y0); g.lineTo(x0 + dx * 16, y0); g.stroke(); }
     this.drawGrip(g, this.panelCam, f, 0, 0, w, h);
+    this.drawDetections(g, this.panelCam, ref, w, h);   // 관제 화면과 같은 AI 인식 상자 (토리 「로봇 정보 창에 AI 검출 상자」 · 현장 팝업 감지 로봇 영상)
     return f.label;
+  }
+  // 한 카메라 시점의 AI 인식 상자 — 관제 화면 칸과 같은 규칙(가까운 순 7개 · 22m 안 · 현장 이벤트는 굵은 깜빡임), 감지 처리는 하지 않는다(관제 화면만)
+  drawDetections(g, cam, ref, w, h) {
+    const sim = this.sim; if (!sim) return;
+    const selfId = ref?.type === 'mover' ? ref.id : null, selfSt = ref?.type === 'cell' ? ref.stationId : null, who = ref?.id ?? ref?.stationId ?? '';
+    const seen = this.targets().filter((t) => !(selfId && t.m?.id === selfId) && !(selfSt && t.st?.id === selfSt))
+      .map((t) => ({ t, d: Math.hypot(t.c[0] - cam.position.x, t.c[2] - cam.position.z) })).filter((o) => o.d < 22).sort((a, b) => a.d - b.d);
+    const labels = []; let n = 0;
+    g.save(); g.textBaseline = 'alphabetic'; g.textAlign = 'left';
+    for (const { t, d } of seen) {
+      if (n >= 7) break;
+      const b = this.project(cam, t, 0, 0, w, h); if (!b) continue;
+      n++;
+      const conf = Math.min(0.99, 0.86 + hash(t.key + who) * 0.1 + Math.sin(this.t * 3 + d) * 0.015 - d * 0.002);
+      const color = t.ev ? (t.ev.severity === 'alarm' ? '#ff4d4d' : '#f5b82e') : CLS_COLOR[t.cls] ?? '#37e8ff';
+      g.strokeStyle = color; g.lineWidth = t.ev ? 3 : 2; if (t.ev && Math.sin(this.t * 8) > 0) g.lineWidth = 5;
+      g.strokeRect(b.x, b.y, b.w, b.h);
+      const lab = `${t.cls}${t.cls === '설비' ? ' ' + t.name : ''} ${conf.toFixed(2)}`;
+      g.font = `600 12px ${FONT}`; const tw = g.measureText(lab).width + 8, ly = Math.max(26, b.y - 16), lr = { x: b.x, y: ly, w: tw, h: 16 };
+      if (t.ev || !labels.some((o) => lr.x < o.x + o.w && o.x < lr.x + lr.w && lr.y < o.y + o.h && o.y < lr.y + lr.h)) {
+        labels.push(lr); g.fillStyle = color; g.fillRect(lr.x, lr.y, tw, 16); g.fillStyle = '#05080c'; g.fillText(lab, b.x + 4, ly + 12);
+      }
+    }
+    g.restore();
   }
 
   // VLA 에피소드용 카메라 프레임: 로봇 카메라 시점을 작은 해상도로 렌더해 JPEG 바이트로 돌려준다 (비동기 인코딩)
@@ -448,7 +473,7 @@ export class RobotCamWall {
   }
 
   // 상자 8개 꼭짓점을 칸 좌표로 투영해 화면 안 사각형을 얻는다
-  project(cam, t, col, row) {
+  project(cam, t, col, row, tw = TW, th = TH) {   // tw · th: 칸 크기 (관제 화면 칸 TW×TH · 로봇 정보 창 · 현장 팝업 캔버스는 그 크기)
     const v = new THREE.Vector3();
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, front = 0;
     for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
@@ -458,9 +483,9 @@ export class RobotCamWall {
       x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y);
     }
     if (front < 4 || x1 < -1 || x0 > 1 || y1 < -1 || y0 > 1) return null;
-    const cx = (a) => col * TW + ((Math.max(-1, Math.min(1, a)) + 1) / 2) * TW, cy = (a) => row * TH + ((1 - Math.max(-1, Math.min(1, a))) / 2) * TH;
+    const cx = (a) => col * tw + ((Math.max(-1, Math.min(1, a)) + 1) / 2) * tw, cy = (a) => row * th + ((1 - Math.max(-1, Math.min(1, a))) / 2) * th;
     const box = { x: cx(x0), y: cy(y1), w: cx(x1) - cx(x0), h: cy(y0) - cy(y1) };
-    return box.w > 18 && box.h > 12 && box.w < TW * 0.98 ? box : null;
+    return box.w > 18 && box.h > 12 && box.w < tw * 0.98 ? box : null;
   }
 
   // ── 현장 알람 (영상 배너·하단 알람 띠 공용) ─────────────────

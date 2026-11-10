@@ -9,7 +9,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const ROLE = { detect: ['🔍', '감지 로봇', '이벤트를 처음 본 카메라'], respond: ['🚑', '대응 로봇', '배정된 로봇 · 현장 처리'], escort: ['🐕', '추적 사족보행', '진입자를 4m 거리로 따라가며 보고'] };
 const KIND = { detect: '감지 이벤트', clip: '영상 클립', ack: '배정 응답', status: '상태', track: '행동 보고', done: '종료 보고' };
 const STATE = { look: '두리번거림', walk: '걷는 중', stop: '멈춰 섬', left: '구역 이탈' };
-const PHASE = { approach: '뒤에서 접근 중', follow: '추적 중' };
+const PHASE = { approach: '뒤에서 접근 중', chase: '동선 따라 따라잡는 중', follow: '추적 중' };
 const W = 320, H = 180, KEEP = 8;   // 영상 크기 · 해결 뒤 남겨 두는 시간(초)
 const kb = (b) => (b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : b >= 1024 ? `${(b / 1024).toFixed(1)} KB` : `${b} B`);
 const compass = (deg) => ['북', '북동', '동', '남동', '남', '남서', '서', '북서'][Math.round((((180 - deg) % 360) + 360) % 360 / 45) % 8];   // 화면 위(−z)가 북
@@ -21,7 +21,7 @@ export class FieldPops {
     this.cards = new Map(); this.hide = new Set(); this.t = 0; this.camT = 0; this.rr = 0; this.evId = null;
     this.el.addEventListener('click', (e) => {
       const x = e.target.closest('[data-fp-x]'); if (x) { this.hide.add(x.dataset.fpX); this.sync(true); return; }
-      const m = e.target.closest('[data-fp-min]'); if (m) { const c = this.cards.get(m.dataset.fpMin); if (c) { c.min = !c.min; c.el.classList.toggle('min', c.min); } }
+      const m = e.target.closest('[data-fp-min]'); if (m) { const c = this.cards.get(m.dataset.fpMin); if (c) { c.min = !c.min; c.userMin = true; c.el.classList.toggle('min', c.min); } }
     });
   }
   // 지금 보여 줄 이벤트: 해결 안 된 것 중 가장 최근에 감지된 것 → 없으면 방금(8초 안) 해결된 것
@@ -46,6 +46,9 @@ export class FieldPops {
     const s = this.sim(), ev = s ? this.pick() : null;
     if (!ev) { if (this.cards.size) { this.el.innerHTML = ''; this.cards.clear(); } this.el.hidden = true; this.evId = null; return; }
     if (ev.id !== this.evId) { this.el.innerHTML = ''; this.cards.clear(); this.evId = ev.id; }
+    // 토리 안내 중에는 창을 접어 둔다(이름 · 역할만) — 토리가 비추는 현장 · 여는 창을 가리지 않게 · 사용자가 직접 펴거나 접은 창은 그대로
+    const te = document.querySelector('.tori'), tour = !!te && !te.classList.contains('mini');   // 토리 말풍선이 열려 있는 동안 (body.tori-tour는 토리가 창을 띄운 동안만이라 출동 장면에서 풀린다)
+    if (tour !== this.tourOn) { this.tourOn = tour; for (const c of this.cards.values()) if (!c.userMin) { c.min = tour; c.el.classList.toggle('min', c.min); } }
     const want = this.roles(ev), keys = new Set(want.map((r) => r.key));
     for (const [k, c] of this.cards) if (!keys.has(k) || c.role !== want.find((r) => r.key === k)?.role) { c.el.remove(); this.cards.delete(k); }
     for (const r of want) {
@@ -59,7 +62,8 @@ export class FieldPops {
           <div class="fp-grid"></div>${r.role === 'escort' ? '<canvas class="fp-map" width="300" height="96"></canvas>' : ''}
           <div class="fp-tx"><div class="fp-tx-h"></div><ol></ol><div class="fp-vid"></div></div></div>`;
         this.el.appendChild(el);
-        c = { ...r, el, cv: el.querySelector('.fp-cam canvas'), nocam: el.querySelector('.fp-nocam'), grid: el.querySelector('.fp-grid'), map: el.querySelector('.fp-map'), txh: el.querySelector('.fp-tx-h'), ol: el.querySelector('.fp-tx ol'), vid: el.querySelector('.fp-vid'), seen: 0 };
+        if (tour) { el.classList.add('min'); }
+        c = { ...r, el, min: tour, cv: el.querySelector('.fp-cam canvas'), nocam: el.querySelector('.fp-nocam'), grid: el.querySelector('.fp-grid'), map: el.querySelector('.fp-map'), txh: el.querySelector('.fp-tx-h'), ol: el.querySelector('.fp-tx ol'), vid: el.querySelector('.fp-vid'), seen: 0 };
         this.cards.set(r.key, c);
       }
       Object.assign(c, r); this.fill(c, ev);
@@ -71,7 +75,8 @@ export class FieldPops {
     if (c.role === 'detect') {
       R.push(['이벤트', `${ev.label} (${ev.cls})`], ['신뢰도', (ev.conf ?? 0).toFixed(2)], ['감지 시각', this.clock(ev.tDetect)], ['위치', `x ${r1(ev.x)} · z ${r1(ev.z)}`]);
       const m = c.ref?.type === 'mover' ? s.movers.find((x) => x.id === c.ref.id) : null;
-      if (m) R.push(['감지 거리', `${r1(Math.hypot(m.x - ev.x, m.z - ev.z))} m`], ['지금 하는 일', m.task ?? '대기']);
+      if (ev.detDist != null) R.push(['감지 거리', `${r1(ev.detDist)} m (감지 당시)`]);
+      if (m) R.push(['지금 거리', `${r1(Math.hypot(m.x - ev.x, m.z - ev.z))} m`], ['지금 하는 일', m.task ?? '대기']);
       R.push(['인시던트', `${ev.inc?.id ?? '-'} · ${sev[0]}`, sev[1]]);
       return R;
     }

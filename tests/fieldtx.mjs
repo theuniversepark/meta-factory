@@ -39,12 +39,12 @@ const mk = () => { const s = new Simulation('dark', 2, { line: zoneLine(), quiet
     const tx = ev.tx ?? [], st = tx.filter((m) => m.role === 'escort' && m.kind === 'status'), tr = tx.filter((m) => m.kind === 'track');
     if (st.length && st.every((m) => m.robot === ev.escort.q.id)) ok++;
     if (st.some((m) => m.body.phase === 'follow' && m.body.person && Number.isFinite(m.body.gap) && m.body.keepGap === 4 && m.body.person.exit)) detail++;
-    if (ev.escort.phase !== 'follow' || (tr.length >= 3 && tr.every((m) => m.body.gap >= 3.5))) trackOk++;
+    if (ev.escort.phase !== 'follow' || (tr.length >= 1 && tr.every((m) => m.body.gap >= 3.5))) trackOk++;   // 합류가 늦으면 남은 행동이 적다 — 1건 이상 · 거리 3.5m 이상
     if (!tx.some((m) => m.role === 'escort' && m.kind === 'done' && m.body.walked > 0)) ok -= 1;
   }
   check('추적 사족보행이 상태 · 종료(done)를 보낸다', ok === n, `${ok}/${n}`);
   check('추적 상태에 진입자 거리 · 행동 · 동선 · 출구', detail >= 2, `${detail}/${n}`);
-  check('행동 보고마다 track (거리 3.5m 이상)', trackOk === n, `${trackOk}/${n}`);
+  check('합류 뒤 행동 보고마다 track (1건 이상 · 거리 3.5m 이상)', trackOk === n, `${trackOk}/${n}`);
 }
 console.log(`\n결과: ${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

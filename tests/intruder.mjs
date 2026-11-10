@@ -25,7 +25,7 @@ for (let i = 0; i < 12; i++) {
     return ev.cleared;
   });
   run(2);
-  r.cleared = ev.cleared; r.joined = ev.escort?.phase === 'follow'; r.reports = ev.inc.steps.filter((x) => x.kind === 'act' && x.text.includes('보고')).length;
+  r.cleared = ev.cleared; r.joined = ev.escort?.phase === 'follow'; r.joinGap = ev.escort?.joinGap ?? null; r.reports = ev.inc.steps.filter((x) => x.kind === 'act' && x.text.includes('보고')).length;
   r.ended = !!ev.escort?.ended; r.cctv = ev.inc.steps.some((x) => x.text.includes('CCTV 추적으로 이탈 확인')); r.speed = q?.speed; r.left = ev.walk?.done;
   res.push(r);
 }
@@ -33,10 +33,12 @@ const n = res.length;
 check('추적 로봇이 배정된다', res.every((r) => r.q), `${res.filter((r) => r.q).length}/${n}`);
 check('진입자가 정밀조립Zone 밖으로 나가 이벤트가 닫힌다', res.every((r) => r.cleared && r.left), `${res.filter((r) => r.cleared && r.left).length}/${n}`);
 check('추적 로봇이 합류해 따라간다 (출구 가까이 들어와 먼저 나간 경우 제외 — 2/3 이상)', res.filter((r) => r.joined).length >= n * 2 / 3, `${res.filter((r) => r.joined).length}/${n}`);
+const jg = res.filter((r) => r.joined).map((r) => r.joinGap);
+check('합류(현장 도착 · 포착)는 진입자 5.5m 안에서만 선언된다', jg.every((g) => g != null && g <= 5.5), `합류 거리 ${jg.map((g) => g?.toFixed(1)).join(' · ')}m`);
 const mg = Math.min(...res.map((r) => r.gap));
 check('합류 뒤 거리 3.8m 이상 유지', mg >= 3.8, `최소 ${mg.toFixed(2)}m`);
 check('진입자 · 로봇이 셀 안을 지나가지 않는다', res.every((r) => !r.cell), res.find((r) => r.cell)?.cell ?? '');
-check('합류한 건은 로봇의 행동 · 동선 보고가 인시던트 흐름에 남는다 (4건 이상)', res.filter((r) => r.joined).every((r) => r.reports >= 4), `최소 ${Math.min(...res.filter((r) => r.joined).map((r) => r.reports))}건`);
+check('합류한 건은 로봇의 행동 · 동선 보고가 인시던트 흐름에 남는다 (합류 · 보고 · 종료 3건 이상)', res.filter((r) => r.joined).every((r) => r.reports >= 3), `최소 ${Math.min(...res.filter((r) => r.joined).map((r) => r.reports))}건`);
 check('합류 전에 나간 건은 CCTV로 이탈을 확인하고 합류를 취소한다', res.filter((r) => !r.joined).every((r) => r.cctv && r.ended), `${res.filter((r) => !r.joined).length}건`);
 check('추적 종료 보고 · 순찰 속도 복귀', res.every((r) => r.ended && r.speed === 1.2), '');
 console.log(`\n결과: ${pass} PASS / ${fail} FAIL`);
