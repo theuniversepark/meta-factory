@@ -2,7 +2,7 @@
 // 주제별로 안내한다: 메타팩토리 둘러보기(단계 · Zone 카메라 이동 · 주요 버튼 강조) · 인시던트 해결 예시(실제로 현장 이벤트를 일으켜 진행 상황을 읽어 줌)
 //   · 데이터 폐루프 · 데이터 플라이휠(고리 그림에 지금 단계 표시) · 매뉴얼·앱 내려받기
 // 접으면 작은 얼굴만 남고, 누르면 주제 메뉴.
-// 자동 넘김: 말이 끝난 뒤(음성이 없으면 읽는 시간 뒤) 1초 동안 「다음」을 누르지 않으면 다음 단계로 (첫 인사도 둘러보기 시작) — 주제 마지막 단계는 이어진 다음 주제로(메뉴 순서 · 활용 및 기대 맺음말에서 멈춤), 메뉴는 기다림,
+// 자동 넘김: 말이 끝난 뒤(음성이 없으면 읽는 시간 뒤) 1초 동안 「다음」을 누르지 않으면 다음 단계로 (첫 인사도 둘러보기 시작) — 주제 마지막 단계는 이어진 다음 주제로(메뉴 순서), 활용 및 기대 맺음말이 끝나면 5초 뒤 메타팩토리 둘러보기부터 다시(끝없이 되풀이 · 「마치기」를 누르면 멈춤), 메뉴는 기다림,
 //   실제로 일어나기를 기다리는 단계(인시던트 감지 · 출동 · 처리)는 ready()가 참이 된 뒤부터 (최대 90초)
 // 그리기: 토리 전용 캔버스를 WebGPU(three/webgpu WebGPURenderer)로 — 메인 3D 화면(WebGL)과 따로라 공장 화면 속도와 무관
 //   WebGPU를 쓸 수 없는 브라우저 · 공유 아티팩트에서는 같은 장면을 WebGL로 그린다 (모양 · 동작 같음)
@@ -422,7 +422,7 @@ const TOPICS = {
     { when: () => isWeb(), say: '맥은 압축을 풀어 응용 프로그램 폴더로 옮기고 처음 한 번 우클릭 → 열기, 윈도우는 폴더째 풀고 Meta-Factory.exe를 실행해 「PC 보호」 창이 뜨면 추가 정보 → 실행을 누르면 돼요. 그러면 지금 이 화면을 내 컴퓨터에서 그대로 확인할 수 있어요.', hl: ['#btnApps'] },
     { when: () => document.body.classList.contains('app'), say: '지금 쓰시는 앱은 서버 저장 · MQTT 발행 · 녹화 · 공정 설계 Agent가 모두 이 컴퓨터에서 동작해요. 데이터는 앱 데이터 폴더에 쌓이고, ⚙ 설정에서 Claude API 키를 넣으면 대화 기반 Agent도 쓸 수 있어요.', hl: ['#btnSettings'] },
   ] },
-  // 활용 및 기대 — 모든 주제의 끝 (자동 넘김은 여기 맺음말에서 멈춤). 메타팩토리 관점의 활용(실증장 · 데이터 공장 · 교육장) → 기대(수치 약속 없이) → 맺음말
+  // 활용 및 기대 — 모든 주제의 끝 (맺음말이 끝나면 5초 뒤 둘러보기부터 다시 — LOOP_MS). 메타팩토리 관점의 활용(실증장 · 데이터 공장 · 교육장) → 기대(수치 약속 없이) → 맺음말
   outcome: { name: '활용 및 기대', steps: [
     { mode: 'dark', view: 'all', hl: ['#btnCompare', '#btnVla', '#btnAios', '#btnFault'], ochain: 0,
       say: '활용 — 메타팩토리는 세 가지로 쓰여요. 기업이 설비 · 로봇을 들이기 전에 같은 라인을 레거시 · 자동화 · 피지컬AI로 돌려 보고 결정하는 실증장, 로봇 · 운영 데이터를 쌓아 AI를 학습시키는 데이터 공장, 운영자와 엔지니어가 고장 · 현장 이벤트 대응을 안전하게 훈련하는 교육장이에요. AAS · OPC UA · EPCIS 같은 표준으로 만들어, 여기서 검증한 방식을 실제 공장으로 그대로 옮길 수 있어요.' },
@@ -499,7 +499,7 @@ export const voiceKey = (t, lang = 'ko') => { let h = 0x811c9dc5; for (const c o
 // 녹음할 문장 전체: 고정 문장은 말풍선 그대로, 실시간 수치가 들어가는 단계는 voice(수치 없는 읽을 글)
 export function narration(lang = 'ko') { const en = lang === 'en'; return [en ? EN_UI.menu : MENU_SAY, ...Object.values(TOPICS).flatMap((T) => T.steps.map((s) => (en ? s.en : s)).filter(Boolean).flatMap((s) => (s.voice && typeof s.voice === 'object' ? Object.values(s.voice) : [s.voice ?? (typeof s.say === 'string' ? s.say : null)])).filter(Boolean))]; }   // 상황별 음성(voice: { 종류: 문장 } · vk가 고름)은 모두 녹음
 const VOICE_DIR = new URL('../assets/tori/voice/', import.meta.url).href, voiceDir = (lang) => (lang === 'en' ? `${VOICE_DIR}en/` : VOICE_DIR);   // 영어 녹음은 voice/en/
-const AUTO_MS = 1000, READY_MAX_MS = 90000, PANEL_MS = 3000;   // 현장을 보여 준 뒤 창을 열기까지
+const AUTO_MS = 1000, LOOP_MS = 5000, READY_MAX_MS = 90000, PANEL_MS = 3000;   // 현장을 보여 준 뒤 창을 열기까지
 const readMs = (t, lang) => 1500 + speakText(t, lang).length * (lang === 'en' ? 65 : 150);   // 소리 없이 읽는 시간 (한글 초당 약 7자 · 영문 약 15자)
 
 const H = { incUns, UNS_CMD, unsSel, qSample, LINK_UNS, fos, fosOrder, clock, adv, lossTop, inc, arrived, escortGap, byRobot, sevK, ex, qx, prioOf, RADIUS };   // 영어 안내(js/tori-en.js)가 쓰는 공장 상태 도우미
@@ -640,14 +640,16 @@ export class Tori {
   cancelAuto() { this.autoTok = (this.autoTok ?? 0) + 1; clearTimeout(this.autoT); this.onSpoken = null; this.el.querySelector('[data-t="next"]')?.classList.remove('auto'); }
   scheduleAuto(s, last) {
     this.cancelAuto();
-    const nx = this.nextTopic(s);   // 주제 마지막 단계: 다음 주제가 이어져 있으면 말이 끝나고 1초 뒤 그 주제로 (메뉴 순서 — 활용 및 기대 맺음말에서 멈춤)
-    if ((s.end || last) && !nx) return;
+    const nx = this.nextTopic(s);   // 주제 마지막 단계: 다음 주제가 이어져 있으면 말이 끝나고 1초 뒤 그 주제로 (메뉴 순서)
+    const loop = (s.end || last) && !nx && this.topic === 'outcome';   // 활용 및 기대 맺음말: 말이 끝나고 5초 뒤 둘러보기부터 다시
+    if ((s.end || last) && !nx && !loop) return;
+    const wait = loop ? LOOP_MS : AUTO_MS;
     const tok = this.autoTok, t0 = performance.now();
     const countdown = () => {
       if (tok !== this.autoTok || !this.open) return;
       if (s.ready && !s.ready(this) && performance.now() - t0 < READY_MAX_MS) { this.autoT = setTimeout(countdown, 500); return; }   // 실제로 일어날 때까지
-      const b = this.el.querySelector('[data-t="next"]'); b?.classList.remove('auto'); void b?.offsetWidth; b?.classList.add('auto');   // 1초 차오르는 막대
-      this.autoT = setTimeout(() => { if (tok === this.autoTok && this.open) { if (nx) this.play(nx); else this.go(this.step + 1); } }, AUTO_MS);
+      const b = this.el.querySelector('[data-t="next"]'); b?.classList.remove('auto'); b?.style.setProperty('--tori-auto', `${wait}ms`); void b?.offsetWidth; b?.classList.add('auto');   // 기다리는 동안 차오르는 막대 (1초 · 맺음말 5초)
+      this.autoT = setTimeout(() => { if (tok === this.autoTok && this.open) { if (loop) this.play('tour'); else if (nx) this.play(nx); else this.go(this.step + 1); } }, wait);
     };
     // 말이 끝나면 시작 — 음성이 재생 중이면 끝날 때, 아니면 읽는 시간 뒤
     if (this.speaking) this.onSpoken = () => { this.onSpoken = null; countdown(); };
