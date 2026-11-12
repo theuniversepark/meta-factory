@@ -798,6 +798,9 @@ AGV·지게차, 운반 AMR, 정비 인력·휴머노이드, 사족보행 로봇,
 - 렌더 중 오류가 나도 화면 루프가 멈추지 않습니다. 화면 바탕은 어두운 색이라 복구 중에도 흰 화면이 나오지 않습니다.
 - 맥 앱은 손실이 반복돼도 WebGL이 차단되지 않게 하고(`app.disableDomainBlockingFor3DAPIs`), 렌더러 프로세스가 죽으면 창을 다시 불러옵니다.
 
+## 라이선스
+이 저장소의 소스 코드는 **[MIT 라이선스](LICENSE)** 로 공개합니다. 함께 들어 있는 외부 라이브러리(`vendor/`)와 외부 3D 모델 · 로고 · 상표는 MIT 대상이 아니며 각자의 라이선스 · 이용 조건을 따릅니다([OPEN_SOURCE.md](OPEN_SOURCE.md)).
+
 ## 사용 라이브러리 · 오픈소스 고지
 - **Three.js r186** (MIT): WebGL 3D 렌더링, OrbitControls, CSS2D 라벨, Bloom 후처리
 - **SheetJS 0.20.3** (Apache-2.0): 엑셀 읽기 · **mammoth 1.13** (BSD-2): 워드 본문 추출
